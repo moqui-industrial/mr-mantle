@@ -684,7 +684,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!reservationAutoEnumId">
                     <service-call name="mantle.facility.WarehousePolicyServices.get#ReservationDefault" out-map="resDefault"
                             out-map-add-to-existing="false" disable-authz="true"
-                            in-map="{organizationPartyId:orderPart.vendorPartyId, facilityId:orderPart.facilityId}"/>
+                            in-map="{organizationPartyId:orderPart.vendorPartyId || productStore?.organizationPartyId,
+                                facilityId:orderPart.facilityId || productStore?.inventoryFacilityId}"/>
                     <set field="reservationAutoEnumId" from="resDefault.reservationAutoEnumId || 'AsResAutoPlaced'"/>
                 </if>
                 <if condition="!forceReserve &amp;&amp; reservationAutoEnumId == 'AsResAutoNone'"><continue/></if>
@@ -736,7 +737,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!reservationAutoEnumId">
                     <service-call name="mantle.facility.WarehousePolicyServices.get#ReservationDefault" out-map="resDefault"
                             disable-authz="true"
-                            in-map="{organizationPartyId:orderPart.vendorPartyId, facilityId:orderPart.facilityId}"/>
+                            in-map="{organizationPartyId:orderPart.vendorPartyId || productStore?.organizationPartyId,
+                                facilityId:orderPart.facilityId || productStore?.inventoryFacilityId}"/>
                     <set field="reservationAutoEnumId" from="resDefault.reservationAutoEnumId || 'AsResAutoPlaced'"/>
                 </if>
                 <if condition="reservationAutoEnumId == 'AsResAutoNone'"><return/></if>

@@ -86,8 +86,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="AssetPoolParty" allow-remote="false">
         <description>Add a party to a pool, or change its role or dates: a vendor, a customer or either (roleTypeId empty)
             may consume the pool's stock between the dates. A membership in effect keeps its start; a new one starts now or
-            later; an end is now or later. Ending one moves no reservation (preview#AssetPoolReservations names them).
-            Takes STOCK_POLICY_MANAGE, audit-logged with the reason.</description>
+            later; an end is now or later, and an empty end keeps a scheduled one. Re-adding an ended member reuses its row
+            (the key has no date); the earlier period is in the audit log. Ending one moves no reservation
+            (preview#AssetPoolReservations names them). Takes STOCK_POLICY_MANAGE, audit-logged with the reason.</description>
         <implements service="mantle.product.AssetPoolServices.define#PoolDetail"/>
         <in-parameters>
             <parameter name="partyId" required="true"/>
@@ -96,6 +97,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="endNow" type="Boolean"><description>End the membership now (thruDate is then
                 ignored)</description></parameter>
+            <parameter name="clearThruDate" type="Boolean"><description>Remove a scheduled end; an empty thruDate keeps
+                it</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="pool" type="Map"/>
@@ -118,6 +121,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="endNow" type="Boolean"><description>End the membership now (thruDate is then
                 ignored)</description></parameter>
+            <parameter name="clearThruDate" type="Boolean"><description>Remove a scheduled end; an empty thruDate keeps
+                it</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="pool" type="Map"/>

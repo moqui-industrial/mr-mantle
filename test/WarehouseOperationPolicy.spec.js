@@ -93,17 +93,24 @@ spec({
                 ownerPartyId: "WOP_ORG",
                 amountUomId: "OTH_ea"
             })
-            for (const [productStoreId, organizationPartyId, reservationOrderEnumId] of [
-                ["WOP_STORE", "WOP_ORG", "AsResOrdFifoRec"],
-                ["WOP_STORE_UNSET", "WOP_ORG", null],
-                ["WOP_OTHER_STORE", "WOP_OTHER", null]
+            for (const [productStoreId, organizationPartyId, reservationOrderEnumId, reservationAutoEnumId] of [
+                ["WOP_STORE", "WOP_ORG", "AsResOrdFifoRec", null],
+                ["WOP_STORE_UNSET", "WOP_ORG", null, null],
+                ["WOP_STORE_NONE", "WOP_ORG", null, "AsResAutoNone"],
+                ["WOP_OTHER_STORE", "WOP_OTHER", null, null]
             ])
                 call("create#mantle.product.store.ProductStore", {
                     productStoreId,
                     storeName: productStoreId,
                     organizationPartyId,
-                    inventoryFacilityId: organizationPartyId === "WOP_ORG" ? "WOP_FAC" : "WOP_OTHER_FAC",
-                    reservationOrderEnumId
+                    inventoryFacilityId:
+                        productStoreId === "WOP_STORE_NONE"
+                            ? "WOP_FAC_PLAIN"
+                            : organizationPartyId === "WOP_ORG"
+                              ? "WOP_FAC"
+                              : "WOP_OTHER_FAC",
+                    reservationOrderEnumId,
+                    reservationAutoEnumId
                 })
             // older and newer stock in the policy facility and in a facility without a policy
             for (const [assetId, facilityId, receivedDate, statusId] of [
@@ -126,14 +133,19 @@ spec({
                     receivedDate
                 })
             // storeless sales orders of the organization, one at each facility, and one for the pool customer
-            for (const [orderId, facilityId, customerPartyId] of [
+            for (const [orderId, facilityId, customerPartyId, productStoreId] of [
                 ["WOP_SO_POLICY", "WOP_FAC", null],
                 ["WOP_SO_PLAIN", "WOP_FAC_PLAIN", null],
                 ["WOP_SO_POOL", "WOP_FAC", "WOP_CUSTOMER"],
-                ["WOP_SO_HELD", "WOP_FAC", null]
+                ["WOP_SO_HELD", "WOP_FAC", null],
+                // for the automatic timing: storeless at each facility, and of a store that reserves nothing by itself
+                ["WOP_SO_AUTO", "WOP_FAC", null],
+                ["WOP_SO_AUTO_PLAIN", "WOP_FAC_PLAIN", null],
+                ["WOP_SO_CHECK_PLAIN", "WOP_FAC_PLAIN", null],
+                ["WOP_SO_STORE_NONE", "WOP_FAC_PLAIN", null, "WOP_STORE_NONE"]
             ]) {
                 // open orders, so nothing reserves them before the policy is set
-                call("create#mantle.order.OrderHeader", {orderId, statusId: "OrderOpen", currencyUomId: "USD"})
+                call("create#mantle.order.OrderHeader", {orderId, statusId: "OrderOpen", currencyUomId: "USD", productStoreId})
                 call("create#mantle.order.OrderPart", {
                     orderId,
                     orderPartSeqId: "01",
@@ -168,7 +180,7 @@ spec({
     },
     cleanupSpec() {
         as("john.doe", () => {
-            for (const id of ["WOP_STORE", "WOP_STORE_UNSET"]) {
+            for (const id of ["WOP_STORE", "WOP_STORE_UNSET", "WOP_STORE_NONE"]) {
                 const store = one("mantle.product.store.ProductStore", {productStoreId: id})
                 if (!store) continue
                 store.set("reservationOrderEnumId", null)
@@ -382,6 +394,67 @@ feature("Mantle's reservation of a storeless order reads the facility default, a
     }
 })
 
+// placed without a status service, so no SECA reserves first
+function place(orderId) {
+    for (const entity of ["mantle.order.OrderHeader", "mantle.order.OrderPart"])
+        for (const row of Array.from(find(entity, {orderId}).list())) {
+            row.set("statusId", "OrderPlaced")
+            row.update()
+        }
+}
+const reservedOn = orderId => Array.from(find("mantle.product.issuance.AssetReservation", {orderId}).list()).length
+feature(
+    "the facility default's automatic timing holds a placed storeless order until approval, and Mantle's stays at placement",
+    {
+        when() {
+            const stored = as("wop_manager", () => {
+                const current = call(W + "resolve#WarehousePolicy", {facilityId: "WOP_FAC", policyType: "reservation"})
+                return invoke(W + "store#ReservationPolicy", {
+                    facilityId: "WOP_FAC",
+                    expectedFromDate: current.configuredPolicy.fromDate,
+                    reservationAutoEnumId: "AsResAutoApproved",
+                    changeReason: "Reserve on approval"
+                })
+            })
+            return as("john.doe", () => {
+                for (const orderId of ["WOP_SO_AUTO", "WOP_SO_AUTO_PLAIN"]) {
+                    place(orderId)
+                    call(A + "reserve#AssetsForOrder", {orderId})
+                }
+                call(A + "checkReserve#AssetForOrderItem", {orderId: "WOP_SO_AUTO", orderItemSeqId: "01"})
+                return {
+                    stored,
+                    held: reservedOn("WOP_SO_AUTO"),
+                    plain: reservedOn("WOP_SO_AUTO_PLAIN"),
+                    order: call(W + "get#ReservationDefault", {organizationPartyId: "WOP_ORG", facilityId: "WOP_FAC"})
+                }
+            })
+        },
+        then({stored, held, plain, order}) {
+            stored.error == ""
+            order.reservationOrderEnumId == "AsResOrdLifoRec"
+            order.reservationAutoEnumId == "AsResAutoApproved"
+            held == 0
+            plain > 0
+        }
+    }
+)
+feature("checkReserve honors a store's own No Auto Reserve (F96), and reserves a storeless order as before", {
+    when() {
+        return as("john.doe", () => {
+            for (const orderId of ["WOP_SO_STORE_NONE", "WOP_SO_CHECK_PLAIN"]) {
+                place(orderId)
+                call(A + "checkReserve#AssetForOrderItem", {orderId, orderItemSeqId: "01"})
+            }
+            return {store: reservedOn("WOP_SO_STORE_NONE"), plain: reservedOn("WOP_SO_CHECK_PLAIN")}
+        })
+    },
+    then({store, plain}) {
+        store == 0
+        plain > 0
+    }
+})
+
 feature("a store's reservation settings change through the field-scoped service, for a manager of its organization", {
     when() {
         return as("wop_manager", () => ({
@@ -546,5 +619,102 @@ feature("a manager keeps a pool with dated members; the preview names reservatio
         list.poolList[0].partyCount == 1
         list.poolList[0].storeCount == 1
         otherReader.error == ""
+    }
+})
+
+feature("a change starting after a scheduled row carries that row's values, not today's", {
+    when() {
+        return as("wop_manager", () => {
+            const base = Date.now()
+            const now = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_PLAIN",
+                autoPrint: "Y",
+                changeReason: "Today"
+            })
+            const expectedFromDate = now.configuredPolicy.fromDate
+            const scheduled = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_PLAIN",
+                expectedFromDate,
+                fromDate: new Date(base + 600000).toISOString(),
+                blindCount: "Y",
+                changeReason: "Blind counts from next week"
+            })
+            const later = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_PLAIN",
+                expectedFromDate,
+                fromDate: new Date(base + 900000).toISOString(),
+                deliverySteps: 2,
+                changeReason: "Staging after that"
+            })
+            const resolved = call(W + "resolve#WarehousePolicy", {
+                facilityId: "WOP_FAC_PLAIN",
+                policyType: "operation",
+                asOfDate: new Date(base + 1200000).toISOString()
+            })
+            return {now, scheduled, later, resolved}
+        })
+    },
+    then({now, scheduled, later, resolved}) {
+        now.error == ""
+        scheduled.error == ""
+        later.error == ""
+        resolved.configuredPolicy.blindCount == "Y"
+        resolved.configuredPolicy.autoPrint == "Y"
+        resolved.configuredPolicy.deliverySteps == 2
+    }
+})
+
+feature("a pool member keeps a scheduled end when re-saved without one, and a store must be the pool's organization's", {
+    when() {
+        return as("wop_manager", () => {
+            const end = new Date(Date.now() + 86400000).toISOString()
+            const scheduled = invoke(AP + "store#AssetPoolParty", {
+                assetPoolId: poolId,
+                partyId: "WOP_MANAGER",
+                roleTypeId: "Customer",
+                thruDate: end,
+                changeReason: "Until tomorrow"
+            })
+            const resaved = invoke(AP + "store#AssetPoolParty", {
+                assetPoolId: poolId,
+                partyId: "WOP_MANAGER",
+                roleTypeId: "Vendor",
+                changeReason: "Role only"
+            })
+            const opened = invoke(AP + "store#AssetPoolParty", {
+                assetPoolId: poolId,
+                partyId: "WOP_MANAGER",
+                clearThruDate: true,
+                changeReason: "Open again"
+            })
+            // a store of the user's other organization is refused for a pool of this one
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            const otherPool = call(AP + "store#AssetPool", {
+                pseudoId: "WOP-OTHER-POOL",
+                ownerPartyId: "WOP_OTHER",
+                changeReason: "Other"
+            })
+            const mixed = invoke(AP + "store#AssetPoolStore", {
+                assetPoolId: otherPool.pool.assetPoolId,
+                productStoreId: "WOP_STORE",
+                changeReason: "Refused"
+            })
+            const member = rows => rows.find(row => row.partyId === "WOP_MANAGER")
+            return {
+                scheduledEnd: member(scheduled.parties).thruDate,
+                resavedEnd: member(resaved.parties).thruDate,
+                resavedRole: member(resaved.parties).roleTypeId,
+                openedEnd: member(opened.parties).thruDate,
+                mixed
+            }
+        })
+    },
+    then({scheduledEnd, resavedEnd, resavedRole, openedEnd, mixed}) {
+        scheduledEnd != null
+        Number(String(resavedEnd)) == Number(String(scheduledEnd))
+        resavedRole == "Vendor"
+        openedEnd == null
+        mixed.error.includes("another organization")
     }
 })

@@ -179,16 +179,18 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <if condition="!organizationPartyId"><return/></if>
-            <entity-find entity-name="mantle.facility.WarehousePolicy" list="defaultList" disable-authz="true">
+            <!-- cached: a cached find filters by date after the cache (XmlActions), so the key holds no time -->
+            <entity-find entity-name="mantle.facility.WarehousePolicy" list="defaultList" cache="true"
+                    disable-authz="true">
                 <date-filter/>
                 <econdition field-name="organizationPartyId"/>
                 <econdition field-name="policyType" value="reservation"/>
                 <econdition field-name="productId" value="_NA_"/>
-                <econdition field-name="facilityId" operator="in" from="[facilityId || '_NA_', '_NA_']"/>
                 <order-by field-name="-fromDate"/>
             </entity-find>
-            <set field="facilityRow" from="defaultList.find(row =&gt; row.facilityId === facilityId)"/>
-            <set field="organizationRow" from="defaultList.find(row =&gt; row.facilityId === '_NA_')"/>
+            <set field="facilityRow"
+                    from="facilityId ? Array.from(defaultList).find(row =&gt; row.facilityId === facilityId) : null"/>
+            <set field="organizationRow" from="Array.from(defaultList).find(row =&gt; row.facilityId === '_NA_')"/>
             <set field="reservationOrderEnumId"
                     from="facilityRow?.reservationOrderEnumId || organizationRow?.reservationOrderEnumId || null"/>
             <set field="reservationAutoEnumId"

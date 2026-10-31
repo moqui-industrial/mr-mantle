@@ -142,8 +142,10 @@ function memberDates(p, old) {
         if (!Number.isFinite(fromDate)) denied("POLICY_INVALID", "Choose a valid start date")
         if (fromDate < now) denied("POLICY_INVALID", "A membership starts now or later")
     }
-    const endNow = p.endNow === true || p.endNow === "true" || p.endNow === "Y"
-    const thruDate = endNow ? now : blank(p.thruDate) ? null : ms(p.thruDate)
+    const flag = value => value === true || value === "true" || value === "Y"
+    // an empty end keeps a membership's scheduled end; clearThruDate opens it again
+    const keptEnd = old && !blank(old.thruDate) && ms(old.thruDate) > now && !flag(p.clearThruDate) ? ms(old.thruDate) : null
+    const thruDate = flag(p.endNow) ? now : blank(p.thruDate) ? keptEnd : ms(p.thruDate)
     if (thruDate != null && !Number.isFinite(thruDate)) denied("POLICY_INVALID", "Choose a valid end date")
     if (thruDate != null && thruDate < now) denied("POLICY_INVALID", "A membership ends now or later")
     if (thruDate != null && fromDate != null && thruDate < fromDate) denied("POLICY_INVALID", "A membership ends after it starts")
@@ -169,6 +171,8 @@ function storeMember(p, kind) {
             ownerIds = owners()
         if (!store || (ownerIds && !ownerIds.includes(store.organizationPartyId)))
             denied("POLICY_INVALID", "Store " + (p.productStoreId || "") + " is not available")
+        if (store.organizationPartyId !== found.ownerPartyId)
+            denied("POLICY_INVALID", "Store " + store.productStoreId + " belongs to another organization than the pool")
         key.productStoreId = store.productStoreId
     }
     const old = find(entity, key).forUpdate(true).one()

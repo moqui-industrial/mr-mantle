@@ -337,11 +337,12 @@ function storeDated(p, type) {
     const at = p.fromDate == null || p.fromDate === "" ? Math.max(now, (ms(old?.fromDate) || 0) + 1) : ms(p.fromDate)
     if (!Number.isFinite(at) || at < now) throw new Error(label + " changes must take effect now or later")
     if (all.some(r => ms(r.fromDate) === at)) throw new Error("A " + family.label + " policy already starts at this time")
-    const data = Object.assign({}, old ? pick(map(old), family.fields) : {}, pick(p, family.fields))
-    validators[type](data, g)
+    // the new row holds the values of the row in effect at its start (not now), with the changes
     const before = all.filter(r => ms(r.fromDate) < at && (r.thruDate == null || ms(r.thruDate) > at)).at(-1),
         after = all.find(r => ms(r.fromDate) > at),
         fromDate = iso(at)
+    const data = Object.assign({}, before ? pick(map(before), family.fields) : {}, pick(p, family.fields))
+    validators[type](data, g)
     audit(["fromDate", "thruDate", ...family.fields, "changeReason"], why)
     if (before) call("update#" + W, Object.assign({}, key, {fromDate: iso(before.fromDate), thruDate: fromDate}))
     call("create#" + W, Object.assign({}, key, data, {fromDate, thruDate: after ? iso(after.fromDate) : null, changeReason: why}))
