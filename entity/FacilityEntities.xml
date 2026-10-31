@@ -258,6 +258,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="capacityUomId" type="id"/>
         <field name="sequenceNum" type="number-integer">
             <description>For pick, etc sort by this then by area, aisle, section, level, position</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="true">
+            <description>When the location closed: mantle.facility.FacilityServices.close#FacilityLocation sets it once nothing
+                is stored or open there, reopen#FacilityLocation clears it. A closed location is left out of location choices
+                and refused as a destination (check#FacilityLocationOpen); receive#Asset and move#Asset do not read it.
+            </description></field>
         <relationship type="one" related="mantle.facility.Facility"/>
         <relationship type="one" title="FacilityLocationType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="locationTypeEnumId"/></relationship>
@@ -273,6 +278,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Staging" enumId="FltStaging" enumTypeId="FacilityLocationType"/>
             <moqui.basic.Enumeration description="Quarantine" enumId="FltQuarantine" enumTypeId="FacilityLocationType"/>
             <moqui.basic.Enumeration description="Morgue" enumId="FltMorgue" enumTypeId="FacilityLocationType"/>
+            <moqui.basic.Enumeration description="Shipping Dock" enumId="FltShipDock" enumTypeId="FacilityLocationType"/>
         </seed-data>
     </entity>
     <entity entity-name="FacilityLocationType" package="mantle.facility">

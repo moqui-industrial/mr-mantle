@@ -191,8 +191,12 @@ function facilityStore(p) {
         entity = E + (location ? "ProductFacilityLocation" : "ProductFacility")
     if (location) {
         key.locationSeqId = location
-        if (!one(E + "FacilityLocation", {facilityId: g.facilityId, locationSeqId: location}))
-            throw new Error("Location is not in the selected facility")
+        const facilityLocation = one(E + "FacilityLocation", {facilityId: g.facilityId, locationSeqId: location})
+        if (!facilityLocation) throw new Error("Location is not in the selected facility")
+        // a closed location takes no new policy; its policy may still be removed
+        const removing = p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y"
+        if (!removing && facilityLocation.thruDate != null && ms(facilityLocation.thruDate) <= ms(ec.user.nowTimestamp))
+            throw new Error("Location " + location + " is closed")
     }
     const fields = location
             ? ["minimumStock", "moveQuantity"]
@@ -200,6 +204,12 @@ function facilityStore(p) {
         old = find(entity, key).forUpdate(true).one()
     if (p.expectedLastUpdatedStamp && ms(p.expectedLastUpdatedStamp) !== ms(old?.lastUpdatedStamp))
         throw new Error("Facility policy changed; reload before saving")
+    // a product's location policy removed, so the location no longer names it (a location closes only when none does)
+    if (location && (p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y")) {
+        if (!old) throw new Error("This product has no policy at the location")
+        call("delete#" + entity, key)
+        return Object.assign(facilityRead(g), {locationSeqId: location})
+    }
     if (
         location &&
         ["maximumStock", "reorderQuantity", "daysToShip", "reorderMethodEnumId", "abcClassEnumId"].some(k => p[k] != null)
