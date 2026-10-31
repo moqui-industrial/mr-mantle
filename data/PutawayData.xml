@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Putaway (impl-warehouse P9, design-warehouse WH-PUTAWAY): the storage types of products and locations, which
+    mantle.facility.PutawayServices matches (a location of a storage type takes only products of it, and a product of one
+    goes only to its locations); extended as data. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="StorageType" description="Storage type"/>
+    <moqui.basic.Enumeration enumId="StgCold" enumTypeId="StorageType" description="Refrigerated" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="StgFrozen" enumTypeId="StorageType" description="Frozen" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="StgHazardous" enumTypeId="StorageType" description="Hazardous" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="StgOversize" enumTypeId="StorageType" description="Oversize" sequenceNum="4"/>
+</entity-facade-xml>

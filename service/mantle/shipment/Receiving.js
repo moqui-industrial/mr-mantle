@@ -240,19 +240,22 @@ function checkOverReceipt(shipmentId, sources, quantity, operation, productId) {
 }
 
 // ===== the receipt steps (P3's operation policy, F101) =====
-// The product's default location at the facility (its first open ProductFacilityLocation), until putaway rules (P9).
-function defaultLocation(facilityId, productId) {
-    const open = Array.from(
-        find("mantle.facility.ProductFacilityLocation", {facilityId, productId}).orderBy("locationSeqId").list()
-    ).map(row => one("mantle.facility.FacilityLocation", {facilityId, locationSeqId: row.locationSeqId}))
-    return open.find(location => location && !location.thruDate)?.locationSeqId || null
+// The step-1 destination (P9): the putaway resolver's for the incoming quantity (the product's default location, then the
+// putaway rules, each checked for capacity, storage type, owner and status), with its explanation or why none fits.
+function putawayLocation(userScope, facilityId, productId, quantity) {
+    const resolved = ec.resource
+        .script("component://mr-mantle/service/mantle/facility/Putaway.js")
+        .forReceipt(userScope, facilityId, productId, quantity)
+    return {locationSeqId: resolved.locationSeqId || null, explanation: resolved.explanation || resolved.reasonText || null}
 }
-// Where the receipt posts: step 1 to the product's default location (or the receiver's choice), step 2 to the receiving
-// location, step 3 to quarantine (the receiver may choose another quarantine location; the inspection comes with
-// quality, P8). The location is open and locked (check#FacilityLocationOpen through posting.destination).
-function destination(userScope, facilityId, productId, operation, requested) {
+// Where the receipt posts: step 1 to the putaway destination (or the receiver's choice; with none that fits, the receiving
+// location, the reason named), step 2 to the receiving location, step 3 to quarantine (the receiver may choose another
+// quarantine location; the inspection comes with quality, P8). The location is open and locked (check#FacilityLocationOpen
+// through posting.destination).
+function destination(userScope, facilityId, productId, operation, requested, quantity) {
     const steps = [1, 2, 3].includes(Number(operation.receiptSteps)) ? Number(operation.receiptSteps) : 1
-    let locationSeqId = null
+    let locationSeqId = null,
+        putaway = null
     if (steps === 3) {
         const chosen = blank(requested) ? null : one("mantle.facility.FacilityLocation", {facilityId, locationSeqId: requested})
         locationSeqId = chosen?.locationTypeEnumId === "FltQuarantine" ? chosen.locationSeqId : operation.quarantineLocationSeqId
@@ -262,17 +265,17 @@ function destination(userScope, facilityId, productId, operation, requested) {
         const chosen = blank(requested) ? null : one("mantle.facility.FacilityLocation", {facilityId, locationSeqId: requested})
         locationSeqId = chosen?.locationTypeEnumId === "FltReceiving" ? chosen.locationSeqId : operation.receivingLocationSeqId
         if (!locationSeqId) denied("LOCATION_REQUIRED", "Two-step receipt needs a receiving location at the facility")
-    } else {
-        locationSeqId = blank(requested)
-            ? defaultLocation(facilityId, productId) || operation.receivingLocationSeqId || null
-            : requested
-    }
-    if (!locationSeqId) return {receiptSteps: steps, locationSeqId: null, statusId: null}
+    } else if (blank(requested)) {
+        putaway = putawayLocation(userScope, facilityId, productId, quantity)
+        locationSeqId = putaway.locationSeqId || operation.receivingLocationSeqId || null
+    } else locationSeqId = requested
+    if (!locationSeqId) return {receiptSteps: steps, locationSeqId: null, statusId: null, putaway}
     const target = posting.destination(userScope, facilityId, {toLocationSeqId: locationSeqId})
     return {
         receiptSteps: steps,
         locationSeqId: target.locationSeqId,
-        statusId: steps === 3 ? "AstQuarantine" : target.autoStatusId || null
+        statusId: steps === 3 ? "AstQuarantine" : target.autoStatusId || null,
+        putaway
     }
 }
 
@@ -430,7 +433,8 @@ function plan(userScope, recv, ln, p) {
     const policy = policyOf(recv.facilityId, ln.product.productId)
     const track = tracking(policy.tracking, ln.product, accepted.quantity, p)
     const over = checkOverReceipt(recv.shipmentId, ln.sources, total, policy.operation, ln.product.productId)
-    const target = destination(userScope, recv.facilityId, ln.product.productId, policy.operation, p.locationSeqId)
+    const productId = ln.product.productId
+    const target = destination(userScope, recv.facilityId, productId, policy.operation, p.locationSeqId, accepted.quantity)
     return {
         accepted: accepted.quantity,
         rejected: rejected.quantity,
@@ -461,6 +465,7 @@ function lineAnswer(recv, ln, pl, posted, p) {
         receiptSteps: pl.target.receiptSteps,
         locationSeqId: pl.target.locationSeqId,
         statusId: pl.target.statusId,
+        putawayExplanation: pl.target.putaway?.explanation || null,
         lotNumber: blank(p.lotNumber) ? null : String(p.lotNumber).trim(),
         serialNumbers: pl.track.serials,
         assetIds: posted.assetIds,

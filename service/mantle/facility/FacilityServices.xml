@@ -391,8 +391,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="FacilityLocation" allow-remote="false">
         <description>Create a location in one of the user's facilities, or change an open one (FACILITY_EDIT): its type,
-            description, area, aisle, section, level and position, capacity with its unit, and pick sequence (sequenceNum).
-            Its id is given or made from the area through the position. With isNew, refuses an id in use
+            description, area, aisle, section, level and position, capacity with its unit, pick sequence (sequenceNum) and
+            storage type. Its id is given or made from the area through the position. With isNew, refuses an id in use
             (LOCATION_EXISTS); refuses a closed location (LOCATION_CLOSED), another organization's facility
             (FACILITY_UNAVAILABLE), an unknown type or unit, a negative capacity and a pick sequence that is not a whole
             number.</description>
@@ -410,6 +410,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="capacity"/>
             <parameter name="capacityUomId"/>
             <parameter name="sequenceNum"/>
+            <parameter name="storageTypeEnumId"><description>What the location stores (StorageType); empty for
+                any product without one (P9).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="facilityId"/>
@@ -453,7 +455,7 @@ along with this software (see the LICENSE.md file). If not, see
             equipment that has not left (not delivered or deactivated, no actualEndOfLife), containers, reservations not
             issued on an asset there (open picks), counts not complete with a line there, product location policies
             (ProductFacilityLocation) naming it, and warehouse operation policies in effect or to come naming it as a
-            default location (operationPolicy).</description>
+            default location (operationPolicy), and putaway rules in effect or to come naming it (putawayRule, P9).</description>
         <in-parameters>
             <parameter name="facilityId" required="true"/>
             <parameter name="locationSeqId" required="true"/>
