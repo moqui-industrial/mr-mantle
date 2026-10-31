@@ -249,7 +249,8 @@ along with this software (see the LICENSE.md file). If not, see
         screen belongs to the app. -->
     <moqui.security.user.NotificationTopic topic="WarehouseReceiptException" description="Receipt exception" typeString="warning"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
-            titleTemplate="Receipt ${shipmentId}: ${kind == 'REJECTED' ? 'units rejected' : 'short, remainder ' + kind.toLowerCase()}"/>
+            titleTemplate="Receipt ${shipmentId}: ${kind == 'REJECTED' ? 'units rejected'
+                : 'short, remainder ' + kind.toLowerCase()}"/>
 
     <!-- Notification: a user mentioned in a note or message on a record, and the followers of a record (Chatter;
         mantle.party.CommunicationServices.notify#RecordMention and notify#RecordFollowers). No link template: the
