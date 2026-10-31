@@ -291,6 +291,8 @@ feature("a change to a published template item starts a new row, and an earlier 
         const earlierRead = run("whq_inspector", Q + "get#Inspection", {qualityInspectionId: earlier.qualityInspectionId})
         const laterRead = run("whq_inspector", Q + "get#Inspection", {qualityInspectionId: later.qualityInspectionId})
         const history = run("whq_reader", Q + "get#InspectionTemplate", {inspectionTemplateId: templateId})
+        const listed = run("whq_reader", Q + "find#InspectionTemplates", {productId: "WHQ_REVISED"})
+        const inspections = run("whq_reader", Q + "find#Inspections", {productId: "WHQ_REVISED", openOnly: "Y"})
         const asOfBefore = run("whq_reader", Q + "get#InspectionTemplate", {
             inspectionTemplateId: templateId,
             asOfDate: inspectionOf(earlier.qualityInspectionId).templateAsOfDate
@@ -308,10 +310,25 @@ feature("a change to a published template item starts a new row, and an earlier 
             laterRead,
             history,
             asOfBefore,
-            rowsOf
+            rowsOf,
+            listed,
+            inspections
         }
     },
-    then({denied, diameter, earlier, noReason, changed, earlierRead, laterRead, history, asOfBefore, rowsOf}) {
+    then({
+        denied,
+        diameter,
+        earlier,
+        noReason,
+        changed,
+        earlierRead,
+        laterRead,
+        history,
+        asOfBefore,
+        rowsOf,
+        listed,
+        inspections
+    }) {
         denied.error.includes("PERMISSION_DENIED")
         earlier.error == ""
         earlier.inspectionTemplateId != null
@@ -329,6 +346,10 @@ feature("a change to a published template item starts a new row, and an earlier 
         history.revisionRows.length == 3
         history.items.length == 2
         asOfBefore.items.some(item => item.characteristicName == "Diameter" && item.upperLimit == "10.1")
+        listed.templates.length == 1
+        listed.templates[0].itemCount == 2
+        inspections.inspections.length == 2
+        inspections.inspections[0].productName == "WHQ_REVISED"
     }
 })
 

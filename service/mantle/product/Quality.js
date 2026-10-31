@@ -435,18 +435,21 @@ function getTemplate(p) {
 // find#InspectionTemplates: the user's organizations' templates by state, context, product and name, a page at a time.
 function findTemplates(p) {
     const userScope = scope()
-    let query = find(TEMPLATE).orderBy("templateName")
-    if (userScope.organizationPartyIds) query = query.condition("organizationPartyId", "in", userScope.organizationPartyIds)
-    if (!blank(p.statusId)) query = query.condition("statusId", p.statusId)
-    if (!blank(p.inspectionContextEnumId)) query = query.condition("inspectionContextEnumId", p.inspectionContextEnumId)
-    if (!blank(p.productId)) query = query.condition("productId", p.productId)
-    if (!blank(p.templateName))
-        query = query.condition(
-            ec.entity.conditionFactory
-                .makeCondition("templateName", "like", "%" + String(p.templateName).replace(/[\\%_]/g, c => "\\" + c) + "%")
-                .ignoreCase()
-        )
-    const found = lib.page(query, p, "templates", query.count())
+    const templateQuery = () => {
+        let query = find(TEMPLATE).orderBy("templateName")
+        if (userScope.organizationPartyIds) query = query.condition("organizationPartyId", "in", userScope.organizationPartyIds)
+        if (!blank(p.statusId)) query = query.condition("statusId", p.statusId)
+        if (!blank(p.inspectionContextEnumId)) query = query.condition("inspectionContextEnumId", p.inspectionContextEnumId)
+        if (!blank(p.productId)) query = query.condition("productId", p.productId)
+        if (!blank(p.templateName))
+            query = query.condition(
+                ec.entity.conditionFactory
+                    .makeCondition("templateName", "like", "%" + String(p.templateName).replace(/[\\%_]/g, c => "\\" + c) + "%")
+                    .ignoreCase()
+            )
+        return query
+    }
+    const found = lib.page(templateQuery(), p, "templates", templateQuery().count())
     const statuses = statusNames(found.rows.map(row => row.statusId))
     const enums = enumNames(found.rows.map(row => row.inspectionContextEnumId))
     const products = names(
@@ -1239,40 +1242,45 @@ function sourceText(inspection, enums) {
 // product, lot, inspector, source, shipment and due date, a page at a time, the nearest due first.
 function findInspections(p) {
     const userScope = scope()
-    const factory = ec.entity.conditionFactory
-    let query = find(INSPECTION).orderBy("dueDate").orderBy("-createdDate")
-    if (userScope.organizationPartyIds) {
-        const ownFacilities = Array.from(
-            find(FACILITY).condition("ownerPartyId", "in", userScope.organizationPartyIds).selectField("facilityId").list()
-        ).map(row => row.facilityId)
-        query = query.condition(
-            factory.makeCondition(
-                [
-                    factory.makeCondition("organizationPartyId", "in", userScope.organizationPartyIds),
-                    factory.makeCondition("facilityId", "in", ownFacilities.length ? ownFacilities : ["_NA_"])
-                ],
-                "or"
+    const ownFacilities = userScope.organizationPartyIds
+        ? Array.from(
+              find(FACILITY).condition("ownerPartyId", "in", userScope.organizationPartyIds).selectField("facilityId").list()
+          ).map(row => row.facilityId)
+        : null
+    const inspectionQuery = () => {
+        const factory = ec.entity.conditionFactory
+        let query = find(INSPECTION).orderBy("dueDate").orderBy("-createdDate")
+        if (ownFacilities) {
+            query = query.condition(
+                factory.makeCondition(
+                    [
+                        factory.makeCondition("organizationPartyId", "in", userScope.organizationPartyIds),
+                        factory.makeCondition("facilityId", "in", ownFacilities.length ? ownFacilities : ["_NA_"])
+                    ],
+                    "or"
+                )
             )
-        )
+        }
+        if (p.facilityIds != null) {
+            const ids = Array.from(p.facilityIds)
+            query = query.condition("facilityId", "in", ids.length ? ids : ["_NA_"])
+        }
+        if (!blank(p.statusId)) query = query.condition("statusId", p.statusId)
+        else if (truthy(p.openOnly)) query = query.condition("statusId", "in", openStatuses)
+        for (const field of [
+            "productId",
+            "lotId",
+            "inspectorPartyId",
+            "sourceTypeEnumId",
+            "shipmentId",
+            "qualityInspectionId",
+            "assetReceiptId"
+        ])
+            if (!blank(p[field])) query = query.condition(field, p[field])
+        if (p.dueBefore) query = query.condition("dueDate", "less", p.dueBefore)
+        return query
     }
-    if (p.facilityIds != null) {
-        const ids = Array.from(p.facilityIds)
-        query = query.condition("facilityId", "in", ids.length ? ids : ["_NA_"])
-    }
-    if (!blank(p.statusId)) query = query.condition("statusId", p.statusId)
-    else if (truthy(p.openOnly)) query = query.condition("statusId", "in", openStatuses)
-    for (const field of [
-        "productId",
-        "lotId",
-        "inspectorPartyId",
-        "sourceTypeEnumId",
-        "shipmentId",
-        "qualityInspectionId",
-        "assetReceiptId"
-    ])
-        if (!blank(p[field])) query = query.condition(field, p[field])
-    if (p.dueBefore) query = query.condition("dueDate", "less", p.dueBefore)
-    const found = lib.page(query, p, "inspections", query.count(), {noLimitCap: 2000})
+    const found = lib.page(inspectionQuery(), p, "inspections", inspectionQuery().count(), {noLimitCap: 2000})
     const list = found.rows
     const statuses = statusNames(list.map(row => row.statusId))
     const enums = enumNames(list.flatMap(row => [row.resultEnumId, row.sourceTypeEnumId]))
