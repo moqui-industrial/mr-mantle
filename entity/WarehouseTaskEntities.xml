@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The fields of the Warehouse posting guard's movements (design-warehouse §17 WH-POST, crosscut CX-POSTING;
+    impl-warehouse F7): what a person entered, in the unit they entered it, and the conversion the guard applied to reach
+    the stock quantity, on each receipt, issuance and shipment source line a guarded entry point writes. The stock
+    quantity stays in the existing quantity fields; these are written by the receive, issue and pick entry points (P7,
+    P11, P16) and are empty on rows Mantle's own services write. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="AssetReceipt" package="mantle.product.receipt">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="ShipmentItemSource" package="mantle.shipment">
+        <field name="enteredQuantity" type="number-decimal"/>
+        <field name="enteredQuantityUomId" type="id"/>
+        <field name="appliedConversionFactor" type="number-decimal"/>
+        <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
+            <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+</entities>

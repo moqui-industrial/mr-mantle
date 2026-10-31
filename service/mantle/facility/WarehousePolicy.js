@@ -485,7 +485,11 @@ function reservationCheck(p) {
         productId: g.productId,
         checkedCount: reservations.length,
         truncated: found.length > previewLimit,
-        findings
+        findings,
+        // what a repair confirms it repairs (WarehouseTaskServices.repair#FacilityReservations): a change since is refused
+        previewFingerprint: lib.hash(
+            findings.map(f => [f.reasonCode, f.assetReservationId, f.assetId, String(f.quantity), String(f.quantityNotAvailable)])
+        )
     }
 }
 
