@@ -723,6 +723,9 @@ function post(p) {
     const lines = rows(LINE, {physicalInventoryId: count.physicalInventoryId}).filter(
         line => ["PicApproved", "PicFailed"].includes(line.statusId) && (!wanted || wanted.has(line.physicalInventoryCountId))
     )
+    // the open period of the effective date, before anything posts (post#AcctgTrans sends a closed-period posting to the
+    // error journal rather than refusing it, F155)
+    periodCheck(facility, lines, effectiveDate)
     // the poster values each variance at the count's date: set before the lines post, each in its own transaction
     lib.probe("update#" + PI, {physicalInventoryId: count.physicalInventoryId, physicalInventoryDate: effectiveDate})
     const buckets = new Map()
@@ -772,6 +775,19 @@ function post(p) {
         results,
         countStatusId
     })
+}
+// The period guard step of StockPosting.js (posting.period, P6) for the organizations whose stock the lines post: the
+// facility's owner and each asset's owner. Until that step is in StockPosting.js the AC-06 guard in post#AcctgTrans is
+// the only period check.
+function periodCheck(facility, lines, effectiveDate) {
+    if (typeof posting.period !== "function") return
+    const assetIds = unique(lines.map(line => line.assetId))
+    const owners = assetIds.length
+        ? Array.from(find(ASSET).condition("assetId", "in", assetIds).selectField("ownerPartyId").distinct(true).list()).map(
+              row => row.ownerPartyId
+          )
+        : []
+    posting.period(unique([facility.ownerPartyId].concat(owners)), effectiveDate)
 }
 // A count with every line posted or skipped is complete; a single location's count dates that location even with no line
 // (a zero confirmed where nothing was found).
