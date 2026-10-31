@@ -101,6 +101,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lotId"/>
             <parameter name="asOfDate" type="Timestamp"><description>The rules in effect then (a rule to come can be
                 tried); capacity is now.</description></parameter>
+            <parameter name="explain" type="Boolean" default="true"><description>False stops at the first location
+                that fits (a queue, a sheet), answering only the candidates tried.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="facilityId"/>

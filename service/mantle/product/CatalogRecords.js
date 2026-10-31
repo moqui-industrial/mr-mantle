@@ -41,7 +41,7 @@ function settings(p) {
     return {settings: out}
 }
 const masterFields =
-    "productName,pseudoId,description,comments,productTypeEnumId,productClassEnumId,assetTypeEnumId,assetClassEnumId,amountUomId,amountFixed,amountRequire,salesAllowed,purchaseAllowed,salesIntroductionDate,salesDiscontinuationDate,salesDiscWhenNotAvail,supportDiscontinuationDate,requireInventory,chargeShipping,taxable,returnable,originGeoId"
+    "productName,pseudoId,description,comments,productTypeEnumId,productClassEnumId,assetTypeEnumId,assetClassEnumId,amountUomId,amountFixed,amountRequire,salesAllowed,purchaseAllowed,salesIntroductionDate,salesDiscontinuationDate,salesDiscWhenNotAvail,supportDiscontinuationDate,requireInventory,chargeShipping,taxable,returnable,originGeoId,storageTypeEnumId"
 const defaults = {
     defaultProductTypeEnumId: "PtAsset",
     defaultAmountUomId: "OTH_ea",
@@ -96,6 +96,8 @@ function prepareProduct(p) {
         "returnable"
     ])
         if (data[key] != null && !["Y", "N"].includes(data[key])) throw new Error("Choose Yes or No for " + key)
+    if (data.storageTypeEnumId && one("moqui.basic.Enumeration", {enumId: data.storageTypeEnumId})?.enumTypeId !== "StorageType")
+        throw new Error("Choose a valid storage type")
     if (old && ["productTypeEnumId", "amountUomId"].some(k => data[k] !== old[k])) {
         if (
             old.statusId !== "PrdDraft" ||

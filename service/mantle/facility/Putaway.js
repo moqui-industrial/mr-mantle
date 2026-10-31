@@ -7,11 +7,14 @@
 //     the rules that apply, by priority, each under the same checks: open, not where the stock is, a storage location
 //     (quarantined stock only in quarantine), a status the stock may take (StatusFlowTransition), the storage type, one
 //     owner per location, and the location's (and the rule's) capacity with what is coming to it. It explains each
-//     destination it chose or refused; when none fits it names why and the stock stays where it is.
+//     destination it chose or refused (or, with explain false, stops at the first that fits); when none fits it names why
+//     and the stock stays where it is. Only available and on-hold stock is put away (quarantined stock within
+//     quarantine); a receiving hold is released only for stock put away from a receiving or staging location.
 //   - Capacity is measured in the location's capacity unit: the stock unit (no unit, or a count), or a weight or volume
 //     through the product's dimensions (ProductUomDimension). Stock it cannot measure is Unmeasured and keeps the location
-//     from claiming spare capacity. What is coming to a location is the putaway queue (stock in a receiving or staging
-//     location of the facility) of the products whose default location it is.
+//     from claiming spare capacity. What is coming to a location is the putaway queue's stock (in a receiving or staging
+//     location of the facility) with an earlier claim (received before the stock resolved, by date then id; a receipt
+//     comes last) of the products whose first default location it is.
 // Reads need a signed-in user with the facility in their scope; the putaway itself is the guarded
 // WarehouseTaskServices.putaway#Stock (STOCK_MOVE), which calls plan and check here.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -39,6 +42,8 @@ const ruleFields = [
 const queueTypes = ["FltReceiving", "FltStaging"]
 const notStorageTypes = ["FltReceiving", "FltStaging", "FltQuarantine", "FltMorgue", "FltShipDock"]
 const stockTypes = ["AstTpInventory", "AstTpSupplies"]
+// the statuses putaway takes (quarantined stock moves only within quarantine)
+const putawayStatuses = ["AstAvailable", "AstOnHold"]
 const countUnits = ["OTH_ea", "OTH_ct"]
 const dimensionTypes = {
     UT_WEIGHT_MEASURE: ["Weight", "ShippingWeight"],
@@ -130,30 +135,69 @@ function contentsOf(facilityId, locationSeqId) {
         totals.set(row.productId, (totals.get(row.productId) || dec(0)).add(dec(row.quantityOnHandTotal)))
     return totals
 }
-// What is coming to a location: the queue's stock (receiving and staging locations of the facility) of the products whose
-// default location it is, less the assets being put away now.
-function incomingOf(facilityId, locationSeqId, excludeAssetIds) {
-    const productIds = Array.from(
-        find("mantle.facility.ProductFacilityLocation", {facilityId, locationSeqId}).selectField("productId").list()
-    ).map(row => row.productId)
+// The facility's queue locations (receiving and staging), read once per resolution.
+function queueLocationsOf(ctx) {
+    if (!ctx.cache.queueLocations)
+        ctx.cache.queueLocations = Array.from(
+            find(LOCATION, {facilityId: ctx.facilityId})
+                .condition("locationTypeEnumId", "in", queueTypes)
+                .selectField("locationSeqId")
+                .list()
+        ).map(row => row.locationSeqId)
+    return ctx.cache.queueLocations
+}
+// A product's first default location in pick sequence: queued stock is charged to that one only.
+function firstDefaultOf(ctx, productId) {
+    if (!ctx.cache.firstDefault.has(productId)) {
+        const locations = rows("mantle.facility.ProductFacilityLocation", {facilityId: ctx.facilityId, productId})
+            .map(row => one(LOCATION, {facilityId: ctx.facilityId, locationSeqId: row.locationSeqId}) || row)
+            .sort(
+                (a, b) =>
+                    (a.sequenceNum ?? 1e9) - (b.sequenceNum ?? 1e9) || String(a.locationSeqId).localeCompare(b.locationSeqId)
+            )
+        ctx.cache.firstDefault.set(productId, locations[0]?.locationSeqId || null)
+    }
+    return ctx.cache.firstDefault.get(productId)
+}
+// Whether a queued asset claimed space before the stock being resolved: received earlier, by date then id; with no claim
+// (a receipt, or get#Capacity) every queued asset has.
+function earlier(ctx, row) {
+    if (!ctx.claim) return true
+    const mine = ctx.claim.receivedMs ?? Infinity,
+        theirs = ms(row.receivedDate) ?? Infinity
+    return theirs < mine || (theirs === mine && String(row.assetId) < String(ctx.claim.assetId))
+}
+// What is coming to a location, by product: the queue's stock with an earlier claim of the products whose first default
+// location it is, less the assets being put away now; read once per location and resolution.
+function incomingOf(ctx, locationSeqId) {
+    if (ctx.cache.incoming.has(locationSeqId)) return ctx.cache.incoming.get(locationSeqId)
     const totals = new Map()
-    if (!productIds.length) return totals
-    const queueLocations = Array.from(
-        find(LOCATION, {facilityId}).condition("locationTypeEnumId", "in", queueTypes).selectField("locationSeqId").list()
-    ).map(row => row.locationSeqId)
-    if (!queueLocations.length) return totals
-    let query = find(ASSET, {facilityId})
+    ctx.cache.incoming.set(locationSeqId, totals)
+    const productIds = Array.from(
+        find("mantle.facility.ProductFacilityLocation", {facilityId: ctx.facilityId, locationSeqId})
+            .selectField("productId")
+            .list()
+    )
+        .map(row => row.productId)
+        .filter(productId => firstDefaultOf(ctx, productId) === locationSeqId)
+    const queueLocations = queueLocationsOf(ctx)
+    if (!productIds.length || !queueLocations.length) return totals
+    let query = find(ASSET, {facilityId: ctx.facilityId})
         .condition("productId", "in", productIds)
         .condition("locationSeqId", "in", queueLocations)
         .condition("quantityOnHandTotal", "greater", 0)
-    if (excludeAssetIds?.length) query = query.condition("assetId", "not-in", excludeAssetIds)
-    for (const row of query.selectField("assetId,productId,quantityOnHandTotal").list())
-        totals.set(row.productId, (totals.get(row.productId) || dec(0)).add(dec(row.quantityOnHandTotal)))
+    if (ctx.excludeAssetIds?.length) query = query.condition("assetId", "not-in", ctx.excludeAssetIds)
+    for (const row of query.selectField("assetId,productId,quantityOnHandTotal,receivedDate").list())
+        if (earlier(ctx, row)) totals.set(row.productId, (totals.get(row.productId) || dec(0)).add(dec(row.quantityOnHandTotal)))
     return totals
+}
+// A context for capacity reads with no stock being resolved (get#Capacity): every queued asset counts.
+function capacityContext(facilityId, excludeAssetIds) {
+    return {facilityId, excludeAssetIds, claim: null, cache: {queueLocations: null, firstDefault: new Map(), incoming: new Map()}}
 }
 // How full a location is in a capacity unit (the location's, or a rule's limit): capacity, occupied, incoming, remaining,
 // and the stock it cannot measure. No capacity is no limit.
-function fill(location, capacity, unitId, excludeAssetIds) {
+function fill(location, capacity, unitId, ctx) {
     const answer = {
         locationSeqId: location.locationSeqId,
         limited: capacity != null,
@@ -183,7 +227,7 @@ function fill(location, capacity, unitId, excludeAssetIds) {
         return onTo.add(total)
     }
     occupied = add(contentsOf(location.facilityId, location.locationSeqId), occupied)
-    incoming = add(incomingOf(location.facilityId, location.locationSeqId, excludeAssetIds), incoming)
+    incoming = add(incomingOf(ctx, location.locationSeqId), incoming)
     answer.occupied = num(occupied)
     answer.incoming = num(incoming)
     answer.remaining = num(dec(capacity).subtract(occupied).subtract(incoming))
@@ -202,7 +246,12 @@ function stockOf(userScope, p) {
     const facility = facilityOf(userScope, asset?.facilityId || p.facilityId)
     const productId = asset?.productId || text(p.productId)
     const product = productId ? one("mantle.product.Product", {productId}) : null
-    if (!product) denied("PRODUCT_REQUIRED", "Choose the product to put away")
+    // a product of another organization is refused as a missing one
+    if (
+        !product ||
+        (product.ownerPartyId && product.ownerPartyId !== "_NA_" && !facilityScope.owns(userScope, product.ownerPartyId))
+    )
+        denied("PRODUCT_REQUIRED", "Choose a product of your organization to put away")
     const quantity = blank(p.quantity) ? (asset ? dec(asset.quantityOnHandTotal) : null) : dec(p.quantity)
     if (quantity == null || quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
     const fromLocationSeqId = asset ? asset.locationSeqId || null : text(p.fromLocationSeqId)
@@ -217,11 +266,19 @@ function stockOf(userScope, p) {
         ownerPartyId: asset?.ownerPartyId || text(p.ownerPartyId) || facility.ownerPartyId,
         statusId: asset?.statusId || text(p.statusId),
         fromLocationSeqId,
-        // a receipt (no source yet) arrives at receiving
-        fromLocationTypeEnumId: from ? from.locationTypeEnumId || null : text(p.fromLocationTypeEnumId) || "FltReceiving",
+        // a receipt (no asset, no source yet) arrives at receiving; an asset with no location has no source type
+        fromLocationTypeEnumId: from
+            ? from.locationTypeEnumId || null
+            : asset
+              ? null
+              : text(p.fromLocationTypeEnumId) || "FltReceiving",
         lotId: asset?.lotId || text(p.lotId),
         excludeAssetIds: asset ? [asset.assetId] : [],
+        claim: asset ? {receivedMs: ms(asset.receivedDate), assetId: asset.assetId} : null,
+        cache: {queueLocations: null, firstDefault: new Map(), incoming: new Map()},
+        explain: p.explain !== false && p.explain !== "false",
         at: blank(p.asOfDate) ? ms(ec.user.nowTimestamp) : ms(p.asOfDate),
+        atStamp: blank(p.asOfDate) ? ec.user.nowTimestamp : p.asOfDate,
         now: ms(ec.user.nowTimestamp)
     }
 }
@@ -235,8 +292,24 @@ function categoriesOf(productId) {
 // The rules in effect at the stock's date that apply to it, by priority.
 function rulesFor(stock) {
     const categories = categoriesOf(stock.product.productId)
-    return rows(RULE, {facilityId: stock.facilityId})
-        .filter(rule => inEffect(rule, stock.at))
+    const cf = ec.entity.conditionFactory
+    const at = stock.atStamp
+    return Array.from(
+        find(RULE, {facilityId: stock.facilityId})
+            .condition(
+                cf.makeCondition(
+                    [cf.makeCondition("fromDate", "is-null", null), cf.makeCondition("fromDate", "less-equals", at)],
+                    "or"
+                )
+            )
+            .condition(
+                cf.makeCondition(
+                    [cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater", at)],
+                    "or"
+                )
+            )
+            .list()
+    )
         .filter(
             rule =>
                 (!rule.productId || rule.productId === stock.product.productId) &&
@@ -256,7 +329,13 @@ function candidatesOf(stock) {
     const candidates = []
     const seen = new Set()
     const push = candidate => {
-        if (seen.has(candidate.locationSeqId) || candidates.length >= candidateLimit) return
+        if (seen.has(candidate.locationSeqId)) {
+            // a default location a rule also names: the rule's capacity applies there too
+            const existing = candidates.find(row => row.locationSeqId === candidate.locationSeqId)
+            if (existing && !existing.rule && candidate.rule) existing.rule = candidate.rule
+            return
+        }
+        if (candidates.length >= candidateLimit) return
         seen.add(candidate.locationSeqId)
         candidates.push(candidate)
     }
@@ -297,7 +376,13 @@ function statusThere(stock, location) {
           })
         : null
     if (type?.autoStatusId) return type.autoStatusId
-    if (stock.statusId === "AstOnHold" && !notStorageTypes.includes(location.locationTypeEnumId)) return "AstAvailable"
+    // a receiving hold is released only for stock put away from receiving or staging (a return's hold stays, P14)
+    if (
+        stock.statusId === "AstOnHold" &&
+        queueTypes.includes(stock.fromLocationTypeEnumId) &&
+        !notStorageTypes.includes(location.locationTypeEnumId)
+    )
+        return "AstAvailable"
     return stock.statusId || null
 }
 const refused = (reasonCode, explanation, extra = {}) => Object.assign({ok: false, reasonCode, explanation}, extra)
@@ -349,7 +434,7 @@ function check(stock, candidate) {
         })
     let locationFill = null
     for (const limit of limits) {
-        const filled = fill(location, limit.capacity, limit.unitId, stock.excludeAssetIds)
+        const filled = fill(location, limit.capacity, limit.unitId, stock)
         if (!locationFill) locationFill = filled
         if (!filled.limited) continue
         if (filled.unmeasured.length)
@@ -375,11 +460,16 @@ function check(stock, candidate) {
         ok: true,
         reasonCode: null,
         explanation:
-            (candidate.source === "default" ? "The product's default location" : "Rule " + candidate.rule.putawayRuleId) +
+            sourceText(candidate) +
             (locationFill?.limited ? `; ${locationFill.remaining} ${locationFill.capacityUnitText} free` : "; no capacity limit"),
         statusAfter,
         fill: locationFill
     }
+}
+// Where a candidate comes from: the default location (and the rule that also names it), or a rule.
+function sourceText(candidate) {
+    if (candidate.source !== "default") return "Rule " + candidate.rule.putawayRuleId
+    return "The product's default location" + (candidate.rule ? " (rule " + candidate.rule.putawayRuleId + ")" : "")
 }
 function enumStatus(statusId) {
     return statusId ? one("moqui.basic.StatusItem", {statusId})?.description || statusId : "none"
@@ -392,7 +482,7 @@ function candidateRow(stock, candidate, checked, chosen) {
         locationTypeEnumId: location?.locationTypeEnumId || null,
         sequenceNum: location?.sequenceNum ?? null,
         source: candidate.source,
-        sourceText: candidate.source === "default" ? "Default location" : "Rule " + candidate.rule.putawayRuleId,
+        sourceText: sourceText(candidate),
         putawayRuleId: candidate.rule?.putawayRuleId || null,
         chosen,
         ok: checked.ok,
@@ -408,16 +498,23 @@ function candidateRow(stock, candidate, checked, chosen) {
 }
 // The destination of the stock with each candidate explained.
 function resolveStock(stock) {
-    const candidates = candidatesOf(stock)
+    const productName = stock.product.productName || stock.product.productId
+    if (stock.statusId && !putawayStatuses.includes(stock.statusId) && stock.statusId !== "AstQuarantine")
+        return Object.assign(answerOf(stock, null, []), {
+            reasonCode: "NOT_PUTAWAY",
+            reasonText: productName + " is " + enumStatus(stock.statusId) + " stock, which is not put away"
+        })
     let chosen = null
-    const candidateRows = candidates.map(candidate => {
+    const candidateRows = []
+    for (const candidate of candidatesOf(stock)) {
+        // explain false stops at the first that fits (the queue, the sheet, receipts)
+        if (chosen && !stock.explain) break
         const checked = check(stock, candidate)
         const pick = checked.ok && !chosen
         const row = candidateRow(stock, candidate, checked, pick)
         if (pick) chosen = row
-        return row
-    })
-    const productName = stock.product.productName || stock.product.productId
+        candidateRows.push(row)
+    }
     let reasonText = null
     if (!chosen)
         reasonText = candidateRows.length
@@ -426,6 +523,9 @@ function resolveStock(stock) {
               ": " +
               candidateRows.map(row => row.locationSeqId + " " + row.explanation.replace(/^Location \S+ /, "")).join("; ")
             : "No default location or putaway rule applies to " + productName + " here"
+    return Object.assign(answerOf(stock, chosen, candidateRows), {reasonCode: chosen ? null : "NO_DESTINATION", reasonText})
+}
+function answerOf(stock, chosen, candidateRows) {
     return {
         facilityId: stock.facilityId,
         productId: stock.product.productId,
@@ -437,8 +537,6 @@ function resolveStock(stock) {
         putawayRuleId: chosen?.putawayRuleId || null,
         statusAfter: chosen?.statusAfter || null,
         explanation: chosen ? chosen.locationSeqId + ": " + chosen.explanation : null,
-        reasonCode: chosen ? null : "NO_DESTINATION",
-        reasonText,
         candidates: candidateRows
     }
 }
@@ -447,11 +545,18 @@ function resolve(p) {
     return resolveStock(stockOf(readScope(), p))
 }
 // The step-1 receipt destination (Receiving.js): the resolver's location for incoming stock, or none with its reason.
+// It stops at the first that fits; with the answer goes the stock, for fits() once the location is locked.
 function forReceipt(userScope, facilityId, productId, quantity, ownerPartyId) {
     if (quantity == null || dec(quantity).compare(0) <= 0) return {locationSeqId: null, reasonText: null}
-    return resolveStock(
-        stockOf(userScope, {facilityId, productId, quantity, ownerPartyId, fromLocationTypeEnumId: "FltReceiving"})
-    )
+    const stock = stockOf(userScope, {
+        facilityId,
+        productId,
+        quantity,
+        ownerPartyId,
+        fromLocationTypeEnumId: "FltReceiving",
+        explain: false
+    })
+    return Object.assign(resolveStock(stock), {stock})
 }
 
 // ===== putaway#Stock's plan and its check under the lock =====
@@ -460,6 +565,7 @@ function forReceipt(userScope, facilityId, productId, quantity, ownerPartyId) {
 function plan(userScope, asset, quantity, toLocationSeqId, reason) {
     const stock = stockOf(userScope, {assetId: asset.assetId, quantity})
     const resolved = resolveStock(stock)
+    if (resolved.reasonCode === "NOT_PUTAWAY") denied("NOT_PUTAWAY", resolved.reasonText)
     const wanted = text(toLocationSeqId)
     if (!wanted) {
         if (!resolved.locationSeqId) denied("NO_DESTINATION", resolved.reasonText + "; the stock stays where it is")
@@ -475,10 +581,16 @@ function plan(userScope, asset, quantity, toLocationSeqId, reason) {
     return {stock, resolved, locationSeqId: wanted, suggested: wanted === resolved.locationSeqId}
 }
 // The destination checked again once it is locked (check#FacilityLocationOpen): a concurrent putaway into it has finished.
-function recheck(planned) {
+// The check of the planned destination, again: the candidate's source and rule (with its capacity) as resolved, and what
+// is there and coming read afresh.
+function fits(planned) {
     const candidate = planned.resolved.candidates.find(row => row.locationSeqId === planned.locationSeqId)
     const rule = candidate?.putawayRuleId ? one(RULE, {putawayRuleId: candidate.putawayRuleId}) : null
-    const checked = check(planned.stock, {locationSeqId: planned.locationSeqId, source: rule ? "rule" : "default", rule})
+    planned.stock.cache = {queueLocations: null, firstDefault: new Map(), incoming: new Map()}
+    return check(planned.stock, {locationSeqId: planned.locationSeqId, source: candidate?.source || "default", rule})
+}
+function recheck(planned) {
+    const checked = fits(planned)
     if (!checked.ok) denied(checked.reasonCode, checked.explanation)
     return checked
 }
@@ -493,11 +605,11 @@ function capacity(p) {
     const locations = Array.from(query.orderBy("sequenceNum,locationSeqId").limit(200).list())
     const product = blank(p.productId) ? null : one("mantle.product.Product", {productId: p.productId})
     if (!blank(p.productId) && !product) denied("PRODUCT_REQUIRED", "Product " + p.productId + " is not available")
-    const excludeAssetIds = Array.from(p.excludeAssetIds || []).filter(Boolean)
+    const ctx = capacityContext(facility.facilityId, Array.from(p.excludeAssetIds || []).filter(Boolean))
     return {
         facilityId: facility.facilityId,
         capacityRows: locations.map(location => {
-            const filled = fill(location, location.capacity, location.capacityUomId, excludeAssetIds)
+            const filled = fill(location, location.capacity, location.capacityUomId, ctx)
             const row = Object.assign(filled, {
                 description: location.description || null,
                 locationTypeEnumId: location.locationTypeEnumId || null,
@@ -542,8 +654,16 @@ function validate(data, facility) {
         )
             denied("RULE_INVALID", "Product " + data.productId + " is not available")
     }
-    if (data.productCategoryId && !one("mantle.product.category.ProductCategory", {productCategoryId: data.productCategoryId}))
-        denied("RULE_INVALID", "Category " + data.productCategoryId + " is not available")
+    if (data.productCategoryId) {
+        const category = one("mantle.product.category.ProductCategory", {productCategoryId: data.productCategoryId})
+        if (
+            !category ||
+            (category.ownerPartyId && category.ownerPartyId !== "_NA_" && category.ownerPartyId !== facility.ownerPartyId)
+        )
+            denied("RULE_INVALID", "Category " + data.productCategoryId + " is not available")
+    }
+    if (data.toAreaId && !find(LOCATION, {facilityId, areaId: data.toAreaId}).count())
+        denied("RULE_INVALID", "Facility " + facilityId + " has no area " + data.toAreaId)
     if (data.priority != null && (!Number.isInteger(data.priority) || data.priority < 0 || data.priority > 9999))
         denied("RULE_INVALID", "The priority is a whole number from 0 to 9999")
     if (data.capacity != null && data.capacity.compare(0) < 0) denied("RULE_INVALID", "Capacity cannot be negative")
@@ -593,18 +713,33 @@ function store(p) {
         if (locked.thruDate != null && ms(locked.thruDate) <= now) denied("RULE_ENDED", "This rule has ended")
         if (!blank(p.expectedLastUpdatedStamp) && ms(p.expectedLastUpdatedStamp) !== ms(locked.lastUpdatedStamp))
             denied("RULE_CHANGED", "The rule changed; reload before saving")
+        // a rule already changed has its successor: that one is changed, never this one again
+        if (find(RULE, {previousPutawayRuleId: before.putawayRuleId}).count())
+            denied("RULE_CHANGED", "Rule " + before.putawayRuleId + " was already changed; change the rule that follows it")
     }
     if (before && yes(p.endNow)) {
+        // an end now never moves a scheduled end later
+        const end = Math.max(now, ms(before.fromDate))
         call("update#" + RULE, {
             putawayRuleId: before.putawayRuleId,
-            thruDate: iso(Math.max(now, ms(before.fromDate))),
+            thruDate: iso(before.thruDate != null ? Math.min(end, ms(before.thruDate)) : end),
             changeReason: why
         })
+        return {putawayRuleId: before.putawayRuleId, rule: view(one(RULE, {putawayRuleId: before.putawayRuleId}), now)}
+    }
+    // a rule still to come is changed in place at its own from date: it has no history yet
+    const future = before && ms(before.fromDate) > now
+    if (future && (blank(p.fromDate) || ms(p.fromDate) === ms(before.fromDate))) {
+        const data = validate(valuesOf(p, before), facility)
+        call("update#" + RULE, Object.assign({}, data, {putawayRuleId: before.putawayRuleId, changeReason: why}))
         return {putawayRuleId: before.putawayRuleId, rule: view(one(RULE, {putawayRuleId: before.putawayRuleId}), now)}
     }
     const at = blank(p.fromDate) ? now : ms(p.fromDate)
     if (!Number.isFinite(at) || at < now - 60000) denied("RULE_INVALID", "Rule changes take effect now or later")
     if (before && at <= ms(before.fromDate)) denied("RULE_INVALID", "A change starts after the rule it replaces")
+    // a change never moves the rule's scheduled end later
+    if (before?.thruDate != null && at >= ms(before.thruDate))
+        denied("RULE_INVALID", "Rule " + before.putawayRuleId + " ends before that date; add a new rule instead")
     const data = validate(valuesOf(p, before), facility)
     if (before) call("update#" + RULE, {putawayRuleId: before.putawayRuleId, thruDate: iso(at), changeReason: why})
     const created = call(
@@ -685,6 +820,7 @@ const operations = {store, list, resolve, capacity}
     },
     forReceipt,
     plan,
+    fits,
     recheck,
     queueTypes,
     notStorageTypes

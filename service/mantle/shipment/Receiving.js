@@ -242,17 +242,24 @@ function checkOverReceipt(shipmentId, sources, quantity, operation, productId) {
 // ===== the receipt steps (P3's operation policy, F101) =====
 // The step-1 destination (P9): the putaway resolver's for the incoming quantity (the product's default location, then the
 // putaway rules, each checked for capacity, storage type, owner and status), with its explanation or why none fits.
-function putawayLocation(userScope, facilityId, productId, quantity) {
-    const resolved = ec.resource
-        .script("component://mr-mantle/service/mantle/facility/Putaway.js")
-        .forReceipt(userScope, facilityId, productId, quantity)
-    return {locationSeqId: resolved.locationSeqId || null, explanation: resolved.explanation || resolved.reasonText || null}
+// The owner is the receipt's (the facility owner when none). Once the location is locked, fits() checks it again: a receipt
+// at the same time may have filled it, and the stock then goes to the receiving location with that reason (P9 review C1).
+function putawayLocation(userScope, facilityId, productId, quantity, ownerPartyId) {
+    const putaway = ec.resource.script("component://mr-mantle/service/mantle/facility/Putaway.js")
+    const resolved = putaway.forReceipt(userScope, facilityId, productId, quantity, ownerPartyId)
+    const fits = () =>
+        resolved.locationSeqId ? putaway.fits({stock: resolved.stock, resolved, locationSeqId: resolved.locationSeqId}) : null
+    return {
+        locationSeqId: resolved.locationSeqId || null,
+        explanation: resolved.explanation || resolved.reasonText || null,
+        fits
+    }
 }
 // Where the receipt posts: step 1 to the putaway destination (or the receiver's choice; with none that fits, the receiving
 // location, the reason named), step 2 to the receiving location, step 3 to quarantine (the receiver may choose another
 // quarantine location; the inspection comes with quality, P8). The location is open and locked (check#FacilityLocationOpen
 // through posting.destination).
-function destination(userScope, facilityId, productId, operation, requested, quantity) {
+function destination(userScope, facilityId, productId, operation, requested, quantity, ownerPartyId) {
     const steps = [1, 2, 3].includes(Number(operation.receiptSteps)) ? Number(operation.receiptSteps) : 1
     let locationSeqId = null,
         putaway = null
@@ -266,11 +273,19 @@ function destination(userScope, facilityId, productId, operation, requested, qua
         locationSeqId = chosen?.locationTypeEnumId === "FltReceiving" ? chosen.locationSeqId : operation.receivingLocationSeqId
         if (!locationSeqId) denied("LOCATION_REQUIRED", "Two-step receipt needs a receiving location at the facility")
     } else if (blank(requested)) {
-        putaway = putawayLocation(userScope, facilityId, productId, quantity)
+        putaway = putawayLocation(userScope, facilityId, productId, quantity, ownerPartyId)
         locationSeqId = putaway.locationSeqId || operation.receivingLocationSeqId || null
     } else locationSeqId = requested
+    const fits = putaway?.fits
+    if (putaway) delete putaway.fits
     if (!locationSeqId) return {receiptSteps: steps, locationSeqId: null, statusId: null, putaway}
-    const target = posting.destination(userScope, facilityId, {toLocationSeqId: locationSeqId})
+    let target = posting.destination(userScope, facilityId, {toLocationSeqId: locationSeqId})
+    // the bin locked (location last in the lock order; the receiving location after it): still fits, else receiving
+    const again = putaway?.locationSeqId ? fits() : null
+    if (again && !again.ok && operation.receivingLocationSeqId) {
+        putaway.explanation = again.explanation + "; received at " + operation.receivingLocationSeqId + " instead"
+        target = posting.destination(userScope, facilityId, {toLocationSeqId: operation.receivingLocationSeqId})
+    }
     return {
         receiptSteps: steps,
         locationSeqId: target.locationSeqId,

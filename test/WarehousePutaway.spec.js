@@ -107,6 +107,8 @@ spec({
             ["RECV1", "FltReceiving", {}],
             ["PICK1", "FltPick", {capacity: 10, capacityUomId: "OTH_ea", sequenceNum: 1}],
             ["PICK2", "FltPick", {sequenceNum: 2}],
+            ["PICK3", "FltPick", {capacity: 10, capacityUomId: "OTH_ea", sequenceNum: 3}],
+            ["PICK4", "FltPick", {sequenceNum: 4}],
             ["BULK1", "FltBulk", {capacity: 100, sequenceNum: 10}],
             ["BULK2", "FltBulk", {sequenceNum: 11}],
             ["COLD1", "FltBulk", {storageTypeEnumId: "StgCold", sequenceNum: 12}],
@@ -130,7 +132,11 @@ spec({
             ["WHP_COLD", {storageTypeEnumId: "StgCold"}],
             ["WHP_LOOSE", {}],
             ["WHP_GADGET", {}],
-            ["WHP_HEAVY", {}]
+            ["WHP_HEAVY", {}],
+            ["WHP_PAIR", {}],
+            ["WHP_RCAP", {}],
+            ["WHP_DEFECT", {}],
+            ["WHP_FOREIGN", {ownerPartyId: "WHP_OTHER"}]
         ])
             call(
                 "create#mantle.product.Product",
@@ -158,6 +164,11 @@ spec({
             facilityId: facility,
             locationSeqId: "PICK1"
         })
+        for (const [productId, locationSeqId] of [
+            ["WHP_PAIR", "PICK3"],
+            ["WHP_RCAP", "PICK4"]
+        ])
+            call("create#mantle.facility.ProductFacilityLocation", {productId, facilityId: facility, locationSeqId})
         ec.artifactExecution.enableAuthz()
     },
     cleanup() {
@@ -176,6 +187,12 @@ feature("a putaway rule takes FACILITY_EDIT in the facility's organization; a ch
         const noReason = rule(Object.assign({}, parameters, {changeReason: " "}))
         const created = rule(parameters)
         const changed = rule({putawayRuleId: created.putawayRuleId, priority: 20})
+        const again = rule({putawayRuleId: created.putawayRuleId, priority: 30})
+        const noArea = rule({productId: "WHP_WIDGET", toLocationTypeEnumId: "FltBulk", toAreaId: "ZZ"})
+        const later = rule({productId: "WHP_WIDGET", toLocationSeqId: "BULK2", priority: 50, fromDate: "2099-01-01 00:00:00"})
+        const laterChanged = rule({putawayRuleId: later.putawayRuleId, priority: 40})
+        // the rule to come is ended again so it never applies
+        rule({putawayRuleId: later.putawayRuleId, endNow: true})
         const listed = run("whp_mover", P + "find#PutawayRules", {facilityId: facility})
         const history = run("whp_mover", P + "find#PutawayRules", {facilityId: facility, includeHistory: true})
         const audit = Array.from(
@@ -185,9 +202,39 @@ feature("a putaway rule takes FACILITY_EDIT in the facility's organization; a ch
                 pkPrimaryValue: created.putawayRuleId
             }).list()
         )
-        return {mover, outsider, closed, noTarget, noReason, created, changed, listed, history, audit}
+        return {
+            mover,
+            outsider,
+            closed,
+            noTarget,
+            noReason,
+            created,
+            changed,
+            again,
+            noArea,
+            later,
+            laterChanged,
+            listed,
+            history,
+            audit
+        }
     },
-    then({mover, outsider, closed, noTarget, noReason, created, changed, listed, history, audit}) {
+    then({
+        mover,
+        outsider,
+        closed,
+        noTarget,
+        noReason,
+        created,
+        changed,
+        again,
+        noArea,
+        later,
+        laterChanged,
+        listed,
+        history,
+        audit
+    }) {
         mover.error.includes("PERMISSION_DENIED")
         outsider.error.includes("FACILITY_UNAVAILABLE")
         closed.error.includes("LOCATION_CLOSED")
@@ -198,9 +245,14 @@ feature("a putaway rule takes FACILITY_EDIT in the facility's organization; a ch
         changed.rule.previousPutawayRuleId == created.putawayRuleId
         changed.rule.priority == 20
         changed.rule.toText == "Location BULK1"
-        listed.rules.filter(row => row.productId === "WHP_WIDGET").length == 1
+        /RULE_ENDED|RULE_CHANGED/.test(again.error)
+        noArea.error.includes("RULE_INVALID")
+        later.error == ""
+        laterChanged.putawayRuleId == later.putawayRuleId
+        laterChanged.rule.priority == 40
+        listed.rules.filter(row => row.productId === "WHP_WIDGET" && row.current).length == 1
         listed.canEdit == false
-        history.rules.filter(row => row.productId === "WHP_WIDGET").length == 2
+        history.rules.filter(row => row.productId === "WHP_WIDGET").length == 3
         audit.length >= 1
         audit[0].changeReason == "Putaway spec"
     }
@@ -262,17 +314,21 @@ feature("storage types, an unmeasured unit, weight capacity and quarantine are c
         rule({productId: "WHP_HEAVY", toLocationSeqId: "SCALE1", priority: 5})
         rule({productId: "WHP_HEAVY", toLocationSeqId: "BULK2", priority: 6})
         const cold = resolve({facilityId: facility, productId: "WHP_COLD", quantity: 4})
+        const coldShort = resolve({facilityId: facility, productId: "WHP_COLD", quantity: 4, explain: false})
         const loose = resolve({facilityId: facility, productId: "WHP_LOOSE", quantity: 1})
         const light = resolve({facilityId: facility, productId: "WHP_HEAVY", quantity: 20})
         const heavy = resolve({facilityId: facility, productId: "WHP_HEAVY", quantity: 30})
         const held = receive("WHP_GADGET", 2, "QUAR1", "AstQuarantine")
         const toBulk = putaway({operationKey: key(), assetId: held, toLocationSeqId: "BULK2", reason: "Overflow"})
         const toQuarantine = putaway({operationKey: key(), assetId: held, toLocationSeqId: "QUAR2", reason: "Cage 2"})
-        return {cold, loose, light, heavy, toBulk, toQuarantine, after: asset(held)}
+        return {cold, coldShort, loose, light, heavy, toBulk, toQuarantine, after: asset(held)}
     },
-    then({cold, loose, light, heavy, toBulk, toQuarantine, after}) {
+    then({cold, coldShort, loose, light, heavy, toBulk, toQuarantine, after}) {
         candidate(cold, "BULK1").reasonCode == "STORAGE_TYPE"
         cold.locationSeqId == "COLD1"
+        coldShort.locationSeqId == "COLD1"
+        coldShort.candidates.length < cold.candidates.length
+        coldShort.candidates[coldShort.candidates.length - 1].locationSeqId == "COLD1"
         candidate(loose, "SCALE1").reasonCode == "CAPACITY_UNMEASURED"
         light.locationSeqId == "SCALE1"
         candidate(heavy, "SCALE1").reasonCode == "CAPACITY_EXCEEDED"
@@ -337,5 +393,53 @@ feature("a one-step receipt posts to the resolved destination, and a rule naming
         received.result.locationSeqId == "PICK2"
         received.result.putawayExplanation.includes("PICK2")
         blockers.blockers.some(row => row.kind === "putawayRule")
+    }
+})
+
+feature("putaway takes only available and on-hold stock, and releases a hold only from receiving or staging", {
+    when() {
+        const defective = receive("WHP_DEFECT", 2, "BULK1", "AstDefective")
+        const resolved = resolve({assetId: defective})
+        const refused = putaway({operationKey: key(), assetId: defective, toLocationSeqId: "BULK2", reason: "Try"})
+        // a hold away from receiving (a return's, with no location) keeps its hold in storage
+        const away = receive("WHP_DEFECT", 1, null, "AstOnHold")
+        const kept = putaway({operationKey: key(), assetId: away, toLocationSeqId: "BULK2", reason: "Shelve the return"})
+        const foreign = resolve({facilityId: facility, productId: "WHP_FOREIGN", quantity: 1})
+        return {resolved, refused, kept, keptAsset: asset(away), foreign}
+    },
+    then({resolved, refused, kept, keptAsset, foreign}) {
+        resolved.reasonCode == "NOT_PUTAWAY"
+        resolved.candidates.length == 0
+        refused.error.includes("NOT_PUTAWAY")
+        kept.error == ""
+        keptAsset.locationSeqId == "BULK2"
+        keptAsset.statusId == "AstOnHold"
+        foreign.error.includes("PRODUCT_REQUIRED")
+    }
+})
+
+feature("queued stock counts only earlier claims on its default bin, and a rule's capacity holds at a default it names", {
+    when() {
+        receive("WHP_PAIR", 6, "PICK3")
+        const first = receive("WHP_PAIR", 3, "RECV1", "AstOnHold")
+        const second = receive("WHP_PAIR", 3, "RECV1", "AstOnHold")
+        rule({productId: "WHP_RCAP", toLocationSeqId: "PICK4", priority: 1, capacity: 3})
+        return {
+            first: resolve({assetId: first}),
+            second: resolve({assetId: second}),
+            receipt: resolve({facilityId: facility, productId: "WHP_PAIR", quantity: 1}),
+            ruleCapacity: resolve({facilityId: facility, productId: "WHP_RCAP", quantity: 5}),
+            ruleFits: resolve({facilityId: facility, productId: "WHP_RCAP", quantity: 2})
+        }
+    },
+    then({first, second, receipt, ruleCapacity, ruleFits}) {
+        first.locationSeqId == "PICK3"
+        candidate(first, "PICK3").incoming == "0"
+        candidate(second, "PICK3").reasonCode == "CAPACITY_EXCEEDED"
+        candidate(second, "PICK3").incoming == "3"
+        candidate(receipt, "PICK3").incoming == "6"
+        candidate(ruleCapacity, "PICK4").reasonCode == "RULE_CAPACITY"
+        ruleFits.locationSeqId == "PICK4"
+        ruleFits.explanation.includes("(rule ")
     }
 })

@@ -1135,25 +1135,24 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="receive" noun="ShipmentStock" allow-remote="false">
         <description>Receive one line of a purchase receipt through mantle.shipment.ShipmentServices.receive#ShipmentProduct,
-            atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of
-            the product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents),
-            converted to the product's stock unit and kept as entered on each receipt (enteredQuantity,
-            enteredQuantityUomId, appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none
-            is given) and, for serialized stock, one unique serial per accepted unit; to the operation policy's receipt
-            step at posting (resolve#WarehousePolicy): 1 the putaway destination (PutawayServices.resolve#Destination,
-            else the receiving location with the reason) or the receiver's, 2 the receiving location, 3 a quarantine location; a rejected quantity becomes no stock (with nothing accepted, the guard writes
-            the rejection as an AssetReceipt with no stock on the sources in order, since receive#Asset receives nothing for
-            a zero quantity: F177). A retry with the same operation key
-            answers the first receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's
-            facilities (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open
-            (RECEIPT_CLOSED), a product not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection
-            without a reason (REASON_REQUIRED), more than the policy's over-receipt tolerance allows, zero by default
-            (OVER_RECEIPT), a serial count that does not match the accepted units (SERIAL_COUNT_MISMATCH), a serial given
-            twice or already in stock (SERIAL_DUPLICATE), a lot-tracked product without a lot (LOT_REQUIRED), a unit with
-            no conversion (UNIT_CONVERSION), a closed or missing destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE,
-            LOCATION_REQUIRED for a two- or three-step receipt with no receiving or quarantine location), and a closed fiscal
-            period today for the facility owner (PERIOD_CLOSED; the periods are read without locking them, so receipts do
-            not serialize on them).</description>
+            atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of the
+            product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents), converted to
+            the product's stock unit and kept as entered on each receipt (enteredQuantity, enteredQuantityUomId,
+            appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none is given) and, for serialized
+            stock, one unique serial per accepted unit; to the operation policy's receipt step at posting
+            (resolve#WarehousePolicy): 1 the putaway destination (PutawayServices.resolve#Destination, else the receiving location
+            with the reason) or the receiver's, 2 the receiving location, 3 a quarantine location; a rejected quantity becomes no
+            stock (with nothing accepted, the guard writes the rejection as an AssetReceipt with no stock on the sources in order,
+            since receive#Asset receives nothing for a zero quantity: F177). A retry with the same operation key answers the first
+            receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's facilities
+            (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open (RECEIPT_CLOSED), a product
+            not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection without a reason (REASON_REQUIRED),
+            more than the policy's over-receipt tolerance allows, zero by default (OVER_RECEIPT), a serial count that does not
+            match the accepted units (SERIAL_COUNT_MISMATCH), a serial given twice or already in stock (SERIAL_DUPLICATE), a lot-
+            tracked product without a lot (LOT_REQUIRED), a unit with no conversion (UNIT_CONVERSION), a closed or missing
+            destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE, LOCATION_REQUIRED for a two- or three-step receipt with no
+            receiving or quarantine location), and a closed fiscal period today for the facility owner (PERIOD_CLOSED; the periods
+            are read without locking them, so receipts do not serialize on them).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="shipmentId" required="true"/>
@@ -1340,7 +1339,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="receiving.policyOf(home.facilityId, productId)"/>
             <set field="track" from="receiving.tracking(policy.tracking, product, unit.quantity, context)"/>
             <set field="target" from="receiving.destination(userScope, home.facilityId, productId, policy.operation,
-                    locationSeqId, unit.quantity)"/>
+                    locationSeqId, unit.quantity, owner)"/>
             <set field="common" from="{productId: productId, facilityId: home.facilityId, locationSeqId: target.locationSeqId,
                     statusId: target.statusId, ownerPartyId: owner, lotId: lotId || null, lotNumber: lotNumber || null,
                     expirationDate: track.expirationDate, mfgPartyId: mfgPartyId || null, acquireCost: cost.acquireCost,
