@@ -119,6 +119,7 @@ function storeLocation(p) {
         denied("LOCATION_EXISTS", "Location " + locationSeqId + " already exists in " + facilityLabel(facility))
     if (existing && closed(existing)) denied("LOCATION_CLOSED", "Location " + locationSeqId + " is closed; reopen it first")
     if (!blank(p.locationTypeEnumId)) enumOf(p.locationTypeEnumId, "FacilityLocationType", "location type")
+    if (!blank(p.storageTypeEnumId)) enumOf(p.storageTypeEnumId, "StorageType", "storage type")
     if (!blank(p.capacity)) {
         let capacity
         try {
@@ -134,7 +135,7 @@ function storeLocation(p) {
         denied("VALUE_INVALID", "The pick sequence is a whole number, zero or more")
     const fields = ["locationTypeEnumId", "description", "areaId", "aisleId", "sectionId", "levelId", "positionId"]
     const values = {facilityId: facility.facilityId, locationSeqId}
-    for (const name of fields.concat(["capacity", "capacityUomId", "sequenceNum"]))
+    for (const name of fields.concat(["capacity", "capacityUomId", "sequenceNum", "storageTypeEnumId"]))
         if (p[name] !== undefined) values[name] = blank(p[name]) ? null : p[name]
     if (existing) call("update#" + locationEntity, values)
     else call("mantle.facility.FacilityServices.create#FacilityLocation", values)
@@ -162,8 +163,9 @@ function storeLocationType(p) {
 // What keeps a location from closing, each named: stock there with on-hand or available-to-promise not zero (a depleted
 // asset stays at zero and does not block), equipment there that has not left (an asset counted by quantity with on-hand
 // and available-to-promise both zero is gone, whatever its type), a container, a reservation not issued on an asset there
-// (an open pick), a count line there on a count not complete, a product's location policy naming it, and a warehouse
-// operation policy in effect or to come naming it as a default location. Each kind is
+// (an open pick), a count line there on a count not complete, a product's location policy naming it, a warehouse
+// operation policy in effect or to come naming it as a default location, and a putaway rule in effect or to come naming it
+// as its source or destination (P9). Each kind is
 // one find filtered in the database: its count and the first records it names.
 function blockersOf(facilityId, locationSeqId) {
     const at = {facilityId, locationSeqId}
@@ -249,6 +251,18 @@ function blockersOf(facilityId, locationSeqId) {
                 .condition(anyOf([cond("thruDate", "is-null", null), cond("thruDate", "greater", ec.user.nowTimestamp)])),
         "fromDate",
         row => ec.l10n.format(new Date(ms(row.fromDate)), "yyyy-MM-dd HH:mm")
+    )
+    // a putaway rule in effect or to come that names it (Putaway.js, P9)
+    add(
+        "putawayRule",
+        "putaway rules naming it:",
+        () =>
+            find("mantle.facility.PutawayRule", {facilityId})
+                .condition(
+                    anyOf([cond("toLocationSeqId", "equals", locationSeqId), cond("fromLocationSeqId", "equals", locationSeqId)])
+                )
+                .condition(anyOf([cond("thruDate", "is-null", null), cond("thruDate", "greater", ec.user.nowTimestamp)])),
+        "putawayRuleId"
     )
     return blockers
 }

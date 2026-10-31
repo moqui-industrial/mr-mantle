@@ -1135,25 +1135,24 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="receive" noun="ShipmentStock" allow-remote="false">
         <description>Receive one line of a purchase receipt through mantle.shipment.ShipmentServices.receive#ShipmentProduct,
-            atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of
-            the product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents),
-            converted to the product's stock unit and kept as entered on each receipt (enteredQuantity,
-            enteredQuantityUomId, appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none
-            is given) and, for serialized stock, one unique serial per accepted unit; to the operation policy's receipt
-            step at posting (resolve#WarehousePolicy): 1 the product's default location or the receiver's, 2 the receiving
-            location, 3 a quarantine location; a rejected quantity becomes no stock (with nothing accepted, the guard writes
-            the rejection as an AssetReceipt with no stock on the sources in order, since receive#Asset receives nothing for
-            a zero quantity: F177). A retry with the same operation key
-            answers the first receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's
-            facilities (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open
-            (RECEIPT_CLOSED), a product not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection
-            without a reason (REASON_REQUIRED), more than the policy's over-receipt tolerance allows, zero by default
-            (OVER_RECEIPT), a serial count that does not match the accepted units (SERIAL_COUNT_MISMATCH), a serial given
-            twice or already in stock (SERIAL_DUPLICATE), a lot-tracked product without a lot (LOT_REQUIRED), a unit with
-            no conversion (UNIT_CONVERSION), a closed or missing destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE,
-            LOCATION_REQUIRED for a two- or three-step receipt with no receiving or quarantine location), and a closed fiscal
-            period today for the facility owner (PERIOD_CLOSED; the periods are read without locking them, so receipts do
-            not serialize on them).</description>
+            atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of the
+            product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents), converted to
+            the product's stock unit and kept as entered on each receipt (enteredQuantity, enteredQuantityUomId,
+            appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none is given) and, for serialized
+            stock, one unique serial per accepted unit; to the operation policy's receipt step at posting
+            (resolve#WarehousePolicy): 1 the putaway destination (PutawayServices.resolve#Destination, else the receiving location
+            with the reason) or the receiver's, 2 the receiving location, 3 a quarantine location; a rejected quantity becomes no
+            stock (with nothing accepted, the guard writes the rejection as an AssetReceipt with no stock on the sources in order,
+            since receive#Asset receives nothing for a zero quantity: F177). A retry with the same operation key answers the first
+            receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's facilities
+            (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open (RECEIPT_CLOSED), a product
+            not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection without a reason (REASON_REQUIRED),
+            more than the policy's over-receipt tolerance allows, zero by default (OVER_RECEIPT), a serial count that does not
+            match the accepted units (SERIAL_COUNT_MISMATCH), a serial given twice or already in stock (SERIAL_DUPLICATE), a lot-
+            tracked product without a lot (LOT_REQUIRED), a unit with no conversion (UNIT_CONVERSION), a closed or missing
+            destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE, LOCATION_REQUIRED for a two- or three-step receipt with no
+            receiving or quarantine location), and a closed fiscal period today for the facility owner (PERIOD_CLOSED; the periods
+            are read without locking them, so receipts do not serialize on them).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="shipmentId" required="true"/>
@@ -1173,8 +1172,9 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, facilityId, productId,
                 packProductId, quantityAccepted and quantityRejected (stock unit), the entered quantities, unit and factor,
-                receiptSteps, locationSeqId, statusId, lotNumber, serialNumbers, assetIds, assetReceiptIds,
-                remainingQuantity, warnings, and the operation fields.</description></parameter>
+                receiptSteps, locationSeqId, statusId, putawayExplanation (step 1: why the putaway destination, or why none
+                fit), lotNumber, serialNumbers, assetIds, assetReceiptIds, remainingQuantity, warnings, and the operation
+                fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -1339,7 +1339,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="receiving.policyOf(home.facilityId, productId)"/>
             <set field="track" from="receiving.tracking(policy.tracking, product, unit.quantity, context)"/>
             <set field="target" from="receiving.destination(userScope, home.facilityId, productId, policy.operation,
-                    locationSeqId)"/>
+                    locationSeqId, unit.quantity, owner)"/>
             <set field="common" from="{productId: productId, facilityId: home.facilityId, locationSeqId: target.locationSeqId,
                     statusId: target.statusId, ownerPartyId: owner, lotId: lotId || null, lotNumber: lotNumber || null,
                     expirationDate: track.expirationDate, mfgPartyId: mfgPartyId || null, acquireCost: cost.acquireCost,
@@ -1361,8 +1361,8 @@ along with this software (see the LICENSE.md file). If not, see
                         quantity: receiving.text(unit.quantity), enteredQuantity: receiving.text(quantity),
                         enteredQuantityUomId: unitId || null, appliedConversionFactor: receiving.text(unit.factor),
                         receiptSteps: target.receiptSteps, locationSeqId: target.locationSeqId, statusId: target.statusId,
-                        ownerPartyId: owner, costSource: cost.costSource, serialNumbers: track.serials,
-                        assetIds: assetIds.filter(Boolean),
+                        putawayExplanation: target.putaway?.explanation || null, ownerPartyId: owner,
+                        costSource: cost.costSource, serialNumbers: track.serials, assetIds: assetIds.filter(Boolean),
                         assetReceiptIds: receiptIds.filter(Boolean), reason: String(reason).trim(),
                         warnings: track.warnings})"/>
         </actions>
@@ -1476,6 +1476,83 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="pattern" from="generated.pattern"/>
             <set field="identityRows" from="generated.identityRows"/>
             <set field="duplicateCount" from="generated.duplicateCount"/>
+        </actions>
+    </service>
+    <!-- ===== putaway (impl-warehouse P9, Putaway.js) ===== -->
+    <service verb="putaway" noun="Stock" allow-remote="false">
+        <description>Put away an asset, or part of it, through mantle.product.AssetServices.move#Asset: to the destination
+            mantle.facility.PutawayServices.resolve#Destination suggests (the product's default location, then the rules by
+            priority, each checked for capacity, storage type, owner and status), or to another location of its facility with
+            a reason (REASON_REQUIRED) that passes the same checks. The destination is checked again once it is locked, so two
+            putaways cannot both fill it. A receiving hold (AstOnHold) is released to AstAvailable in storage through
+            update#Asset, by its status flow, so the reservation SECAs run; quarantined stock moves only within quarantine
+            (QUARANTINE_ONLY). A retry with the same operation key answers the first putaway. Requires STOCK_MOVE
+            (PERMISSION_DENIED); refuses what move#Stock refuses (RECORD_UNAVAILABLE, NOT_STOCK, NO_STOCK,
+            QUANTITY_EXCEEDS_ON_HAND, LOCATION_CLOSED, HELD_STOCK), no destination (NO_DESTINATION, naming why: the stock
+            stays where it is), and a destination that does not fit (CAPACITY_EXCEEDED, RULE_CAPACITY, CAPACITY_UNMEASURED,
+            STORAGE_TYPE, OTHER_OWNER, NOT_STORAGE, STATUS_FLOW, SAME_LOCATION).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"><description>Empty puts away the whole asset.</description></parameter>
+            <parameter name="toLocationSeqId"><description>Empty takes the suggestion.</description></parameter>
+            <parameter name="reason"><description>Required for a destination other than the suggestion.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PUT_AWAY, assetId, toAssetId, productId, quantity,
+                facilityId, fromLocationSeqId, toLocationSeqId, suggestedLocationSeqId, suggested, source, putawayRuleId,
+                fromStatusId, statusId, reservationsChecked, warnings, reason, and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="putaway" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Putaway.js')"/>
+            <!-- 1. permission and operation key: a retry answers the first putaway before any other check -->
+            <set field="begun" from="posting.begin(context, 'StockPutaway', 'STOCK_MOVE', ['assetId', 'quantity',
+                    'toLocationSeqId', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the asset, locked and scoped; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
+            <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3. the suggestion and the destination (a reason for another), then locked and checked again -->
+            <set field="planned" from="putaway.plan(userScope, asset, quantity, toLocationSeqId, reason)"/>
+            <set field="target" from="posting.destination(userScope, asset.facilityId, {toLocationSeqId: planned.locationSeqId,
+                    ownerPartyId: asset.ownerPartyId})"/>
+            <set field="checked" from="putaway.recheck(planned)"/>
+            <!-- 4. status and expiry: held stock stays held; a receiving hold is released in storage by its flow -->
+            <script>posting.keepHeld(asset, target)</script>
+            <set field="statusAfter" from="checked.statusAfter || asset.statusId"/>
+            <set field="warnings" from="posting.expiryWarnings(assetId)"/>
+            <!-- 5. Mantle's move, the release, and the reservations carried onto stock that is not available -->
+            <set field="moveQuantity" from="quantity ?? asset.quantityOnHandTotal"/>
+            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
+                    in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
+                        assetPoolId:asset.assetPoolId, quantity:moveQuantity}"/>
+            <set field="toAssetId" from="moved.newAssetId || assetId"/>
+            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="movedAsset" disable-authz="true">
+                <field-map field-name="assetId" from="toAssetId"/></entity-find-one>
+            <if condition="statusAfter &amp;&amp; movedAsset.statusId != statusAfter">
+                <service-call name="update#mantle.product.asset.Asset" disable-authz="true"
+                        in-map="{assetId:toAssetId, statusId:statusAfter}"/>
+            </if>
+            <set field="reservationsChecked" from="posting.recheckReservations(toAssetId)"/>
+            <!-- 6. the answer, stored with the operation -->
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.Asset', toAssetId,
+                    {resultCode: 'PUT_AWAY', assetId: assetId, toAssetId: toAssetId, productId: asset.productId,
+                        quantity: String(moveQuantity), facilityId: asset.facilityId,
+                        fromLocationSeqId: asset.locationSeqId || null, toLocationSeqId: target.locationSeqId,
+                        suggestedLocationSeqId: planned.resolved.locationSeqId, suggested: planned.suggested,
+                        source: planned.suggested ? planned.resolved.source : 'chosen',
+                        putawayRuleId: planned.suggested ? planned.resolved.putawayRuleId : null,
+                        fromStatusId: asset.statusId, statusId: statusAfter, reservationsChecked: reservationsChecked,
+                        warnings: warnings, reason: reason || null})"/>
         </actions>
     </service>
 </services>

@@ -32,7 +32,8 @@ const safeCopy = [
     "chargeShipping",
     "taxable",
     "returnable",
-    "originGeoId"
+    "originGeoId",
+    "storageTypeEnumId"
 ]
 const ids = v => [
     ...new Set(
