@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="WarehousePolicy" package="mantle.facility">
-        <description>Dated Warehouse policy by organization and optional facility/product scope. _NA_ is the all-scope key. Tracking is the first policy family; changes preserve prior rows and audits.</description>
+        <description>Dated Warehouse policy by organization and optional facility/product scope. _NA_ is the all-scope key.
+            The policy families (policyType): tracking (organization, facility and product scope), operation (receipt and
+            delivery steps, default locations, tolerances, the backorder choice, blind counts and auto-print; organization
+            and facility scope) and reservation (the facility reservation default where a store leaves it unset). Each change
+            ends the row in effect and starts the next, with its fields audit-logged.</description>
         <field name="organizationPartyId" type="id" is-pk="true"/>
         <field name="policyType" type="text-short" is-pk="true" default="'tracking'"/>
         <field name="facilityId" type="id" is-pk="true" default="'_NA_'"/>
@@ -16,9 +20,43 @@
         <field name="shelfLifeDays" type="number-integer" enable-audit-log="true"/>
         <field name="nearExpiryDays" type="number-integer" enable-audit-log="true"/>
         <field name="minimumRemainingShelfLifeDays" type="number-integer" enable-audit-log="true"/>
+        <!-- operation policy (store#OperationPolicy) -->
+        <field name="receiptSteps" type="number-integer" enable-audit-log="true">
+            <description>1 receive to the putaway destination, 2 to a receiving location then putaway, 3 to quarantine then
+                inspection and putaway</description></field>
+        <field name="deliverySteps" type="number-integer" enable-audit-log="true">
+            <description>1 ship from stock, 2 pick to a staging location then ship, 3 pick, pack and ship</description></field>
+        <field name="receivingLocationSeqId" type="id" enable-audit-log="true"/>
+        <field name="quarantineLocationSeqId" type="id" enable-audit-log="true"/>
+        <field name="stagingLocationSeqId" type="id" enable-audit-log="true"/>
+        <field name="overReceiptPercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="overShipmentPercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="backorderEnumId" type="id" enable-audit-log="true"/>
+        <field name="blindCount" type="text-indicator" enable-audit-log="true"/>
+        <field name="autoPrint" type="text-indicator" enable-audit-log="true"/>
+        <!-- reservation policy (store#ReservationPolicy) -->
+        <field name="reservationOrderEnumId" type="id" enable-audit-log="true"/>
+        <field name="reservationAutoEnumId" type="id" enable-audit-log="true"/>
         <field name="changeReason" type="text-long" enable-audit-log="true"/>
         <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one-nofk" related="mantle.facility.Facility"/>
         <relationship type="one-nofk" related="mantle.product.Product"/>
+        <relationship type="one" title="WarehouseBackorder" related="moqui.basic.Enumeration" short-alias="backorderEnum">
+            <key-map field-name="backorderEnumId"/></relationship>
+        <relationship type="one" title="AssetReservationOrder" related="moqui.basic.Enumeration"
+                short-alias="reservationOrderEnum">
+            <key-map field-name="reservationOrderEnumId"/></relationship>
+        <relationship type="one" title="AssetReservationAuto" related="moqui.basic.Enumeration"
+                short-alias="reservationAutoEnum">
+            <key-map field-name="reservationAutoEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Warehouse Backorder Choice" enumTypeId="WarehouseBackorder"/>
+            <moqui.basic.Enumeration enumId="WhBoBackorder" description="Keep the remainder on backorder" sequenceNum="1"
+                    enumTypeId="WarehouseBackorder"/>
+            <moqui.basic.Enumeration enumId="WhBoCancel" description="Cancel the remainder" sequenceNum="2"
+                    enumTypeId="WarehouseBackorder"/>
+            <moqui.basic.Enumeration enumId="WhBoAsk" description="Ask each time" sequenceNum="3"
+                    enumTypeId="WarehouseBackorder"/>
+        </seed-data>
     </entity>
 </entities>

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Asset pools (WH-POLICY; AssetPools.js): stock set aside for the parties and stores that may consume it, which
+    AssetServices.get#AssetPools reads when it reserves. A pool belongs to an internal organization; reading takes
+    membership of it and every change STOCK_POLICY_MANAGE. Members qualify between their dates; a change never reaches
+    back before now, and the reservation preview names what a change leaves unqualified without moving anything. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="PoolDetail" type="interface">
+        <description>The in-parameters a pool change shares.</description>
+        <in-parameters>
+            <parameter name="assetPoolId"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+    </service>
+
+    <service verb="find" noun="AssetPools" allow-remote="false">
+        <description>The pools of the user's organizations (every pool for a system administrator), by ID, pseudo ID or
+            description ignoring case, at most 100 (truncated says more exist), each with its current party and store
+            counts. Refuses a user outside any organization's catalog scope or a client.</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="ownerPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="poolList" type="List"/>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="canManage" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('findPools', context))</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="AssetPool" allow-remote="false">
+        <description>A pool with its parties and stores, each with its dates and whether it is in effect or ended. Refuses
+            a pool of another organization like a missing one (POOL_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="assetPoolId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="pool" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="stores" type="List"/>
+            <parameter name="canManage" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('getPool', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="AssetPool" allow-remote="false">
+        <description>Create a pool for one of the user's internal organizations (assetPoolId empty), or change a pool's ID
+            or description; the owner never changes. Takes STOCK_POLICY_MANAGE. Refuses an ID the owner already
+            uses.</description>
+        <implements service="mantle.product.AssetPoolServices.define#PoolDetail"/>
+        <in-parameters>
+            <parameter name="pseudoId"/>
+            <parameter name="description"/>
+            <parameter name="ownerPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="pool" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="stores" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storePool', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="AssetPoolParty" allow-remote="false">
+        <description>Add a party to a pool, or change its role or dates: a vendor, a customer or either (roleTypeId empty)
+            may consume the pool's stock between the dates. A membership in effect keeps its start; a new one starts now or
+            later; an end is now or later. Ending one moves no reservation (preview#AssetPoolReservations names them).
+            Takes STOCK_POLICY_MANAGE, audit-logged with the reason.</description>
+        <implements service="mantle.product.AssetPoolServices.define#PoolDetail"/>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="pool" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="stores" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeParty', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="AssetPoolStore" allow-remote="false">
+        <description>Add a store of the user's organizations to a pool, or change its dates, as for a party. Takes
+            STOCK_POLICY_MANAGE, audit-logged with the reason.</description>
+        <implements service="mantle.product.AssetPoolServices.define#PoolDetail"/>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="pool" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="stores" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeStore', context))</script>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="AssetPoolReservations" allow-remote="false">
+        <description>The open reservations on the pool's stock (at most 200; truncated says more exist), each with whether
+            its order still qualifies for the pool now, by its store, vendor or customer. Reads only.</description>
+        <in-parameters>
+            <parameter name="assetPoolId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assetPoolId"/>
+            <parameter name="reservations" type="List"/>
+            <parameter name="unqualifiedCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/AssetPools.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('previewReservations', context))</script>
+        </actions>
+    </service>
+</services>

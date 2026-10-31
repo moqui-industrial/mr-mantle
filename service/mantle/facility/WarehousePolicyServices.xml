@@ -1,35 +1,79 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Warehouse policy (WH-POLICY; WarehousePolicy.js): dated WarehousePolicy rows by organization, facility and
+    product, in three families. Tracking (lot and serial requirements, patterns, shelf life, the expiry gate's flag) has
+    product exceptions, which a stock planner may change; operation (receipt and delivery steps, default locations,
+    tolerances, the backorder choice, blind counts, auto-print) and reservation (the facility reservation default where
+    a store leaves it unset) are organization and facility policies that take STOCK_POLICY_MANAGE. A change ends the row
+    in effect and starts the next, applies from its date (at posting) and never rewrites history. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
-    
-    
-    <service verb="resolve" noun="WarehousePolicy" allow-remote="false">
-        <description>Warehouse tracking policy by effective date, with organization, facility and product sources. Operation and reservation policy are added by Warehouse.</description>
+    <service verb="define" noun="PolicyResult" type="interface">
+        <description>The in-parameters a policy read or change shares: the scope and the date.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="facilityId"/>
             <parameter name="productId"/>
             <parameter name="asOfDate" type="Timestamp"/>
         </in-parameters>
+    </service>
+
+    <service verb="resolve" noun="WarehousePolicy" allow-remote="false">
+        <description>The effective Warehouse policy at a date for an organization, facility, store and product, with its
+            trace: each value's source (organization, facility, store, product, facility product, the facility's location of
+            the type, or the built-in default). Tracking resolves through the organization, the facility, the product and
+            the product at the facility, and a narrower scope cannot lift an inherited expiry block; operation through the
+            organization and the facility; reservation through the organization, the facility and then the store's own
+            settings, which win for that store's orders only. configuredPolicy and history are the rows of policyType
+            (default tracking) at the exact scope. Warnings name a location the effective steps need and the facility lacks.
+            Refuses a user outside the organization, and a facility, store or product of another.</description>
+        <implements service="mantle.facility.WarehousePolicyServices.define#PolicyResult"/>
+        <in-parameters>
+            <parameter name="productStoreId"><description>The store whose reservation settings override; its inventory
+                facility when no facility is given</description></parameter>
+            <parameter name="policyType"><description>tracking (default), operation or reservation: the family of
+                configuredPolicy and history</description></parameter>
+        </in-parameters>
         <out-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="facilityId"/>
             <parameter name="productId"/>
+            <parameter name="productStoreId"/>
             <parameter name="asOfDate" type="Timestamp"/>
             <parameter name="trackingPolicy" type="Map"/>
+            <parameter name="operationPolicy" type="Map"/>
+            <parameter name="reservationPolicy" type="Map"/>
             <parameter name="configuredPolicy" type="Map"/>
             <parameter name="sources" type="Map"/>
             <parameter name="sourceRows" type="List"/>
+            <parameter name="trace" type="List"/>
+            <parameter name="warnings" type="List"/>
             <parameter name="history" type="List"/>
             <parameter name="canPlan" type="Boolean"/>
+            <parameter name="canManage" type="Boolean"/>
         </out-parameters>
         <actions>
-            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/facility/WarehousePolicy.js').execute('resolve',context))</script>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('resolve', context))</script>
         </actions>
     </service>
-    
-    
+
     <service verb="store" noun="TrackingPolicy" allow-remote="false">
-        <description>Warehouse tracking policy by effective date, with organization, facility and product sources. Operation and reservation policy are added by Warehouse.</description>
+        <description>A dated tracking change at the organization, facility, product or product-at-facility scope. Product
+            exceptions take STOCK_POLICY_PLAN or STOCK_POLICY_MANAGE; organization and facility defaults take
+            STOCK_POLICY_MANAGE. Refuses a stale expectedFromDate, a start in the past, a second row starting at the same
+            time, and invalid flags, days and patterns.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.facility.WarehousePolicy" include="all"/>
             <parameter name="expectedFromDate" type="Timestamp"/>
@@ -48,9 +92,154 @@
             <parameter name="canPlan" type="Boolean"/>
         </out-parameters>
         <actions>
-            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/facility/WarehousePolicy.js').execute('storeTracking',context))</script>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeTracking', context))</script>
         </actions>
     </service>
-    
 
+    <service verb="store" noun="OperationPolicy" allow-remote="false">
+        <description>A dated operation policy change for an organization (facilityId empty) or a facility: receipt and
+            delivery steps (1 to 3), the receiving, quarantine and staging locations (a facility's, of those location
+            types), over-receipt and over-shipment tolerances in percent (0 to 100; zero with no row), the backorder choice
+            (WarehouseBackorder), blind counts and auto-print. An empty field inherits. Takes STOCK_POLICY_MANAGE in the
+            organization. Refuses a stale expectedFromDate, a start in the past and a second row at the same time.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"><description>Empty starts now</description></parameter>
+            <parameter name="expectedFromDate" type="Timestamp"><description>The fromDate of the row in effect at this
+                scope when the form was read, empty when none</description></parameter>
+            <parameter name="receiptSteps" type="Integer"/>
+            <parameter name="deliverySteps" type="Integer"/>
+            <parameter name="receivingLocationSeqId"/>
+            <parameter name="quarantineLocationSeqId"/>
+            <parameter name="stagingLocationSeqId"/>
+            <parameter name="overReceiptPercent" type="BigDecimal"/>
+            <parameter name="overShipmentPercent" type="BigDecimal"/>
+            <parameter name="backorderEnumId"/>
+            <parameter name="blindCount"/>
+            <parameter name="autoPrint"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="operationPolicy" type="Map"/>
+            <parameter name="configuredPolicy" type="Map"/>
+            <parameter name="trace" type="List"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="history" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeOperation', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="ReservationPolicy" allow-remote="false">
+        <description>A dated facility reservation default for an organization (facilityId empty) or a facility: the
+            reservation order (AssetReservationOrder) and automatic timing (AssetReservationAuto) that Mantle's reservation
+            uses for an order whose store, or the order part, leaves them unset (orders without a store). An empty field
+            inherits. Takes STOCK_POLICY_MANAGE in the organization. The change does not move existing reservations.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="expectedFromDate" type="Timestamp"/>
+            <parameter name="reservationOrderEnumId"/>
+            <parameter name="reservationAutoEnumId"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="reservationPolicy" type="Map"/>
+            <parameter name="configuredPolicy" type="Map"/>
+            <parameter name="trace" type="List"/>
+            <parameter name="history" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeReservation', context))</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ReservationDefault" allow-remote="false">
+        <description>The facility reservation default Mantle's reservation reads where a store leaves the setting unset:
+            the reservation order and automatic timing of the reservation rows in effect now for the organization at the
+            facility, else for the organization. Empty with no row, so reservation is unchanged without a policy. Internal:
+            it reads policy only and checks no permission.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reservationOrderEnumId"/>
+            <parameter name="reservationAutoEnumId"/>
+        </out-parameters>
+        <actions>
+            <if condition="!organizationPartyId"><return/></if>
+            <entity-find entity-name="mantle.facility.WarehousePolicy" list="defaultList" disable-authz="true">
+                <date-filter/>
+                <econdition field-name="organizationPartyId"/>
+                <econdition field-name="policyType" value="reservation"/>
+                <econdition field-name="productId" value="_NA_"/>
+                <econdition field-name="facilityId" operator="in" from="[facilityId || '_NA_', '_NA_']"/>
+                <order-by field-name="-fromDate"/>
+            </entity-find>
+            <set field="facilityRow" from="defaultList.find(row =&gt; row.facilityId === facilityId)"/>
+            <set field="organizationRow" from="defaultList.find(row =&gt; row.facilityId === '_NA_')"/>
+            <set field="reservationOrderEnumId"
+                    from="facilityRow?.reservationOrderEnumId || organizationRow?.reservationOrderEnumId || null"/>
+            <set field="reservationAutoEnumId"
+                    from="facilityRow?.reservationAutoEnumId || organizationRow?.reservationAutoEnumId || null"/>
+        </actions>
+    </service>
+
+    <service verb="update" noun="StoreReservation" allow-remote="false">
+        <description>A store's own reservation settings, the override over the facility default for that store's orders:
+            its inventory facility (the organization's), reservation order, automatic timing and require-inventory flag.
+            A field-scoped change of ProductStore, audit-logged with the reason; the store's other settings stay Commerce's.
+            Takes STOCK_POLICY_MANAGE in the store's organization. Refuses a stale expectedLastUpdatedStamp.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="inventoryFacilityId"/>
+            <parameter name="reservationOrderEnumId"/>
+            <parameter name="reservationAutoEnumId"/>
+            <parameter name="requireInventory"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="facilityId"/>
+            <parameter name="reservationPolicy" type="Map"/>
+            <parameter name="trace" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('storeStoreReservation', context))</script>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="FacilityReservations" allow-remote="false">
+        <description>The reservations at a facility that check#FacilityReservations would repair, read without changing
+            anything: on an asset no longer available (ASSET_NOT_AVAILABLE), for an order part of another facility
+            (OTHER_FACILITY), on a pool the order does not qualify for (POOL_NOT_QUALIFIED), or not available while the
+            product has available stock there (AVAILABLE_ELSEWHERE). At most 200 reservations are checked (truncated says
+            more exist). Refuses a user outside the facility's organization.</description>
+        <implements service="mantle.facility.WarehousePolicyServices.define#PolicyResult"/>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="checkedCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="findings" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
+            <script>ec.context.putAll(ec.resource.script(module).execute('reservationCheck', context))</script>
+        </actions>
+    </service>
 </services>

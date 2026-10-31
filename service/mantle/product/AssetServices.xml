@@ -620,13 +620,14 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="assetPoolIdSet" from="[]"/>
             <if condition="productStoreId">
                 <entity-find entity-name="mantle.product.asset.AssetPoolStore" list="assetPoolStoreList" cache="true">
-                    <econdition field-name="productStoreId"/></entity-find>
+                    <!-- a member row qualifies between its dates (Warehouse AssetPools); undated rows always -->
+                    <date-filter/><econdition field-name="productStoreId"/></entity-find>
                 <if condition="(assetPoolStoreList?.length > 0)">
                     <script>for (const aps of assetPoolStoreList) if (!assetPoolIdSet.includes(aps.assetPoolId)) assetPoolIdSet.push(aps.assetPoolId)</script></if>
             </if>
             <if condition="vendorPartyId">
                 <entity-find entity-name="mantle.product.asset.AssetPoolParty" list="vendorPoolPartyList" cache="true">
-                    <econdition field-name="partyId" from="vendorPartyId"/></entity-find>
+                    <date-filter/><econdition field-name="partyId" from="vendorPartyId"/></entity-find>
                 <!-- filter by role or null after for better caching -->
                 <set field="vendorPoolPartyList" from="Array.from(vendorPoolPartyList).filter((it) =&gt; it.roleTypeId == null || it.roleTypeId === 'Vendor')"/>
                 <if condition="(vendorPoolPartyList?.length > 0)">
@@ -634,7 +635,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <if condition="customerPartyId">
                 <entity-find entity-name="mantle.product.asset.AssetPoolParty" list="customerPoolPartyList" cache="true">
-                    <econdition field-name="partyId" from="customerPartyId"/></entity-find>
+                    <date-filter/><econdition field-name="partyId" from="customerPartyId"/></entity-find>
                 <!-- filter by role or null after for better caching -->
                 <set field="customerPoolPartyList" from="Array.from(customerPoolPartyList).filter((it) =&gt; it.roleTypeId == null || it.roleTypeId === 'Customer')"/>
                 <if condition="(customerPoolPartyList?.length > 0)">
@@ -678,7 +679,14 @@ along with this software (see the LICENSE.md file). If not, see
 
             <iterate list="orderPartList" entry="orderPart">
                 <!-- check OrderPart.reservationAutoEnumId vs current status -->
-                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId || 'AsResAutoPlaced'"/>
+                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId"/>
+                <!-- unset by the order and its store: the facility reservation default (WarehousePolicy), if any -->
+                <if condition="!reservationAutoEnumId">
+                    <service-call name="mantle.facility.WarehousePolicyServices.get#ReservationDefault" out-map="resDefault"
+                            out-map-add-to-existing="false" disable-authz="true"
+                            in-map="{organizationPartyId:orderPart.vendorPartyId, facilityId:orderPart.facilityId}"/>
+                    <set field="reservationAutoEnumId" from="resDefault.reservationAutoEnumId || 'AsResAutoPlaced'"/>
+                </if>
                 <if condition="!forceReserve &amp;&amp; reservationAutoEnumId == 'AsResAutoNone'"><continue/></if>
                 <if condition="!forceReserve &amp;&amp; reservationAutoEnumId == 'AsResAutoApproved'"><then>
                     <set field="resStatusList" from="['OrderApproved', 'OrderSent']"/>
@@ -722,7 +730,15 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!existingResList?.length">
                 <!-- only do this automatically if order placed or later but not completed/cancelled/etc -->
                 <!-- check OrderPart.reservationAutoEnumId vs current status -->
-                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId || 'AsResAutoPlaced'"/>
+                <set field="productStore" from="orderHeader.productStore"/>
+                <set field="reservationAutoEnumId" from="orderPart.reservationAutoEnumId || productStore?.reservationAutoEnumId"/>
+                <!-- unset by the order and its store: the facility reservation default (WarehousePolicy), if any -->
+                <if condition="!reservationAutoEnumId">
+                    <service-call name="mantle.facility.WarehousePolicyServices.get#ReservationDefault" out-map="resDefault"
+                            disable-authz="true"
+                            in-map="{organizationPartyId:orderPart.vendorPartyId, facilityId:orderPart.facilityId}"/>
+                    <set field="reservationAutoEnumId" from="resDefault.reservationAutoEnumId || 'AsResAutoPlaced'"/>
+                </if>
                 <if condition="reservationAutoEnumId == 'AsResAutoNone'"><return/></if>
                 <if condition="reservationAutoEnumId == 'AsResAutoApproved'"><then>
                     <set field="resStatusList" from="['OrderApproved', 'OrderSent']"/>
@@ -849,10 +865,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-related-one value-field="orderHeader" relationship-name="mantle.product.store.ProductStore"
                         to-value-field="productStore" cache="true"/>
             </if>
-            <!-- if store setup for no reservation return now -->
-            <if condition="productStore?.reservationOrderEnumId == 'AsResOrdNoRes'"><return/></if>
+            <!-- the store's reservation order, else the facility reservation default (WarehousePolicy), else FIFO -->
+            <set field="reservationOrderEnumId" from="productStore?.reservationOrderEnumId"/>
+            <if condition="!reservationOrderEnumId">
+                <service-call name="mantle.facility.WarehousePolicyServices.get#ReservationDefault" out-map="resDefault"
+                        disable-authz="true"
+                        in-map="{organizationPartyId:orderPart?.vendorPartyId || productStore?.organizationPartyId,
+                            facilityId:orderPart?.facilityId || productStore?.inventoryFacilityId}"/>
+                <set field="reservationOrderEnumId" from="resDefault.reservationOrderEnumId || 'AsResOrdFifoRec'"/>
+            </if>
+            <!-- if set up for no reservation return now -->
+            <if condition="reservationOrderEnumId == 'AsResOrdNoRes'"><return/></if>
             <!-- otherwise set assetOrderBy field based on reservationOrderEnumId -->
-            <set field="reservationOrderEnumId" from="productStore?.reservationOrderEnumId || 'AsResOrdFifoRec'"/>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="resOrderEnum">
                 <field-map field-name="enumId" from="reservationOrderEnumId"/></entity-find-one>
             <set field="assetOrderBy" from="resOrderEnum?.enumCode || 'receivedDate'"/><!-- default: FIFO by received date -->

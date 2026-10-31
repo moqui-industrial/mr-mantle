@@ -500,7 +500,10 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="AssetPoolParty" package="mantle.product.asset">
         <field name="assetPoolId" type="id" is-pk="true"/>
         <field name="partyId" type="id" is-pk="true"/>
-        <field name="roleTypeId" type="id"/>
+        <field name="roleTypeId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"><description>When set, the party qualifies from
+            then (get#AssetPools); empty is always</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <relationship type="one" related="mantle.product.asset.AssetPool" short-alias="pool"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
         <relationship type="one" related="mantle.party.RoleType" short-alias="roleType"/>
@@ -508,6 +511,9 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="AssetPoolStore" package="mantle.product.asset">
         <field name="assetPoolId" type="id" is-pk="true"/>
         <field name="productStoreId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"><description>When set, the store qualifies from
+            then (get#AssetPools); empty is always</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <relationship type="one" related="mantle.product.asset.AssetPool" short-alias="pool"/>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
     </entity>
