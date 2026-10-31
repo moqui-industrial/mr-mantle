@@ -5,8 +5,10 @@
 // locked and scoped (its facility is its route segment's destination, F55), the line's product, unit and pack, the
 // tracking policy's lot and serial rules, the over-receipt tolerance and the receipt steps of the operation policy read at
 // posting (resolve#WarehousePolicy, F101), the Mantle primitives (receive#ShipmentProduct, receive#Asset), the entered
-// quantity fields (F7), and the receipt exception notice. One lock order: the order part, then the shipment, then its
-// sources by id, then the destination location. Each refusal is denied(reason, message).
+// quantity fields (F7), and the receipt exception notice. One lock order: the shipment, then its sources by id, then the
+// order parts and the order header (in Mantle's own order: complete#OrderPart updates the part, then the header), then the
+// destination location; ensure#PurchaseReceipt, which has no shipment yet, starts at the part (P7 review B1). Each refusal
+// is denied(reason, message).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const posting = ec.resource.script("component://mr-mantle/service/mantle/shipment/StockPosting.js")
 const purchase = ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRemainders.js")
@@ -63,29 +65,6 @@ function openReceipt(orderId, orderPartSeqId, excludeShipmentId) {
     )
     return open.length ? open[0].shipmentId : null
 }
-// A new receipt's sources of lines in another unit than the product's stock unit, in stock units (Mantle copies the
-// line quantity as it is), and each product's shipment item the sum of its sources.
-function toStockUnits(shipmentId) {
-    const products = new Set()
-    for (const source of rows(SOURCE, {shipmentId})) {
-        if (!source.orderId) continue
-        const item = one("mantle.order.OrderItem", {orderId: source.orderId, orderItemSeqId: source.orderItemSeqId})
-        const factor = purchase.lineFactor(item, one(PRODUCT, {productId: source.productId}))
-        if (factor.compare(1) === 0) continue
-        call("update#" + SOURCE, {
-            shipmentItemSourceId: source.shipmentItemSourceId,
-            quantity: dec(source.quantity).multiply(factor),
-            quantityNotHandled: dec(source.quantityNotHandled).multiply(factor)
-        })
-        products.add(source.productId)
-    }
-    for (const productId of products) {
-        const total = rows(SOURCE, {shipmentId, productId}).reduce((sum, source) => sum.add(dec(source.quantity)), zero())
-        call("update#mantle.shipment.ShipmentItem", {shipmentId, productId, quantity: total})
-    }
-    return [...products]
-}
-
 // ===== the receipt, locked and scoped =====
 // The purchase receipt, locked, still being received, at its route segment's destination facility (F55), a facility of
 // the user's organizations.
@@ -198,6 +177,16 @@ function serialsOf(value) {
             : Array.from(value)
     return list.map(serial => String(serial).trim()).filter(Boolean)
 }
+// The serials of the product's stock on hand (a unit shipped out and come back is not a duplicate).
+function serialsInStock(productId, serials) {
+    return Array.from(
+        find("mantle.product.asset.Asset", {productId})
+            .condition("serialNumber", "in", serials)
+            .condition("quantityOnHandTotal", "greater", 0)
+            .selectField("serialNumber")
+            .list()
+    ).map(row => row.serialNumber)
+}
 // The tracking checks before anything posts: a serial-tracked product (or any given serials) needs one unique serial per
 // accepted unit (SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE); a lot-tracked one a lot for what is accepted (LOT_REQUIRED). A
 // lot with no expiry takes the shelf life from the receipt date. Answers the serials and the expiry.
@@ -214,14 +203,7 @@ function tracking(policy, product, accepted, p) {
             )
         const repeated = serials.filter((serial, index) => serials.indexOf(serial) !== index)
         if (repeated.length) denied("SERIAL_DUPLICATE", "Serial numbers given twice: " + [...new Set(repeated)].join(", "))
-        const existing = serials.length
-            ? Array.from(
-                  find("mantle.product.asset.Asset", {productId: product.productId})
-                      .condition("serialNumber", "in", serials)
-                      .selectField("serialNumber")
-                      .list()
-              ).map(row => row.serialNumber)
-            : []
+        const existing = serials.length ? serialsInStock(product.productId, serials) : []
         if (existing.length) denied("SERIAL_DUPLICATE", "Serial numbers already in stock: " + existing.join(", "))
     }
     if (policy.lotRequired === "Y" && !accepted.isZero() && blank(p.lotNumber) && blank(p.lotId))
@@ -276,7 +258,10 @@ function destination(userScope, facilityId, productId, operation, requested) {
         locationSeqId = chosen?.locationTypeEnumId === "FltQuarantine" ? chosen.locationSeqId : operation.quarantineLocationSeqId
         if (!locationSeqId) denied("LOCATION_REQUIRED", "Receipt into quarantine needs a quarantine location at the facility")
     } else if (steps === 2) {
-        locationSeqId = blank(requested) ? operation.receivingLocationSeqId : requested
+        // a receiving location: the receiver's, if it is one, else the policy's (P7 review C4)
+        const chosen = blank(requested) ? null : one("mantle.facility.FacilityLocation", {facilityId, locationSeqId: requested})
+        locationSeqId = chosen?.locationTypeEnumId === "FltReceiving" ? chosen.locationSeqId : operation.receivingLocationSeqId
+        if (!locationSeqId) denied("LOCATION_REQUIRED", "Two-step receipt needs a receiving location at the facility")
     } else {
         locationSeqId = blank(requested)
             ? defaultLocation(facilityId, productId) || operation.receivingLocationSeqId || null
@@ -409,6 +394,30 @@ function notifyException(recv, kind, detail) {
     }
 }
 
+// ===== receive#AdHocStock's cost (P7 review C6) =====
+// The unit cost of stock received with no order: the one given needs financial read (ACCOUNTING_VIEW; COST_NOT_PERMITTED),
+// else the product's approved standard cost for the organization and facility, else its latest acquire cost there, else
+// none (the receipt posts no value, as Mantle's receive#Asset without a cost).
+function adHocCost(product, facility, ownerPartyId, given, givenUomId) {
+    if (given != null && given !== "") {
+        if (!lib.access.has("ACCOUNTING_VIEW")) denied("COST_NOT_PERMITTED", "Setting a cost needs financial read")
+        return {acquireCost: dec(given), acquireCostUomId: givenUomId || null, costSource: "given"}
+    }
+    const costs = ec.resource.script("component://mr-mantle/service/mantle/product/Costs.js")
+    const standard = costs.effective(product.productId, ownerPartyId, ec.user.nowTimestamp, facility.facilityId)
+    if (standard?.unitCost != null)
+        return {acquireCost: dec(standard.unitCost), acquireCostUomId: standard.priceUomId || null, costSource: "standard"}
+    const last = Array.from(
+        find("mantle.product.asset.Asset", {productId: product.productId, ownerPartyId})
+            .condition("acquireCost", "is-not-null", null)
+            .orderBy("-acquiredDate")
+            .limit(1)
+            .list()
+    )[0]
+    if (last) return {acquireCost: dec(last.acquireCost), acquireCostUomId: last.acquireCostUomId || null, costSource: "last"}
+    return {acquireCost: null, acquireCostUomId: null, costSource: null}
+}
+
 // ===== receive#ShipmentStock's plan: everything checked before anything posts =====
 function plan(userScope, recv, ln, p) {
     const unitId = blank(p.quantityUomId) ? (ln.packProductId ? null : defaultUnit(ln.sources, ln.product)) : p.quantityUomId
@@ -486,18 +495,28 @@ function closeRemainders(userScope, recv, open, reason) {
         for (const source of lineRow.sources)
             if (source.orderId) byOrder.set(source.orderId, (byOrder.get(source.orderId) || new Set()).add(source.orderItemSeqId))
     return [...byOrder.entries()].map(([orderId, itemIds]) =>
-        purchase.remainders({orderId, orderItemSeqIds: [...itemIds], reason, shipmentId: recv.shipmentId, userScope})
+        purchase.remainders({
+            orderId,
+            orderItemSeqIds: [...itemIds],
+            reason,
+            shipmentId: recv.shipmentId,
+            onShipment: true,
+            userScope
+        })
     )
 }
 // Backorder: this receipt keeps what was received (update#ShipmentItem), and each order part's remainder goes to its
 // open receipt (ensure#PurchaseReceipt, a new one since this one is being delivered).
 function backorderRemainders(recv, open, operationKey) {
+    // a receipt that received nothing is cancelled rather than delivered empty (P7 review C2)
+    const receivedAny = find(RECEIPT, {shipmentId: recv.shipmentId}).count() > 0
     for (const lineRow of open)
         call("mantle.shipment.ShipmentServices.update#ShipmentItem", {
             shipmentId: recv.shipmentId,
             productId: lineRow.productId,
             quantity: lineRow.received
         })
+    if (!receivedAny) call("mantle.shipment.ShipmentServices.cancel#Shipment", {shipmentId: recv.shipmentId})
     const parts = new Map()
     for (const lineRow of open)
         for (const source of lineRow.sources) {
@@ -528,7 +547,9 @@ function nextValues(first, count) {
 }
 // A pattern's values: {seq:N} is the sequence in N digits from start, {yyyy}, {yy}, {MM}, {dd} the day in the user's zone,
 // {product} the product id.
-function patternValues(pattern, productId, start, count) {
+// A pattern with its day and product tokens filled, the {seq} left: the text before the sequence, and a regular
+// expression whose group is the sequence of a value made from it.
+function patternParts(pattern, productId) {
     if (!/\{seq(?::\d+)?\}/.test(pattern)) denied("PATTERN_INVALID", "A tracking pattern needs {seq} or {seq:N}")
     const now = ec.user.nowTimestamp
     const day = {
@@ -537,15 +558,51 @@ function patternValues(pattern, productId, start, count) {
         MM: ec.l10n.format(now, "MM"),
         dd: ec.l10n.format(now, "dd")
     }
+    const filled = pattern.replace(/\{(yyyy|yy|MM|dd)\}/g, (_, token) => day[token]).replace(/\{product\}/g, productId)
+    const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const pieces = filled.split(/\{seq(?::\d+)?\}/)
+    return {
+        filled,
+        prefix: pieces[0],
+        matcher: new RegExp("^" + pieces.map(escape).join("(\\d+)") + "$")
+    }
+}
+function patternValues(parts, start, count) {
     return Array.from({length: count}, (_, index) =>
-        pattern
-            .replace(/\{seq(?::(\d+))?\}/g, (_, width) => String(start + index).padStart(Number(width || 0), "0"))
-            .replace(/\{(yyyy|yy|MM|dd)\}/g, (_, token) => day[token])
-            .replace(/\{product\}/g, productId)
+        parts.filled.replace(/\{seq(?::(\d+))?\}/g, (_, width) => String(start + index).padStart(Number(width || 0), "0"))
     )
 }
-// Serial or lot values for many units, with each one's uniqueness: a serial already on the product's stock, a lot number
-// already used by the manufacturer, or a value given twice is a duplicate. Writes nothing.
+// The sequence after the highest value already made from the pattern: of the product's serials, or of the lots (the
+// manufacturer's when given), so generating again goes on rather than starting at 1 (P7 review B3).
+function nextSequence(parts, kind, productId, mfgPartyId) {
+    const like = parts.prefix.replace(/[\\%_]/g, c => "\\" + c) + "%"
+    const field = kind === "serial" ? "serialNumber" : "lotNumber"
+    let query =
+        kind === "serial"
+            ? find("mantle.product.asset.Asset", {productId})
+            : mfgPartyId
+              ? find("mantle.product.asset.Lot", {mfgPartyId})
+              : find("mantle.product.asset.Lot")
+    query = query
+        .condition(field, "like", parts.prefix ? like : "%")
+        .selectField(field)
+        .orderBy("-" + field)
+        .limit(5000)
+    let highest = 0
+    for (const row of Array.from(query.list())) {
+        const match = parts.matcher.exec(String(row[field] || ""))
+        if (match) highest = Math.max(highest, Number(match[1]))
+    }
+    return highest + 1
+}
+// Values from the policy's pattern: from startNumber when given, else after the highest made from it already.
+function patternFrom(pattern, kind, productId, p, count) {
+    const parts = patternParts(pattern, productId)
+    const start = Number(p.startNumber) > 0 ? Number(p.startNumber) : nextSequence(parts, kind, productId, p.mfgPartyId)
+    return patternValues(parts, start, count)
+}
+// Serial or lot values for many units, with each one's uniqueness: a serial on the product's stock on hand, a lot number
+// already used (by the manufacturer, when given), or a value given twice is a duplicate. Writes nothing.
 function generate(p) {
     posting.requirePermission(["STOCK_RECEIVE", "STOCK_ISSUE"])
     const userScope = posting.scope()
@@ -564,16 +621,11 @@ function generate(p) {
     const values = !blank(p.firstValue)
         ? nextValues(String(p.firstValue).trim(), count)
         : pattern
-          ? patternValues(pattern, product.productId, Number(p.startNumber) > 0 ? Number(p.startNumber) : 1, count)
+          ? patternFrom(pattern, kind, product.productId, p, count)
           : denied("FIRST_VALUE_REQUIRED", "Give a first value, or set a tracking pattern for the product")
     const taken = new Set(
         kind === "serial"
-            ? Array.from(
-                  find("mantle.product.asset.Asset", {productId: product.productId})
-                      .condition("serialNumber", "in", values)
-                      .selectField("serialNumber")
-                      .list()
-              ).map(row => row.serialNumber)
+            ? serialsInStock(product.productId, values)
             : Array.from(
                   (p.mfgPartyId ? find("mantle.product.asset.Lot", {mfgPartyId: p.mfgPartyId}) : find("mantle.product.asset.Lot"))
                       .condition("lotNumber", "in", values)
@@ -598,7 +650,6 @@ function generate(p) {
 ;({
     purchasePart,
     openReceipt,
-    toStockUnits,
     receipt,
     sourcesOf,
     line,
@@ -606,6 +657,7 @@ function generate(p) {
     postLine,
     lineAnswer,
     stockQuantity,
+    adHocCost,
     policyOf,
     tracking,
     destination,

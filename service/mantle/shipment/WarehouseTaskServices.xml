@@ -978,7 +978,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="ensure" noun="PurchaseReceipt" allow-remote="false">
         <description>The one open receipt of a purchase order part: the part's ShpTpPurchase shipment in Input or Scheduled
             (resultCode EXISTING), or a new one through mantle.shipment.ShipmentServices.create#OrderPartShipment to the
-            facility (CREATED), with the sources of lines in another unit converted to the product's stock unit.
+            facility (CREATED), its sources in the product's stock unit (create#OrderPartShipment converts a line in
+            another unit, OrderServices.get#OrderItemStockFactor). EXISTING answers that receipt's own facility.
             Warehouse's NewReceipt and Purchasing's expected receipt both call it, so a second request for the part opens
             the same receipt; a retry with the same operation key answers the first. Requires STOCK_RECEIVE or
             PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses a part outside the user's organizations (RECORD_UNAVAILABLE),
@@ -1027,15 +1028,21 @@ along with this software (see the LICENSE.md file). If not, see
                     <return error="true"
                             message="NOTHING_TO_RECEIVE: Order ${orderId} part ${orderPartSeqId} has nothing left to receive"/>
                 </if>
-                <script>receiving.toStockUnits(shipmentId)</script>
                 <if condition="estimatedArrivalDate">
                     <service-call name="update#mantle.shipment.Shipment" disable-authz="true"
                             in-map="{shipmentId:shipmentId, estimatedArrivalDate:estimatedArrivalDate}"/>
                 </if>
             </if>
+            <!-- the receipt's own facility (its route segment's destination), which for an existing one may not be the one
+                asked for (P7 review C2) -->
+            <entity-find entity-name="mantle.shipment.ShipmentRouteSegment" list="segments" disable-authz="true">
+                <econdition field-name="shipmentId"/>
+                <econdition field-name="destinationFacilityId" operator="is-not-null"/>
+                <order-by field-name="-shipmentRouteSegmentSeqId"/>
+            </entity-find>
             <set field="result" from="posting.complete(begun.op, part.customerPartyId, 'mantle.shipment.Shipment', shipmentId,
                     {resultCode: resultCode, shipmentId: shipmentId, orderId: orderId, orderPartSeqId: orderPartSeqId,
-                        facilityId: home.facilityId})"/>
+                        facilityId: segments[0]?.destinationFacilityId || home.facilityId})"/>
         </actions>
     </service>
     <service verb="adjust" noun="ExpectedReceipt" allow-remote="false">
@@ -1075,19 +1082,18 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!parts.length">
                 <return error="true" message="RECORD_UNAVAILABLE: Order ${orderId} is not available"/>
             </if>
-            <set field="partList" from="Array.from(parts).map(part =&gt; receiving.purchasePart(userScope, orderId,
-                    part.orderPartSeqId))"/>
             <script><![CDATA[
                 const purchase = ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRemainders.js')
                 const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
                 const dec = value => toDecimal(value ?? 0)
-                const items = Array.from(lib.find('mantle.order.OrderItem', {orderId}).orderBy('orderItemSeqId').list())
-                    .filter(item => partList.some(part => part.orderPartSeqId === item.orderPartSeqId) && item.productId)
-                // the open receipts, locked by id before their sources (the receive guard's order)
-                const receiptIds = [...new Set(items.map(item => receiving.openReceipt(orderId, item.orderPartSeqId, null))
-                    .filter(Boolean))].sort()
+                // one lock order (P7 review B1): the open receipts by id first, found without locks, then the parts
+                const receiptIds = [...new Set(Array.from(parts).map(part => receiving.openReceipt(orderId,
+                    part.orderPartSeqId, null)).filter(Boolean))].sort()
                 for (const shipmentId of receiptIds)
                     lib.find('mantle.shipment.Shipment', {shipmentId}).forUpdate(true).one()
+                partList = Array.from(parts).map(part => receiving.purchasePart(userScope, orderId, part.orderPartSeqId))
+                const items = Array.from(lib.find('mantle.order.OrderItem', {orderId}).orderBy('orderItemSeqId').list())
+                    .filter(item => partList.some(part => part.orderPartSeqId === item.orderPartSeqId) && item.productId)
                 adjusted = []
                 for (const item of items) {
                     const product = lib.one('mantle.product.Product', {productId: item.productId})
@@ -1135,15 +1141,19 @@ along with this software (see the LICENSE.md file). If not, see
             enteredQuantityUomId, appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none
             is given) and, for serialized stock, one unique serial per accepted unit; to the operation policy's receipt
             step at posting (resolve#WarehousePolicy): 1 the product's default location or the receiver's, 2 the receiving
-            location, 3 a quarantine location; a rejected quantity becomes no stock. A retry with the same operation key
+            location, 3 a quarantine location; a rejected quantity becomes no stock (with nothing accepted, the guard writes
+            the rejection as an AssetReceipt with no stock on the sources in order, since receive#Asset receives nothing for
+            a zero quantity: F177). A retry with the same operation key
             answers the first receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's
             facilities (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open
             (RECEIPT_CLOSED), a product not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection
             without a reason (REASON_REQUIRED), more than the policy's over-receipt tolerance allows, zero by default
             (OVER_RECEIPT), a serial count that does not match the accepted units (SERIAL_COUNT_MISMATCH), a serial given
             twice or already in stock (SERIAL_DUPLICATE), a lot-tracked product without a lot (LOT_REQUIRED), a unit with
-            no conversion (UNIT_CONVERSION), and a closed or missing destination (LOCATION_CLOSED,
-            LOCATION_UNAVAILABLE).</description>
+            no conversion (UNIT_CONVERSION), a closed or missing destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE,
+            LOCATION_REQUIRED for a two- or three-step receipt with no receiving or quarantine location), and a closed fiscal
+            period today for the facility owner (PERIOD_CLOSED; the periods are read without locking them, so receipts do
+            not serialize on them).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="shipmentId" required="true"/>
@@ -1185,6 +1195,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <!-- 3-4. units, tracking, over-receipt and the receipt step's open destination, all before anything posts -->
             <set field="pl" from="receiving.plan(userScope, recv, ln, context)"/>
+            <!-- the open period of today for the facility owner, read without locking the periods (P7 review B2) -->
+            <script>posting.period([recv.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
             <!-- 5. Mantle's receipt, and the entered quantity on each receipt it wrote -->
             <set field="posted" from="receiving.postLine(recv, ln, pl, context)"/>
             <if condition="pl.rejected.compare(0) &gt; 0">
@@ -1228,6 +1240,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="recv" from="receiving.receipt(userScope, shipmentId)"/>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
+            <script>posting.period([recv.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
             <set field="open" from="receiving.remainders(shipmentId).filter(row =&gt; row.remaining.compare(0) &gt; 0)"/>
             <if condition="!open.length">
                 <return error="true" message="NOTHING_TO_RECEIVE: Receipt ${shipmentId} has nothing left to receive"/>
@@ -1264,7 +1277,9 @@ along with this software (see the LICENSE.md file). If not, see
             organization or another of the user's. A retry with the same operation key answers the first. Requires
             STOCK_RECEIVE; refuses a facility outside the user's organizations (RECORD_UNAVAILABLE), an owner outside them
             (OWNER_UNAVAILABLE), a product that holds no stock (NOT_STOCK), no reason (REASON_REQUIRED), no quantity
-            (QUANTITY_INVALID), and the tracking and destination refusals of receive#ShipmentStock.</description>
+            (QUANTITY_INVALID), a cost given without financial read (COST_NOT_PERMITTED: with none, the product's approved
+            standard cost, else its latest acquire cost, is used), a closed fiscal period today (PERIOD_CLOSED, read without
+            locking), and the tracking and destination refusals of receive#ShipmentStock.</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="facilityId" required="true"/>
@@ -1319,14 +1334,16 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="unit.quantity.compare(0) &lt;= 0">
                 <return error="true" message="QUANTITY_INVALID: Give a quantity above zero"/>
             </if>
+            <script>posting.period([owner], ec.user.nowTimestamp, {lock: false})</script>
+            <set field="cost" from="receiving.adHocCost(product, home, owner, acquireCost, acquireCostUomId)"/>
             <set field="policy" from="receiving.policyOf(home.facilityId, productId)"/>
             <set field="track" from="receiving.tracking(policy.tracking, product, unit.quantity, context)"/>
             <set field="target" from="receiving.destination(userScope, home.facilityId, productId, policy.operation,
                     locationSeqId)"/>
             <set field="common" from="{productId: productId, facilityId: home.facilityId, locationSeqId: target.locationSeqId,
                     statusId: target.statusId, ownerPartyId: owner, lotId: lotId || null, lotNumber: lotNumber || null,
-                    expirationDate: track.expirationDate, mfgPartyId: mfgPartyId || null, acquireCost: acquireCost ?? null,
-                    acquireCostUomId: acquireCost != null ? (acquireCostUomId || null) : null}"/>
+                    expirationDate: track.expirationDate, mfgPartyId: mfgPartyId || null, acquireCost: cost.acquireCost,
+                    acquireCostUomId: cost.acquireCostUomId}"/>
             <set field="receiptIds" from="[]"/>
             <set field="assetIds" from="[]"/>
             <iterate list="track.serialized ? track.serials : [null]" entry="serialNumber">
@@ -1344,7 +1361,8 @@ along with this software (see the LICENSE.md file). If not, see
                         quantity: receiving.text(unit.quantity), enteredQuantity: receiving.text(quantity),
                         enteredQuantityUomId: unitId || null, appliedConversionFactor: receiving.text(unit.factor),
                         receiptSteps: target.receiptSteps, locationSeqId: target.locationSeqId, statusId: target.statusId,
-                        ownerPartyId: owner, serialNumbers: track.serials, assetIds: assetIds.filter(Boolean),
+                        ownerPartyId: owner, costSource: cost.costSource, serialNumbers: track.serials,
+                        assetIds: assetIds.filter(Boolean),
                         assetReceiptIds: receiptIds.filter(Boolean), reason: String(reason).trim(),
                         warnings: track.warnings})"/>
         </actions>
@@ -1353,13 +1371,14 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Finish a short purchase receipt (ReceiveRemaining): only what was received stays on it, and the
             remainder of each line is either closed, through Purchasing's close of purchase remainders
             (mantle.order.OrderServices.close#PurchaseRemainders' close, run in this operation under its STOCK_RECEIVE
-            check: cancel#OrderItem with the explicit remainder, the Requirement allocation and the budget commitment
-            released, the order completed when nothing is open), or backordered, this receipt's items lowered to what was
-            received (update#ShipmentItem) and the order part's remainder put on its open receipt (ensure#PurchaseReceipt).
-            Only then is the receipt delivered (deliver#Shipment, whose ShipmentIncomingDeliveredCreateInvoices SECA bills
-            the accepted quantity of a self-billing supplier as Accounting conditioned it), unless the close cancelled a
-            receipt that received nothing. A remainder sends the receipt exception notice. A retry with the same operation
-            key answers the first. Requires STOCK_RECEIVE; refuses a receipt outside the user's facilities
+            check: cancel#OrderItem with what this receipt expected and did not get, lowering only its sources, so a remainder
+            on another open receipt stays; the Requirement allocation and the budget commitment released, the order
+            completed when nothing is open), or backordered, this receipt's items lowered to what was received
+            (update#ShipmentItem; a receipt that received nothing is cancelled) and the order part's remainder put on its
+            open receipt (ensure#PurchaseReceipt). Only then is the receipt delivered (deliver#Shipment, whose
+            ShipmentIncomingDeliveredCreateInvoices SECA bills the accepted quantity of a self-billing supplier as Accounting
+            conditioned it), unless it was cancelled. A remainder sends the receipt exception notice. A retry with the same
+            operation key answers the first. Requires STOCK_RECEIVE; refuses a receipt outside the user's facilities
             (RECORD_UNAVAILABLE), not a purchase receipt (RECEIPT_TYPE) or no longer open (RECEIPT_CLOSED), a choice other
             than close or backorder (CHOICE_INVALID) and a missing reason (REASON_REQUIRED).</description>
         <in-parameters>

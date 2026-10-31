@@ -25,19 +25,15 @@ function productItemTypes() {
         row => row.enumId
     )
 }
-// Stock units in one unit of the order line's quantity: the line's quantityUomId converted to the product's stock unit
-// (amountUomId); 1 when either is unset or they are the same.
+// Stock units in one unit of the order line's quantity (1 when either unit is unset or they are the same): Mantle's own
+// factor (OrderServices.get#OrderItemStockFactor, which counts units it cannot relate as 1), refusing such a line here,
+// since a receipt in stock units cannot be compared with it (UNIT_CONVERSION).
 function lineFactor(orderItem, product) {
     const stockUomId = product?.amountUomId
-    if (!orderItem?.quantityUomId || !stockUomId || orderItem.quantityUomId === stockUomId) return toDecimal(1)
-    const converted = call("org.moqui.impl.BasicServices.convert#Uom", {
-        uomId: orderItem.quantityUomId,
-        toUomId: stockUomId,
-        amount: 1
-    }).convertedAmount
-    if (converted == null || dec(converted).compare(0) <= 0)
+    const unit = call("mantle.order.OrderServices.get#OrderItemStockFactor", {orderItem})
+    if (!unit.converted && orderItem?.quantityUomId && stockUomId && orderItem.quantityUomId !== stockUomId)
         denied("UNIT_CONVERSION", `No conversion from ${orderItem.quantityUomId} to ${stockUomId} for ${orderItem.productId}`)
-    return dec(converted)
+    return dec(unit.stockFactor ?? 1)
 }
 // Received on an order item, in stock units: accepted and rejected.
 function receivedOf(orderId, orderItemSeqId) {
@@ -50,9 +46,10 @@ function receivedOf(orderId, orderItemSeqId) {
     return {accepted, rejected, total: accepted.add(rejected)}
 }
 // A purchase order of one of the user's organizations (its customer is an internal organization in scope), locked.
+// The parts are locked before the header, as Mantle's completion updates them (complete#OrderPart, then the header).
 function purchaseOrder(orderId, userScope) {
+    const parts = orderId ? Array.from(find(PART, {orderId}).orderBy("orderPartSeqId").forUpdate(true).list()) : []
     const order = orderId ? find(ORDER, {orderId}).forUpdate(true).one() : null
-    const parts = order ? rows(PART, {orderId}) : []
     const buying = parts.filter(part => one("mantle.party.PartyRole", {partyId: part.customerPartyId, roleTypeId: "OrgInternal"}))
     if (!order || !parts.length || buying.length !== parts.length)
         denied("NOT_PURCHASE", "Order " + (orderId || "") + " is not a purchase order")
@@ -108,14 +105,30 @@ function remainders(p) {
     if (!parts.some(part => openStatuses.includes(part.statusId)))
         denied("ORDER_NOT_OPEN", "Order " + p.orderId + " has no open part")
     const closedItems = []
+    const touchedParts = new Set()
     for (const line of openLines(p.orderId, Array.from(p.orderItemSeqIds || []))) {
-        if (line.remainder.compare(0) <= 0) continue
-        const cancelled = call("mantle.order.OrderServices.cancel#OrderItem", {
-            orderId: p.orderId,
-            orderItemSeqId: line.item.orderItemSeqId,
-            cancelQuantity: line.remainder
-        }).quantityCancelled
-        const quantityCancelled = dec(cancelled ?? line.remainder)
+        touchedParts.add(line.item.orderPartSeqId)
+        let cancelQuantity = line.remainder
+        let sources = null
+        if (p.onShipment && p.shipmentId) {
+            // a close at a receipt closes what that receipt expected and did not get: a remainder on another open
+            // receipt stays there (P7 review C3), and only this receipt's sources are lowered
+            sources = rows("mantle.shipment.ShipmentItemSource", {shipmentId: p.shipmentId, orderId: p.orderId}).filter(
+                source => source.orderItemSeqId === line.item.orderItemSeqId && source.statusId !== "SisCancelled"
+            )
+            const onReceipt = sources.reduce((sum, source) => sum.add(dec(source.quantityNotHandled)), zero())
+            const onReceiptLine = onReceipt.divide(line.factor, 6, "HALF_UP")
+            if (onReceiptLine.compare(cancelQuantity) < 0) cancelQuantity = onReceiptLine
+        }
+        if (cancelQuantity.compare(0) <= 0) continue
+        const cancelled = call(
+            "mantle.order.OrderServices.cancel#OrderItem",
+            Object.assign(
+                {orderId: p.orderId, orderItemSeqId: line.item.orderItemSeqId, cancelQuantity},
+                sources ? {fullShipmentItemSourceList: sources} : {}
+            )
+        ).quantityCancelled
+        const quantityCancelled = dec(cancelled ?? cancelQuantity)
         closedItems.push({
             orderItemSeqId: line.item.orderItemSeqId,
             productId: line.item.productId,
@@ -140,10 +153,10 @@ function remainders(p) {
                 ")"
             ).slice(0, 4000)
         })
-    // a part with nothing open (every product line received, accepted or rejected) is completed
+    // a part the close touched with nothing open (every product line received, accepted or rejected) is completed
     const remaining = openLines(p.orderId, null)
     for (const part of rows(PART, {orderId: p.orderId})) {
-        if (!openStatuses.includes(part.statusId)) continue
+        if (!openStatuses.includes(part.statusId) || !touchedParts.has(part.orderPartSeqId)) continue
         const partOpen = remaining.some(line => line.item.orderPartSeqId === part.orderPartSeqId && line.remainder.compare(0) > 0)
         if (!partOpen)
             call("mantle.order.OrderServices.complete#OrderPart", {orderId: p.orderId, orderPartSeqId: part.orderPartSeqId})

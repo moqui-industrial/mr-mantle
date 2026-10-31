@@ -214,7 +214,10 @@ along with this software (see the LICENSE.md file). If not, see
                             <field-map field-name="orderItemSeqId" from="sis.orderItemSeqId"/>
                         </entity-find-one>
 
-                        <set field="itemQuantityRemaining" from="toDecimal(orderItem.quantity ?? 0).subtract(itemShipmentQuantity)"/>
+                        <service-call name="mantle.order.OrderServices.get#OrderItemStockFactor" out-map="stockUnit"
+                                out-map-add-to-existing="false" in-map="{orderItem:orderItem}"/>
+                        <set field="itemQuantityRemaining" from="toDecimal(orderItem.quantity ?? 0)
+                                .multiply(stockUnit.stockFactor).subtract(itemShipmentQuantity)"/>
 
                         <set field="currentChange" from="increaseRemaining.compare(itemQuantityRemaining) &gt; 0 ?
                                 itemQuantityRemaining : increaseRemaining"/>
@@ -561,7 +564,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))"><continue/></if>
 
                 <!-- determine quantityNotShipped -->
-                <set field="quantityNotShipped" from="toDecimal(orderItem.quantity ?? 1).multiply((orderItem.selectedAmount == null || toDecimal(orderItem.selectedAmount).isZero()) ? 1 : orderItem.selectedAmount)"/>
+                <!-- in the product's stock unit: the item's unit converted (1 with none or the same; impl-warehouse F186) -->
+                <service-call name="mantle.order.OrderServices.get#OrderItemStockFactor" out-map="stockUnit"
+                        out-map-add-to-existing="false" in-map="{orderItem:orderItem}"/>
+                <set field="quantityNotShipped" from="toDecimal(orderItem.quantity ?? 1).multiply(
+                        (orderItem.selectedAmount == null || toDecimal(orderItem.selectedAmount).isZero())
+                            ? 1 : orderItem.selectedAmount)
+                        .multiply(stockUnit.stockFactor)"/>
                 <entity-find entity-name="mantle.shipment.ShipmentAndItemSource" list="existingSisList">
                     <econdition field-name="orderId"/><econdition field-name="orderItemSeqId" from="orderItem.orderItemSeqId"/>
                     <econdition field-name="shipmentStatusId" operator="not-in" value="ShipRejected,ShipCancelled"/>
@@ -706,7 +715,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!(['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId))"><continue/></if>
 
                 <!-- determine quantityNotShipped -->
-                <set field="quantityNotShipped" from="toDecimal(orderItem.quantity ?? 1).multiply((orderItem.selectedAmount == null || toDecimal(orderItem.selectedAmount).isZero()) ? 1 : orderItem.selectedAmount)"/>
+                <!-- in the product's stock unit: the item's unit converted (1 with none or the same; impl-warehouse F186) -->
+                <service-call name="mantle.order.OrderServices.get#OrderItemStockFactor" out-map="stockUnit"
+                        out-map-add-to-existing="false" in-map="{orderItem:orderItem}"/>
+                <set field="quantityNotShipped" from="toDecimal(orderItem.quantity ?? 1).multiply(
+                        (orderItem.selectedAmount == null || toDecimal(orderItem.selectedAmount).isZero())
+                            ? 1 : orderItem.selectedAmount)
+                        .multiply(stockUnit.stockFactor)"/>
                 <entity-find entity-name="mantle.shipment.ShipmentAndItemSource" list="existingSisList">
                     <econdition field-name="orderId"/><econdition field-name="orderItemSeqId" from="orderItem.orderItemSeqId"/>
                     <econdition field-name="shipmentStatusId" operator="not-in" value="ShipRejected,ShipCancelled"/>

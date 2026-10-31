@@ -1596,7 +1596,11 @@ General Order Placement and eCommerce Usage
                     <iterate list="currentAssetReceiptList" entry="currentAssetReceipt">
                         <set field="currentQuantityTotal" from="currentQuantityTotal.add(currentAssetReceipt.quantityAccepted ?? 0)"/>
                     </iterate>
-                    <if condition="currentQuantityTotal.compare(orderItem.quantity ?? 0) &lt; 0">
+                    <!-- issuances and receipts are in the product's stock unit: the line's quantity in it (F186) -->
+                    <service-call name="mantle.order.OrderServices.get#OrderItemStockFactor" out-map="stockUnit"
+                            out-map-add-to-existing="false" in-map="{orderItem:orderItem}"/>
+                    <if condition="currentQuantityTotal.compare(toDecimal(orderItem.quantity ?? 0)
+                            .multiply(stockUnit.stockFactor)) &lt; 0">
                         <set field="isFulfilled" from="false"/>
                     </if>
                 </if>
@@ -1898,6 +1902,10 @@ General Order Placement and eCommerce Usage
             <iterate list="itemAssetIssuanceList" entry="itemAssetIssuance">
                 <set field="itemQuantityIssued" from="itemQuantityIssued.add(itemAssetIssuance.quantity ?? 0)"/></iterate>
             <set field="hasIssuedQuantity" from="itemQuantityIssued.compare(0) &gt; 0"/>
+            <!-- issuances and shipment sources are in the product's stock unit, the item's quantity in its own (F186) -->
+            <service-call name="mantle.order.OrderServices.get#OrderItemStockFactor" out-map="stockUnit"
+                    out-map-add-to-existing="false" in-map="{orderItem:orderItem}"/>
+            <set field="itemQuantityIssued" from="itemQuantityIssued.divide(stockUnit.stockFactor, 6, 'HALF_UP')"/>
 
             <!-- determine quantity to cancel -->
             <set field="itemQuantity" from="toDecimal(orderItem.quantity ?? 1)"/>
@@ -1961,7 +1969,7 @@ General Order Placement and eCommerce Usage
             </else></if>
 
             <set field="shipmentItemQuantityReducedMap" from="{}"/>
-            <set field="shipQuantityRemaining" from="toDecimal(quantityCancelled)"/>
+            <set field="shipQuantityRemaining" from="toDecimal(quantityCancelled).multiply(stockUnit.stockFactor)"/>
             <iterate list="itemShipmentItemSourceList" entry="itemShipmentItemSource">
                 <set field="shipQuantityToReduce" from="shipQuantityRemaining.compare(itemShipmentItemSource.quantityNotHandled ?? 0) &gt; 0 ?
                         toDecimal(itemShipmentItemSource.quantityNotHandled ?? 0) : shipQuantityRemaining"/>
@@ -2957,6 +2965,52 @@ General Order Placement and eCommerce Usage
 
             <!-- Order created for Purchase Request, set Request status to In Progress -->
             <service-call name="update#mantle.request.Request" in-map="{requestId:requestId, statusId:'ReqInProgress'}"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="OrderItemStockFactor" allow-remote="false">
+        <description>Stock units in one unit of an order item's quantity: its quantityUomId converted to the product's
+            stock unit (amountUomId). 1 when the item has no unit, the product none, they are the same (create#OrderItem
+            defaults the item's unit to the product's), or no UomConversion relates them, so an order without units is
+            counted as before. Shipment sources, issuances and receipts are in the stock unit (impl-warehouse F186).</description>
+        <in-parameters>
+            <parameter name="orderItem" type="EntityValue"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="stockFactor" type="BigDecimal"/>
+            <parameter name="converted" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <if condition="orderItem == null"><entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem"/></if>
+            <set field="stockFactor" from="toDecimal(1)"/>
+            <set field="converted" from="false"/>
+            <if condition="!orderItem?.productId || !orderItem.quantityUomId"><return/></if>
+            <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
+                <field-map field-name="productId" from="orderItem.productId"/></entity-find-one>
+            <if condition="!product?.amountUomId || product.amountUomId == orderItem.quantityUomId"><return/></if>
+            <!-- the conversion read here, not through convert#Uom, which fails when there is none -->
+            <entity-find entity-name="moqui.basic.UomConversion" list="forward" cache="true">
+                <date-filter/>
+                <econdition field-name="uomId" from="orderItem.quantityUomId"/>
+                <econdition field-name="toUomId" from="product.amountUomId"/>
+                <order-by field-name="-fromDate"/>
+            </entity-find>
+            <entity-find entity-name="moqui.basic.UomConversion" list="backward" cache="true">
+                <date-filter/>
+                <econdition field-name="uomId" from="product.amountUomId"/>
+                <econdition field-name="toUomId" from="orderItem.quantityUomId"/>
+                <order-by field-name="-fromDate"/>
+            </entity-find>
+            <if condition="forward.length &amp;&amp; forward[0].conversionFactor &amp;&amp; !forward[0].conversionOffset"><then>
+                <set field="stockFactor" from="toDecimal(forward[0].conversionFactor)"/>
+                <set field="converted" from="true"/>
+            </then><else-if condition="backward.length &amp;&amp; backward[0].conversionFactor
+                    &amp;&amp; !backward[0].conversionOffset">
+                <set field="stockFactor" from="toDecimal(1).divide(toDecimal(backward[0].conversionFactor), 12, 'HALF_UP')"/>
+                <set field="converted" from="true"/>
+            </else-if></if>
         </actions>
     </service>
 

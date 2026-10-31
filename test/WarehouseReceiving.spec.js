@@ -147,6 +147,12 @@ spec({
             ])
                 call("create#mantle.facility.FacilityLocationType", {facilityId, locationTypeEnumId, autoStatusId})
         }
+        call("create#mantle.facility.Facility", {facilityId: "WHR_FAC4", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.facility.FacilityLocation", {
+            facilityId: "WHR_FAC4",
+            locationSeqId: "PICK1",
+            locationTypeEnumId: "FltPick"
+        })
         call("create#mantle.facility.Facility", {
             facilityId: "WHR_OTHER_FAC",
             facilityTypeEnumId: "FcTpWarehouse",
@@ -190,6 +196,7 @@ spec({
             {facilityId: "WHR_FAC2"}
         )
         policy({policyType: "operation", receiptSteps: 3, quarantineLocationSeqId: "QUAR1"}, {facilityId: "WHR_FAC3"})
+        policy({policyType: "operation", receiptSteps: 2}, {facilityId: "WHR_FAC4"})
         call("mantle.party.SupplierServices.store#SupplierProfile", {
             organizationPartyId: org,
             supplierPartyId: selfBilled,
@@ -215,7 +222,8 @@ feature("a part has one open receipt: a second request opens it, a retry answers
         const operationKey = key()
         const first = ensure(orderId, "WHR_FAC1", operationKey)
         const retry = ensure(orderId, "WHR_FAC1", operationKey)
-        const second = ensure(orderId, "WHR_FAC1")
+        // asked for at another facility, the open receipt is answered with its own (P7 review C2)
+        const second = ensure(orderId, "WHR_FAC2")
         const buyer = ensure(orderId, "WHR_FAC1", key(), "whr_buyer")
         const reader = ensure(orderId, "WHR_FAC1", key(), "whr_reader")
         const otherFacility = ensure(orderId, "WHR_OTHER_FAC")
@@ -236,6 +244,7 @@ feature("a part has one open receipt: a second request opens it, a retry answers
         retry.result.shipmentId == first.result.shipmentId
         second.result.resultCode == "EXISTING"
         second.result.shipmentId == first.result.shipmentId
+        second.result.facilityId == "WHR_FAC1"
         buyer.result.shipmentId == first.result.shipmentId
         reader.error.includes("PERMISSION_DENIED")
         otherFacility.error.includes("RECORD_UNAVAILABLE")
@@ -298,25 +307,76 @@ feature("part of a part is received with one rejected unit and a generated lot r
     }
 })
 
-feature("the entered unit is kept and converted, and a PO line in dozens is received in each", {
+feature("a PO line in dozens is received in each: Mantle counts it in stock units, so the part stays open until closed", {
     when() {
         const orderId = purchaseOrder("WHR_FAC1", [["WHR_DOZ", 2, "WHR_dz"]])
         const shipmentId = ensure(orderId, "WHR_FAC1").result.shipmentId
         const expected = sum(rows("mantle.shipment.ShipmentItemSource", {shipmentId}), "quantity")
         const received = receiveLine({shipmentId, productId: "WHR_DOZ", quantityAccepted: 1})
+        // one dozen of two: the part is not fulfilled (isFulfilled#OrderItem compares 12 each with 2 dozen, F186)
+        const afterDozen = one("mantle.order.OrderPart", {orderId, orderPartSeqId: "01"}).statusId
         const eaches = receiveLine({shipmentId, productId: "WHR_DOZ", quantityAccepted: 6, quantityUomId: "OTH_ea"})
-        return {expected, received, eaches, receipts: receiptsOf(shipmentId, "WHR_DOZ")}
+        const closed = run("whr_receiver", "close#ReceiptRemainder", {
+            operationKey: key(),
+            shipmentId,
+            choice: "close",
+            reason: "Half a dozen short"
+        })
+        return {
+            expected,
+            received,
+            afterDozen,
+            eaches,
+            closed,
+            receipts: receiptsOf(shipmentId, "WHR_DOZ"),
+            item: one("mantle.order.OrderItem", {orderId, orderItemSeqId: "01"}),
+            order: one("mantle.order.OrderHeader", {orderId}),
+            shipment: one("mantle.shipment.Shipment", {shipmentId}),
+            dozens: call("mantle.order.OrderServices.get#OrderItemStockFactor", {orderId, orderItemSeqId: "01"})
+        }
     },
-    then({expected, received, eaches, receipts}) {
+    then({expected, received, afterDozen, eaches, closed, receipts, item, order, shipment, dozens}) {
         expected == 24
         received.error == ""
         received.result.quantityAccepted == "12"
         received.result.enteredQuantityUomId == "WHR_dz"
+        afterDozen == "OrderApproved"
         eaches.result.quantityAccepted == "6"
         eaches.result.remainingQuantity == "6"
         receipts.some(
             row => row.enteredQuantityUomId == "WHR_dz" && n(row.enteredQuantity) == 1 && n(row.appliedConversionFactor) == 12
         )
+        // 18 each of 2 dozen: half a dozen is closed, in the line's unit
+        closed.error == ""
+        closed.result.orders[0].closedItems[0].cancelledQuantity == "0.5"
+        n(item.quantity) == 1.5
+        n(item.quantityCancelled) == 0.5
+        order.statusId == "OrderCompleted"
+        shipment.statusId == "ShipDelivered"
+        n(dozens.stockFactor) == 12
+    }
+})
+feature("an order line in the stock unit, or in a unit with no conversion, is counted as before (factor 1)", {
+    when() {
+        const orderId = purchaseOrder("WHR_FAC1", [
+            ["WHR_PLAIN", 4],
+            ["WHR_BULK", 3, "WT_kg"]
+        ])
+        return {
+            plain: call("mantle.order.OrderServices.get#OrderItemStockFactor", {orderId, orderItemSeqId: "01"}),
+            unrelated: call("mantle.order.OrderServices.get#OrderItemStockFactor", {orderId, orderItemSeqId: "02"}),
+            plainItem: one("mantle.order.OrderItem", {orderId, orderItemSeqId: "01"}),
+            shipped: call("mantle.shipment.ShipmentServices.create#OrderPartShipment", {orderId, orderPartSeqId: "01"}),
+            orderId
+        }
+    },
+    then({plain, unrelated, plainItem, shipped, orderId}) {
+        plainItem.quantityUomId == "OTH_ea"
+        n(plain.stockFactor) == 1
+        plain.converted == false
+        n(unrelated.stockFactor) == 1
+        unrelated.converted == false
+        sum(rows("mantle.shipment.ShipmentItemSource", {shipmentId: shipped.shipmentId}), "quantity") == 7
     }
 })
 
@@ -358,9 +418,15 @@ feature("serialized stock needs one unique serial per accepted unit; a count tha
         })
         const receipts = receiptsOf(shipmentId, "WHR_SERIAL")
         const assets = rows("mantle.product.asset.Asset", {productId: "WHR_SERIAL"})
-        return {serials, mismatch, repeated, good, again, preview, rejectOnly, receipts, assets}
+        const restart = run("whr_receiver", "generate#TrackingIdentities", {
+            productId: "WHR_SERIAL",
+            facilityId: "WHR_FAC1",
+            count: 2,
+            startNumber: 1
+        })
+        return {serials, mismatch, repeated, good, again, preview, restart, rejectOnly, receipts, assets}
     },
-    then({serials, mismatch, repeated, good, again, preview, rejectOnly, receipts, assets}) {
+    then({serials, mismatch, repeated, good, again, preview, restart, rejectOnly, receipts, assets}) {
         serials[0] == "WS-0001"
         mismatch.error.includes("SERIAL_COUNT_MISMATCH")
         repeated.error.includes("SERIAL_DUPLICATE")
@@ -368,9 +434,11 @@ feature("serialized stock needs one unique serial per accepted unit; a count tha
         good.result.assetIds.length == 3
         assets.length == 3
         again.error.includes("SERIAL_DUPLICATE")
-        // the pattern starts again at 1, so the preview flags the serials now in stock
-        preview.duplicateCount == 2
-        preview.identityRows[0].reason == "IN_STOCK"
+        // the pattern goes on after the highest serial made from it (P7 review B3), and a start number flags those in stock
+        preview.duplicateCount == 0
+        preview.identityRows[0].value == "WS-0004"
+        restart.duplicateCount == 2
+        restart.identityRows[0].reason == "IN_STOCK"
         rejectOnly.error == ""
         rejectOnly.result.remainingQuantity == "0"
         receipts.filter(row => n(row.quantityRejected) == 1 && row.assetId == null && row.shipmentItemSourceId != null).length ==
@@ -389,13 +457,30 @@ feature("the receipt steps post to the default location, the receiving location 
         const over1 = receiveLine({shipmentId: receipt1, productId: "WHR_PLAIN", quantityAccepted: 6})
         const one1 = receiveLine({shipmentId: receipt1, productId: "WHR_PLAIN", quantityAccepted: 5})
         // two-step with 10% tolerance: 11 of 10 is allowed, a 12th is not
-        const one2 = receiveLine({shipmentId: receipt2, productId: "WHR_BULK", quantityAccepted: 11})
+        // a pick bin asked for at a two-step receipt is not a receiving location: it posts to receiving (P7 review C4)
+        const one2 = receiveLine({shipmentId: receipt2, productId: "WHR_BULK", quantityAccepted: 11, locationSeqId: "PICK1"})
+        // two-step at a facility with no receiving location is refused rather than posting no location
+        const noReceiving = receiveLine({
+            shipmentId: ensure(purchaseOrder("WHR_FAC4", [["WHR_BULK", 2]]), "WHR_FAC4").result.shipmentId,
+            productId: "WHR_BULK",
+            quantityAccepted: 1
+        })
         const over2 = receiveLine({shipmentId: receipt2, productId: "WHR_BULK", quantityAccepted: 1})
         const one3 = receiveLine({shipmentId: receipt3, productId: "WHR_PLAIN", quantityAccepted: 5, locationSeqId: "PICK1"})
         const statusOf = result => one("mantle.product.asset.Asset", {assetId: result.result.assetIds[0]})
-        return {over1, one1, one2, over2, one3, asset1: statusOf(one1), asset2: statusOf(one2), asset3: statusOf(one3)}
+        return {
+            over1,
+            one1,
+            one2,
+            over2,
+            one3,
+            noReceiving,
+            asset1: statusOf(one1),
+            asset2: statusOf(one2),
+            asset3: statusOf(one3)
+        }
     },
-    then({over1, one1, one2, over2, one3, asset1, asset2, asset3}) {
+    then({over1, one1, one2, over2, one3, noReceiving, asset1, asset2, asset3}) {
         over1.error.includes("OVER_RECEIPT")
         one1.result.locationSeqId == "PICK1"
         asset1.statusId == "AstAvailable"
@@ -403,6 +488,7 @@ feature("the receipt steps post to the default location, the receiving location 
         one2.result.locationSeqId == "RECV1"
         asset2.statusId == "AstOnHold"
         over2.error.includes("OVER_RECEIPT")
+        noReceiving.error.includes("LOCATION_REQUIRED")
         // step 3 posts into quarantine whatever pick bin is asked for
         one3.result.locationSeqId == "QUAR1"
         asset3.statusId == "AstQuarantine"
@@ -606,5 +692,84 @@ feature("receive all as expected needs confirmation; an ad hoc receipt needs a r
         receipt.itemDescription == "Found in the yard"
         receipt.shipmentId == null
         foreign.error.includes("RECORD_UNAVAILABLE")
+    }
+})
+feature("a backorder of a receipt that received nothing cancels it; a close at a receipt leaves another receipt's remainder", {
+    when() {
+        const emptyOrder = purchaseOrder("WHR_FAC1", [["WHR_BULK", 4]])
+        const empty = ensure(emptyOrder, "WHR_FAC1").result.shipmentId
+        const backordered = run("whr_receiver", "close#ReceiptRemainder", {
+            operationKey: key(),
+            shipmentId: empty,
+            choice: "backorder",
+            reason: "Nothing came"
+        })
+        // two open receipts of one part: 6 on the first, 4 on a second Mantle made
+        const orderId = purchaseOrder("WHR_FAC1", [["WHR_BULK", 10]])
+        const first = ensure(orderId, "WHR_FAC1").result.shipmentId
+        call("mantle.shipment.ShipmentServices.update#ShipmentItem", {shipmentId: first, productId: "WHR_BULK", quantity: 6})
+        const second = call("mantle.shipment.ShipmentServices.create#OrderPartShipment", {
+            orderId,
+            orderPartSeqId: "01",
+            destinationFacilityId: "WHR_FAC1"
+        }).shipmentId
+        receiveLine({shipmentId: first, productId: "WHR_BULK", quantityAccepted: 5})
+        const closed = run("whr_receiver", "close#ReceiptRemainder", {
+            operationKey: key(),
+            shipmentId: first,
+            choice: "close",
+            reason: "One short on this delivery"
+        })
+        return {
+            backordered,
+            empty: one("mantle.shipment.Shipment", {shipmentId: empty}),
+            closed,
+            item: one("mantle.order.OrderItem", {orderId, orderItemSeqId: "01"}),
+            part: one("mantle.order.OrderPart", {orderId, orderPartSeqId: "01"}),
+            secondItem: one("mantle.shipment.ShipmentItem", {shipmentId: second, productId: "WHR_BULK"})
+        }
+    },
+    then({backordered, empty, closed, item, part, secondItem}) {
+        backordered.error == ""
+        backordered.result.delivered == false
+        empty.statusId == "ShipCancelled"
+        backordered.result.backorders.length == 1
+        closed.error == ""
+        closed.result.orders[0].closedItems[0].cancelledQuantity == "1"
+        n(item.quantity) == 9
+        part.statusId == "OrderApproved"
+        n(secondItem.quantity) == 4
+    }
+})
+feature("an ad hoc cost needs financial read, else the product's last cost is used; receipts check the open period", {
+    when() {
+        const base = {facilityId: "WHR_FAC1", productId: "WHR_PLAIN", quantity: 1, reason: "Found"}
+        const costly = run("whr_receiver", "receive#AdHocStock", Object.assign({operationKey: key(), acquireCost: 7}, base))
+        const plain = run("whr_receiver", "receive#AdHocStock", Object.assign({operationKey: key()}, base))
+        // a closed fiscal period today refuses a receipt (read without locking the periods), then it is reopened
+        const today = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd")
+        const current = Array.from(
+            find("mantle.party.time.TimePeriod", {partyId: org})
+                .condition("fromDate", "less-equals", today)
+                .condition("thruDate", "greater-equals", today)
+                .list()
+        ).filter(period => period.isClosed !== "Y")
+        for (const period of current)
+            call("update#mantle.party.time.TimePeriod", {timePeriodId: period.timePeriodId, isClosed: "Y"})
+        let closedPeriod
+        try {
+            closedPeriod = run("whr_receiver", "receive#AdHocStock", Object.assign({operationKey: key()}, base))
+        } finally {
+            for (const period of current)
+                call("update#mantle.party.time.TimePeriod", {timePeriodId: period.timePeriodId, isClosed: "N"})
+        }
+        return {costly, plain, closedPeriod, current}
+    },
+    then({costly, plain, closedPeriod, current}) {
+        costly.error.includes("COST_NOT_PERMITTED")
+        plain.error == ""
+        plain.result.costSource == "last" || plain.result.costSource == null
+        current.length > 0
+        closedPeriod.error.includes("PERIOD_CLOSED")
     }
 })
