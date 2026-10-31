@@ -217,11 +217,14 @@ function blockersOf(facilityId, locationSeqId) {
     if (countIds.length)
         add(
             "count",
-            "counts not complete:",
+            "counts still open:",
             () =>
                 find("mantle.product.asset.PhysicalInventory")
                     .condition("physicalInventoryId", "in", countIds)
-                    .condition(anyOf([cond("statusId", "is-null", null), cond("statusId", "not-equals", "PIComplete")])),
+                    // a count still open (P10's statuses): neither complete nor cancelled
+                    .condition(
+                        anyOf([cond("statusId", "is-null", null), cond("statusId", "not-in", ["PIComplete", "PICancelled"])])
+                    ),
             "physicalInventoryId"
         )
     add("productLocation", "product location policies of", () => find("mantle.facility.ProductFacilityLocation", at), "productId")

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- Counts come due by the count schedule (InventoryCountServices.notify#DueCounts): the counters of the facility's
+        organization, and each schedule's assignee, hear of a facility's due counts once a day. An app adds its
+        linkTemplate. -->
+    <moqui.security.user.NotificationTopic topic="WarehouseCountsDue" inboxEnumId="NinNotifications"
+            description="Counts due" typeString="info" showAlert="N" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="${dueCount} counts are due at ${facilityName}"/>
+    <moqui.service.job.ServiceJob jobName="notify_DueCounts" description="Tell counters of the counts due"
+            serviceName="mantle.product.InventoryCountServices.notify#DueCounts" cronExpression="0 30 5 * * ?" paused="N"
+            transactionTimeout="1800"/>
+</entity-facade-xml>
