@@ -48,8 +48,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="originalQuantityUomId" type="id"><description>QOHT and ATPT are in units of the Product (amountUomId).
             This field specifies the original UOM (along with originalQuantity) when it differs from Product.amountUomId.</description></field>
 
-        <field name="assetName" type="text-medium"/>
-        <field name="comments" type="text-long"/>
+        <!-- audit-logged: the metadata an asset's detail screen edits (AssetRecordServices.update#AssetMetadata) -->
+        <field name="assetName" type="text-medium" enable-audit-log="true"/>
+        <field name="comments" type="text-long" enable-audit-log="true"/>
 
         <field name="serialNumber" type="text-medium" enable-audit-log="update"/>
         <field name="softIdentifier" type="text-medium"/>
@@ -389,6 +390,30 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="InVrSample" description="Sample (Giveaway)" enumTypeId="InventoryVarianceReason"/>
             <moqui.basic.Enumeration enumId="InVrMisShipOrdered" description="Mis-shipped Item Ordered (+)" enumTypeId="InventoryVarianceReason"/>
             <moqui.basic.Enumeration enumId="InVrMisShipShipped" description="Mis-shipped Item Shipped (-)" enumTypeId="InventoryVarianceReason"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="AssetContent" package="mantle.product.asset" cache="never">
+        <description>A file of an asset: a certificate, manual, photo or other document of a stock unit or a piece of
+            equipment (crosscut CX-RECORD-HOSTS). Written through
+            mantle.product.AssetRecordServices.create#AssetContent.</description>
+        <field name="assetContentId" type="id" is-pk="true"/>
+        <field name="assetId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" title="AssetContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Asset Content Type" enumTypeId="AssetContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="AcntDocument" enumTypeId="AssetContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Certificate" enumId="AcntCertificate" enumTypeId="AssetContentType"
+                    sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Manual" enumId="AcntManual" enumTypeId="AssetContentType" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Photo" enumId="AcntPhoto" enumTypeId="AssetContentType" sequenceNum="4"/>
         </seed-data>
     </entity>
     <entity entity-name="AssetDepreciation" package="mantle.product.asset" cache="never">

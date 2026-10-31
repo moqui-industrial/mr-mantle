@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The stock ledger and lineage reads (WH-TRACE; Traceability.js). Both read the user's organizations only (StockScope.js:
+    an asset whose owner or facility owner is one of them), narrowed to the caller's facilities when it passes them, and
+    answer cost only to a user with ACCOUNTING_VIEW. No stock read permission exists in Mantle: an app's own access check
+    decides who may call these. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Movements" allow-remote="false">
+        <description>A page of the stock ledger (AssetDetail with its asset), newest first, each row with its source (receipt,
+            issuance, adjustment, a revaluation split or a partial move with its other asset, or another ledger entry), the
+            document of the source (work effort, shipment, return, order or count), the variance reason, the user who
+            received or issued it, and its correction chain: the later rows of the same receipt or issuance correct the first
+            (a cancelled issuance, a changed receipt quantity). Unit and acquire cost only with ACCOUNTING_VIEW (costIncluded).
+            Refuses an asset outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="productId"/>
+            <parameter name="lotId"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityIds" type="List"><description>The caller's facilities: rows of assets elsewhere are left
+                out. Null for no narrowing; an empty list is no row.</description></parameter>
+            <parameter name="assetReceiptId"/>
+            <parameter name="sourceType"><description>receipt, issuance, adjustment, split (revaluation splits and partial
+                moves) or other</description></parameter>
+            <parameter name="varianceReasonEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"><description>Exclusive</description></parameter>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="movementList" type="List"/>
+            <parameter name="movementListCount" type="Long"/>
+            <parameter name="movementListPageIndex" type="Integer"/>
+            <parameter name="movementListPageSize" type="Integer"/>
+            <parameter name="movementListPageMaxIndex" type="Integer"/>
+            <parameter name="movementListPageRangeLow" type="Integer"/>
+            <parameter name="movementListPageRangeHigh" type="Integer"/>
+            <parameter name="costIncluded" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/Traceability.js"/>
+            <set field="found" from="ec.resource.script(module).execute('movements', context)"/>
+            <set field="movementList" from="found.movementList"/>
+            <set field="movementListCount" from="found.movementListCount"/>
+            <set field="movementListPageIndex" from="found.movementListPageIndex"/>
+            <set field="movementListPageSize" from="found.movementListPageSize"/>
+            <set field="movementListPageMaxIndex" from="found.movementListPageMaxIndex"/>
+            <set field="movementListPageRangeLow" from="found.movementListPageRangeLow"/>
+            <set field="movementListPageRangeHigh" from="found.movementListPageRangeHigh"/>
+            <set field="costIncluded" from="found.costIncluded"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Traceability" allow-remote="false">
+        <description>The lineage of an asset, a lot (its assets), a shipment or a work effort, upstream (where it came from),
+            downstream (where it went) or both, as nodes (assets, documents, counts, Unknown provenance) and edges (receipts,
+            issuances, adjustments, partial moves and revaluation splits, the pair of ledger rows linked by otherAssetId),
+            bounded by maxDepth (1 to 10, default 5) and maxNodes (default 200, at most 1000) and cycle-safe: a node is
+            followed once in each direction, and an edge to a node seen before is marked joined. An asset with no receipt and
+            no split into it shows Unknown provenance with its first known movement; a receipt or issuance naming no document
+            an Unknown end. Stock outside the user's organizations or the caller's facilities is a restricted node, not
+            followed and not named. Answers pages of nodes and edges and a tree (rows keyed by their path, a node reached
+            again shown without its children). Cost (acquire and unit cost) only with ACCOUNTING_VIEW. Refuses a root the user
+            may not see (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="rootType" default-value="asset"><description>asset, lot, shipment, workEffort, return or
+                order</description></parameter>
+            <parameter name="rootId" required="true"/>
+            <parameter name="direction" default-value="both"><description>upstream, downstream or both</description></parameter>
+            <parameter name="maxDepth" type="Integer"/>
+            <parameter name="maxNodes" type="Integer"/>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rootKeys" type="List"/>
+            <parameter name="nodeList" type="List"/>
+            <parameter name="nodeListCount" type="Integer"/>
+            <parameter name="nodeListPageIndex" type="Integer"/>
+            <parameter name="nodeListPageSize" type="Integer"/>
+            <parameter name="nodeListPageMaxIndex" type="Integer"/>
+            <parameter name="nodeListPageRangeLow" type="Integer"/>
+            <parameter name="nodeListPageRangeHigh" type="Integer"/>
+            <parameter name="edgeList" type="List"/>
+            <parameter name="edgeListCount" type="Integer"/>
+            <parameter name="edgeListPageIndex" type="Integer"/>
+            <parameter name="edgeListPageSize" type="Integer"/>
+            <parameter name="edgeListPageMaxIndex" type="Integer"/>
+            <parameter name="edgeListPageRangeLow" type="Integer"/>
+            <parameter name="edgeListPageRangeHigh" type="Integer"/>
+            <parameter name="treeRows" type="List"/>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="unknownCount" type="Integer"/>
+            <parameter name="restrictedCount" type="Integer"/>
+            <parameter name="costIncluded" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/Traceability.js"/>
+            <set field="found" from="ec.resource.script(module).execute('traceability', context)"/>
+            <!-- the declared out-parameters, by name -->
+            <script>for (const name of Object.keys(found)) context[name] = found[name]</script>
+        </actions>
+    </service>
+</services>

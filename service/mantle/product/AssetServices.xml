@@ -61,7 +61,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="ProductStockTotals">
         <description>One product's stock at one facility for one owner: the quantity on hand, the part on hold (quarantine),
             the part in available status, what reservations hold back, the available to promise of get#AvailableInventory, and
-            what the owner's open purchase orders still bring to the facility. Quantities only; no valuation.</description>
+            what the owner's open purchase orders still bring to the facility. Quantities only; no valuation. Also the on-hand
+            quantity by asset status (a held asset keeps its available to promise, so held stock is counted by status) and
+            what the owner's transfers shipped to the facility have issued and not yet received (in transit).</description>
         <in-parameters>
             <parameter name="productId" required="true"/>
             <parameter name="facilityId" required="true"/>
@@ -75,12 +77,16 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="availableToPromiseTotal" type="BigDecimal"/>
             <parameter name="incomingQuantity" type="BigDecimal"><description>Ordered less accepted on the owner's open
                 purchase order parts for this facility</description></parameter>
+            <parameter name="quantityByStatus" type="Map"><description>On hand by Asset statusId</description></parameter>
+            <parameter name="transitQuantity" type="BigDecimal"><description>Issued less received on the owner's shipped
+                transfer shipments whose route ends at this facility</description></parameter>
         </out-parameters>
         <actions>
             <entity-find entity-name="mantle.product.asset.Asset" list="assetList">
                 <econdition field-name="productId"/><econdition field-name="facilityId"/><econdition field-name="ownerPartyId"/></entity-find>
             <script><![CDATA[
                 quantityOnHandTotal = toDecimal(0); heldQuantity = toDecimal(0); availableStatusQuantity = toDecimal(0)
+                const byStatus = {}
                 reservedQuantity = toDecimal(0)
                 const assets = Array.from(assetList)
                 for (const asset of assets) {
@@ -88,6 +94,29 @@ along with this software (see the LICENSE.md file). If not, see
                     quantityOnHandTotal = quantityOnHandTotal.add(onHand)
                     if (asset.statusId === 'AstQuarantine') heldQuantity = heldQuantity.add(onHand)
                     if (asset.statusId === 'AstAvailable') availableStatusQuantity = availableStatusQuantity.add(onHand)
+                    if (asset.statusId) byStatus[asset.statusId] = toDecimal(byStatus[asset.statusId] ?? 0).add(onHand)
+                }
+                quantityByStatus = byStatus
+                // in transit: the owner's shipped transfers to this facility, issued less received
+                transitQuantity = toDecimal(0)
+                const transferIds = Array.from(ec.entity.find('mantle.shipment.ShipmentRouteSegment')
+                        .condition('destinationFacilityId', facilityId).selectField('shipmentId').list())
+                        .map(row => row.shipmentId)
+                const shipped = transferIds.length ? Array.from(ec.entity.find('mantle.shipment.Shipment')
+                        .condition('shipmentId', 'in', [...new Set(transferIds)])
+                        .condition('shipmentTypeEnumId', 'ShpTpTransfer').condition('statusId', 'ShipShipped')
+                        .condition('toPartyId', ownerPartyId).list()).map(row => row.shipmentId) : []
+                if (shipped.length) {
+                    for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance')
+                            .condition('shipmentId', 'in', shipped).condition('productId', productId).list()) {
+                        const issued = toDecimal(issuance.quantity ?? 0).subtract(issuance.quantityCancelled ?? 0)
+                        transitQuantity = transitQuantity.add(issued)
+                    }
+                    for (const receipt of ec.entity.find('mantle.product.receipt.AssetReceipt')
+                            .condition('shipmentId', 'in', shipped).condition('productId', productId).list())
+                        transitQuantity = transitQuantity.subtract(receipt.quantityAccepted ?? 0)
+                                .subtract(receipt.quantityRejected ?? 0)
+                    if (transitQuantity.compare(0) < 0) transitQuantity = toDecimal(0)
                 }
                 // a reservation holds back what it has not issued, less what it already found unavailable
                 if (assets.length) for (const reservation of ec.entity.find('mantle.product.issuance.AssetReservation')

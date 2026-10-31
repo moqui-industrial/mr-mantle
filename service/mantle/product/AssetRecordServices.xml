@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The stock records that are not stock movements (impl-warehouse P4): an asset's descriptive metadata, a new lot, a new
+    empty container and an asset's files. Each checks its Moqui permission and the organization by party relationship
+    (StockScope.js); quantity, location, status, owner and cost change only through their posting services. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="update" noun="AssetMetadata" allow-remote="false">
+        <description>Change an asset's descriptive metadata, its name and comments (both audit-logged), through
+            mantle.product.AssetServices.update#Asset with only those fields: never its quantity, location, status, owner,
+            lot, serial number or cost. Requires STOCK_ADJUST (PERMISSION_DENIED) and an asset whose owner or facility owner
+            is one of the user's organizations (RECORD_UNAVAILABLE); with expectedLastUpdatedStamp, refuses an asset changed
+            since it was read (RECORD_CHANGED).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="assetName"/>
+            <parameter name="comments" allow-html="safe"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <actions>
+            <set field="stock" from="ec.resource.script('component://mr-mantle/service/mantle/product/StockScope.js')"/>
+            <script>stock.requirePermission('STOCK_ADJUST')</script>
+            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true" disable-authz="true"/>
+            <if condition="!stock.assetAllowed(stock.scope(), asset)">
+                <return error="true" message="RECORD_UNAVAILABLE: Asset ${assetId} is not available"/>
+            </if>
+            <script><![CDATA[
+                const ms = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js').ms
+                changed = expectedLastUpdatedStamp != null && ms(asset.lastUpdatedStamp) !== ms(expectedLastUpdatedStamp)
+            ]]></script>
+            <if condition="changed">
+                <return error="true" message="RECORD_CHANGED: Asset ${assetId} was changed by someone else; open it again"/>
+            </if>
+            <service-call name="mantle.product.AssetServices.update#Asset" disable-authz="true"
+                    in-map="{assetId:assetId, assetName:assetName || null, comments:comments || null}"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Lot" allow-remote="false">
+        <description>Create a lot: its lot number, manufacturer, manufactured date and expiration date. Requires STOCK_RECEIVE
+            (PERMISSION_DENIED) and a user in an organization; refuses a lot number its manufacturer already has
+            (LOT_DUPLICATE) and an expiration before the manufactured date (LOT_DATES). A lot's later corrections are
+            WarehouseTaskServices.correct#LotMetadata's.</description>
+        <in-parameters>
+            <parameter name="lotNumber" required="true"/>
+            <parameter name="mfgPartyId"/>
+            <parameter name="manufacturedDate" type="Timestamp"/>
+            <parameter name="expirationDate" type="Date"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="lotId"/>
+        </out-parameters>
+        <actions>
+            <set field="stock" from="ec.resource.script('component://mr-mantle/service/mantle/product/StockScope.js')"/>
+            <script>stock.requirePermission('STOCK_RECEIVE')</script>
+            <set field="userScope" from="stock.scope()"/>
+            <if condition="userScope.organizationIds != null &amp;&amp; !userScope.organizationIds.length">
+                <return error="true" message="PERMISSION_DENIED: Only a member of an organization creates lots"/>
+            </if>
+            <set field="lotNumber" from="String(lotNumber).trim()"/>
+            <if condition="mfgPartyId">
+                <entity-find-one entity-name="mantle.party.Party" value-field="manufacturer" disable-authz="true">
+                    <field-map field-name="partyId" from="mfgPartyId"/>
+                </entity-find-one>
+                <if condition="manufacturer == null">
+                    <return error="true" message="RECORD_UNAVAILABLE: Manufacturer ${mfgPartyId} is not available"/>
+                </if>
+            </if>
+            <entity-find-count entity-name="mantle.product.asset.Lot" count-field="sameCount" disable-authz="true">
+                <econdition field-name="lotNumber"/>
+                <econdition field-name="mfgPartyId" from="mfgPartyId || null"/>
+            </entity-find-count>
+            <if condition="sameCount &gt; 0">
+                <return error="true" message="LOT_DUPLICATE: Lot ${lotNumber} already exists for this manufacturer"/>
+            </if>
+            <if condition="manufacturedDate != null &amp;&amp; expirationDate != null
+                    &amp;&amp; String(expirationDate) &lt; ec.l10n.format(manufacturedDate, 'yyyy-MM-dd')">
+                <return error="true" message="LOT_DATES: The expiration date is before the manufactured date"/>
+            </if>
+            <service-call name="create#mantle.product.asset.Lot" disable-authz="true" out-map="created"
+                    in-map="{lotNumber:lotNumber, mfgPartyId:mfgPartyId || null, manufacturedDate:manufacturedDate,
+                        expirationDate:expirationDate}"/>
+            <set field="lotId" from="created.lotId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Container" allow-remote="false">
+        <description>Create an empty container (pallet, tote, bin) at a facility and, optionally, one of its locations.
+            Requires STOCK_MOVE (PERMISSION_DENIED), a facility owned by one of the user's organizations (RECORD_UNAVAILABLE)
+            and a location of that facility (LOCATION_UNAVAILABLE). Its contents are attached and moved by the guarded
+            container tasks.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="containerTypeEnumId"/>
+            <parameter name="serialNumber"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="containerId"/>
+        </out-parameters>
+        <actions>
+            <set field="stock" from="ec.resource.script('component://mr-mantle/service/mantle/product/StockScope.js')"/>
+            <script>stock.requirePermission('STOCK_MOVE')</script>
+            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" disable-authz="true"/>
+            <if condition="!stock.facilityAllowed(stock.scope(), facility)">
+                <return error="true" message="RECORD_UNAVAILABLE: Facility ${facilityId} is not available"/>
+            </if>
+            <if condition="locationSeqId">
+                <entity-find-one entity-name="mantle.facility.FacilityLocation" value-field="location" disable-authz="true"/>
+                <if condition="location == null">
+                    <return error="true"
+                            message="LOCATION_UNAVAILABLE: Location ${locationSeqId} is not a location of ${facilityId}"/>
+                </if>
+            </if>
+            <if condition="containerTypeEnumId">
+                <entity-find-one entity-name="moqui.basic.Enumeration" value-field="containerType" cache="true">
+                    <field-map field-name="enumId" from="containerTypeEnumId"/>
+                </entity-find-one>
+                <if condition="containerType?.enumTypeId != 'ContainerType'">
+                    <return error="true" message="Container type ${containerTypeEnumId} is not known"/>
+                </if>
+            </if>
+            <service-call name="create#mantle.product.asset.Container" disable-authz="true" out-map="created"
+                    in-map="{facilityId:facilityId, locationSeqId:locationSeqId || null,
+                        containerTypeEnumId:containerTypeEnumId || null, serialNumber:serialNumber || null,
+                        description:description || null}"/>
+            <set field="containerId" from="created.containerId"/>
+            <if condition="!serialNumber">
+                <service-call name="update#mantle.product.asset.Container" disable-authz="true"
+                        in-map="{containerId:containerId, serialNumber:containerId}"/>
+            </if>
+        </actions>
+    </service>
+
+    <!-- an asset's files (record files; get#RecordLinkInfo's AssetContent) -->
+    <service verb="create" noun="AssetContent">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.product.asset.AssetContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="assetContentId"/></out-parameters>
+        <actions>
+            <service-call name="create#mantle.product.asset.AssetContent" in-map="context" out-map="context"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.product.AssetRecordServices.save#AssetContentFile" in-map="context"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="AssetContentFile">
+        <in-parameters>
+            <parameter name="assetContentId" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <set field="filename" from="contentFile.getName()"/>
+            <if condition="ResourceReference.isTextFilename(filename)"><then>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+            </then><else>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+            </else></if>
+            <set field="contentLocation" value="${contentRoot}/asset/${assetId}/content_${assetContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.product.asset.AssetContent"
+                    in-map="{assetContentId:assetContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+</services>
