@@ -77,8 +77,11 @@ function validate(data, organizationPartyId) {
         denied("POLICY_INVALID", "Location " + data.locationSeqId + " is not in facility " + data.facilityId)
     if (data.productCategoryId && !one("mantle.product.category.ProductCategory", {productCategoryId: data.productCategoryId}))
         denied("POLICY_INVALID", "Category " + data.productCategoryId + " is not available")
-    if (data.assigneePartyId && !one("mantle.party.Party", {partyId: data.assigneePartyId}))
-        denied("POLICY_INVALID", "Assignee " + data.assigneePartyId + " is not available")
+    // an assignee of the organization who counts (InventoryCounts.js's rule)
+    if (data.assigneePartyId)
+        ec.resource
+            .script("component://mr-mantle/service/mantle/product/InventoryCounts.js")
+            .checkAssignee(data.assigneePartyId, organizationPartyId)
     return data
 }
 function valuesOf(p, before) {

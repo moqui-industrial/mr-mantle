@@ -140,14 +140,16 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="record" noun="CountLine" allow-remote="false">
         <description>Save an observation of a count line, never changing stock: the quantity counted (zero is a count, blank
             is no entry: QUANTITY_REQUIRED; a negative one is QUANTITY_INVALID), when and comments, or a skip with its reason.
-            Without physicalInventoryCountId, stock found that the snapshot did not hold: a reviewed extra line of the count
-            for that product, location and lot (a snapshot line of the same stock is LINE_EXISTS). With increment the
-            quantity adds to the line's observation (scan-quantity mode), which needs an operationKey: a repeated request
-            answers the first. Refuses a count not being counted (COUNT_NOT_IN_PROGRESS); needs STOCK_COUNT. The answer's line
-            carries no expected quantity on a blind count.</description>
+            Without physicalInventoryCountId, stock found that the snapshot did not hold: a reviewed extra line of the count for
+            that product, location and lot (a snapshot line of the same stock is LINE_EXISTS). With increment the quantity adds to
+            the line's observation (scan-quantity mode), which needs an operationKey: a repeated request answers the first.
+            Refuses a count not being counted (COUNT_NOT_IN_PROGRESS), a line a reviewer approved or posted (LINE_REVIEWED: it is
+            sent back by a recount), a time counted before the snapshot or in the future (COUNT_DATE_INVALID); needs STOCK_COUNT.
+            The answer's line carries no expected quantity on a blind count.</description>
         <in-parameters>
-            <parameter name="physicalInventoryCountId"/>
-            <parameter name="physicalInventoryId"/>
+            <parameter name="physicalInventoryCountId"><description>A line of physicalInventoryId (another count's is
+                RECORD_UNAVAILABLE).</description></parameter>
+            <parameter name="physicalInventoryId" required="true"/>
             <parameter name="productId"/>
             <parameter name="locationSeqId"/>
             <parameter name="lotId"/>
@@ -260,9 +262,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Resolve a line whose stock moved during counting (or whose posting failed): recount (the default; the
             count goes back to counting) or carry the observed variance forward, the delta being the observation less the
             asset's balance when it was counted, with a required reason (REASON_REQUIRED), never the stale count written over
-            the current quantity. Refuses a line with no conflict (NO_CONFLICT); needs STOCK_COUNT_REVIEW.</description>
+            the current quantity; an asset that moved since the snapshot is counted again (MOVED_RECOUNT). Refuses a line with no
+            conflict (NO_CONFLICT); needs STOCK_COUNT_REVIEW.</description>
         <in-parameters>
-            <parameter name="physicalInventoryCountId" required="true"/>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="physicalInventoryCountId" required="true"><description>A line of that count; another count's
+                is RECORD_UNAVAILABLE.</description></parameter>
             <parameter name="resolution" default-value="recount"><description>recount or carry</description></parameter>
             <parameter name="varianceReasonEnumId"/>
             <parameter name="comments"/>
@@ -282,14 +287,14 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="post" noun="Count" allow-remote="false">
         <description>Post a reviewed count's approved lines (all, or lineIds) at an effective date (now or earlier), through
-            the posting guard (StockPosting.js: STOCK_ADJUST, then the operation key; a retry answers the first result, a
-            changed request is OPERATION_KEY_CONFLICT). The lines are grouped into disjoint stock buckets (an asset; stock
-            found by product, location and lot), each posted in its own transaction (post#CountLines) with its summed delta
-            added once, so the variance SECA values each asset once per count (F5). A bucket that fails is named with its
-            reason and the others post; a move since the review returns its lines to conflict (STOCK_MOVED), and an effective
-            date in a closed fiscal period of the facility's or stock's owner fails each bucket (PERIOD_CLOSED, StockPosting.js's
-            period step, F240). Lines already
-            posted are skipped, so a new attempt posts only what failed. Uncounted and skipped lines change nothing. With
+            the posting guard (StockPosting.js: STOCK_ADJUST, then the operation key; a retry answers the first result, a changed
+            request is OPERATION_KEY_CONFLICT). The lines are grouped into disjoint stock buckets (an asset; stock found by
+            product, location and lot), each posted in its own transaction (post#CountLines) with its summed delta added once, so
+            the variance SECA values each asset once per count (F5). A bucket that fails is named with its reason and the others
+            post; a move since the review returns its lines to conflict (STOCK_MOVED). Lines already posted are skipped, so a new
+            attempt posts only what failed. Uncounted and skipped lines change nothing (NOTHING_TO_POST when no line is approved).
+            Once a line has posted, the count's date is fixed (DATE_FIXED for another). A date in a closed fiscal period refuses
+            the whole post before anything is written (PERIOD_CLOSED); each bucket checks it again under the period lock. With
             every line posted or skipped the count is complete. Refuses a count not reviewed (COUNT_NOT_IN_REVIEW,
             COUNT_NOT_REVIEWED) or reviewed again since (REVIEW_CHANGED) and a future date (DATE_INVALID).</description>
         <in-parameters>
@@ -310,7 +315,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="post" noun="CountLines" allow-remote="false">
-        <description>One stock bucket of post#Count, in the caller's transaction (post#Count runs each in its own): the lines
+        <description>Internal to post#Count, which runs each stock bucket through it in its own transaction (no screen calls it,
+            and it refuses a count not under review at the version reviewed: COUNT_NOT_IN_REVIEW, REVIEW_CHANGED): the lines
             locked, then the asset, then the location (stock found); the asset still where the line found it with no movement
             since the review (STOCK_MOVED), the fiscal period of the date open for the facility's and the stock's owner
             (PERIOD_CLOSED), and no earlier variance of this count (ALREADY_POSTED); the summed delta through
@@ -319,9 +325,10 @@ along with this software (see the LICENSE.md file). If not, see
             AssetDetail, and FacilityLocation.lastCountDate and ProductFacility.lastCountDate take its count time. Needs
             STOCK_ADJUST.</description>
         <in-parameters>
-            <parameter name="physicalInventoryId"/>
+            <parameter name="physicalInventoryId" required="true"/>
             <parameter name="lineIds" type="List" required="true"/>
             <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="reviewVersion" required="true"/>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"/>
@@ -332,9 +339,11 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="fail" noun="CountLines" allow-remote="false">
-        <description>The lines of a bucket post#Count could not post, named with the reason (PicFailed; a move since the
+        <description>Internal to post#Count: the lines of a bucket it could not post, of the count named (others left
+            alone), named with the reason (PicFailed; a move since the
             review, STOCK_MOVED, back to PicConflict). Needs STOCK_ADJUST.</description>
         <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
             <parameter name="lineIds" type="List" required="true"/>
             <parameter name="reasonCode"/>
             <parameter name="message"/>
@@ -449,6 +458,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="horizonDays" type="Integer" default="0"/>
             <parameter name="throughDate" type="Timestamp"/>
             <parameter name="assignedOnly" type="Boolean" default="false"/>
+            <parameter name="summaryOnly" type="Boolean" default="false"><description>Only dueCount, overdueCount and
+                truncated (Home's queue).</description></parameter>
             <parameter name="pageIndex"/>
             <parameter name="pageSize"/>
         </in-parameters>
@@ -456,6 +467,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="dueRows" type="List"/>
             <parameter name="dueCount" type="Integer"/>
             <parameter name="overdueCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"><description>A facility had more open locations than the 2000 a
+                find reads; those past them are not in the answer.</description></parameter>
             <parameter name="dueRowsPageIndex" type="Integer"/>
             <parameter name="dueRowsPageSize" type="Integer"/>
             <parameter name="dueRowsPageMaxIndex" type="Integer"/>
@@ -468,6 +481,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="dueRows" from="answer.dueRows"/>
             <set field="dueCount" from="answer.dueCount"/>
             <set field="overdueCount" from="answer.overdueCount"/>
+            <set field="truncated" from="answer.truncated"/>
             <set field="dueRowsPageIndex" from="answer.dueRowsPageIndex"/>
             <set field="dueRowsPageSize" from="answer.dueRowsPageSize"/>
             <set field="dueRowsPageMaxIndex" from="answer.dueRowsPageMaxIndex"/>

@@ -69,9 +69,11 @@ function requireStatus(count, statuses, code, message) {
     if (!statuses.includes(count.statusId)) denied(code, "Count " + count.physicalInventoryId + " " + message)
 }
 // A line with its count in the user's scope, both locked in the one order (the count, then its lines).
-function lineOf(userScope, physicalInventoryCountId) {
+// The count the caller names must be the line's: a line id of another count is refused like a missing one.
+function lineOf(userScope, physicalInventoryCountId, physicalInventoryId) {
     const found = blank(physicalInventoryCountId) ? null : one(LINE, {physicalInventoryCountId})
-    if (!found) denied("RECORD_UNAVAILABLE", "Count line " + (physicalInventoryCountId || "") + " is not available")
+    if (!found || blank(physicalInventoryId) || found.physicalInventoryId !== physicalInventoryId)
+        denied("RECORD_UNAVAILABLE", "Count line " + (physicalInventoryCountId || "") + " is not available")
     const counted = countOf(userScope, found.physicalInventoryId, true)
     const line = find(LINE, {physicalInventoryCountId}).forUpdate(true).one()
     return Object.assign({line}, counted)
@@ -95,6 +97,27 @@ function checkReason(value) {
     if (reason?.enumTypeId !== "InventoryVarianceReason") denied("REASON_INVALID", "Choose a valid variance reason")
     if (reason.enumCode === "scrap") denied("REASON_INVALID", "Scrap and expiry are recorded as scrap, not as a count variance")
     return value
+}
+// An assignee: a person of the organization (agent or employee) whose user account may count (STOCK_COUNT in a group).
+function checkAssignee(partyId, organizationPartyId) {
+    const member = rows("mantle.party.PartyRelationship", {fromPartyId: partyId, toPartyId: organizationPartyId}).some(
+        row => ["PrtAgent", "PrtEmployee"].includes(row.relationshipTypeEnumId) && lib.active(row)
+    )
+    const userIds = rows("moqui.security.UserAccount", {partyId}).map(row => row.userId)
+    const groupIds = userIds.length
+        ? Array.from(find("moqui.security.UserGroupMember").condition("userId", "in", userIds).list())
+              .filter(row => lib.active(row))
+              .map(row => row.userGroupId)
+        : []
+    const counts =
+        groupIds.length &&
+        Array.from(
+            find("moqui.security.UserGroupPermission", {userPermissionId: "STOCK_COUNT"})
+                .condition("userGroupId", "in", groupIds)
+                .list()
+        ).some(row => lib.active(row))
+    if (!member || !counts) denied("ASSIGNEE_INVALID", "Assign the count to someone of the organization who counts stock")
+    return partyId
 }
 const defaultReason = delta => (dec(delta).compare(0) > 0 ? "InVrFound" : "InVrLost")
 
@@ -249,10 +272,9 @@ function createCount(p, userScope) {
     if (!scopeFields.some(field => scope[field]) && !assets.length && mode !== "CntModeFull")
         denied("SCOPE_REQUIRED", "A cycle or spot count needs a location, product, lot or assets to count")
     const blind = blank(p.blindIndicator) ? blindDefault(facility) : truthy(p.blindIndicator) ? "Y" : "N"
-    if (p.assigneePartyId && !one("mantle.party.Party", {partyId: p.assigneePartyId}))
-        denied("COUNT_INVALID", "Assignee " + p.assigneePartyId + " is not available")
-    if (p.countScheduleId && !one(SCHEDULE, {countScheduleId: p.countScheduleId}))
-        denied("COUNT_INVALID", "Count schedule " + p.countScheduleId + " is not available")
+    if (p.assigneePartyId) checkAssignee(p.assigneePartyId, facility.ownerPartyId)
+    if (p.countScheduleId && one(SCHEDULE, {countScheduleId: p.countScheduleId})?.organizationPartyId !== facility.ownerPartyId)
+        denied("COUNT_INVALID", "Count schedule " + p.countScheduleId + " is not the facility's organization's")
     const created = call(
         "create#" + PI,
         Object.assign({}, scope, {
@@ -315,8 +337,7 @@ function update(p) {
     if (p.countModeEnumId) changes.countModeEnumId = checkEnum(p.countModeEnumId, "CountMode", "count mode")
     if (!blank(p.blindIndicator)) changes.blindIndicator = truthy(p.blindIndicator) ? "Y" : "N"
     if (p.assigneePartyId != null) {
-        if (p.assigneePartyId && !one("mantle.party.Party", {partyId: p.assigneePartyId}))
-            denied("COUNT_INVALID", "Assignee " + p.assigneePartyId + " is not available")
+        if (p.assigneePartyId) checkAssignee(p.assigneePartyId, facility.ownerPartyId)
         changes.assigneePartyId = text(p.assigneePartyId)
     }
     if (p.plannedDate != null) changes.plannedDate = p.plannedDate || null
@@ -399,7 +420,7 @@ function record(p) {
     }
     const userScope = posting.scope()
     let found
-    if (!blank(p.physicalInventoryCountId)) found = lineOf(userScope, p.physicalInventoryCountId)
+    if (!blank(p.physicalInventoryCountId)) found = lineOf(userScope, p.physicalInventoryCountId, p.physicalInventoryId)
     else found = extraLine(userScope, p)
     const {line, count, facility} = found
     requireStatus(count, ["PIInProgress"], "COUNT_NOT_IN_PROGRESS", "is not being counted")
@@ -407,6 +428,12 @@ function record(p) {
         const settled = posting.settled(begun.op)
         if (settled) return settled
     }
+    // a line a reviewer approved or posted is not entered again until the reviewer sends it back (recount)
+    if (!["PicOpen", "PicCounted", "PicSkipped"].includes(line.statusId))
+        denied("LINE_REVIEWED", "Line " + line.physicalInventoryCountId + " was reviewed; a reviewer sends it back to be counted")
+    // the time counted lies between the line's snapshot and now
+    if (p.countDate && ((line.snapshotDate && ms(p.countDate) < ms(line.snapshotDate)) || ms(p.countDate) > ms(now()) + 60000))
+        denied("COUNT_DATE_INVALID", "A count is made after its snapshot and not in the future")
     const skipping = !blank(p.skipReasonEnumId)
     const changes = {physicalInventoryCountId: line.physicalInventoryCountId, countedByUserId: ec.user.userId}
     if (p.comments != null) changes.comments = text(p.comments)
@@ -505,6 +532,13 @@ function movementsSince(assetId, since, physicalInventoryId) {
             .list()
     )
 }
+// Whether an asset is no longer where its line found it (another location or container).
+const placeMoved = (asset, line) =>
+    (asset.locationSeqId || null) !== (line.locationSeqId || null) || (asset.containerId || null) !== (line.containerId || null)
+// Whether the asset's quantity is not its snapshot plus the movements counted since: a movement dated before the snapshot
+// but written after it (a backdated posting) is found this way.
+const quantityDrifted = (asset, line, intervening) =>
+    !dec(asset.quantityOnHandTotal).eq(dec(line.snapshotQuantity).add(dec(intervening)))
 // A line compared: the balance when it was counted, the movements since the snapshot, a move of the asset, and the delta
 // it would post (observed less snapshot; with a conflict, observed less the balance at the count's time once carried).
 function compare(line, count) {
@@ -523,6 +557,7 @@ function compare(line, count) {
             reasons.push(asset.containerId ? "put in container " + asset.containerId : "taken out of its container")
     }
     if (movements.length) reasons.push(movements.length + " movement" + (movements.length > 1 ? "s" : "") + " since the snapshot")
+    else if (asset && quantityDrifted(asset, line, intervening)) reasons.push("its quantity changed by a backdated movement")
     return {
         countTime,
         intervening,
@@ -661,7 +696,7 @@ function recount(p) {
 function resolve(p) {
     requireAny(["STOCK_COUNT_REVIEW"])
     const userScope = posting.scope()
-    const {line, count} = lineOf(userScope, p.physicalInventoryCountId)
+    const {line, count} = lineOf(userScope, p.physicalInventoryCountId, p.physicalInventoryId)
     requireStatus(count, ["PIInValidation"], "COUNT_NOT_IN_REVIEW", "is not submitted for review")
     if (!["PicConflict", "PicFailed"].includes(line.statusId))
         denied("NO_CONFLICT", "Line " + line.physicalInventoryCountId + " has no conflict to resolve")
@@ -675,12 +710,19 @@ function resolve(p) {
     const reason = checkReason(p.varianceReasonEnumId)
     if (!reason) denied("REASON_REQUIRED", "Give the reason for carrying the variance")
     if (line.quantityOnHand == null) denied("QUANTITY_REQUIRED", "Line " + line.physicalInventoryCountId + " was not counted")
+    // an asset that left the line's place is counted again where it is: its variance cannot be carried (a post would refuse
+    // it as moved every time)
+    const asset = line.assetId ? one(ASSET, {assetId: line.assetId}) : null
+    if (line.assetId && (!asset || placeMoved(asset, line)))
+        denied("MOVED_RECOUNT", "Asset " + line.assetId + " moved since the snapshot; count it again where it is")
     const countTime = line.assetId ? quantityAsOf(line.assetId, line.countDate || now()) : dec(0)
     const delta = dec(line.quantityOnHand).subtract(countTime)
     call("update#" + LINE, {
         physicalInventoryCountId: line.physicalInventoryCountId,
         statusId: "PicApproved",
         countTimeQuantity: countTime,
+        // the basis the post checks the asset against: its quantity now, seen by the reviewer carrying the variance
+        interveningQuantity: asset ? dec(asset.quantityOnHandTotal).subtract(dec(line.snapshotQuantity)) : null,
         approvedDelta: delta,
         varianceReasonEnumId: reason,
         comments: text(p.comments) ?? line.comments,
@@ -716,14 +758,30 @@ function post(p) {
     if (p.reviewVersion != null && Number(p.reviewVersion) !== Number(count.reviewVersion || 0))
         denied("REVIEW_CHANGED", "Count " + count.physicalInventoryId + " was reviewed again; check the variances before posting")
     if (!count.reviewedDate) denied("COUNT_NOT_REVIEWED", "Review count " + count.physicalInventoryId + " before posting")
-    const effectiveDate = p.effectiveDate ? iso(p.effectiveDate) : iso(now())
-    if (ms(effectiveDate) > ms(now()) + 60000) denied("DATE_INVALID", "A count posts now or on an earlier date")
+    // once a line has posted the count's date is fixed: a later attempt, under any key, posts at the same date (F236)
+    const postedBefore = find(LINE, {physicalInventoryId: count.physicalInventoryId, statusId: "PicPosted"}).count() > 0
+    let stamp = p.effectiveDate || now()
+    if (postedBefore && count.physicalInventoryDate) {
+        if (p.effectiveDate && Math.abs(ms(p.effectiveDate) - ms(count.physicalInventoryDate)) > 60000)
+            denied(
+                "DATE_FIXED",
+                "Count " + count.physicalInventoryId + " already posted lines at " + dateText(count.physicalInventoryDate)
+            )
+        stamp = count.physicalInventoryDate
+    }
+    if (ms(stamp) > ms(now()) + 60000) denied("DATE_INVALID", "A count posts now or on an earlier date")
+    const effectiveDate = iso(stamp)
     const wanted = p.lineIds?.length ? new Set(Array.from(p.lineIds).map(String)) : null
     const lines = rows(LINE, {physicalInventoryId: count.physicalInventoryId}).filter(
         line => ["PicApproved", "PicFailed"].includes(line.statusId) && (!wanted || wanted.has(line.physicalInventoryCountId))
     )
+    // the period of the date, open for the facility's and the stock's owners, before anything is written: a closed one
+    // refuses the whole post (post#AcctgTrans would send it to the error journal, F155); each bucket checks it again
+    // under the period lock (StockPosting.js period) in case it closes meanwhile
+    periodOpen(facility, lines, stamp)
     // the poster values each variance at the count's date: set before the lines post, each in its own transaction
-    lib.probe("update#" + PI, {physicalInventoryId: count.physicalInventoryId, physicalInventoryDate: effectiveDate})
+    if (!postedBefore && lines.length)
+        lib.probe("update#" + PI, {physicalInventoryId: count.physicalInventoryId, physicalInventoryDate: effectiveDate})
     const buckets = new Map()
     for (const line of lines) {
         const key = bucketOf(line)
@@ -736,7 +794,8 @@ function post(p) {
             const out = lib.probe("mantle.product.InventoryCountServices.post#CountLines", {
                 physicalInventoryId: count.physicalInventoryId,
                 lineIds,
-                effectiveDate
+                effectiveDate,
+                reviewVersion: count.reviewVersion
             })
             results.push(Object.assign({key, ok: true}, out.result))
         } catch (error) {
@@ -745,7 +804,12 @@ function post(p) {
             ec.logger.warn("Count " + count.physicalInventoryId + " bucket " + key + " not posted: " + message)
             results.push({key, ok: false, lineIds, reasonCode, message})
             try {
-                lib.probe("mantle.product.InventoryCountServices.fail#CountLines", {lineIds, reasonCode, message})
+                lib.probe("mantle.product.InventoryCountServices.fail#CountLines", {
+                    physicalInventoryId: count.physicalInventoryId,
+                    lineIds,
+                    reasonCode,
+                    message
+                })
             } catch (markError) {
                 ec.logger.error(
                     "Count " + count.physicalInventoryId + " lines " + lineIds + " not marked failed: " + markError.message
@@ -763,7 +827,13 @@ function post(p) {
     }
     const failed = results.filter(row => !row.ok)
     return posting.complete(begun.op, facility.ownerPartyId, PI, count.physicalInventoryId, {
-        resultCode: failed.length ? (failed.length === results.length ? "FAILED" : "PARTIAL") : "POSTED",
+        resultCode: !results.length
+            ? "NOTHING_TO_POST"
+            : failed.length
+              ? failed.length === results.length
+                  ? "FAILED"
+                  : "PARTIAL"
+              : "POSTED",
         physicalInventoryId: count.physicalInventoryId,
         effectiveDate,
         postedCount: results.filter(row => row.ok).length,
@@ -771,6 +841,20 @@ function post(p) {
         results,
         countStatusId
     })
+}
+// The up-front period check of a post: PostingGuard.js's fiscal (without its lock; the locking step runs in each bucket's
+// transaction) for the facility's and the lines' asset owners at the effective date, a Timestamp so its day is the user's.
+function periodOpen(facility, lines, stamp) {
+    const guard = ec.resource.script("component://mr-mantle/service/mantle/ledger/PostingGuard.js")
+    const assetIds = unique(lines.map(line => line.assetId))
+    const owners = assetIds.length
+        ? Array.from(find(ASSET).condition("assetId", "in", assetIds).selectField("ownerPartyId").distinct(true).list()).map(
+              row => row.ownerPartyId
+          )
+        : []
+    for (const organizationPartyId of unique([facility.ownerPartyId].concat(owners)).sort())
+        if (guard.fiscal(organizationPartyId, stamp, false).findings.some(row => row.code === "PERIOD_CLOSED"))
+            denied("PERIOD_CLOSED", "The fiscal period of " + dateText(stamp) + " is closed for " + organizationPartyId)
 }
 // A count with every line posted or skipped is complete; a single location's count dates that location even with no line
 // (a zero confirmed where nothing was found).
@@ -811,7 +895,13 @@ function postLines(p) {
           )
         : []
     if (!lines.length) denied("NOTHING_TO_POST", "No count line to post")
-    const {count, facility} = countOf(userScope, lines[0].physicalInventoryId)
+    // only through post#Count: the count named, under review at the version reviewed
+    const {count, facility} = countOf(userScope, p.physicalInventoryId)
+    requireStatus(count, ["PIInValidation"], "COUNT_NOT_IN_REVIEW", "is not reviewed")
+    if (p.reviewVersion == null || Number(p.reviewVersion) !== Number(count.reviewVersion || 0))
+        denied("REVIEW_CHANGED", "Count " + count.physicalInventoryId + " was reviewed again; check the variances before posting")
+    if (lines.some(line => line.physicalInventoryId !== count.physicalInventoryId))
+        denied("COUNT_INVALID", "Lines of one count post together")
     const open = lines.filter(line => line.statusId !== "PicPosted")
     if (!open.length) return {result: {resultCode: "ALREADY_POSTED", lineIds: ids}}
     for (const line of open) {
@@ -841,6 +931,9 @@ function postLines(p) {
             (asset.containerId || null) !== (first.containerId || null)
         )
             denied("STOCK_MOVED", "Asset " + first.assetId + " moved since the review; review or count it again")
+        // the quantity the review saw (snapshot plus the movements then): any change since, backdated ones too, is a move
+        if (quantityDrifted(asset, first, first.interveningQuantity))
+            denied("STOCK_MOVED", "Asset " + first.assetId + " changed since the review; review or count it again")
         const since = first.reviewedDate || first.snapshotDate
         if (movementsSince(first.assetId, since, count.physicalInventoryId).length)
             denied("STOCK_MOVED", "Asset " + first.assetId + " changed since the review; review or count it again")
@@ -937,9 +1030,10 @@ function postLines(p) {
 // A bucket that failed: its lines named with the reason (a move since the review is a conflict to resolve again).
 function failLines(p) {
     posting.requirePermission("STOCK_ADJUST")
+    const {count} = countOf(posting.scope(), p.physicalInventoryId)
     for (const physicalInventoryCountId of Array.from(p.lineIds || [])) {
         const line = find(LINE, {physicalInventoryCountId}).forUpdate(true).one()
-        if (!line || line.statusId === "PicPosted") continue
+        if (!line || line.physicalInventoryId !== count.physicalInventoryId || line.statusId === "PicPosted") continue
         const moved = p.reasonCode === "STOCK_MOVED"
         call("update#" + LINE, {
             physicalInventoryCountId,
@@ -1288,14 +1382,22 @@ function dueOf(facility, throughDay, todayDay) {
         if (!old || item.nextDate < old.nextDate || (item.nextDate === old.nextDate && rank[item.kind] < rank[old.kind]))
             items.set(key, item)
     }
-    const locations = Array.from(
+    const located = Array.from(
         find(LOCATION, {facilityId: facility.facilityId})
             .condition(anyOf([cond("thruDate", "is-null", null), cond("thruDate", "greater", at)]))
             .orderBy("locationSeqId")
-            .limit(dueLimit)
+            .limit(dueLimit + 1)
             .list()
     )
-    for (const schedule of schedulesFor(facility, at)) {
+    // a facility with more locations than the limit is read up to it, and the answer says so (truncated)
+    const locations = located.slice(0, dueLimit)
+    if (located.length > dueLimit) truncatedFacilities.add(facility.facilityId)
+    const schedules = schedulesFor(facility, at)
+    // the day each empty location reached zero, read once for the facility when a zero schedule is in effect
+    const zeroDays = schedules.some(row => row.scheduleKindEnumId === "CskZero")
+        ? zeroDaysOf(facility.facilityId, locations)
+        : new Map()
+    for (const schedule of schedules) {
         const base = {
             facilityId: facility.facilityId,
             countScheduleId: schedule.countScheduleId,
@@ -1346,7 +1448,7 @@ function dueOf(facility, throughDay, todayDay) {
         )
         if (schedule.scheduleKindEnumId === "CskZero") {
             for (const location of inScope) {
-                const reached = zeroReached(facility.facilityId, location)
+                const reached = zeroDays.get(location.locationSeqId) || null
                 if (!reached || reached > throughDay) continue
                 offer(
                     "location:" + location.locationSeqId,
@@ -1424,29 +1526,75 @@ function dueOf(facility, throughDay, todayDay) {
     }
     return due
 }
-// The day a location's stock reached zero since its last count: it holds no stock now and an asset there moved since the
-// last count (not by scrap); null otherwise.
-function zeroReached(facilityId, location) {
-    if (
-        stockQuery(facilityId)
-            .condition({locationSeqId: location.locationSeqId})
-            .condition("quantityOnHandTotal", "not-equals", 0)
-            .count()
+// The day each empty location of a facility reached zero since its last count: no stock with a quantity there now, and the
+// latest movement of its stock after the location's last count, not by scrap. Three queries for the facility: the
+// locations holding stock, the stock of the empty ones, and their movements (latest first).
+function zeroDaysOf(facilityId, locations) {
+    const held = new Set(
+        Array.from(
+            stockQuery(facilityId)
+                .condition("quantityOnHandTotal", "not-equals", 0)
+                .selectField("locationSeqId")
+                .distinct(true)
+                .list()
+        ).map(row => row.locationSeqId)
     )
-        return null
+    const empty = locations.filter(location => !held.has(location.locationSeqId))
+    const days = new Map()
+    if (!empty.length) return days
     const assets = Array.from(
-        stockQuery(facilityId).condition({locationSeqId: location.locationSeqId}).selectField("assetId").limit(200).list()
-    ).map(row => row.assetId)
-    let latest = null
-    for (const assetId of assets) {
-        const movement = lastMovement(assetId)
-        if (!movement || scrapDepleted(movement)) continue
-        if (location.lastCountDate != null && ms(movement.effectiveDate) <= ms(location.lastCountDate)) continue
-        if (!latest || ms(movement.effectiveDate) > ms(latest)) latest = movement.effectiveDate
+        stockQuery(facilityId)
+            .condition(
+                "locationSeqId",
+                "in",
+                empty.map(location => location.locationSeqId)
+            )
+            .selectField("assetId,locationSeqId")
+            .limit(lineLimit)
+            .list()
+    )
+    if (!assets.length) return days
+    const latest = new Map()
+    for (const row of find(DETAIL)
+        .condition(
+            "assetId",
+            "in",
+            assets.map(asset => asset.assetId)
+        )
+        .selectField("assetId,effectiveDate,physicalInventoryId")
+        .orderBy("-effectiveDate")
+        .limit(lineLimit * 4)
+        .list())
+        if (!latest.has(row.assetId)) latest.set(row.assetId, row)
+    const scrapIds = new Set(
+        Array.from(
+            find(PI)
+                .condition(
+                    "physicalInventoryId",
+                    "in",
+                    unique([...latest.values()].map(row => row.physicalInventoryId)).concat(["_NA_"])
+                )
+                .condition("scrapIndicator", "Y")
+                .selectField("physicalInventoryId")
+                .list()
+        ).map(row => row.physicalInventoryId)
+    )
+    const lastCounts = new Map(empty.map(location => [location.locationSeqId, location.lastCountDate]))
+    for (const asset of assets) {
+        const movement = latest.get(asset.assetId)
+        if (!movement || scrapIds.has(movement.physicalInventoryId)) continue
+        const lastCount = lastCounts.get(asset.locationSeqId)
+        if (lastCount != null && ms(movement.effectiveDate) <= ms(lastCount)) continue
+        const day = dayOf(movement.effectiveDate)
+        const known = days.get(asset.locationSeqId)
+        if (!known || day > known) days.set(asset.locationSeqId, day)
     }
-    return latest ? dayOf(latest) : null
+    return days
 }
+// the facilities whose locations a due find read only up to dueLimit (per call: set by dueRows)
+let truncatedFacilities = new Set()
 function dueRows(facilities, p) {
+    truncatedFacilities = new Set()
     const todayDay = dayOf(now())
     const throughDay = p.throughDate ? dayOf(p.throughDate) : addDays(todayDay, Math.max(0, Number(p.horizonDays || 0)))
     const all = []
@@ -1478,6 +1626,10 @@ function due(p) {
         const partyId = ec.user.userAccount?.partyId
         found = found.filter(row => row.assigneePartyId && row.assigneePartyId === partyId)
     }
+    const overdueCount = found.filter(row => row.overdue).length
+    const truncated = truncatedFacilities.size > 0
+    // Home's counts: the totals alone, without the rows' names
+    if (truthy(p.summaryOnly)) return {dueRows: [], dueCount: found.length, overdueCount, truncated}
     const productIds = unique(found.map(row => row.productId))
     const productNames = new Map(
         productIds.length
@@ -1501,7 +1653,8 @@ function due(p) {
     return {
         dueRows: rowsOut,
         dueCount: found.length,
-        overdueCount: found.filter(row => row.overdue).length,
+        overdueCount,
+        truncated,
         dueRowsPageIndex: pageIndex,
         dueRowsPageSize: pageSize,
         dueRowsPageMaxIndex: Math.max(0, Math.ceil(found.length / pageSize) - 1),
@@ -1599,6 +1752,15 @@ function request(p) {
     requireAny(shortPick ? ["STOCK_COUNT", "SHIPMENT_PICK"] : ["STOCK_COUNT"])
     const userScope = posting.scope()
     const facility = posting.facility(userScope, p.facilityId)
+    // a picker without count authority reports the short pick only: the stock or one location, a spot count with the
+    // policy's blind default, no assignee
+    if (shortPick && !access.has("STOCK_COUNT")) {
+        if (scopeFields.some(field => field !== "scopeLocationSeqId" && !blank(p[field])))
+            denied("SCOPE_INVALID", "A short-pick recount names the stock or its location")
+        if (!Array.from(p.assetIds || []).length && blank(p.scopeLocationSeqId))
+            denied("SCOPE_REQUIRED", "Name the stock or the location to count again")
+        p = Object.assign({}, p, {countModeEnumId: "CntModeSpot", blindIndicator: null, assigneePartyId: null})
+    }
     if (shortPick) {
         const open = Array.from(
             find(PI, {facilityId: facility.facilityId, countSourceEnumId: "CntSrcShortPick", statusId: "PIInPlanning"}).list()
@@ -1781,6 +1943,7 @@ const operations = {
 }
 ;({
     countOf,
+    checkAssignee,
     requireStatus,
     showsExpected,
     openCountStatuses,

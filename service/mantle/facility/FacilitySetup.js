@@ -214,6 +214,11 @@ function blockersOf(facilityId, locationSeqId) {
             .distinct(true)
             .list()
     ).map(row => row.physicalInventoryId)
+    // a planned count scoped to the location has no lines yet (P10)
+    for (const row of find("mantle.product.asset.PhysicalInventory", {facilityId, scopeLocationSeqId: locationSeqId})
+        .selectField("physicalInventoryId")
+        .list())
+        if (!countIds.includes(row.physicalInventoryId)) countIds.push(row.physicalInventoryId)
     if (countIds.length)
         add(
             "count",

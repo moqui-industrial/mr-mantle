@@ -83,6 +83,9 @@ function location(locationSeqId, locationTypeEnumId, lastCountDate = null, facil
 }
 const asset = assetId => one("mantle.product.asset.Asset", {assetId})
 const line = (physicalInventoryId, assetId) => one("mantle.product.asset.PhysicalInventoryCount", {physicalInventoryId, assetId})
+// a line of the scenario's first count, which belongs to no other count
+const lineOfFirst = () =>
+    rows("mantle.product.asset.PhysicalInventoryCount", {physicalInventoryId: state.count})[0].physicalInventoryCountId
 const dueOf = (rowsDue, locationSeqId) => rowsDue.find(row => row.locationSeqId === locationSeqId && row.itemType === "location")
 
 spec({
@@ -115,7 +118,9 @@ spec({
             ["A2", "FltBulk"],
             ["A3", "FltBulk"],
             ["B1", "FltBulk"],
-            ["IMP1", "FltBulk"]
+            ["IMP1", "FltBulk"],
+            ["C1", "FltBulk"],
+            ["C2", "FltBulk"]
         ])
             location(locationSeqId, locationTypeEnumId)
         // the due facility: pick faces counted 31 and 10 days ago, a bulk bin counted over a year ago, and a bin emptied
@@ -123,7 +128,7 @@ spec({
         location("PF_NEW", "FltPick", daysAgo(10), "WCN_DUE")
         location("BULK_YEAR", "FltBulk", daysAgo(370), "WCN_DUE")
         location("ZERO1", "FltBulk", daysAgo(40), "WCN_DUE")
-        for (const productId of ["WCN_WIDGET", "WCN_BOLT", "WCN_NUT", "WCN_FOUND", "WCN_EMPTY", "WCN_IMPORT"])
+        for (const productId of ["WCN_WIDGET", "WCN_BOLT", "WCN_NUT", "WCN_FOUND", "WCN_EMPTY", "WCN_IMPORT", "WCN_DRIFT"])
             call("create#mantle.product.Product", {
                 productId,
                 productName: productId,
@@ -274,10 +279,25 @@ feature("a blind count snapshots its scope and a counter never receives an expec
 feature("counting saves observations only; a move during counting is found at review and a recount resolves it", {
     when() {
         const lineOf = assetId => line(state.count, assetId).physicalInventoryCountId
-        const widget = run("wcn_counter", "record#CountLine", {physicalInventoryCountId: lineOf(state.widget), quantity: 9})
-        const bolt = run("wcn_counter", "record#CountLine", {physicalInventoryCountId: lineOf(state.bolt), quantity: 20})
-        const negative = run("wcn_counter", "record#CountLine", {physicalInventoryCountId: lineOf(state.bolt), quantity: -1})
-        const blankQuantity = run("wcn_counter", "record#CountLine", {physicalInventoryCountId: lineOf(state.bolt)})
+        const widget = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
+            physicalInventoryCountId: lineOf(state.widget),
+            quantity: 9
+        })
+        const bolt = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
+            physicalInventoryCountId: lineOf(state.bolt),
+            quantity: 20
+        })
+        const negative = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
+            physicalInventoryCountId: lineOf(state.bolt),
+            quantity: -1
+        })
+        const blankQuantity = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
+            physicalInventoryCountId: lineOf(state.bolt)
+        })
         // stock found that the snapshot did not hold, and a line of the snapshot named again by its stock
         const found = run("wcn_counter", "record#CountLine", {
             physicalInventoryId: state.count,
@@ -302,17 +322,23 @@ feature("counting saves observations only; a move during counting is found at re
             })
         )
         const submitted = run("wcn_counter", "submit#Count", {physicalInventoryId: state.count})
-        const lateEntry = run("wcn_counter", "record#CountLine", {physicalInventoryCountId: lineOf(state.widget), quantity: 8})
+        const lateEntry = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
+            physicalInventoryCountId: lineOf(state.widget),
+            quantity: 8
+        })
         const counterReview = run("wcn_counter", "review#Count", {physicalInventoryId: state.count})
         const reviewed = run("wcn_reviewer", "review#Count", {physicalInventoryId: state.count})
         const reviewerView = run("wcn_reviewer", "get#Count", {physicalInventoryId: state.count})
         const counterView = run("wcn_counter", "get#Count", {physicalInventoryId: state.count})
         const boltLine = line(state.count, state.bolt)
         const recount = run("wcn_reviewer", "resolve#CountConflict", {
+            physicalInventoryId: state.count,
             physicalInventoryCountId: boltLine.physicalInventoryCountId
         })
         const afterRecount = line(state.count, state.bolt)
         const recounted = run("wcn_counter", "record#CountLine", {
+            physicalInventoryId: state.count,
             physicalInventoryCountId: boltLine.physicalInventoryCountId,
             quantity: 15
         })
@@ -570,3 +596,114 @@ feature("a planned count changes its scope and cancels; the variance report and 
         !r.recipients.includes("WCN_OUTSIDER")
     }
 })
+
+feature(
+    "a post finds stock changed or moved since the review (STOCK_MOVED), a moved asset is counted again, a line is its count's",
+    {
+        when() {
+            ec.artifactExecution.disableAuthz()
+            const changed = receive("WCN_DRIFT", 8, "C1")
+            const steady = receive("WCN_DRIFT", 5, "C1")
+            const moved = receive("WCN_DRIFT", 3, "C1")
+            ec.artifactExecution.enableAuthz()
+            const created = run("wcn_counter", "create#Count", {
+                facilityId: facility,
+                assetIds: [changed, steady, moved],
+                blindIndicator: "N"
+            })
+            const physicalInventoryId = created.physicalInventoryId
+            run("wcn_counter", "start#Count", {physicalInventoryId})
+            const lineId = assetId => line(physicalInventoryId, assetId).physicalInventoryCountId
+            for (const [assetId, quantity] of [
+                [changed, 7],
+                [steady, 5],
+                [moved, 3]
+            ])
+                run("wcn_counter", "record#CountLine", {physicalInventoryId, physicalInventoryCountId: lineId(assetId), quantity})
+            const otherCount = run("wcn_counter", "record#CountLine", {
+                physicalInventoryId,
+                physicalInventoryCountId: lineOfFirst(),
+                quantity: 1
+            })
+            run("wcn_counter", "submit#Count", {physicalInventoryId})
+            const reviewed = run("wcn_reviewer", "review#Count", {physicalInventoryId})
+            // after the review: one asset's quantity changes, another moves whole to another bin
+            ec.artifactExecution.disableAuthz()
+            call("mantle.product.AssetServices.change#AssetQuantity", {
+                assetId: changed,
+                quantityDiff: -1,
+                productId: "WCN_DRIFT"
+            })
+            call("mantle.product.AssetServices.move#Asset", {
+                assetId: moved,
+                facilityId: facility,
+                locationSeqId: "C2",
+                quantity: 3
+            })
+            ec.artifactExecution.enableAuthz()
+            const posted = run("wcn_adjuster", "post#Count", {
+                operationKey: key(),
+                physicalInventoryId,
+                reviewVersion: reviewed.reviewVersion
+            })
+            const carryMoved = run("wcn_reviewer", "resolve#CountConflict", {
+                physicalInventoryId,
+                physicalInventoryCountId: lineId(moved),
+                resolution: "carry",
+                varianceReasonEnumId: "InVrLost"
+            })
+            const recountChanged = run("wcn_reviewer", "resolve#CountConflict", {
+                physicalInventoryId,
+                physicalInventoryCountId: lineId(changed)
+            })
+            const reenter = run("wcn_counter", "record#CountLine", {
+                physicalInventoryId,
+                physicalInventoryCountId: lineId(moved),
+                quantity: 3
+            })
+            const early = run("wcn_counter", "record#CountLine", {
+                physicalInventoryId,
+                physicalInventoryCountId: lineId(changed),
+                quantity: 6,
+                countDate: "2001-01-01T00:00:00Z"
+            })
+            const pickerScope = run("wcn_picker", "request#Count", {
+                facilityId: facility,
+                scopeProductId: "WCN_DRIFT",
+                countSourceEnumId: "CntSrcShortPick"
+            })
+            return {
+                otherCount,
+                reviewed,
+                posted,
+                carryMoved,
+                recountChanged,
+                reenter,
+                early,
+                pickerScope,
+                changedLine: line(physicalInventoryId, changed),
+                steadyLine: line(physicalInventoryId, steady),
+                movedLine: line(physicalInventoryId, moved),
+                changedQuantity: n(asset(changed).quantityOnHandTotal)
+            }
+        },
+        then(r) {
+            r.otherCount.error.includes("RECORD_UNAVAILABLE")
+            r.reviewed.approvedCount == 3
+            r.posted.error == ""
+            r.posted.result.resultCode == "PARTIAL"
+            r.posted.result.results.filter(row => !row.ok).every(row => row.reasonCode == "STOCK_MOVED")
+            r.posted.result.failedCount == 2
+            r.steadyLine.statusId == "PicPosted"
+            // the changed asset's line is a conflict again, and nothing posted to it
+            r.changedQuantity == 7
+            r.carryMoved.error.includes("MOVED_RECOUNT")
+            r.recountChanged.error == ""
+            r.changedLine.statusId == "PicOpen"
+            r.reenter.error.includes("LINE_REVIEWED")
+            r.early.error.includes("COUNT_DATE_INVALID")
+            r.movedLine.statusId == "PicConflict"
+            r.pickerScope.error.includes("SCOPE_INVALID")
+        }
+    }
+)
