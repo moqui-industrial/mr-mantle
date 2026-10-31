@@ -15,8 +15,10 @@
 //      and issue in Mantle itself, §4).
 //   5. the Mantle primitive and its dependent writes, in the entry point's one transaction.
 //   6. complete: the answer, stored with the operation and returned.
-// A batch runs each row as its own operation in its own transaction and names each failure (batch). The period check is
-// the posting's: an entry point that posts value runs in the transaction of post#AcctgTrans's guard (PostingGuard.js).
+// A batch runs each row as its own operation in its own transaction and names each failure (batch). The period: an entry
+// point that posts value (an adjustment, a scrap, a repack) refuses a closed fiscal period of its effective date before
+// it posts (period, PostingGuard.js's fiscal periods), as post#AcctgTrans would otherwise send the posting to the error
+// journal; a move posts no value and has none.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, denied, call, hash, access} = lib
@@ -70,8 +72,10 @@ function stored(op) {
         denied("OPERATION_KEY_CONFLICT", "Operation " + op.clientKey + " was already used for another request")
     return old
 }
+// The permission, or one of a list of permissions.
 function requirePermission(permission) {
-    if (!access.has(permission)) denied("PERMISSION_DENIED", permission + " is required")
+    const any = Array.isArray(permission) ? permission : [permission]
+    if (!any.some(access.has)) denied("PERMISSION_DENIED", any.join(" or ") + " is required")
 }
 // The permission, then the operation: {op, previous}, previous the first answer when this is a retry.
 function begin(p, operationType, permission, requestFields) {
@@ -98,10 +102,10 @@ function facility(userScope, facilityId) {
         denied("RECORD_UNAVAILABLE", "Facility " + (facilityId || "") + " is not available")
     return row
 }
-// The asset, locked: stock in a facility of the user's organizations, with on hand; quantity (when given) above zero and
-// at most the on-hand quantity.
-function stock(userScope, assetId, quantity) {
-    const asset = blank(assetId) ? null : find(ASSET, {assetId}).forUpdate(true).one()
+// The asset, locked (a preview reads it with lock false): stock in a facility of the user's organizations, with on hand;
+// quantity (when given) above zero and at most the on-hand quantity.
+function stock(userScope, assetId, quantity, lock = true) {
+    const asset = blank(assetId) ? null : find(ASSET, {assetId}).forUpdate(lock).one()
     const home = asset?.facilityId ? one(FACILITY, {facilityId: asset.facilityId}) : null
     if (!asset || !home || !facilityScope.owns(userScope, home.ownerPartyId))
         denied("RECORD_UNAVAILABLE", "Asset " + (assetId || "") + " is not available")
@@ -192,6 +196,23 @@ function expiryWarnings(assetId) {
     return []
 }
 
+// The fiscal period of the effective date, for each organization that posts: refused when a period of the organization,
+// or of one it rolls up to, holds the day and is closed (PERIOD_CLOSED). The periods are read for update, so a close
+// waits for the posting. Accounting's own check (PostingGuard.js) runs again inside post#AcctgTrans.
+function period(organizationPartyIds, effectiveDate) {
+    const guard = ec.resource.script("component://mr-mantle/service/mantle/ledger/PostingGuard.js")
+    const date = effectiveDate || ec.user.nowTimestamp
+    for (const organizationPartyId of [...new Set(organizationPartyIds.filter(Boolean))].sort()) {
+        const closed = guard.fiscal(organizationPartyId, date, true).findings.find(row => row.code === "PERIOD_CLOSED")
+        if (closed)
+            denied(
+                "PERIOD_CLOSED",
+                "The fiscal period of " + ec.l10n.format(date, "yyyy-MM-dd") + " is closed for " + organizationPartyId
+            )
+    }
+    return date
+}
+
 // ===== 5. the posting and its dependent writes =====
 // A reservation carried onto stock that is not available (a partial move into a held location carries the quantity
 // beyond the source's ATP) is checked again, so the order is re-reserved on available stock (F38). A whole asset that
@@ -255,6 +276,7 @@ function batch(p, rows, rowKey, serviceName, parametersOf) {
     destination,
     keepHeld,
     expiryWarnings,
+    period,
     recheckReservations,
     complete,
     reasonOf,

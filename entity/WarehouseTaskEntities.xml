@@ -23,8 +23,14 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="enteredQuantity" type="number-decimal"/>
         <field name="enteredQuantityUomId" type="id"/>
         <field name="appliedConversionFactor" type="number-decimal"/>
+        <!-- CX-PRODUCTION (impl-warehouse P6, F7): the issuance a receipt was made from, as a repack's receipt of its
+            source's issue (repack#Asset), so the ledger and Traceability follow the conversion -->
+        <field name="sourceAssetIssuanceId" type="id"/>
         <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
             <key-map field-name="enteredQuantityUomId"/></relationship>
+        <relationship type="one" title="Source" related="mantle.product.issuance.AssetIssuance"
+                short-alias="sourceAssetIssuance">
+            <key-map field-name="sourceAssetIssuanceId" related="assetIssuanceId"/></relationship>
     </extend-entity>
     <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
         <field name="enteredQuantity" type="number-decimal"/>
@@ -39,5 +45,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="appliedConversionFactor" type="number-decimal"/>
         <relationship type="one" title="EnteredQuantity" related="moqui.basic.Uom" short-alias="enteredQuantityUom">
             <key-map field-name="enteredQuantityUomId"/></relationship>
+    </extend-entity>
+    <!-- WH-SCRAP (impl-warehouse P6): a PhysicalInventory scrap#Asset made, one per scrap operation (F5), which Counts,
+        CountVariance and the count record kind leave out -->
+    <extend-entity entity-name="PhysicalInventory" package="mantle.product.asset">
+        <field name="scrapIndicator" type="text-indicator"/>
     </extend-entity>
 </entities>
