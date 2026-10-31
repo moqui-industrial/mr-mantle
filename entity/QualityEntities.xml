@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Shared quality inspection (design-crosscut §3.19 CX-QUALITY, design-warehouse WH-QUALITY; impl-warehouse P8): templates
+    whose characteristics are effective-dated rows (a published item is never edited in place: a change ends it and starts
+    a new row, its key fields audit-logged), source-linked inspections that read their template's items as of their
+    creation, readings, the dispositions that move held stock (a posting each, with its own identity) and the inspection's
+    files. Written only through mantle.product.QualityServices; the seed data is in data/QualityData.xml. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="InspectionTemplate" package="mantle.product.quality">
+        <description>Reusable checks of an organization: the context they apply to (receipt, return, outgoing, production),
+            the applicability (a product, a category, a facility; none for any), the sample policy and the state (draft,
+            published, retired). The characteristics are its InspectionTemplateItem rows.</description>
+        <field name="inspectionTemplateId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="templateName" type="text-medium" enable-audit-log="true"/>
+        <field name="description" type="text-long"/>
+        <field name="inspectionContextEnumId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="samplePolicyEnumId" type="id" enable-audit-log="true"/>
+        <field name="sampleSize" type="number-decimal" enable-audit-log="true"/>
+        <field name="samplePercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="publishedDate" type="date-time" enable-audit-log="true"/>
+        <field name="retiredDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="InspectionContext" related="moqui.basic.Enumeration">
+            <key-map field-name="inspectionContextEnumId"/></relationship>
+        <relationship type="one" title="InspectionSamplePolicy" related="moqui.basic.Enumeration">
+            <key-map field-name="samplePolicyEnumId"/></relationship>
+        <relationship type="one" title="InspectionTemplate" related="moqui.basic.StatusItem"/>
+        <relationship type="one-nofk" related="mantle.product.Product"/>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="many" related="mantle.product.quality.InspectionTemplateItem" short-alias="items">
+            <key-map field-name="inspectionTemplateId"/></relationship>
+        <index name="INSP_TMPL_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+    </entity>
+    <entity entity-name="InspectionTemplateItem" package="mantle.product.quality">
+        <description>A characteristic of a template, effective-dated (the shared rule, impl-drawers-commons §4): a draft
+            item has no fromDate; publishing stamps it; a change to a published item ends it (thruDate) and starts a new row
+            (previousItemId, the same characteristicId), never editing it in place. An inspection reads the items in effect at
+            its creation (templateAsOfDate).</description>
+        <field name="inspectionTemplateItemId" type="id" is-pk="true"/>
+        <field name="inspectionTemplateId" type="id"/>
+        <field name="characteristicId" type="id"><description>The id of the characteristic's first row, the same on each
+            of its revisions.</description></field>
+        <field name="previousItemId" type="id"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="characteristicName" type="text-medium" enable-audit-log="true"/>
+        <field name="description" type="text-long"/>
+        <field name="readingTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="uomId" type="id" enable-audit-log="true"/>
+        <field name="lowerLimit" type="number-decimal" enable-audit-log="true"/>
+        <field name="upperLimit" type="number-decimal" enable-audit-log="true"/>
+        <field name="targetValue" type="number-decimal" enable-audit-log="true"/>
+        <field name="mandatory" type="text-indicator" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.quality.InspectionTemplate"/>
+        <relationship type="one" title="InspectionReadingType" related="moqui.basic.Enumeration">
+            <key-map field-name="readingTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="moqui.basic.Uom"/>
+        <index name="INSP_TMPL_ITEM_TMPL"><index-field name="inspectionTemplateId"/></index>
+    </entity>
+    <entity entity-name="QualityInspection" package="mantle.product.quality">
+        <description>One inspection of a source (a receipt, a return item, an outgoing shipment, a production run, or a stock
+            asset): its product, lot and the asset held for it, the quantity and sample, its template and the time it reads
+            the template's items as of, the inspector, the result (accepted and rejected), verification and dispositions.
+            Draft, Submitted, Verified, Disposed (and Cancelled); the result is not a status. heldQuantity is what is still
+            quarantined for it: the quantity, less what Release, Use as is and Scrap took (the other dispositions keep it
+            held until their own process moves it).</description>
+        <field name="qualityInspectionId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="inspectionContextEnumId" type="id"/>
+        <field name="sourceTypeEnumId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="returnId" type="id"/>
+        <field name="returnItemSeqId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="lotId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="heldQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="disposedQuantity" type="number-decimal"/>
+        <field name="sampleSize" type="number-decimal" enable-audit-log="true"/>
+        <field name="inspectionTemplateId" type="id" enable-audit-log="true"/>
+        <field name="templateAsOfDate" type="date-time"><description>The inspection's creation: its template's items are
+            read as of this time.</description></field>
+        <field name="inspectorPartyId" type="id" enable-audit-log="true"/>
+        <field name="dueDate" type="date-time" enable-audit-log="true"/>
+        <field name="demandOrderId" type="id"><description>The customer demand the held stock is pegged to (a run's
+            OrderItemWorkEffort, or given): Release reserves it to this order item first.</description></field>
+        <field name="demandOrderItemSeqId" type="id"/>
+        <field name="resultEnumId" type="id" enable-audit-log="true"/>
+        <field name="quantityAccepted" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityRejected" type="number-decimal" enable-audit-log="true"/>
+        <field name="resultReason" type="text-long" enable-audit-log="true"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="submittedByUserId" type="id"/>
+        <field name="verifiedDate" type="date-time"/>
+        <field name="verifiedByUserId" type="id"/>
+        <field name="verificationComments" type="text-long" enable-audit-log="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="comments" type="text-long"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" title="QualityInspection" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="InspectionContext" related="moqui.basic.Enumeration">
+            <key-map field-name="inspectionContextEnumId"/></relationship>
+        <relationship type="one" title="InspectionSourceType" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceTypeEnumId"/></relationship>
+        <relationship type="one" title="InspectionResult" related="moqui.basic.Enumeration">
+            <key-map field-name="resultEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.shipment.Shipment"/>
+        <relationship type="one-nofk" related="mantle.product.receipt.AssetReceipt"/>
+        <relationship type="one-nofk" related="mantle.product.Product"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Lot"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset"/>
+        <relationship type="one-nofk" related="mantle.product.quality.InspectionTemplate"/>
+        <relationship type="one-nofk" title="Inspector" related="mantle.party.Party">
+            <key-map field-name="inspectorPartyId" related="partyId"/></relationship>
+        <index name="QUAL_INSP_RECEIPT"><index-field name="assetReceiptId"/></index>
+        <index name="QUAL_INSP_ORDER"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+        <index name="QUAL_INSP_FACILITY"><index-field name="facilityId"/><index-field name="statusId"/></index>
+        <index name="QUAL_INSP_INSPECTOR"><index-field name="inspectorPartyId"/></index>
+        <index name="QUAL_INSP_ASSET"><index-field name="assetId"/></index>
+    </entity>
+    <entity entity-name="InspectionReading" package="mantle.product.quality">
+        <description>The evidence of one characteristic (a template item in effect at the inspection's creation) on one
+            sample: a measured value with its pass computed from the item's limits, a pass or fail, or a text. Saved while the
+            inspection is a draft; its value fields are audit-logged, so a verified inspection's evidence is never silently
+            changed.</description>
+        <field name="inspectionReadingId" type="id" is-pk="true"/>
+        <field name="qualityInspectionId" type="id"/>
+        <field name="inspectionTemplateItemId" type="id"/>
+        <field name="sampleNumber" type="number-integer"/>
+        <field name="numericValue" type="number-decimal" enable-audit-log="true"/>
+        <field name="passIndicator" type="text-indicator" enable-audit-log="true"/>
+        <field name="textValue" type="text-medium" enable-audit-log="true"/>
+        <field name="uomId" type="id"/>
+        <field name="comments" type="text-long" enable-audit-log="true"/>
+        <field name="readDate" type="date-time"/>
+        <field name="readByUserId" type="id"/>
+        <relationship type="one" related="mantle.product.quality.QualityInspection"/>
+        <relationship type="one" related="mantle.product.quality.InspectionTemplateItem"/>
+        <index name="INSP_READING_INSP"><index-field name="qualityInspectionId"/></index>
+    </entity>
+    <entity entity-name="QualityInspectionDisposition" package="mantle.product.quality">
+        <description>A disposition of part of an inspection's quantity: a posting with an identity of its own (the shared
+            rule keeps such facts as records): the decision (InspectionDisposition), the quantity, the stock it took and the
+            asset that holds the result, the location, the reservation Release made first and the scrap's PhysicalInventory.
+            Written once by dispose#Inspection, never changed except to record the scrap it called.</description>
+        <field name="qualityInspectionId" type="id" is-pk="true"/>
+        <field name="dispositionSeqId" type="id" is-pk="true"/>
+        <field name="dispositionEnumId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="assetId" type="id"/>
+        <field name="resultAssetId" type="id"/>
+        <field name="fromLocationSeqId" type="id"/>
+        <field name="toLocationSeqId" type="id"/>
+        <field name="statusId" type="id"><description>The stock's status after the disposition.</description></field>
+        <field name="reservedOrderId" type="id"/>
+        <field name="reservedOrderItemSeqId" type="id"/>
+        <field name="varianceReasonEnumId" type="id"/>
+        <field name="physicalInventoryId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="disposedDate" type="date-time"/>
+        <field name="disposedByUserId" type="id"/>
+        <relationship type="one" related="mantle.product.quality.QualityInspection"/>
+        <relationship type="one" title="InspectionDisposition" related="moqui.basic.Enumeration">
+            <key-map field-name="dispositionEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset"/>
+        <relationship type="one-nofk" title="Result" related="mantle.product.asset.Asset">
+            <key-map field-name="resultAssetId" related="assetId"/></relationship>
+        <index name="QUAL_INSP_DISP_RESULT"><index-field name="resultAssetId"/></index>
+    </entity>
+    <entity entity-name="QualityInspectionContent" package="mantle.product.quality" cache="never">
+        <description>A file of an inspection: a photo, a measurement printout or a certificate (the record files of
+            get#RecordLinkInfo). Written through mantle.product.QualityServices.create#InspectionContent.</description>
+        <field name="qualityInspectionContentId" type="id" is-pk="true"/>
+        <field name="qualityInspectionId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.product.quality.QualityInspection"/>
+        <relationship type="one" title="QualityInspectionContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+    </entity>
+
+    <!-- the tracking policy's inspection flag (design-warehouse §4 Receive): a receipt of the product posts into quarantine
+        and creates its inspection (WarehousePolicy.js's tracking family) -->
+    <extend-entity entity-name="WarehousePolicy" package="mantle.facility">
+        <field name="inspectionRequired" type="text-indicator" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

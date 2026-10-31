@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Shared quality inspection (design-crosscut §3.19 CX-QUALITY; impl-warehouse P8): the template and inspection status
+    flows, the one disposition vocabulary, the contexts, sources, reading types, sample policies, results and file types,
+    and the inspection decision notification (mantle.product.QualityServices). -->
+<entity-facade-xml type="seed">
+    <!-- a template: drafted, published (its items stamped), retired -->
+    <moqui.basic.StatusType statusTypeId="InspectionTemplate" description="Inspection template"/>
+    <moqui.basic.StatusItem statusId="QtDraft" statusTypeId="InspectionTemplate" description="Draft" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="QtPublished" statusTypeId="InspectionTemplate" description="Published"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="QtRetired" statusTypeId="InspectionTemplate" description="Retired" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtDraft" toStatusId="QtPublished"
+            transitionName="Publish"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtPublished" toStatusId="QtRetired"
+            transitionName="Retire"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QtDraft" toStatusId="QtRetired"
+            transitionName="Retire"/>
+
+    <!-- an inspection: draft (readings), submitted (result), verified, disposed; a failed verification goes back to draft
+        with its readings kept; a draft or submitted inspection may be cancelled -->
+    <moqui.basic.StatusType statusTypeId="QualityInspection" description="Quality inspection"/>
+    <moqui.basic.StatusItem statusId="QiDraft" statusTypeId="QualityInspection" description="Draft" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="QiSubmitted" statusTypeId="QualityInspection" description="Submitted"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="QiVerified" statusTypeId="QualityInspection" description="Verified" sequenceNum="3"/>
+    <moqui.basic.StatusItem statusId="QiDisposed" statusTypeId="QualityInspection" description="Disposed" sequenceNum="4"/>
+    <moqui.basic.StatusItem statusId="QiCancelled" statusTypeId="QualityInspection" description="Cancelled"
+            sequenceNum="5"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiDraft" toStatusId="QiSubmitted"
+            transitionName="Submit"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiVerified"
+            transitionName="Verify"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiDraft"
+            transitionName="Return to inspector"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiVerified" toStatusId="QiDisposed"
+            transitionName="Dispose"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiDraft" toStatusId="QiCancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="QiSubmitted" toStatusId="QiCancelled"
+            transitionName="Cancel"/>
+
+    <!-- the one disposition vocabulary (CX-QUALITY) -->
+    <moqui.basic.EnumerationType enumTypeId="InspectionDisposition" description="Inspection disposition"/>
+    <moqui.basic.Enumeration enumId="QdRelease" enumTypeId="InspectionDisposition" description="Release" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QdQuarantine" enumTypeId="InspectionDisposition" description="Quarantine"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QdRework" enumTypeId="InspectionDisposition" description="Rework or repair"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QdReturnCustomer" enumTypeId="InspectionDisposition" description="Return to customer"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="QdReturnSupplier" enumTypeId="InspectionDisposition" description="Return to supplier"
+            sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="QdScrap" enumTypeId="InspectionDisposition" description="Scrap" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="QdUseAsIs" enumTypeId="InspectionDisposition" description="Use as is" sequenceNum="7"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionContext" description="Inspection context"/>
+    <moqui.basic.Enumeration enumId="QicReceipt" enumTypeId="InspectionContext" description="Incoming receipt"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QicReturn" enumTypeId="InspectionContext" description="Customer return"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QicOutgoing" enumTypeId="InspectionContext" description="Outgoing shipment"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QicProduction" enumTypeId="InspectionContext" description="Production"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSourceType" description="Inspection source"/>
+    <moqui.basic.Enumeration enumId="QisReceipt" enumTypeId="InspectionSourceType" description="Receipt" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QisReturn" enumTypeId="InspectionSourceType" description="Return item" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QisShipment" enumTypeId="InspectionSourceType" description="Outgoing shipment"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="QisWorkEffort" enumTypeId="InspectionSourceType" description="Production run"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="QisAsset" enumTypeId="InspectionSourceType" description="Stock" sequenceNum="5"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionReadingType" description="Inspection reading type"/>
+    <moqui.basic.Enumeration enumId="QrtNumeric" enumTypeId="InspectionReadingType" description="Measured value"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QrtPassFail" enumTypeId="InspectionReadingType" description="Pass or fail"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QrtText" enumTypeId="InspectionReadingType" description="Observation"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSamplePolicy" description="Inspection sample policy"/>
+    <moqui.basic.Enumeration enumId="QspAll" enumTypeId="InspectionSamplePolicy" description="Every unit" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QspFixed" enumTypeId="InspectionSamplePolicy" description="A fixed number of units"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QspPercent" enumTypeId="InspectionSamplePolicy" description="A percentage of units"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionResult" description="Inspection result"/>
+    <moqui.basic.Enumeration enumId="QirAccepted" enumTypeId="InspectionResult" description="Accepted" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QirPartial" enumTypeId="InspectionResult" description="Partly accepted"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QirRejected" enumTypeId="InspectionResult" description="Rejected" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="QualityInspectionContentType" description="Inspection file type"/>
+    <moqui.basic.Enumeration enumId="QicntEvidence" enumTypeId="QualityInspectionContentType" description="Evidence"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QicntPhoto" enumTypeId="QualityInspectionContentType" description="Photo"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="QicntCertificate" enumTypeId="QualityInspectionContentType" description="Certificate"
+            sequenceNum="3"/>
+
+    <!-- Notification: an inspection's decision. On submit, to the organization's QUALITY_VERIFY holders (a result to
+        verify); on verification and on each disposition, to its inspector. No link template: the inspection's screen
+        belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="QualityInspectionDecision" description="Inspection decision"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Inspection ${qualityInspectionId}: ${decision}"/>
+</entity-facade-xml>

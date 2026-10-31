@@ -18,7 +18,7 @@ const call = (n, p = {}) => {
 const map = r => (r?.getMap ? r.getMap() : Object.assign({}, r || {})),
     ms = v => (v == null || v === "" ? null : Number.isFinite(Number(String(v))) ? Number(String(v)) : Date.parse(String(v))),
     iso = v => new Date(ms(v)).toISOString()
-const flags = ["lotRequired", "serialRequired", "expiryBlock"],
+const flags = ["lotRequired", "serialRequired", "expiryBlock", "inspectionRequired"],
     days = ["shelfLifeDays", "nearExpiryDays", "minimumRemainingShelfLifeDays"],
     trackingFields = [...flags, ...days, "serialPattern", "lotPattern"]
 // The default locations of the operation policy, each with the location type it must be (design StockPolicies' steps).
@@ -47,6 +47,7 @@ const families = {
             lotRequired: "N",
             serialRequired: "N",
             expiryBlock: "N",
+            inspectionRequired: "N",
             shelfLifeDays: null,
             nearExpiryDays: 0,
             minimumRemainingShelfLifeDays: 0,

@@ -21,9 +21,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Read only: a bill's lines and their sources, checked against the organization's match policy. With an
             applied match, its allocations checked against the sources as they are now; else the allocations given, or
             the proposal: the bill line's existing billing links, else the approved order lines of the product from the
-            supplier (orderId narrows them) on the policy's basis, the accepted receipts less what is in quarantine
-            (held quantity; the inspection check itself is unavailable until there is an inspection record) and what
-            other bills billed. Each source row has its snapshot, the quantity left to bill and its exceptions; a row
+            supplier (orderId narrows them) on the policy's basis, the accepted receipts less what is held for inspection
+            (mantle.product.QualityServices.get#SourceInspectionStatus; inspectionCheck available) and what other bills
+            billed. Each source row has its snapshot, the quantity left to bill and its exceptions; a row
             beyond what its source allows names the refusal apply would give. Needs INVOICE_MATCH, PAYABLE_VIEW or
             ACCOUNTING_VIEW in the organization; refuses a customer invoice.</description>
         <in-parameters>

@@ -136,27 +136,21 @@ function orderLine(scope, orderId, orderItemSeqId) {
         denied("SOURCE_INVALID", "Order " + orderId + " is in " + header.currencyUomId + ", the bill in " + scope.currencyUomId)
     return item
 }
-// The receipts of an order line, with the part of each still in quarantine (held: open inspection, D21).
+// The receipts of an order line, with the part of each still held for inspection (D21): CX-QUALITY's
+// get#SourceInspectionStatus (impl-warehouse P8, F31), which replaced the quarantine reading used before inspections existed.
 function receiptsOf(orderId, orderItemSeqId) {
     const receipts = rows("mantle.product.receipt.AssetReceipt", {orderId, orderItemSeqId})
-    const assetIds = [...new Set(receipts.map(row => row.assetId).filter(Boolean))]
-    const quarantined = new Set(
-        assetIds.length
-            ? Array.from(
-                  find("mantle.product.asset.Asset")
-                      .condition("assetId", "in", assetIds)
-                      .condition("statusId", "AstQuarantine")
-                      .list()
-              ).map(row => row.assetId)
-            : []
-    )
+    const status = receipts.length
+        ? call("mantle.product.QualityServices.get#SourceInspectionStatus", {orderId, orderItemSeqId})
+        : {receiptRows: []}
+    const held = Object.fromEntries(Array.from(status.receiptRows || []).map(row => [row.assetReceiptId, row.heldQuantity]))
     return receipts.map(row => ({
         record: row,
         assetReceiptId: row.assetReceiptId,
         shipmentId: row.shipmentId,
         receivedDate: row.receivedDate,
         accepted: dec(row.quantityAccepted),
-        held: quarantined.has(row.assetId) ? dec(row.quantityAccepted) : zero()
+        held: held[row.assetReceiptId] != null ? dec(held[row.assetReceiptId]) : zero()
     }))
 }
 // What other bills have billed of an order line, or of one receipt (billing links of other invoices; a cancelled bill's
@@ -627,7 +621,7 @@ function evaluate(p) {
         resultEnumId: evaluated.resultEnumId,
         resultName: resultNames[evaluated.resultEnumId],
         resultText: evaluated.resultText,
-        inspectionCheck: "unavailable",
+        inspectionCheck: "available",
         currentMatch,
         openHoldCount: open.length,
         matchCapabilities: {
