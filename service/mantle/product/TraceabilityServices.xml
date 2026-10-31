@@ -39,6 +39,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"><description>Exclusive</description></parameter>
             <parameter name="pageIndex" type="Integer"/>
             <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"><description>Every row on one page, up to 5000 (an
+                export)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="movementList" type="List"/>
@@ -70,8 +72,9 @@ along with this software (see the LICENSE.md file). If not, see
             bounded by maxDepth (1 to 10, default 5) and maxNodes (default 200, at most 1000) and cycle-safe: a node is
             followed once in each direction, and an edge to a node seen before is marked joined. An asset with no receipt and
             no split into it shows Unknown provenance with its first known movement; a receipt or issuance naming no document
-            an Unknown end. Stock outside the user's organizations or the caller's facilities is a restricted node, not
-            followed and not named. Answers pages of nodes and edges and a tree (rows keyed by their path, a node reached
+            an Unknown end. Stock outside the user's organizations or the caller's facilities is one restricted node, not
+            followed and not named; an edge to it carries nothing of that stock (no product, quantity, date, cost or reason),
+            and a visible node's edges to it are one. Each neighbor query reads at most the nodes still allowed. Answers pages of nodes and edges and a tree (rows keyed by their path, a node reached
             again shown without its children). Cost (acquire and unit cost) only with ACCOUNTING_VIEW. Refuses a root the user
             may not see (RECORD_UNAVAILABLE).</description>
         <in-parameters>
@@ -84,6 +87,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="facilityIds" type="List"/>
             <parameter name="pageIndex" type="Integer"/>
             <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"><description>Every node and edge on one page, up to 5000 (an
+                export)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="rootKeys" type="List"/>

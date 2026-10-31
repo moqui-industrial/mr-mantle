@@ -169,6 +169,7 @@ spec({
             ["TRC_SHIP_X", "ShpTpTransfer"]
         ])
             call("create#mantle.shipment.Shipment", {shipmentId, shipmentTypeEnumId, statusId: "ShipDelivered"})
+        call("create#mantle.work.effort.WorkEffort", {workEffortId: "TRC_WE", workEffortTypeEnumId: "WetTask"})
         call("create#mantle.product.asset.PhysicalInventory", {
             physicalInventoryId: "TRC_PI",
             facilityId: wh,
@@ -307,6 +308,53 @@ feature("an asset with no receipt shows Unknown provenance with its first known 
         finance.edgeList.some(row => row.event === "revaluation" && row.unitCost === 6 && row.previousUnitCost === 5)
     }
 })
+feature("a finance user's trace carries nothing of the other organization's stock: no product, quantity, date or cost", {
+    when() {
+        return as("trc.finance", () => call(T + "get#Traceability", {rootType: "lot", rootId: lotId, pageSize: 200}))
+    },
+    then(trace) {
+        trace.costIncluded == true
+        trace.restrictedCount == 1
+        trace.nodeList.filter(row => row.kind === "restricted").length == 1
+        trace.edgeList.filter(row => row.event === "restricted").length == 1
+        trace.edgeList
+            .filter(row => row.event === "restricted")
+            .every(row => Object.keys(row).sort().join(",") === "edgeKey,event,eventText,fromKey,joined,toKey")
+        // the transfer's own issuance (ours) keeps its cost; nothing names TRC_O, its receipt or its cost
+        trace.edgeList.some(row => row.eventId === "TRC_I3" && row.unitCost === 6)
+        !JSON.stringify(trace).includes('TRC_O"')
+        !JSON.stringify(trace).includes("TRC_R3")
+    }
+})
+feature("a shipment root reaches the receipts that also name a work effort", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        try {
+            asset("TRC_SUB", wh)
+            call("create#mantle.product.receipt.AssetReceipt", {
+                assetReceiptId: "TRC_R_SUB",
+                assetId: "TRC_SUB",
+                productId,
+                shipmentId: "TRC_SHIP_IN",
+                workEffortId: "TRC_WE",
+                quantityAccepted: 1,
+                receivedDate: day(13)
+            })
+            detail("TRC_R_SUB", "TRC_SUB", 1, day(13), {assetReceiptId: "TRC_R_SUB", shipmentId: "TRC_SHIP_IN"})
+        } finally {
+            ec.artifactExecution.enableAuthz()
+        }
+        return as("trc.reader", () => ({
+            shipment: call(T + "get#Traceability", {rootType: "shipment", rootId: "TRC_SHIP_IN", direction: "downstream"}),
+            run: call(T + "get#Traceability", {rootType: "workEffort", rootId: "TRC_WE", direction: "downstream"})
+        }))
+    },
+    then({shipment, run}) {
+        shipment.edgeList.some(row => row.eventId === "TRC_R_SUB" && row.fromKey === "shipment:TRC_SHIP_IN")
+        shipment.edgeList.some(row => row.eventId === "TRC_R1")
+        run.edgeList.some(row => row.eventId === "TRC_R_SUB" && row.fromKey === "workEffort:TRC_WE")
+    }
+})
 feature("a trace is cycle-safe and bounded", {
     when() {
         return as("trc.reader", () => ({
@@ -346,6 +394,15 @@ feature("an asset's metadata changes, audited, with stock adjust authority only;
                     Object.assign({}, parameters, {expectedLastUpdatedStamp: before.lastUpdatedStamp})
                 ).error
         )
+        // only the name given: the comments stay; an empty name clears it
+        const nameOnly = as(
+            "trc.clerk",
+            () => attempt(A + "update#AssetMetadata", {assetId: "TRC_U", assetName: "Bench unit"}).error
+        )
+        const kept = one("mantle.product.asset.Asset", {assetId: "TRC_U"})
+        as("trc.clerk", () => attempt(A + "update#AssetMetadata", {assetId: "TRC_U", assetName: ""}))
+        const cleared = one("mantle.product.asset.Asset", {assetId: "TRC_U"})
+        as("trc.clerk", () => attempt(A + "update#AssetMetadata", {assetId: "TRC_U", assetName: "Returned demo unit"}))
         const after = one("mantle.product.asset.Asset", {assetId: "TRC_U"})
         const audit = Array.from(
             find("moqui.entity.EntityAuditLog", {
@@ -353,9 +410,14 @@ feature("an asset's metadata changes, audited, with stock adjust authority only;
                 pkPrimaryValue: "TRC_U"
             }).list()
         ).map(row => row.changedFieldName)
-        return {reader, outsider, stale, clerk, after, audit}
+        return {reader, outsider, stale, clerk, after, audit, nameOnly, kept, cleared}
     },
-    then({reader, outsider, stale, clerk, after, audit}) {
+    then({reader, outsider, stale, clerk, after, audit, nameOnly, kept, cleared}) {
+        nameOnly == ""
+        kept.assetName == "Bench unit"
+        kept.comments == "Box opened"
+        cleared.assetName == null
+        cleared.comments == "Box opened"
         reader.includes("STOCK_ADJUST")
         outsider.includes("RECORD_UNAVAILABLE")
         stale.includes("RECORD_CHANGED")

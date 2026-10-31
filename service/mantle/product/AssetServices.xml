@@ -99,13 +99,13 @@ along with this software (see the LICENSE.md file). If not, see
                 quantityByStatus = byStatus
                 // in transit: the owner's shipped transfers to this facility, issued less received
                 transitQuantity = toDecimal(0)
-                const transferIds = Array.from(ec.entity.find('mantle.shipment.ShipmentRouteSegment')
-                        .condition('destinationFacilityId', facilityId).selectField('shipmentId').list())
-                        .map(row => row.shipmentId)
-                const shipped = transferIds.length ? Array.from(ec.entity.find('mantle.shipment.Shipment')
-                        .condition('shipmentId', 'in', [...new Set(transferIds)])
+                // the owner's shipped transfers first (a small set), then which of them end at this facility
+                const shippedIds = Array.from(ec.entity.find('mantle.shipment.Shipment')
                         .condition('shipmentTypeEnumId', 'ShpTpTransfer').condition('statusId', 'ShipShipped')
-                        .condition('toPartyId', ownerPartyId).list()).map(row => row.shipmentId) : []
+                        .condition('toPartyId', ownerPartyId).selectField('shipmentId').list()).map(row => row.shipmentId)
+                const shipped = shippedIds.length ? [...new Set(Array.from(ec.entity.find('mantle.shipment.ShipmentRouteSegment')
+                        .condition('shipmentId', 'in', shippedIds).condition('destinationFacilityId', facilityId)
+                        .selectField('shipmentId').list()).map(row => row.shipmentId))] : []
                 if (shipped.length) {
                     for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance')
                             .condition('shipmentId', 'in', shipped).condition('productId', productId).list()) {

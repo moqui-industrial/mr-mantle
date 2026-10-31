@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="update" noun="AssetMetadata" allow-remote="false">
         <description>Change an asset's descriptive metadata, its name and comments (both audit-logged), through
-            mantle.product.AssetServices.update#Asset with only those fields: never its quantity, location, status, owner,
+            mantle.product.AssetServices.update#Asset with only those fields given (an empty one clears it): never its quantity, location, status, owner,
             lot, serial number or cost. Requires STOCK_ADJUST (PERMISSION_DENIED) and an asset whose owner or facility owner
             is one of the user's organizations (RECORD_UNAVAILABLE); with expectedLastUpdatedStamp, refuses an asset changed
             since it was read (RECORD_CHANGED).</description>
@@ -42,8 +42,14 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="changed">
                 <return error="true" message="RECORD_CHANGED: Asset ${assetId} was changed by someone else; open it again"/>
             </if>
-            <service-call name="mantle.product.AssetServices.update#Asset" disable-authz="true"
-                    in-map="{assetId:assetId, assetName:assetName || null, comments:comments || null}"/>
+            <!-- only the fields given: one left out keeps its value, an empty one is cleared -->
+            <script><![CDATA[
+                fields = {assetId: assetId}
+                for (const name of ['assetName', 'comments'])
+                    if (Object.prototype.hasOwnProperty.call(context, name) && context[name] !== undefined)
+                        fields[name] = context[name] || null
+            ]]></script>
+            <service-call name="mantle.product.AssetServices.update#Asset" disable-authz="true" in-map="fields"/>
         </actions>
     </service>
     <service verb="create" noun="Lot" allow-remote="false">

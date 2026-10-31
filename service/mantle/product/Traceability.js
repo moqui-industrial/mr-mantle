@@ -29,8 +29,13 @@ function names(entity, field, nameField, values) {
     return new Map(rowsIn(entity, field, values).map(row => [row[field], row[nameField] || row[field]]))
 }
 // One page of a list built in memory, with the fields a form-list reads (prefixed by field).
+// A request with pageNoLimit (an export) gets every row on one page, up to noLimitCap.
+const noLimitCap = 5000
+const noLimit = p => p.pageNoLimit === true || p.pageNoLimit === "true"
 function pageOf(list, p, field) {
-    const pageSize = Math.min(200, Math.max(1, Number(p.pageSize) || 50))
+    const pageSize = noLimit(p)
+        ? Math.max(1, Math.min(list.length, noLimitCap))
+        : Math.min(200, Math.max(1, Number(p.pageSize) || 50))
     const pageMaxIndex = Math.max(0, Math.ceil(list.length / pageSize) - 1)
     const pageIndex = Math.min(pageMaxIndex, Math.max(0, Number(p.pageIndex) || 0))
     return {
@@ -276,7 +281,7 @@ function movements(p) {
     }
     const count = movementQuery(userScope, p).count()
     const ordered = movementQuery(userScope, p).orderBy("-effectiveDate").orderBy("-assetDetailId")
-    const paged = lib.page(ordered, p, "movementList", count)
+    const paged = lib.page(ordered, p, "movementList", count, {noLimitCap})
     return Object.assign(
         {
             movementList: describeMovements(paged.rows, userScope),
@@ -356,12 +361,23 @@ function traceability(p) {
         if (!touched.some(assetId => assetVisible(assetOf(assetId)))) unavailable()
         rootKeys = [rootType + ":" + p.rootId]
     } else throw new Error("Unknown trace root type " + rootType)
+    // a receipt's or issuance's document, the root's first when the record names it (a subcontract receipt names its work
+    // effort and its shipment), else in documentKey's order
+    const docKey = record => {
+        for (const rootKey of rootKeys) {
+            const [kind, ...rest] = rootKey.split(":")
+            if (documentKinds[kind] && record[documentKinds[kind].field] === rest.join(":")) return rootKey
+        }
+        return documentKey(record)
+    }
 
     const nodes = new Map()
     const edges = new Map()
-    let restrictedCount = 0
-    const restrictedKeys = new Map()
-    // a node by its key, with its label; stock outside the scope is a restricted node that is not followed
+    let truncated = false
+    // stock outside the scope is one restricted node, which names nothing and is not followed, however many assets it stands for
+    const restrictedNode = {nodeKey: "restricted", kind: "restricted", label: "Stock outside your facilities"}
+    const nodeCount = () => new Set(nodes.values()).size
+    // a node by its key, with its label
     function node(key) {
         if (nodes.has(key)) return nodes.get(key)
         const [kind, ...rest] = key.split(":")
@@ -369,10 +385,8 @@ function traceability(p) {
         let out
         if (kind === "asset") {
             const asset = assetOf(id)
-            if (!assetVisible(asset)) {
-                if (!restrictedKeys.has(key)) restrictedKeys.set(key, "restricted:" + ++restrictedCount)
-                out = {nodeKey: restrictedKeys.get(key), kind: "restricted", label: "Stock outside your facilities"}
-            } else {
+            if (!assetVisible(asset)) out = restrictedNode
+            else {
                 out = {
                     nodeKey: key,
                     kind,
@@ -400,13 +414,16 @@ function traceability(p) {
         if (!edges.has(key)) edges.set(key, Object.assign({edgeKey: key, fromKey, toKey}, values))
         return edges.get(key)
     }
-    const costOf = assetId => (userScope.financeRead ? number(assetOf(assetId)?.acquireCost) : undefined)
+    // cost only for a user with financial read, and only of stock in their scope (an asset already read for its node)
+    const costOf = assetId =>
+        userScope.financeRead && assetVisible(assetOf(assetId)) ? number(assetOf(assetId).acquireCost) : undefined
     const withCost = (values, assetId) => {
-        if (userScope.financeRead) values.unitCost = costOf(assetId)
+        const cost = costOf(assetId)
+        if (cost !== undefined) values.unitCost = cost
         return values
     }
     const receiptEdge = receipt => {
-        const from = documentKey(receipt) || "unknown:receipt:" + receipt.assetReceiptId
+        const from = docKey(receipt) || "unknown:receipt:" + receipt.assetReceiptId
         const values = withCost(
             {
                 event: "receipt",
@@ -420,7 +437,7 @@ function traceability(p) {
         return edge("receipt:" + receipt.assetReceiptId, from, "asset:" + receipt.assetId, values)
     }
     const issuanceEdge = issuance => {
-        const to = documentKey(issuance) || "unknown:issuance:" + issuance.assetIssuanceId
+        const to = docKey(issuance) || "unknown:issuance:" + issuance.assetIssuanceId
         const quantity = toDecimal(issuance.quantity ?? 0).subtract(issuance.quantityCancelled ?? 0)
         const values = withCost(
             {
@@ -447,16 +464,24 @@ function traceability(p) {
             productId: detail.productId,
             quantity: number(toDecimal(detail.quantityOnHandDiff ?? 0).abs())
         }
-        if (userScope.financeRead) {
-            values.unitCost = costOf(targetId)
-            values.previousUnitCost = costOf(sourceId)
-        }
+        if (costOf(targetId) !== undefined) values.unitCost = costOf(targetId)
+        if (costOf(sourceId) !== undefined) values.previousUnitCost = costOf(sourceId)
         return edge(
             event + ":" + sourceId + ">" + targetId + ":" + lib.ms(detail.effectiveDate),
             "asset:" + sourceId,
             "asset:" + targetId,
             values
         )
+    }
+    // a neighbor query's rows, at most the nodes still allowed (and one more, to know the trace was cut)
+    function capped(query) {
+        const budget = Math.max(1, maxNodes - nodeCount())
+        const list = Array.from(query.limit(budget + 1).list())
+        if (list.length > budget) {
+            truncated = true
+            return list.slice(0, budget)
+        }
+        return list
     }
     // the edges of a node in one direction, each with the node at its other end
     function neighbors(key, dir) {
@@ -465,10 +490,10 @@ function traceability(p) {
         const found = []
         if (kind === "asset") {
             if (!assetVisible(assetOf(id))) return found
-            const splits = Array.from(find(DETAIL, {assetId: id}).condition("otherAssetId", "is-not-null", null).list())
+            const splits = capped(find(DETAIL, {assetId: id}).condition("otherAssetId", "is-not-null", null))
             const revaluations = revaluationPairs(splits.flatMap(row => [row.assetId, row.otherAssetId]))
             if (dir === "up") {
-                const receipts = Array.from(find(RECEIPT, {assetId: id}).orderBy("receivedDate").list())
+                const receipts = capped(find(RECEIPT, {assetId: id}).orderBy("receivedDate"))
                 for (const receipt of receipts) {
                     const e = receiptEdge(receipt)
                     found.push([e, e.fromKey])
@@ -491,7 +516,7 @@ function traceability(p) {
                     found.push([e, e.fromKey])
                 }
             } else {
-                for (const issuance of Array.from(find(ISSUANCE, {assetId: id}).orderBy("issuedDate").list())) {
+                for (const issuance of capped(find(ISSUANCE, {assetId: id}).orderBy("issuedDate"))) {
                     const e = issuanceEdge(issuance)
                     found.push([e, e.toKey])
                 }
@@ -499,11 +524,10 @@ function traceability(p) {
                     const e = splitEdge(detail, revaluations)
                     found.push([e, e.toKey])
                 }
-                const adjustments = find(DETAIL, {assetId: id})
-                    .condition("physicalInventoryId", "is-not-null", null)
-                    .orderBy("effectiveDate")
-                    .list()
-                for (const detail of Array.from(adjustments)) {
+                const adjustments = capped(
+                    find(DETAIL, {assetId: id}).condition("physicalInventoryId", "is-not-null", null).orderBy("effectiveDate")
+                )
+                for (const detail of adjustments) {
                     const e = edge("adjustment:" + detail.assetDetailId, key, "count:" + detail.physicalInventoryId, {
                         event: "adjustment",
                         eventId: detail.assetDetailId,
@@ -519,22 +543,14 @@ function traceability(p) {
             const field = documentKinds[kind].field
             // a document's own receipts and issuances: those whose first document is this one
             if (dir === "down") {
-                for (const receipt of Array.from(
-                    find(RECEIPT, {[field]: id})
-                        .orderBy("receivedDate")
-                        .list()
-                ))
-                    if (documentKey(receipt) === key) {
+                for (const receipt of capped(find(RECEIPT, {[field]: id}).orderBy("receivedDate")))
+                    if (docKey(receipt) === key) {
                         const e = receiptEdge(receipt)
                         found.push([e, e.toKey])
                     }
             } else {
-                for (const issuance of Array.from(
-                    find(ISSUANCE, {[field]: id})
-                        .orderBy("issuedDate")
-                        .list()
-                ))
-                    if (documentKey(issuance) === key) {
+                for (const issuance of capped(find(ISSUANCE, {[field]: id}).orderBy("issuedDate")))
+                    if (docKey(issuance) === key) {
                         const e = issuanceEdge(issuance)
                         found.push([e, e.fromKey])
                     }
@@ -545,7 +561,6 @@ function traceability(p) {
 
     // breadth first from the roots, upstream and downstream apart, to the depth and node limits; a node seen before in a
     // direction is not followed again (a cycle or a join), and the edge to it is marked
-    let truncated = false
     const visited = new Set()
     const children = new Map()
     const directions = direction === "both" ? ["up", "down"] : [direction === "upstream" ? "up" : "down"]
@@ -558,7 +573,7 @@ function traceability(p) {
             for (const key of frontier) {
                 const childList = []
                 for (const [e, otherKey] of neighbors(key, dir)) {
-                    if (nodes.size >= maxNodes && !nodes.has(otherKey)) {
+                    if (nodeCount() >= maxNodes && !nodes.has(otherKey)) {
                         truncated = true
                         edges.delete(e.edgeKey)
                         continue
@@ -581,7 +596,8 @@ function traceability(p) {
     }
 
     // labels and display text, reading names for every node and edge in a few queries
-    const assetNodes = Array.from(nodes.values()).filter(row => row.kind === "asset")
+    const nodeList = Array.from(new Set(nodes.values()))
+    const assetNodes = nodeList.filter(row => row.kind === "asset")
     const products = names("mantle.product.Product", "productId", "productName", [
         ...assetNodes.map(row => row.productId),
         ...Array.from(edges.values()).map(row => row.productId)
@@ -614,7 +630,7 @@ function traceability(p) {
         return: "Return",
         order: "Order"
     }
-    for (const row of nodes.values()) {
+    for (const row of nodeList) {
         row.kindText = kindTexts[row.kind] || row.kind
         if (row.kind === "asset") {
             row.label = products.get(row.productId) || row.productId || row.recordId
@@ -638,28 +654,40 @@ function traceability(p) {
         unknown: "First known movement"
     }
     const outKey = key => nodes.get(key)?.nodeKey || key
-    const edgeList = Array.from(edges.values()).map(row =>
-        Object.assign({}, row, {
-            fromKey: outKey(row.fromKey),
-            toKey: outKey(row.toKey),
+    // an edge with stock outside the scope at one end carries nothing of that stock (product, quantity, date, cost, reason):
+    // the edges of one visible node to it are one restricted edge
+    const edgeKeys = new Map()
+    const edgeList = []
+    const restrictedEdges = new Map()
+    for (const row of edges.values()) {
+        const fromKey = outKey(row.fromKey),
+            toKey = outKey(row.toKey)
+        if (fromKey === restrictedNode.nodeKey || toKey === restrictedNode.nodeKey) {
+            const edgeKey = "restricted-edge:" + fromKey + ">" + toKey
+            edgeKeys.set(row.edgeKey, edgeKey)
+            if (!restrictedEdges.has(edgeKey))
+                restrictedEdges.set(edgeKey, {
+                    edgeKey,
+                    fromKey,
+                    toKey,
+                    event: "restricted",
+                    eventText: "Stock outside your facilities",
+                    joined: false
+                })
+            continue
+        }
+        const out = Object.assign({}, row, {
+            fromKey,
+            toKey,
             dateText: dateText(row.date),
             eventText: eventTexts[row.event] || row.event,
             productName: products.get(row.productId) || row.productId || "",
             joined: !!row.joined
         })
-    )
-    for (const row of edgeList) delete row.date
-    // a restricted asset's id never leaves: its edge's key and event id, which would name its rows, are replaced
-    let restrictedEdges = 0
-    const edgeKeys = new Map()
-    for (const row of edgeList)
-        if (String(row.fromKey).startsWith("restricted:") || String(row.toKey).startsWith("restricted:")) {
-            const restrictedKey = "restricted-edge:" + ++restrictedEdges
-            edgeKeys.set(row.edgeKey, restrictedKey)
-            row.edgeKey = restrictedKey
-            row.eventId = null
-        }
-    const nodeList = Array.from(nodes.values())
+        delete out.date
+        edgeList.push(out)
+    }
+    edgeList.push(...restrictedEdges.values())
 
     // the tree: one row per occurrence of a node under its parent, keyed by its path (Products P3's occurrence keys), a
     // node reached again shown without its children
@@ -667,6 +695,16 @@ function traceability(p) {
     const expanded = new Set()
     const edgeByKey = new Map(edgeList.map(row => [row.edgeKey, row]))
     for (const [internalKey, restrictedKey] of edgeKeys) edgeByKey.set(internalKey, edgeByKey.get(restrictedKey))
+    // a node's children, one per edge shown (the edges to the restricted node are one)
+    const shownChildren = (dir, key) => {
+        const seen = new Set()
+        return (children.get(dir + "|" + key) || []).filter(child => {
+            const shownKey = edgeByKey.get(child.edgeKey)?.edgeKey || child.edgeKey
+            if (seen.has(shownKey)) return false
+            seen.add(shownKey)
+            return true
+        })
+    }
     function walk(dir, key, path, parentPath, viaEdgeKey, depth) {
         if (treeRows.length >= maxTreeRows) {
             truncated = true
@@ -675,7 +713,7 @@ function traceability(p) {
         const item = nodes.get(key)
         const via = viaEdgeKey ? edgeByKey.get(viaEdgeKey) : null
         const repeated = expanded.has(dir + "|" + key)
-        const childList = children.get(dir + "|" + key) || []
+        const childList = shownChildren(dir, key)
         treeRows.push({
             occurrenceKey: path,
             parentOccurrenceKey: parentPath,
@@ -718,12 +756,12 @@ function traceability(p) {
             quantity: null,
             dateText: "",
             repeated: false,
-            childCount: directions.reduce((total, dir) => total + (children.get(dir + "|" + rootKey) || []).length, 0),
+            childCount: directions.reduce((total, dir) => total + shownChildren(dir, rootKey).length, 0),
             depth: 0
         })
         for (const dir of directions) {
             expanded.add(dir + "|" + rootKey)
-            ;(children.get(dir + "|" + rootKey) || []).forEach((child, index) =>
+            shownChildren(dir, rootKey).forEach((child, index) =>
                 walk(dir, child.nodeKey, rootPath + "/" + dir[0] + (index + 1), rootPath, child.edgeKey, 1)
             )
         }
@@ -734,7 +772,8 @@ function traceability(p) {
             rootKeys: rootKeys.map(outKey),
             truncated,
             unknownCount: nodeList.filter(row => row.kind === "unknown").length,
-            restrictedCount,
+            // whether some of the trace is stock outside the scope (one restricted node, whatever it stands for)
+            restrictedCount: nodeList.includes(restrictedNode) ? 1 : 0,
             costIncluded: userScope.financeRead,
             treeRows
         },
