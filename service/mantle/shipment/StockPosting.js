@@ -70,8 +70,10 @@ function stored(op) {
         denied("OPERATION_KEY_CONFLICT", "Operation " + op.clientKey + " was already used for another request")
     return old
 }
+// One permission, or a list of which any one admits (ensure#PurchaseReceipt: the receiver's or the buyer's).
 function requirePermission(permission) {
-    if (!access.has(permission)) denied("PERMISSION_DENIED", permission + " is required")
+    const permissions = Array.isArray(permission) ? permission : [permission]
+    if (!permissions.some(name => access.has(name))) denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
 // The permission, then the operation: {op, previous}, previous the first answer when this is a retry.
 function begin(p, operationType, permission, requestFields) {

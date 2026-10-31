@@ -2959,4 +2959,43 @@ General Order Placement and eCommerce Usage
             <service-call name="update#mantle.request.Request" in-map="{requestId:requestId, statusId:'ReqInProgress'}"/>
         </actions>
     </service>
+
+    <!-- ===== Purchasing's close of purchase remainders (design-purchasing ClosePurchaseOrders; Warehouse P7) ===== -->
+    <service verb="close" noun="PurchaseRemainders" allow-remote="false">
+        <description>Close what is left of a purchase order's product lines, explicitly and with a reason: per item the
+            ordered quantity less what was received, accepted and rejected (OrderItem.quantity is already net of what was
+            cancelled), recorded through cancel#OrderItem with that explicit cancelQuantity (never its default, which
+            measures issuances and would cancel a received purchase line in full), lowering the line's Requirement
+            allocation (RequirementOrderItem) by it, and keeping the reason as an internal OrderNote. A part with nothing
+            open is completed, and a completed or cancelled order releases what is left of its budget commitments
+            (mantle.other.BudgetServices.release#ClosedSourceCommitments). A line in another unit than its product's stock
+            unit compares the received stock quantity in the line's unit. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED)
+            in the order's buying organization (RECORD_UNAVAILABLE); refuses an order that is not a purchase (NOT_PURCHASE),
+            one with no open part (ORDER_NOT_OPEN) and a missing reason (REASON_REQUIRED). Warehouse's
+            WarehouseTaskServices.close#ReceiptRemainder runs the same close inside its operation, under its own
+            check.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqIds" type="List"><description>Only these lines; empty closes every product
+                line of the order.</description></parameter>
+            <parameter name="reason"><description>Required: checked by the service (REASON_REQUIRED).</description>
+            </parameter>
+            <parameter name="shipmentId"><description>The receipt the close was made at, named in the note.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="closedItems" type="List"><description>Per line closed: orderItemSeqId, productId,
+                orderedQuantity, receivedQuantity, cancelledQuantity, requirements (requirementId, quantity
+                released).</description></parameter>
+            <parameter name="orderStatusId"/>
+            <parameter name="releasedCommitments" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="closed" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRemainders.js')
+                .execute('close', context)"/>
+            <set field="closedItems" from="closed.closedItems"/>
+            <set field="orderStatusId" from="closed.orderStatusId"/>
+            <set field="releasedCommitments" from="closed.releasedCommitments"/>
+        </actions>
+    </service>
 </services>
