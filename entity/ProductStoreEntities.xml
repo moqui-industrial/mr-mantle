@@ -23,10 +23,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="organizationPartyId" type="id">
             <description>The Organization Party that Orders, Invoices, GL transactions, etc will be associated with.</description></field>
 
-        <field name="inventoryFacilityId" type="id"/>
-        <field name="reservationOrderEnumId" type="id"/>
-        <field name="reservationAutoEnumId" type="id"/>
-        <field name="requireInventory" type="text-indicator"/>
+        <field name="inventoryFacilityId" type="id" enable-audit-log="true"/>
+        <field name="reservationOrderEnumId" type="id" enable-audit-log="true"/>
+        <field name="reservationAutoEnumId" type="id" enable-audit-log="true"/>
+        <field name="requireInventory" type="text-indicator" enable-audit-log="true"/>
 
         <field name="defaultDisablePromotions" type="text-indicator"/>
         <field name="defaultDisableShippingCalc" type="text-indicator"/>
