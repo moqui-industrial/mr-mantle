@@ -18,12 +18,13 @@ const roles = ["Vendor", "Customer"]
 const blank = value => value == null || value === ""
 const current = (row, at) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 
-// The organizations whose pools the user reads; null for every one (a system administrator).
+// The organizations whose pools the user reads; null for every one.
+// They are FacilityScope.js's, as for the facilities and stock the pools hold.
 function owners() {
-    const scope = call(P + "ProductServices.get#CatalogOwnerScope")
+    const scope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js").scope()
     if (!ec.user.userId || (!scope.systemAdmin && ec.user.hasPermission("PROJECT_CLIENT")))
         denied("POOL_UNAVAILABLE", "Asset pools are not available")
-    return scope.systemAdmin ? null : Array.from(scope.ownerPartyIds).filter(id => id !== "_NA_")
+    return scope.organizationPartyIds ? Array.from(scope.organizationPartyIds) : null
 }
 // A pool the user may read (manage: and change), refused alike when missing or another organization's.
 function pool(assetPoolId, manage = false) {

@@ -322,6 +322,8 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.facility.ProductFacility" include="nonpk"/>
             <parameter name="locationSeqId"/>
             <parameter name="moveQuantity" type="BigDecimal"/>
+            <parameter name="removeLocation" type="Boolean" default="false"><description>With locationSeqId, removes the
+                product's policy at that location (ProductFacilityLocation).</description></parameter>
             <parameter name="changeReason" required="true"/>
             <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
         </in-parameters>
@@ -336,6 +338,195 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/facility/WarehousePolicy.js').execute('facilityStore',context))</script>
+        </actions>
+    </service>
+
+    <!-- Facility and location setup (FacilitySetup.js): the saves a facility administrator makes, each checking
+        FACILITY_EDIT and the organization by party relationship, and the location close with its open check. -->
+    <service verb="store" noun="Facility" allow-remote="false">
+        <description>Create a facility, or change one of the user's (FACILITY_EDIT; a facility is the user's when its owner
+            is one of their internal organizations, every one for a system administrator). Refuses another organization's
+            facility (FACILITY_UNAVAILABLE), an owner that is not one of the user's internal organizations
+            (OWNER_UNAVAILABLE), no name, a parent that is not one of the user's facilities, a parent that is the facility
+            itself or one under it (PARENT_CYCLE), and a close before the open. A changed owner needs changeReason
+            (REASON_REQUIRED), which the audit log keeps. A blank parentFacilityId keeps the stored parent unless
+            clearParent; a parent equal to the stored one is kept without being checked again. The scope is
+            FacilityScope.js's: the user's organizations (the active one when it is theirs), every one with
+            FACILITY_ALL_ORGANIZATIONS. Contact details go through create#Facility and update#Facility.</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="facilityTypeEnumId"/>
+            <parameter name="parentFacilityId"/>
+            <parameter name="clearParent" type="Boolean" default="false"><description>With a blank parentFacilityId,
+                removes the parent.</description></parameter>
+            <parameter name="ownerPartyId"/>
+            <parameter name="description"/>
+            <parameter name="openedDate" type="Timestamp"/>
+            <parameter name="closedDate" type="Timestamp"/>
+            <parameter name="defaultDaysToShip" type="Integer"/>
+            <parameter name="address1"/>
+            <parameter name="address2"/>
+            <parameter name="city"/>
+            <parameter name="stateProvinceGeoId"/>
+            <parameter name="countryGeoId"/>
+            <parameter name="postalCode"/>
+            <parameter name="countryCode"/>
+            <parameter name="areaCode"><text-digits/></parameter>
+            <parameter name="contactNumber">
+                <matches regexp="^\d\d[-\. \d]*\d\d$" message="Please enter a valid phone number"/></parameter>
+            <parameter name="emailAddress"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('storeFacility', context)"/>
+            <set field="facilityId" from="saved.facilityId"/>
+            <set field="created" from="saved.created"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityLocation" allow-remote="false">
+        <description>Create a location in one of the user's facilities, or change an open one (FACILITY_EDIT): its type,
+            description, area, aisle, section, level and position, capacity with its unit, and pick sequence (sequenceNum).
+            Its id is given or made from the area through the position. With isNew, refuses an id in use
+            (LOCATION_EXISTS); refuses a closed location (LOCATION_CLOSED), another organization's facility
+            (FACILITY_UNAVAILABLE), an unknown type or unit, a negative capacity and a pick sequence that is not a whole
+            number.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="isNew" type="Boolean" default="false"/>
+            <parameter name="locationTypeEnumId"/>
+            <parameter name="description"/>
+            <parameter name="areaId"/>
+            <parameter name="aisleId"/>
+            <parameter name="sectionId"/>
+            <parameter name="levelId"/>
+            <parameter name="positionId"/>
+            <parameter name="capacity"/>
+            <parameter name="capacityUomId"/>
+            <parameter name="sequenceNum"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('storeLocation', context)"/>
+            <set field="facilityId" from="saved.facilityId"/>
+            <set field="locationSeqId" from="saved.locationSeqId"/>
+            <set field="created" from="saved.created"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityLocationType" allow-remote="false">
+        <description>The asset status that receive#Asset and move#Asset give stock put in a location of this type in one of
+            the user's facilities (FACILITY_EDIT); empty for none. Audit-logged with changeReason, which is required.
+            Refuses a status that is not an asset status and another organization's facility.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationTypeEnumId" required="true"/>
+            <parameter name="autoStatusId"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="locationTypeEnumId"/>
+            <parameter name="autoStatusId"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('storeLocationType', context)"/>
+            <set field="facilityId" from="saved.facilityId"/>
+            <set field="locationTypeEnumId" from="saved.locationTypeEnumId"/>
+            <set field="autoStatusId" from="saved.autoStatusId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="FacilityLocationBlockers" allow-remote="false">
+        <description>What keeps a location of one of the user's facilities from closing now (FACILITY_EDIT), each kind with
+            the records it names: stock with on-hand or available-to-promise not zero (a depleted asset does not block),
+            equipment that has not left (not delivered or deactivated, no actualEndOfLife), containers, reservations not
+            issued on an asset there (open picks), counts not complete with a line there, and product location policies
+            (ProductFacilityLocation) naming it.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="blockers" type="List"><description>Each blocker's kind, label, recordIds (at most ten),
+                count and text.</description></parameter>
+            <parameter name="locationClosed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('blockers', context)"/>
+            <set field="blockers" from="found.blockers"/>
+            <set field="locationClosed" from="found.locationClosed"/>
+        </actions>
+    </service>
+    <service verb="close" noun="FacilityLocation" allow-remote="false">
+        <description>Close a location of one of the user's facilities now (FACILITY_EDIT): its audit-logged thruDate, with
+            changeReason, which is required. Refuses, naming each, while anything of get#FacilityLocationBlockers is there
+            (LOCATION_IN_USE); relocating the stock is how it is emptied. Refuses a closed location.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId" required="true"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="closed" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('closeLocation', context)"/>
+            <set field="facilityId" from="closed.facilityId"/>
+            <set field="locationSeqId" from="closed.locationSeqId"/>
+            <set field="thruDate" from="closed.thruDate"/>
+        </actions>
+    </service>
+    <service verb="reopen" noun="FacilityLocation" allow-remote="false">
+        <description>Open a closed location of one of the user's facilities again (FACILITY_EDIT), clearing its thruDate
+            with changeReason, which is required, in the audit log.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId" required="true"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="locationSeqId"/>
+        </out-parameters>
+        <actions>
+            <set field="opened" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('reopenLocation', context)"/>
+            <set field="facilityId" from="opened.facilityId"/>
+            <set field="locationSeqId" from="opened.locationSeqId"/>
+        </actions>
+    </service>
+    <service verb="check" noun="FacilityLocationOpen" allow-remote="false">
+        <description>For a destination guard (receive, move, putaway): refuses a location that does not exist
+            (LOCATION_UNAVAILABLE) or is closed (LOCATION_CLOSED), or one of a facility whose closedDate has passed
+            (FACILITY_CLOSED), since receive#Asset and move#Asset do not read FacilityLocation.thruDate. It locks the
+            location row, so the guard calls it inside its own transaction, where the lock serializes it with
+            close#FacilityLocation. Checks no permission: the guard has checked the user and the facility.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="locationTypeEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="open" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('checkOpen', context)"/>
+            <set field="locationTypeEnumId" from="open.locationTypeEnumId"/>
         </actions>
     </service>
 </services>

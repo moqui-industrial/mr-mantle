@@ -80,8 +80,10 @@ const storeFields = {reservationOrderEnumId: "reservationOrderEnumId", reservati
 const current = (r, at) => (ms(r.fromDate) ?? -Infinity) <= at && (ms(r.thruDate) ?? Infinity) > at
 const pick = (p, fields) =>
     Object.fromEntries(fields.filter(k => Object.keys(p).includes(k)).map(k => [k, p[k] === "" ? null : p[k]]))
+// The organizations are FacilityScope.js's, as for every facility and stock guard.
+const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 function guard(p, write = false) {
-    const s = call(P + "ProductServices.get#CatalogOwnerScope"),
+    const s = facilityScope.scope(),
         blocked = !s.systemAdmin && ec.user.hasPermission("PROJECT_CLIENT")
     if (!ec.user.userId || blocked) throw new Error("Warehouse policy is not available")
     const canPlan = s.systemAdmin || ec.user.hasPermission("STOCK_POLICY_PLAN") || ec.user.hasPermission("STOCK_POLICY_MANAGE")
@@ -96,17 +98,14 @@ function guard(p, write = false) {
         facility?.ownerPartyId ||
         store?.organizationPartyId ||
         s.activeOrganizationPartyId ||
-        s.organizationPartyIds[0]
+        s.memberPartyIds[0]
     if (
         !organizationPartyId ||
         !one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}) ||
-        (!s.systemAdmin && !s.ownerPartyIds.includes(organizationPartyId))
+        !facilityScope.owns(s, organizationPartyId)
     )
         throw new Error("Warehouse organization is not available")
-    if (
-        facility &&
-        (facility.ownerPartyId !== organizationPartyId || (!s.systemAdmin && !s.ownerPartyIds.includes(facility.ownerPartyId)))
-    )
+    if (facility && (facility.ownerPartyId !== organizationPartyId || !facilityScope.owns(s, facility.ownerPartyId)))
         throw new Error("Facility is not in the available warehouse organization")
     if (store && store.organizationPartyId !== organizationPartyId)
         throw new Error("Store is not in the available warehouse organization")
@@ -114,7 +113,7 @@ function guard(p, write = false) {
     if (
         p.productId &&
         p.productId !== "_NA_" &&
-        (!product || (!s.systemAdmin && !s.ownerPartyIds.includes(product.ownerPartyId)))
+        (!product || (product.ownerPartyId !== "_NA_" && !facilityScope.owns(s, product.ownerPartyId)))
     )
         throw new Error("Product is not available")
     if (write && product && !["PtAsset", "PtDigitalAsset", "PtAssetUse", "PtPickAssembly"].includes(product.productTypeEnumId))
@@ -494,8 +493,12 @@ function facilityStore(p) {
         entity = E + (location ? "ProductFacilityLocation" : "ProductFacility")
     if (location) {
         key.locationSeqId = location
-        if (!one(E + "FacilityLocation", {facilityId: g.facilityId, locationSeqId: location}))
-            throw new Error("Location is not in the selected facility")
+        const facilityLocation = one(E + "FacilityLocation", {facilityId: g.facilityId, locationSeqId: location})
+        if (!facilityLocation) throw new Error("Location is not in the selected facility")
+        // a closed location takes no new policy; its policy may still be removed
+        const removing = p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y"
+        if (!removing && facilityLocation.thruDate != null && ms(facilityLocation.thruDate) <= ms(ec.user.nowTimestamp))
+            throw new Error("Location " + location + " is closed")
     }
     const fields = location
             ? ["minimumStock", "moveQuantity"]
@@ -503,6 +506,15 @@ function facilityStore(p) {
         old = find(entity, key).forUpdate(true).one()
     if (p.expectedLastUpdatedStamp && ms(p.expectedLastUpdatedStamp) !== ms(old?.lastUpdatedStamp))
         throw new Error("Facility policy changed; reload before saving")
+    // a product's location policy removed, so the location no longer names it (a location closes only when none does)
+    if (location && (p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y")) {
+        if (!old) throw new Error("This product has no policy at the location")
+        // the fields cleared through the audited update first, so the old values and the reason reach the audit log
+        audit([...fields, "changeReason"], why)
+        call("update#" + entity, Object.assign({}, key, Object.fromEntries(fields.map(f => [f, null])), {changeReason: why}))
+        call("delete#" + entity, key)
+        return Object.assign(facilityRead(g), {locationSeqId: location})
+    }
     if (
         location &&
         ["maximumStock", "reorderQuantity", "daysToShip", "reorderMethodEnumId", "abcClassEnumId"].some(k => p[k] != null)
