@@ -36,6 +36,39 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- Special Permissions - NOTE: other such permissions that the data model seed data relies on are in MantleUdmSetupData.xml in mr-mantle -->
     <userPermissions userPermissionId="ORDER_APPROVE" description="Order Approve"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_APPROVE" fromDate="0"/>
+    <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
+        WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
+        receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
+    <userPermissions userPermissionId="STOCK_ISSUE" description="Stock Issue"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_ISSUE" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_MOVE" description="Stock Move"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_MOVE" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_ADJUST" description="Stock Adjust"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_ADJUST" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_COUNT" description="Stock Count"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_COUNT" fromDate="0"/>
+    <userPermissions userPermissionId="STOCK_COUNT_REVIEW" description="Stock Count Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="STOCK_COUNT_REVIEW" fromDate="0"/>
+    <userPermissions userPermissionId="LOT_EXPIRY_EXTEND" description="Lot Expiry Extend"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="LOT_EXPIRY_EXTEND" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_PICK" description="Shipment Pick"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_PICK" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_LOAD_EDIT" description="Shipment Load Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_LOAD_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_PACK" description="Shipment Pack"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_PACK" fromDate="0"/>
+    <userPermissions userPermissionId="SHIPMENT_SHIP" description="Shipment Ship"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SHIPMENT_SHIP" fromDate="0"/>
+    <userPermissions userPermissionId="FACILITY_EDIT" description="Facility Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="FACILITY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_INSPECT" description="Quality Inspect"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_INSPECT" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_VERIFY" description="Quality Verify"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_VERIFY" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_DISPOSE" description="Quality Dispose"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_DISPOSE" fromDate="0"/>
+    <userPermissions userPermissionId="QUALITY_TEMPLATE_EDIT" description="Quality Template Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_TEMPLATE_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="CARD_NUMBER_EDIT" description="Credit Card Number Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="CARD_NUMBER_EDIT" fromDate="0"/>
 
