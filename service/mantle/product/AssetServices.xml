@@ -806,6 +806,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="componentProductId"/>
             <parameter name="componentQuantity" type="BigDecimal"/>
         </in-parameters>
+        <out-parameters>
+            <parameter name="expiredShortfall" type="BigDecimal"><description>With the expiry gate on (WarehousePolicy
+                expiryBlock), the quantity left not available while expired stock was skipped.</description></parameter>
+            <parameter name="expiredSkipped" type="List"><description>The expired assets skipped: assetId and
+                expiryDate.</description></parameter>
+        </out-parameters>
         <actions>
             <set field="nowTimestamp" from="ec.user.nowTimestamp"/>
 
@@ -952,6 +958,14 @@ along with this software (see the LICENSE.md file). If not, see
                         customerPartyId:orderPart?.customerPartyId}"/>
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
+            <!-- the expiry gate (WarehousePolicy tracking expiryBlock, off by default; impl-warehouse F12): expired stock, by
+                the asset's own or its lot's expiry, is not reserved, and a shortfall names what was skipped -->
+            <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="expiryGate" disable-authz="true"
+                    in-map="{organizationPartyId:organizationPartyId || inventoryFacility?.ownerPartyId,
+                        facilityId:inventoryFacilityId, productId:productId}"/>
+            <set field="expiryToday" from="expiryGate.expiryBlock ? ec.l10n.format(nowTimestamp, 'yyyy-MM-dd') : null"/>
+            <set field="expiredSkipped" from="[]"/>
+
             <!-- check and lock individual Asset records -->
             <set field="lockedAssetList" from="[]"/>
             <set field="checkQuantityRemaining" from="quantityRemaining"/>
@@ -979,6 +993,15 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="checkAsset.assetPoolId &amp;&amp; !assetPoolIdSet.includes(checkAsset.assetPoolId)">
                         <message type="danger">Not reserving specified asset ${checkAsset.assetId} in pool ${checkAsset.assetPoolId} which is not available to this order</message>
                         <continue/>
+                    </if>
+                    <if condition="expiryToday">
+                        <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" out-map="assetExpiry"
+                                out-map-add-to-existing="false" disable-authz="true" in-map="{assetId:checkAsset.assetId}"/>
+                        <if condition="assetExpiry.expired">
+                            <script>expiredSkipped.push({assetId: checkAsset.assetId,
+                                expiryDate: assetExpiry.expiryDate})</script>
+                            <continue/>
+                        </if>
                     </if>
 
                     <!-- here we do the lock query, check the ATP using the locked value -->
@@ -1036,6 +1059,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="assetPoolId" operator="in" from="assetPoolIdSet" ignore="assetPoolIdSet.length == 0" or-null="true"/>
                         <econdition field-name="assetPoolId" operator="is-null" ignore="assetPoolIdSet.length &gt; 0"/>
                         <econdition field-name="expirationDate" operator="greater-equals" from="newerThanExpireDate" ignore-if-empty="true"/>
+                        <econdition field-name="expirationDate" operator="greater-equals" from="expiryToday"
+                                ignore="!expiryToday" or-null="true"/>
                         <select-field field-name="lotId,availableToPromiseTotal,manufacturedDate,expirationDate"/>
                         <!-- order to get fewest but sufficient available in a lot -->
                         <order-by field-name="availableToPromiseTotal"/>
@@ -1054,6 +1079,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="ownerPartyId" operator="in" from="ownerPartyIdSet" ignore="assetAllowOtherOwner == 'Y' || ownerPartyIdSet.length == 0"/>
                             <econdition field-name="assetPoolId" operator="in" from="assetPoolIdSet" ignore="assetPoolIdSet.length == 0" or-null="true"/>
                             <econdition field-name="assetPoolId" operator="is-null" ignore="assetPoolIdSet.length &gt; 0"/>
+                            <econdition field-name="expirationDate" operator="greater-equals" from="expiryToday"
+                                    ignore="!expiryToday" or-null="true"/>
                             <select-field field-name="lotId,availableToPromiseTotal,manufacturedDate,expirationDate"/>
                             <order-by field-name="${lotRetryOrderBy}"/>
                         </entity-find>
@@ -1111,6 +1138,14 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- here we do the lock query, check the ATP using the locked value -->
                         <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true">
                             <field-map field-name="assetId" from="checkAsset.assetId"/></entity-find-one>
+                        <if condition="expiryToday">
+                            <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" out-map="assetExpiry"
+                                    out-map-add-to-existing="false" disable-authz="true" in-map="{assetId:asset.assetId}"/>
+                            <if condition="assetExpiry.expired">
+                                <script>expiredSkipped.push({assetId: asset.assetId, expiryDate: assetExpiry.expiryDate})</script>
+                                <continue/>
+                            </if>
+                        </if>
 
                         <!-- TODO 20180503 remove this at some point, added to monitor corner case issue -->
                         <if condition="inventoryFacilityId != asset.facilityId">
@@ -1148,6 +1183,14 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- here we do the lock query, check the ATP using the locked value -->
                         <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true">
                             <field-map field-name="assetId" from="checkAsset.assetId"/></entity-find-one>
+                        <if condition="expiryToday">
+                            <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" out-map="assetExpiry"
+                                    out-map-add-to-existing="false" disable-authz="true" in-map="{assetId:asset.assetId}"/>
+                            <if condition="assetExpiry.expired">
+                                <script>expiredSkipped.push({assetId: asset.assetId, expiryDate: assetExpiry.expiryDate})</script>
+                                <continue/>
+                            </if>
+                        </if>
 
                         <!-- TODO 20180503 remove this at some point, added to monitor corner case issue -->
                         <if condition="inventoryFacilityId != asset.facilityId">
@@ -1209,6 +1252,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="quantityRemaining" from="toDecimal(0)"/>
             </if>
 
+            <if condition="expiredSkipped.length &amp;&amp; toDecimal(quantityRemaining).compare(0) &gt; 0">
+                <set field="expiredText" from="'Order item ' + orderId + ':' + orderItemSeqId + ' is short ' +
+                        String(quantityRemaining) + '; expired stock is not reserved (' +
+                        expiredSkipped.map(skip =&gt; skip.assetId + ' expired ' + skip.expiryDate).join(', ') + ')'"/>
+                <message type="warning">EXPIRED_SHORTFALL: ${expiredText}</message>
+                <set field="expiredShortfall" from="quantityRemaining"/>
+            </if>
             <if condition="toDecimal(quantityRemaining).compare(0) &gt; 0">
                 <!-- look for qualifying Asset even if no available quantity and do 'not available' reservation on that instead of creating new ad-hoc -->
                 <entity-find entity-name="mantle.product.asset.Asset" list="existingResAssetList" limit="1">
@@ -2028,6 +2078,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if allow over QOH not allowed check now -->
             <set field="asset" from="assetReservation.asset"/>
+            <!-- the expiry gate (WarehousePolicy, off by default): an expired asset is not issued -->
+            <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
+                    in-map="{assetId:asset.assetId}"/>
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true">
                 <field-map field-name="facilityId" from="asset?.facilityId"/></entity-find-one>
             <if condition="facility?.assetAllowIssueOverQoh != 'Y'">
@@ -2153,6 +2206,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
             <if condition="facility == null"><return error="true" message="Could not find facility to issue asset from for shipment ${shipmentId}"/></if>
+            <!-- the expiry gate (WarehousePolicy, off by default): an expired asset named is refused, others are skipped -->
+            <if condition="passedAsset != null">
+                <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
+                        in-map="{assetId:passedAsset.assetId}"/>
+            </if>
+            <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="expiryGate" disable-authz="true"
+                    in-map="{organizationPartyId:facility.ownerPartyId, facilityId:facilityId, productId:productId}"/>
 
             <set field="baseMap" from="{productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
                     invoiceId:invoiceId, invoiceItemSeqId:invoiceItemSeqId, shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId}"/>
@@ -2182,6 +2242,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- reserve by availableToPromiseTotal (no reservation here, but respect others) -->
                 <set field="quantityRemaining" from="quantity"/>
                 <iterate list="assetList" entry="asset">
+                    <if condition="expiryGate.expiryBlock">
+                        <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" out-map="assetExpiry"
+                                out-map-add-to-existing="false" disable-authz="true" in-map="{assetId:asset.assetId}"/>
+                        <if condition="assetExpiry.expired"><continue/></if>
+                    </if>
                     <set field="lastAsset" from="asset"/>
                     <if condition="toDecimal(quantityRemaining).compare(0) &gt; 0">
                         <!-- always check ATP (we don't have a reservation) -->
@@ -2300,6 +2365,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="assetId"/></entity-find-one>
             </if>
             <if condition="asset == null"><return error="true" message="Asset not found with ID ${assetId}"/></if>
+            <!-- the expiry gate (WarehousePolicy, off by default): an expired asset is not issued -->
+            <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
+                    in-map="{assetId:asset.assetId}"/>
 
             <if condition="quantity != null &amp;&amp; !toDecimal(quantity).isZero() &amp;&amp; quantityUomId"><then>
                 <service-call name="mantle.shipment.ShipmentServices.convert#ProductBoxQuantity" out-map="cvtQty"

@@ -198,6 +198,114 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <!-- the expiry gate (WH-EXPIRY, impl-warehouse §4, F12): the tracking policy's expiryBlock, off by default -->
+    <service verb="get" noun="ExpiryGate" allow-remote="false">
+        <description>The tracking policy's expiry settings in effect now for an organization's product at a facility, which
+            Mantle's reservation and issue read: expiryBlock (true when a tracking row in effect at the organization,
+            facility, product or facility-product scope blocks expired stock; a narrower row cannot lift a wider one's
+            block) and nearExpiryDays (the narrowest row that sets it). Off with no row, so reservation and issue are
+            unchanged without a policy. Internal: it reads policy only and checks no permission.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="expiryBlock" type="Boolean"/>
+            <parameter name="nearExpiryDays" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="expiryBlock" from="false"/>
+            <set field="nearExpiryDays" from="0"/>
+            <if condition="!organizationPartyId"><return/></if>
+            <!-- cached: a cached find filters by date after the cache (XmlActions), so the key holds no time -->
+            <entity-find entity-name="mantle.facility.WarehousePolicy" list="trackingList" cache="true" disable-authz="true">
+                <date-filter/>
+                <econdition field-name="organizationPartyId"/>
+                <econdition field-name="policyType" value="tracking"/>
+                <order-by field-name="-fromDate"/>
+            </entity-find>
+            <script><![CDATA[
+                // the newest row of each scope that applies, most general first (WarehousePolicy.js's layering)
+                const scopes = [['_NA_', '_NA_'], [facilityId, '_NA_'], ['_NA_', productId], [facilityId, productId]]
+                const seen = new Set()
+                for (const [scopeFacilityId, scopeProductId] of scopes) {
+                    if (!scopeFacilityId || !scopeProductId || seen.has(scopeFacilityId + '|' + scopeProductId)) continue
+                    seen.add(scopeFacilityId + '|' + scopeProductId)
+                    const row = Array.from(trackingList)
+                        .find(policy => policy.facilityId === scopeFacilityId && policy.productId === scopeProductId)
+                    if (!row) continue
+                    if (row.expiryBlock === 'Y') expiryBlock = true
+                    if (row.nearExpiryDays != null) nearExpiryDays = Number(String(row.nearExpiryDays))
+                }
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="get" noun="AssetExpiry" allow-remote="false">
+        <description>An asset's expiry: the earlier of its own expected end of life and its lot's expiration date, as a
+            calendar day; expired when that day has passed in the user's zone, near expiry within the tracking policy's
+            nearExpiryDays; and the policy's expiryBlock for the asset's facility owner (else its owner) and product
+            (get#ExpiryGate). An asset with no date is neither. Internal: it checks no permission.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="expiryDate"/>
+            <parameter name="expired" type="Boolean"/>
+            <parameter name="nearExpiry" type="Boolean"/>
+            <parameter name="expiryBlock" type="Boolean"/>
+            <parameter name="nearExpiryDays" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="expired" from="false"/>
+            <set field="nearExpiry" from="false"/>
+            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" disable-authz="true"/>
+            <if condition="asset == null"><return/></if>
+            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true" disable-authz="true">
+                <field-map field-name="facilityId" from="asset.facilityId"/>
+            </entity-find-one>
+            <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="gate" disable-authz="true"
+                    in-map="{organizationPartyId:facility?.ownerPartyId || asset.ownerPartyId, facilityId:asset.facilityId,
+                        productId:asset.productId}"/>
+            <set field="expiryBlock" from="gate.expiryBlock"/>
+            <set field="nearExpiryDays" from="gate.nearExpiryDays"/>
+            <if condition="asset.lotId">
+                <entity-find-one entity-name="mantle.product.asset.Lot" value-field="lot" disable-authz="true">
+                    <field-map field-name="lotId" from="asset.lotId"/>
+                </entity-find-one>
+            </if>
+            <script><![CDATA[
+                const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                const days = [asset.expectedEndOfLife, lot?.expirationDate].filter(day => day != null && day !== '')
+                    .map(day => lib.calendarDateText(day)).sort()
+                expiryDate = days[0] || null
+                if (expiryDate) {
+                    const today = ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')
+                    // the calendar day nearExpiryDays after today
+                    const horizon = lib.calendarDateText(Date.parse(today + 'T00:00:00Z') + (nearExpiryDays || 0) * 86400000)
+                    expired = expiryDate < today
+                    nearExpiry = !expired && (nearExpiryDays || 0) > 0 && expiryDate <= horizon
+                }
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="check" noun="AssetExpiryGate" allow-remote="false">
+        <description>For the issue services (sales and production): refuses an expired asset, naming its date
+            (ASSET_EXPIRED), when its tracking policy blocks expired stock (get#AssetExpiry); with no such policy, or an
+            asset not expired, it passes. Internal: it checks no permission.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" in-map="{assetId:assetId}"
+                    out-map="expiry" disable-authz="true"/>
+            <if condition="expiry.expiryBlock &amp;&amp; expiry.expired">
+                <return error="true" message="ASSET_EXPIRED: Asset ${assetId} expired on ${expiry.expiryDate}"/>
+            </if>
+        </actions>
+    </service>
+
     <service verb="update" noun="StoreReservation" allow-remote="false">
         <description>A store's own reservation settings, the override over the facility default for that store's orders:
             its inventory facility (the organization's), reservation order, automatic timing and require-inventory flag.
@@ -238,6 +346,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="checkedCount" type="Integer"/>
             <parameter name="truncated" type="Boolean"/>
             <parameter name="findings" type="List"/>
+            <parameter name="previewFingerprint"><description>The findings' fingerprint, which a repair
+                (WarehouseTaskServices.repair#FacilityReservations) gives back.</description></parameter>
         </out-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/facility/WarehousePolicy.js"/>
