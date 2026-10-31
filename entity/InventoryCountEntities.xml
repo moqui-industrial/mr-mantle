@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Counts with snapshots, review and guarded posting (design-warehouse §17 WH-COUNT; impl-warehouse P10): the fields a
+    count (PhysicalInventory) and its lines (PhysicalInventoryCount) need for mantle.product.InventoryCountServices, the
+    last count dates find#DueCounts reads, and the count schedule (CountSchedule), effective-dated rows of the warehouse
+    policy written by mantle.facility.WarehousePolicyServices.store#CountSchedule. A count of these services has a count
+    mode; PhysicalInventory rows without one are Mantle's immediate postings (record#PhysicalInventoryQuantity, scrap),
+    which the count services never list. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="PhysicalInventory" package="mantle.product.asset">
+        <field name="countModeEnumId" type="id"><description>Full, cycle or spot (CountMode): set on every count of
+            InventoryCountServices, never on an immediate posting.</description></field>
+        <field name="blindIndicator" type="text-indicator" enable-audit-log="true"><description>Y: counters get no
+            expected quantity or variance from the server; reviewers see them once the count is submitted.</description></field>
+        <field name="assigneePartyId" type="id" enable-audit-log="true"/>
+        <field name="plannedDate" type="date-time"/>
+        <field name="countSourceEnumId" type="id"><description>Why the count exists (CountSource): planned, the
+            schedule, Request a count, a short-pick recount.</description></field>
+        <field name="sourceReference" type="text-medium"><description>The record the request came from, such as the
+            shipment of a short pick.</description></field>
+        <field name="countScheduleId" type="id"/>
+        <field name="scopeLocationTypeEnumId" type="id"/>
+        <field name="scopeAreaId" type="id"/>
+        <field name="scopeLocationSeqId" type="id"/>
+        <field name="scopeProductId" type="id"/>
+        <field name="scopeProductCategoryId" type="id"/>
+        <field name="scopeLotId" type="id"/>
+        <field name="scopeAbcClassEnumId" type="id"/>
+        <field name="scopeVersion" type="number-integer"><description>Raised by each scope change while planning; frozen
+            when the count starts.</description></field>
+        <field name="startedDate" type="date-time"/>
+        <field name="startedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="reviewedDate" type="date-time"/>
+        <field name="reviewedByUserId" type="id"/>
+        <field name="reviewVersion" type="number-integer"><description>Raised by each review, recount and resolution;
+            post#Count posts only the reviewed version it was shown.</description></field>
+        <field name="completedDate" type="date-time"/>
+        <relationship type="one" title="CountMode" related="moqui.basic.Enumeration" short-alias="countModeEnum">
+            <key-map field-name="countModeEnumId"/></relationship>
+        <relationship type="one" title="CountSource" related="moqui.basic.Enumeration" short-alias="countSourceEnum">
+            <key-map field-name="countSourceEnumId"/></relationship>
+        <relationship type="one" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.facility.CountSchedule" short-alias="countSchedule"/>
+        <index name="PHYS_INV_COUNT_MODE"><index-field name="countModeEnumId"/><index-field name="statusId"/></index>
+        <index name="PHYS_INV_ASSIGNEE"><index-field name="assigneePartyId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="PhysicalInventoryCount" package="mantle.product.asset">
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="assetId" type="id"><description>The exact stock counted; empty on a line for stock found that the
+            snapshot did not hold (extraIndicator).</description></field>
+        <field name="extraIndicator" type="text-indicator"/>
+        <field name="ownerPartyId" type="id"/>
+        <field name="assetPoolId" type="id"/>
+        <field name="assetStatusId" type="id"/>
+        <field name="containerId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="snapshotQuantity" type="number-decimal"/>
+        <field name="snapshotDate" type="date-time"/>
+        <field name="countedByUserId" type="id"/>
+        <field name="skipReasonEnumId" type="id"/>
+        <field name="recountNumber" type="number-integer"/>
+        <field name="countTimeQuantity" type="number-decimal"><description>The asset's quantity at the time it was
+            counted (review#Count).</description></field>
+        <field name="interveningQuantity" type="number-decimal"><description>The asset's movements of other records since
+            the snapshot (review#Count).</description></field>
+        <field name="conflictText" type="text-medium"/>
+        <field name="approvedDelta" type="number-decimal" enable-audit-log="true"/>
+        <field name="varianceReasonEnumId" type="id"/>
+        <field name="reviewedByUserId" type="id"/>
+        <field name="reviewedDate" type="date-time"/>
+        <field name="postedDelta" type="number-decimal"/>
+        <field name="postedDate" type="date-time"/>
+        <field name="postAssetId" type="id"><description>The asset the variance posted to (a new one for stock
+            found).</description></field>
+        <field name="assetDetailId" type="id"/>
+        <field name="postReasonCode" type="text-short"/>
+        <field name="postMessage" type="text-medium"/>
+        <relationship type="one" title="PhysicalInventoryCount" related="moqui.basic.StatusItem" short-alias="status"
+                fk-name="PhysInvCountStatus"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" title="CountSkipReason" related="moqui.basic.Enumeration" short-alias="skipReasonEnum">
+            <key-map field-name="skipReasonEnumId"/></relationship>
+        <relationship type="one" title="InventoryVarianceReason" related="moqui.basic.Enumeration"
+                short-alias="varianceReasonEnum">
+            <key-map field-name="varianceReasonEnumId"/></relationship>
+        <index name="PHYS_INV_CNT_INV"><index-field name="physicalInventoryId"/><index-field name="statusId"/></index>
+        <index name="PHYS_INV_CNT_ASSET"><index-field name="assetId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="FacilityLocation" package="mantle.facility">
+        <field name="lastCountDate" type="date-time"><description>When stock here was last counted and posted
+            (InventoryCountServices.post#Count); find#DueCounts reads it.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="ProductFacility" package="mantle.facility">
+        <field name="lastCountDate" type="date-time"><description>When the product here was last counted and posted
+            (post#Count).</description></field>
+    </extend-entity>
+
+    <entity entity-name="CountSchedule" package="mantle.facility" cache="never">
+        <description>When locations or products come due for counting (design-warehouse StockPolicies CountSchedule): one
+            dated row of the warehouse policy per rule. Its scope is an organization and, optionally, a facility and either
+            locations (a location type, an area or one location) or products (a product category or an ABC class). Its kind
+            is periodic (every frequencyDays), annual (annualMonth and annualDay) or zero confirmation (a location whose
+            stock reached zero since its last count). A change ends the row in effect and starts the next
+            (previousCountScheduleId), with the key fields audit-logged; history is never rewritten.</description>
+        <field name="countScheduleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="locationTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="areaId" type="id" enable-audit-log="true"/>
+        <field name="locationSeqId" type="id" enable-audit-log="true"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="abcClassEnumId" type="id" enable-audit-log="true"/>
+        <field name="scheduleKindEnumId" type="id" enable-audit-log="true"/>
+        <field name="frequencyDays" type="number-integer" enable-audit-log="true"/>
+        <field name="annualMonth" type="number-integer" enable-audit-log="true"/>
+        <field name="annualDay" type="number-integer" enable-audit-log="true"/>
+        <field name="countModeEnumId" type="id" enable-audit-log="true"/>
+        <field name="blindIndicator" type="text-indicator" enable-audit-log="true"/>
+        <field name="assigneePartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="previousCountScheduleId" type="id"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one" title="FacilityLocationType" related="moqui.basic.Enumeration" short-alias="locationType">
+            <key-map field-name="locationTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" title="AbcClass" related="moqui.basic.Enumeration" short-alias="abcClassEnum">
+            <key-map field-name="abcClassEnumId"/></relationship>
+        <relationship type="one" title="CountScheduleKind" related="moqui.basic.Enumeration" short-alias="scheduleKindEnum">
+            <key-map field-name="scheduleKindEnumId"/></relationship>
+        <relationship type="one" title="CountMode" related="moqui.basic.Enumeration" short-alias="countModeEnum">
+            <key-map field-name="countModeEnumId"/></relationship>
+        <relationship type="one" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <index name="COUNT_SCHED_ORG"><index-field name="organizationPartyId"/><index-field name="facilityId"/></index>
+    </entity>
+</entities>

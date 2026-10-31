@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Counts (impl-warehouse P10, design-warehouse WH-COUNT): the count modes, sources, schedule kinds and skip reasons;
+    the status flow of a count (the four PhysicalInventory statuses and a cancel) and of its lines; the due-count
+    notification and its nightly job (mantle.product.InventoryCountServices). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="CountMode" description="Count mode"/>
+    <moqui.basic.Enumeration enumId="CntModeFull" enumTypeId="CountMode" description="Full" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntModeCycle" enumTypeId="CountMode" description="Cycle" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntModeSpot" enumTypeId="CountMode" description="Spot" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountSource" description="Why a count exists"/>
+    <moqui.basic.Enumeration enumId="CntSrcPlanned" enumTypeId="CountSource" description="Planned" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntSrcSchedule" enumTypeId="CountSource" description="Count schedule" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntSrcRequest" enumTypeId="CountSource" description="Count requested" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="CntSrcShortPick" enumTypeId="CountSource" description="Short pick recount"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountScheduleKind" description="Count schedule kind"/>
+    <moqui.basic.Enumeration enumId="CskPeriodic" enumTypeId="CountScheduleKind" description="Every few days"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CskAnnual" enumTypeId="CountScheduleKind" description="Once a year" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CskZero" enumTypeId="CountScheduleKind" description="When stock reaches zero"
+            sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType enumTypeId="CountSkipReason" description="Why a count line was not counted"/>
+    <moqui.basic.Enumeration enumId="CntSkNotCounted" enumTypeId="CountSkipReason" description="Not counted"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="CntSkNoAccess" enumTypeId="CountSkipReason" description="Could not reach it"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="CntSkOther" enumTypeId="CountSkipReason" description="Other" sequenceNum="3"/>
+
+    <!-- a count: planned, counting, in review, complete; cancelled before anything posts -->
+    <moqui.basic.StatusItem statusId="PICancelled" statusTypeId="PhysicalInventory" description="Cancelled" sequenceNum="5"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInPlanning" toStatusId="PIInProgress"
+            transitionName="Start"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInProgress" toStatusId="PIInValidation"
+            transitionName="Submit"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PIInProgress"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PIComplete"
+            transitionName="Complete"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInPlanning" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInProgress" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PIInValidation" toStatusId="PICancelled"
+            transitionName="Cancel"/>
+
+    <!-- a count line: to count, counted or skipped; reviewed into approved or a conflict; posted or failed -->
+    <moqui.basic.StatusType statusTypeId="PhysicalInventoryCount" description="Count line status"/>
+    <moqui.basic.StatusItem statusId="PicOpen" statusTypeId="PhysicalInventoryCount" description="To count" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PicCounted" statusTypeId="PhysicalInventoryCount" description="Counted"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PicSkipped" statusTypeId="PhysicalInventoryCount" description="Skipped"
+            sequenceNum="3"/>
+    <moqui.basic.StatusItem statusId="PicConflict" statusTypeId="PhysicalInventoryCount" description="Stock moved"
+            sequenceNum="4"/>
+    <moqui.basic.StatusItem statusId="PicApproved" statusTypeId="PhysicalInventoryCount" description="Approved"
+            sequenceNum="5"/>
+    <moqui.basic.StatusItem statusId="PicPosted" statusTypeId="PhysicalInventoryCount" description="Posted" sequenceNum="6"/>
+    <moqui.basic.StatusItem statusId="PicFailed" statusTypeId="PhysicalInventoryCount" description="Failed" sequenceNum="7"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicOpen" toStatusId="PicCounted" transitionName="Count"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicOpen" toStatusId="PicSkipped" transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicSkipped"
+            transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicOpen"
+            transitionName="Clear"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicSkipped" toStatusId="PicCounted"
+            transitionName="Count"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicSkipped" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicApproved"
+            transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicCounted" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicApproved"
+            transitionName="Carry variance"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicConflict" toStatusId="PicSkipped"
+            transitionName="Skip"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicPosted"
+            transitionName="Post"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicApproved" toStatusId="PicFailed"
+            transitionName="Post failed"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicPosted"
+            transitionName="Post"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicConflict"
+            transitionName="Stock moved"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicOpen"
+            transitionName="Recount"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PicFailed" toStatusId="PicApproved"
+            transitionName="Carry variance"/>
+</entity-facade-xml>

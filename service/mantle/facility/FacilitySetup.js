@@ -214,14 +214,22 @@ function blockersOf(facilityId, locationSeqId) {
             .distinct(true)
             .list()
     ).map(row => row.physicalInventoryId)
+    // a planned count scoped to the location has no lines yet (P10)
+    for (const row of find("mantle.product.asset.PhysicalInventory", {facilityId, scopeLocationSeqId: locationSeqId})
+        .selectField("physicalInventoryId")
+        .list())
+        if (!countIds.includes(row.physicalInventoryId)) countIds.push(row.physicalInventoryId)
     if (countIds.length)
         add(
             "count",
-            "counts not complete:",
+            "counts still open:",
             () =>
                 find("mantle.product.asset.PhysicalInventory")
                     .condition("physicalInventoryId", "in", countIds)
-                    .condition(anyOf([cond("statusId", "is-null", null), cond("statusId", "not-equals", "PIComplete")])),
+                    // a count still open (P10's statuses): neither complete nor cancelled
+                    .condition(
+                        anyOf([cond("statusId", "is-null", null), cond("statusId", "not-in", ["PIComplete", "PICancelled"])])
+                    ),
             "physicalInventoryId"
         )
     add("productLocation", "product location policies of", () => find("mantle.facility.ProductFacilityLocation", at), "productId")
