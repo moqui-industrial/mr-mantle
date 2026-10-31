@@ -19,8 +19,10 @@ const flags = ["lotRequired", "serialRequired", "expiryBlock"],
 const current = (r, at) => (ms(r.fromDate) ?? -Infinity) <= at && (ms(r.thruDate) ?? Infinity) > at
 const pick = (p, fields) =>
     Object.fromEntries(fields.filter(k => Object.keys(p).includes(k)).map(k => [k, p[k] === "" ? null : p[k]]))
+// The organizations are FacilityScope.js's, as for every facility and stock guard.
+const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 function guard(p, write = false) {
-    const s = call(P + "ProductServices.get#CatalogOwnerScope"),
+    const s = facilityScope.scope(),
         blocked = !s.systemAdmin && ec.user.hasPermission("PROJECT_CLIENT")
     if (!ec.user.userId || blocked) throw new Error("Warehouse policy is not available")
     const canPlan = s.systemAdmin || ec.user.hasPermission("STOCK_POLICY_PLAN") || ec.user.hasPermission("STOCK_POLICY_MANAGE")
@@ -28,23 +30,20 @@ function guard(p, write = false) {
     const facility = p.facilityId && p.facilityId !== "_NA_" ? one(E + "Facility", {facilityId: p.facilityId}) : null
     if (p.facilityId && p.facilityId !== "_NA_" && !facility) throw new Error("Facility is not available")
     const organizationPartyId =
-        p.organizationPartyId || facility?.ownerPartyId || s.activeOrganizationPartyId || s.organizationPartyIds[0]
+        p.organizationPartyId || facility?.ownerPartyId || s.activeOrganizationPartyId || s.memberPartyIds[0]
     if (
         !organizationPartyId ||
         !one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}) ||
-        (!s.systemAdmin && !s.ownerPartyIds.includes(organizationPartyId))
+        !facilityScope.owns(s, organizationPartyId)
     )
         throw new Error("Warehouse organization is not available")
-    if (
-        facility &&
-        (facility.ownerPartyId !== organizationPartyId || (!s.systemAdmin && !s.ownerPartyIds.includes(facility.ownerPartyId)))
-    )
+    if (facility && (facility.ownerPartyId !== organizationPartyId || !facilityScope.owns(s, facility.ownerPartyId)))
         throw new Error("Facility is not in the available warehouse organization")
     const product = p.productId && p.productId !== "_NA_" ? one(P + "Product", {productId: p.productId}) : null
     if (
         p.productId &&
         p.productId !== "_NA_" &&
-        (!product || (!s.systemAdmin && !s.ownerPartyIds.includes(product.ownerPartyId)))
+        (!product || (product.ownerPartyId !== "_NA_" && !facilityScope.owns(s, product.ownerPartyId)))
     )
         throw new Error("Product is not available")
     if (write && product && !["PtAsset", "PtDigitalAsset", "PtAssetUse", "PtPickAssembly"].includes(product.productTypeEnumId))
@@ -207,6 +206,9 @@ function facilityStore(p) {
     // a product's location policy removed, so the location no longer names it (a location closes only when none does)
     if (location && (p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y")) {
         if (!old) throw new Error("This product has no policy at the location")
+        // the fields cleared through the audited update first, so the old values and the reason reach the audit log
+        audit([...fields, "changeReason"], why)
+        call("update#" + entity, Object.assign({}, key, Object.fromEntries(fields.map(f => [f, null])), {changeReason: why}))
         call("delete#" + entity, key)
         return Object.assign(facilityRead(g), {locationSeqId: location})
     }

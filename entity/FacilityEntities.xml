@@ -284,7 +284,7 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="FacilityLocationType" package="mantle.facility">
         <field name="facilityId" type="id" is-pk="true"/>
         <field name="locationTypeEnumId" type="id" is-pk="true"/>
-        <field name="autoStatusId" type="id" enable-audit-log="update"/>
+        <field name="autoStatusId" type="id" enable-audit-log="true"/>
         <relationship type="one" related="mantle.facility.Facility"/>
         <relationship type="one" title="FacilityLocationType" related="moqui.basic.Enumeration" short-alias="locationTypeEnum">
             <key-map field-name="locationTypeEnumId"/></relationship>

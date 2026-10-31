@@ -48,6 +48,7 @@ spec({
         ec.artifactExecution.disableAuthz()
         ensureGroup("WHF_FACILITY_EDITOR", ["FACILITY_EDIT", "STOCK_POLICY_PLAN"])
         ensureGroup("WHF_FACILITY_READER", [])
+        ensureGroup("WHF_FACILITY_ALL", ["FACILITY_EDIT", "FACILITY_ALL_ORGANIZATIONS"])
         for (const partyId of ["WHF_ORG", "WHF_OTHER"]) {
             call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization"})
             call("create#mantle.party.Organization", {partyId, organizationName: partyId})
@@ -55,7 +56,8 @@ spec({
         }
         for (const [partyId, userGroupId] of [
             ["WHF_EDITOR", "WHF_FACILITY_EDITOR"],
-            ["WHF_READER", "WHF_FACILITY_READER"]
+            ["WHF_READER", "WHF_FACILITY_READER"],
+            ["WHF_ALL", "WHF_FACILITY_ALL"]
         ]) {
             call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
             call("create#mantle.party.Person", {partyId, firstName: partyId})
@@ -141,10 +143,30 @@ spec({
             locationSeqId: "COUNT",
             productId: "WHF_PRODUCT"
         })
+        call("create#mantle.facility.FacilityLocation", {
+            facilityId: "WHF_FAC",
+            locationSeqId: "GONE",
+            locationTypeEnumId: "FltBulk"
+        })
+        asset("WHF_PALLET_JACK", "GONE", {assetTypeEnumId: "AstTpEquipment", hasQuantity: "Y", statusId: "AstInUse"})
+        call("create#mantle.facility.Facility", {
+            facilityId: "WHF_SHUT",
+            facilityName: "Closed site",
+            ownerPartyId: "WHF_ORG",
+            closedDate: "2026-01-31 00:00:00"
+        })
+        call("create#mantle.facility.FacilityLocation", {facilityId: "WHF_SHUT", locationSeqId: "S1"})
+        call("create#mantle.facility.Facility", {
+            facilityId: "WHF_UNDER_OTHER",
+            facilityName: "Under another",
+            ownerPartyId: "WHF_ORG",
+            parentFacilityId: "WHF_OTHER_FAC"
+        })
         call("create#mantle.facility.ProductFacilityLocation", {
             productId: "WHF_PRODUCT",
             facilityId: "WHF_FAC",
-            locationSeqId: "POLICY"
+            locationSeqId: "POLICY",
+            minimumStock: 2
         })
         ec.artifactExecution.enableAuthz()
     },
@@ -302,6 +324,12 @@ feature("locations keep capacity and pick sequence, and each location type's ass
             newValueText: "AstOnHold",
             changeReason: "Held, not quarantined"
         }).count() == 1
+        find("moqui.entity.EntityAuditLog", {
+            changedEntityName: "mantle.facility.FacilityLocationType",
+            changedFieldName: "autoStatusId",
+            newValueText: "AstQuarantine",
+            changeReason: "Quarantine holds stock"
+        }).count() == 1
     }
 })
 
@@ -350,9 +378,20 @@ feature("removing a product's location policy through store#ProductFacilityPolic
                 changeReason: "Bin retired"
             })
         )
-        return {removed, again, closed: closeAt("POLICY")}
+        return {
+            removed,
+            again,
+            closed: closeAt("POLICY"),
+            audited: find("moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.facility.ProductFacilityLocation",
+                changedFieldName: "minimumStock",
+                oldValueText: "2",
+                changeReason: "Bin retired"
+            }).count()
+        }
     },
-    then({removed, again, closed}) {
+    then({removed, again, closed, audited}) {
+        audited == 1
         removed.error == ""
         removed.locationPolicies.length == 0
         again.error.includes("no policy at the location")
@@ -469,5 +508,71 @@ feature("another organization's location is refused like a missing one", {
         close.error.includes("FACILITY_UNAVAILABLE")
         blockers.error.includes("FACILITY_UNAVAILABLE")
         type.error.includes("FACILITY_UNAVAILABLE")
+    }
+})
+
+feature("a blank parent keeps the stored one, an unchanged one is not checked again, and clearParent removes it", {
+    when() {
+        return as("whf_editor", () => ({
+            noOwner: invoke(F + "store#Facility", {facilityId: "WHF_SITE", ownerPartyId: "WHF_OTHER"}),
+            kept: invoke(F + "store#Facility", {facilityId: "WHF_UNDER_OTHER", facilityName: "Renamed", parentFacilityId: ""}),
+            unchanged: invoke(F + "store#Facility", {
+                facilityId: "WHF_UNDER_OTHER",
+                facilityName: "Renamed again",
+                parentFacilityId: "WHF_OTHER_FAC"
+            }),
+            keptRow: one("mantle.facility.Facility", {facilityId: "WHF_UNDER_OTHER"}),
+            cleared: invoke(F + "store#Facility", {facilityId: "WHF_FLOOR", parentFacilityId: "", clearParent: true}),
+            clearedRow: one("mantle.facility.Facility", {facilityId: "WHF_FLOOR"})
+        }))
+    },
+    then({noOwner, kept, unchanged, keptRow, cleared, clearedRow}) {
+        noOwner.error.includes("OWNER_UNAVAILABLE")
+        kept.error == ""
+        unchanged.error == ""
+        keptRow.parentFacilityId == "WHF_OTHER_FAC"
+        keptRow.facilityName == "Renamed again"
+        cleared.error == ""
+        clearedRow.parentFacilityId == null
+    }
+})
+
+feature("FACILITY_ALL_ORGANIZATIONS works in another organization's facility, and an owner change needs a reason", {
+    when() {
+        return as("whf_all", () => ({
+            renamed: invoke(F + "store#Facility", {facilityId: "WHF_OTHER_FAC", facilityName: "Other, renamed"}),
+            location: invoke(F + "store#FacilityLocation", {facilityId: "WHF_OTHER_FAC", locationSeqId: "X1", capacity: 4}),
+            noReason: invoke(F + "store#Facility", {facilityId: "WHF_OTHER_FAC", ownerPartyId: "WHF_ORG"}),
+            withReason: invoke(F + "store#Facility", {
+                facilityId: "WHF_OTHER_FAC",
+                ownerPartyId: "WHF_ORG",
+                changeReason: "Site bought"
+            })
+        }))
+    },
+    then({renamed, location, noReason, withReason}) {
+        renamed.error == ""
+        location.error == ""
+        noReason.error.includes("REASON_REQUIRED")
+        withReason.error == ""
+        one("mantle.facility.Facility", {facilityId: "WHF_OTHER_FAC"}).ownerPartyId == "WHF_ORG"
+        find("moqui.entity.EntityAuditLog", {
+            changedEntityName: "mantle.facility.Facility",
+            changedFieldName: "ownerPartyId",
+            changeReason: "Site bought"
+        }).count() == 1
+    }
+})
+
+feature("equipment counted by quantity with none on hand does not block, and a closed facility's location is refused", {
+    when() {
+        return {
+            gone: closeAt("GONE"),
+            shut: invoke(F + "check#FacilityLocationOpen", {facilityId: "WHF_SHUT", locationSeqId: "S1"})
+        }
+    },
+    then({gone, shut}) {
+        gone.error == ""
+        shut.error.includes("FACILITY_CLOSED")
     }
 })

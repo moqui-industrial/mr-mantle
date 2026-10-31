@@ -348,13 +348,18 @@ along with this software (see the LICENSE.md file). If not, see
             is one of their internal organizations, every one for a system administrator). Refuses another organization's
             facility (FACILITY_UNAVAILABLE), an owner that is not one of the user's internal organizations
             (OWNER_UNAVAILABLE), no name, a parent that is not one of the user's facilities, a parent that is the facility
-            itself or one under it (PARENT_CYCLE), and a close before the open. A changed owner is audit-logged with
-            changeReason. Contact details go through create#Facility and update#Facility.</description>
+            itself or one under it (PARENT_CYCLE), and a close before the open. A changed owner needs changeReason
+            (REASON_REQUIRED), which the audit log keeps. A blank parentFacilityId keeps the stored parent unless
+            clearParent; a parent equal to the stored one is kept without being checked again. The scope is
+            FacilityScope.js's: the user's organizations (the active one when it is theirs), every one with
+            FACILITY_ALL_ORGANIZATIONS. Contact details go through create#Facility and update#Facility.</description>
         <in-parameters>
             <parameter name="facilityId"/>
             <parameter name="facilityName"/>
             <parameter name="facilityTypeEnumId"/>
             <parameter name="parentFacilityId"/>
+            <parameter name="clearParent" type="Boolean" default="false"><description>With a blank parentFacilityId,
+                removes the parent.</description></parameter>
             <parameter name="ownerPartyId"/>
             <parameter name="description"/>
             <parameter name="openedDate" type="Timestamp"/>
@@ -507,9 +512,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="check" noun="FacilityLocationOpen" allow-remote="false">
         <description>For a destination guard (receive, move, putaway): refuses a location that does not exist
-            (LOCATION_UNAVAILABLE) or is closed (LOCATION_CLOSED), since receive#Asset and move#Asset do not read
-            FacilityLocation.thruDate. Checks no permission: the guard calling it inside its operation has checked the
-            user and the facility.</description>
+            (LOCATION_UNAVAILABLE) or is closed (LOCATION_CLOSED), or one of a facility whose closedDate has passed
+            (FACILITY_CLOSED), since receive#Asset and move#Asset do not read FacilityLocation.thruDate. It locks the
+            location row, so the guard calls it inside its own transaction, where the lock serializes it with
+            close#FacilityLocation. Checks no permission: the guard has checked the user and the facility.</description>
         <in-parameters>
             <parameter name="facilityId" required="true"/>
             <parameter name="locationSeqId" required="true"/>

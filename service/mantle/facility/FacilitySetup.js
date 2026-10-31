@@ -1,11 +1,11 @@
 // Facility and location setup (mantle.facility.FacilityServices): the facility and location saves, each location type's
-// asset status, and closing a location. The writes check FACILITY_EDIT and the organization by party relationship: a
-// facility is the user's when its owner is one of their organizations (get#PartyOrganizationInfo userOrgIds), and a
-// system administrator works in every one. Facility parents never form a cycle. A location closes by its audit-logged
-// thruDate only when nothing is stored or open there, and each thing that is is named. Disabled artifact authorization
-// widens nothing here.
+// asset status, and closing a location. The writes check FACILITY_EDIT and the organization by party relationship
+// (FacilityScope.js, shared with the other facility and stock guards): a facility is the user's when its owner is in
+// their scope. Facility parents never form a cycle. A location closes by its audit-logged thruDate only when nothing is
+// stored or open there, and each thing that is is named. Disabled artifact authorization widens nothing here.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const {find, one, rows, denied, call, ms} = lib
+const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
+const {find, one, denied, call, ms} = lib
 
 const facilityEntity = "mantle.facility.Facility"
 const locationEntity = "mantle.facility.FacilityLocation"
@@ -23,13 +23,9 @@ const text = value => (blank(value) ? null : String(value).trim())
 function scope() {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in to change facilities")
     if (!lib.access.has("FACILITY_EDIT")) denied("PERMISSION_DENIED", "Facility edit authority is required")
-    if (lib.access.systemAdmin()) return {organizationPartyIds: null}
-    const organization = call("mantle.party.PartyServices.get#PartyOrganizationInfo")
-    return {organizationPartyIds: Array.from(organization.userOrgIds || [])}
+    return facilityScope.scope()
 }
-function ownedBy(userScope, partyId) {
-    return !!partyId && (!userScope.organizationPartyIds || userScope.organizationPartyIds.includes(partyId))
-}
+const ownedBy = (userScope, partyId) => facilityScope.owns(userScope, partyId)
 // A facility of the user's, locked for update when asked; a missing one and another organization's are refused alike.
 function facilityOf(userScope, facilityId, lock = false) {
     let query = find(facilityEntity, {facilityId: facilityId || "_NA_"})
@@ -52,7 +48,9 @@ function closed(location, now = ms(ec.user.nowTimestamp)) {
 }
 
 // store#Facility: a new facility, or a change to one of the user's. Its owner is one of the user's internal
-// organizations; its parent is one of their facilities and never itself or a facility under it.
+// organizations, and a change of owner needs a reason; its parent is one of their facilities and never itself or a
+// facility under it. A blank parent keeps the stored one unless clearParent says the user removed it, and a parent equal
+// to the stored one is kept without being checked again (the user may not see it).
 function storeFacility(p) {
     const userScope = scope()
     const existing = blank(p.facilityId) ? null : find(facilityEntity, {facilityId: p.facilityId}).forUpdate(true).one()
@@ -62,14 +60,20 @@ function storeFacility(p) {
     if (!ownerPartyId) denied("OWNER_REQUIRED", "Choose the organization that owns the facility")
     if (!one("mantle.party.PartyRole", {partyId: ownerPartyId, roleTypeId: "OrgInternal"}) || !ownedBy(userScope, ownerPartyId))
         denied("OWNER_UNAVAILABLE", "Organization " + ownerPartyId + " is not available")
+    if (existing && existing.ownerPartyId !== ownerPartyId && blank(p.changeReason))
+        denied("REASON_REQUIRED", "Give a reason for the change of owner")
     const facilityName = has("facilityName") ? text(p.facilityName) : existing?.facilityName
     if (!facilityName) denied("NAME_REQUIRED", "Give the facility a name")
     if (!blank(p.facilityTypeEnumId)) enumOf(p.facilityTypeEnumId, "FacilityType", "facility type")
-    if (has("parentFacilityId") && !blank(p.parentFacilityId)) {
-        const parent = facilityOf(userScope, p.parentFacilityId)
-        // walk up from the parent: reaching this facility would make it its own ancestor
+    const clearParent = p.clearParent === true || p.clearParent === "true" || p.clearParent === "Y"
+    const parentChanged = !blank(p.parentFacilityId) && p.parentFacilityId !== existing?.parentFacilityId
+    if (parentChanged) {
+        const parent = facilityOf(userScope, p.parentFacilityId, true)
+        // walk up from the parent, locking each ancestor: reaching this facility would make it its own ancestor
         const seen = new Set()
-        for (let at = parent; at; at = at.parentFacilityId ? one(facilityEntity, {facilityId: at.parentFacilityId}) : null) {
+        const above = at =>
+            at.parentFacilityId ? find(facilityEntity, {facilityId: at.parentFacilityId}).forUpdate(true).one() : null
+        for (let at = parent; at; at = above(at)) {
             if (existing && at.facilityId === existing.facilityId)
                 denied(
                     "PARENT_CYCLE",
@@ -82,12 +86,19 @@ function storeFacility(p) {
     if (!blank(p.openedDate) && !blank(p.closedDate) && ms(p.closedDate) < ms(p.openedDate))
         denied("DATES_INVALID", "The facility cannot close before it opens")
     const values = Object.assign({}, p, {ownerPartyId, facilityName})
-    for (const name of ["facilityId", "facilityTypeEnumId", "parentFacilityId", "description"])
-        if (has(name) && blank(p[name])) values[name] = null
+    for (const name of ["facilityId", "facilityTypeEnumId", "description"]) if (has(name) && blank(p[name])) values[name] = null
+    // the parent: the new one, none when the user removed it, else as stored
+    if (parentChanged) values.parentFacilityId = p.parentFacilityId
+    else if (clearParent && blank(p.parentFacilityId)) values.parentFacilityId = null
+    else delete values.parentFacilityId
     delete values.changeReason
+    delete values.clearParent
     if (existing) {
-        // the owner is audit-logged with the reason given
-        if (!blank(p.changeReason)) ec.context.putAll({ownerPartyId_changeReason: String(p.changeReason).trim()})
+        // a new owner first, through the entity's own update, so the audit log keeps it with its reason
+        if (existing.ownerPartyId !== ownerPartyId) {
+            ec.context.putAll({ownerPartyId_changeReason: String(p.changeReason).trim()})
+            call("update#" + facilityEntity, {facilityId: existing.facilityId, ownerPartyId})
+        }
         call("mantle.facility.FacilityServices.update#Facility", values)
         return {facilityId: existing.facilityId, created: false}
     }
@@ -125,7 +136,8 @@ function storeLocation(p) {
     const values = {facilityId: facility.facilityId, locationSeqId}
     for (const name of fields.concat(["capacity", "capacityUomId", "sequenceNum"]))
         if (p[name] !== undefined) values[name] = blank(p[name]) ? null : p[name]
-    call((existing ? "update#" : "create#") + locationEntity, values)
+    if (existing) call("update#" + locationEntity, values)
+    else call("mantle.facility.FacilityServices.create#FacilityLocation", values)
     return {facilityId: facility.facilityId, locationSeqId, created: !existing}
 }
 
@@ -148,88 +160,70 @@ function storeLocationType(p) {
 }
 
 // What keeps a location from closing, each named: stock there with on-hand or available-to-promise not zero (a depleted
-// asset stays at zero and does not block), equipment there that has not left, a container, a reservation not issued on an
-// asset there (an open pick), a count line there on a count not complete, and a product's location policy naming it.
+// asset stays at zero and does not block), equipment there that has not left (an asset counted by quantity with on-hand
+// and available-to-promise both zero is gone, whatever its type), a container, a reservation not issued on an asset there
+// (an open pick), a count line there on a count not complete, and a product's location policy naming it. Each kind is
+// one find filtered in the database: its count and the first records it names.
 function blockersOf(facilityId, locationSeqId) {
     const at = {facilityId, locationSeqId}
-    const blockers = []
-    const add = (kind, label, records) => {
-        if (!records.length) return
-        const named = records.slice(0, namedLimit).join(", ")
-        const more = records.length > namedLimit ? " and " + (records.length - namedLimit) + " more" : ""
-        blockers.push({
-            kind,
-            label,
-            recordIds: records.slice(0, namedLimit),
-            count: records.length,
-            text: label + " " + named + more
-        })
-    }
     const factory = ec.entity.conditionFactory
-    const assets = rows("mantle.product.asset.Asset", at)
-    const stock = assets.filter(asset => !asset.assetTypeEnumId || stockAssetTypes.includes(asset.assetTypeEnumId))
-    const zero = value => value == null || toDecimal(value).isZero()
+    const cond = (field, operator, value) => factory.makeCondition(field, operator, value)
+    const anyOf = conditions => factory.makeCondition(conditions, "or")
+    const allOf = conditions => factory.makeCondition(conditions, "and")
+    const blockers = []
+    const add = (kind, label, query, field, show = row => row[field]) => {
+        const count = query().count()
+        if (!count) return
+        const records = Array.from(query().orderBy(field).limit(namedLimit).list()).map(show)
+        const more = count > namedLimit ? " and " + (count - namedLimit) + " more" : ""
+        blockers.push({kind, label, recordIds: records, count, text: label + " " + records.join(", ") + more})
+    }
+    const notZero = anyOf([cond("quantityOnHandTotal", "not-equals", 0), cond("availableToPromiseTotal", "not-equals", 0)])
+    const stockType = anyOf([cond("assetTypeEnumId", "is-null", null), cond("assetTypeEnumId", "in", stockAssetTypes)])
     add(
         "stock",
         "stock on hand or promised:",
-        stock.filter(asset => !zero(asset.quantityOnHandTotal) || !zero(asset.availableToPromiseTotal)).map(a => a.assetId)
+        () => find("mantle.product.asset.Asset", at).condition(stockType).condition(notZero),
+        "assetId"
     )
     add(
         "equipment",
         "equipment that has not left:",
-        assets
-            .filter(asset => asset.assetTypeEnumId && !stockAssetTypes.includes(asset.assetTypeEnumId))
-            .filter(asset => !leftStatuses.includes(asset.statusId) && asset.actualEndOfLife == null)
-            .map(asset => asset.assetId)
+        () =>
+            find("mantle.product.asset.Asset", at)
+                .condition("assetTypeEnumId", "not-in", stockAssetTypes)
+                .condition(cond("assetTypeEnumId", "is-not-null", null))
+                .condition(anyOf([cond("statusId", "is-null", null), cond("statusId", "not-in", leftStatuses)]))
+                .condition(cond("actualEndOfLife", "is-null", null))
+                .condition(anyOf([cond("hasQuantity", "is-null", null), cond("hasQuantity", "not-equals", "Y"), notZero])),
+        "assetId"
     )
-    add(
-        "container",
-        "containers:",
-        rows("mantle.product.asset.Container", at).map(container => container.containerId)
-    )
-    const assetIds = assets.map(asset => asset.assetId)
+    add("container", "containers:", () => find("mantle.product.asset.Container", at), "containerId")
     add(
         "reservation",
         "reservations not issued (open picks) on",
-        assetIds.length
-            ? Array.from(
-                  find("mantle.product.issuance.AssetReservation")
-                      .condition("assetId", "in", assetIds)
-                      .condition("quantityNotIssued", "greater", 0)
-                      .orderBy("assetReservationId")
-                      .list()
-              ).map(row => row.assetReservationId + " (asset " + row.assetId + ")")
-            : []
+        () => find("mantle.product.issuance.AssetAndReservation", at).condition("quantityNotIssued", "greater", 0),
+        "assetReservationId",
+        row => row.assetReservationId + " (asset " + row.assetId + ")"
     )
-    const countLines = Array.from(
-        find("mantle.product.asset.PhysicalInventoryCount")
-            .condition(factory.makeCondition("physicalInventoryId", "is-not-null", null))
-            .condition(at)
+    const countIds = Array.from(
+        find("mantle.product.asset.PhysicalInventoryCount", at)
+            .condition(cond("physicalInventoryId", "is-not-null", null))
+            .selectField("physicalInventoryId")
+            .distinct(true)
             .list()
-    )
-    const countIds = [...new Set(countLines.map(line => line.physicalInventoryId))]
-    const openCountIds = countIds.length
-        ? Array.from(
-              find("mantle.product.asset.PhysicalInventory")
-                  .condition("physicalInventoryId", "in", countIds)
-                  .condition(
-                      factory.makeCondition(
-                          [
-                              factory.makeCondition("statusId", "is-null", null),
-                              factory.makeCondition("statusId", "not-equals", "PIComplete")
-                          ],
-                          "or"
-                      )
-                  )
-                  .list()
-          ).map(row => row.physicalInventoryId)
-        : []
-    add("count", "counts not complete:", openCountIds)
-    add(
-        "productLocation",
-        "product location policies of",
-        rows("mantle.facility.ProductFacilityLocation", at).map(row => row.productId)
-    )
+    ).map(row => row.physicalInventoryId)
+    if (countIds.length)
+        add(
+            "count",
+            "counts not complete:",
+            () =>
+                find("mantle.product.asset.PhysicalInventory")
+                    .condition("physicalInventoryId", "in", countIds)
+                    .condition(anyOf([cond("statusId", "is-null", null), cond("statusId", "not-equals", "PIComplete")])),
+            "physicalInventoryId"
+        )
+    add("productLocation", "product location policies of", () => find("mantle.facility.ProductFacilityLocation", at), "productId")
     return blockers
 }
 function locationOf(userScope, p, lock) {
@@ -270,16 +264,21 @@ function reopenLocation(p) {
     call("update#" + locationEntity, {facilityId: facility.facilityId, locationSeqId: location.locationSeqId, thruDate: null})
     return {facilityId: facility.facilityId, locationSeqId: location.locationSeqId}
 }
-// check#FacilityLocationOpen: refuses a location that does not exist or is closed (a destination guard calls it inside
-// its own operation, which has checked the user and the facility).
+// check#FacilityLocationOpen: refuses a location that does not exist or is closed, or one of a facility that has closed.
+// A destination guard calls it inside its own operation and transaction, which has checked the user and the facility;
+// the location row is locked for update, so a close of the location waits for the guard's transaction or the guard for
+// the close.
 function checkOpen(p) {
     const location =
         blank(p.facilityId) || blank(p.locationSeqId)
             ? null
-            : one(locationEntity, {facilityId: p.facilityId, locationSeqId: p.locationSeqId})
+            : find(locationEntity, {facilityId: p.facilityId, locationSeqId: p.locationSeqId}).forUpdate(true).one()
     if (!location) denied("LOCATION_UNAVAILABLE", "Location " + (p.locationSeqId || "") + " is not available")
     if (closed(location))
         denied("LOCATION_CLOSED", "Location " + location.locationSeqId + " of facility " + location.facilityId + " is closed")
+    const facility = one(facilityEntity, {facilityId: location.facilityId})
+    if (facility?.closedDate != null && ms(facility.closedDate) <= ms(ec.user.nowTimestamp))
+        denied("FACILITY_CLOSED", "Facility " + location.facilityId + " is closed")
     return {locationTypeEnumId: location.locationTypeEnumId || null}
 }
 
