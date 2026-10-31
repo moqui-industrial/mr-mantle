@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Picking (design-warehouse §9 Pick, §17 WH-PICK; impl-warehouse P11): a short pick is a ShipmentPickException, written by
+    mantle.shipment.WarehouseTaskServices.record#ShortPick with the recount it requested; it never changes on-hand, and
+    ShipmentItemSource.quantityNotHandled keeps Mantle's meaning, so the exception is what shows a line as Short. A source line
+    whose picked quantity is above its quantity after a cancelled balance (cancel#OrderItem) carries putBackQuantity until
+    reverse#Pick puts the stock back. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ShipmentPickException" package="mantle.shipment" cache="never">
+        <description>A short pick: the quantity a picker did not find for a shipment source line, where and why, how it is to
+            be resolved and the recount it opened (a PhysicalInventory of source CntSrcShortPick).</description>
+        <field name="exceptionId" type="id" is-pk="true"/>
+        <field name="shipmentItemSourceId" type="id" not-null="true"/>
+        <field name="shipmentId" type="id" not-null="true"/>
+        <field name="productId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="locationSeqId" type="id"/>
+        <field name="quantityShort" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="reasonEnumId" type="id"/>
+        <field name="resolutionEnumId" type="id" enable-audit-log="update"/>
+        <field name="physicalInventoryId" type="id"/>
+        <field name="operationKey" type="id"><description>The posting operation (PostingOperation.operationKey) that wrote
+            it.</description></field>
+        <field name="comments" type="text-medium"/>
+        <field name="reportedByUserId" type="id"/>
+        <field name="reportedDate" type="date-time"/>
+        <relationship type="one" related="mantle.shipment.ShipmentItemSource" short-alias="shipmentItemSource"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.product.asset.PhysicalInventory" short-alias="physicalInventory"/>
+        <relationship type="one" title="ShortPickReason" related="moqui.basic.Enumeration" short-alias="reason">
+            <key-map field-name="reasonEnumId"/></relationship>
+        <relationship type="one" title="ShortPickResolution" related="moqui.basic.Enumeration" short-alias="resolution">
+            <key-map field-name="resolutionEnumId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="ReportedBy" related="moqui.security.UserAccount" short-alias="reportedBy">
+            <key-map field-name="reportedByUserId" related="userId"/></relationship>
+        <index name="SHPPKEXC_SOURCE"><index-field name="shipmentItemSourceId"/></index>
+        <index name="SHPPKEXC_SHIPMENT"><index-field name="shipmentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType enumTypeId="ShortPickReason" description="Short pick reason"/>
+            <moqui.basic.Enumeration enumId="SprNotFound" enumTypeId="ShortPickReason" description="Not at the location"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="SprFewer" enumTypeId="ShortPickReason" description="Fewer than expected"
+                    sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="SprDamaged" enumTypeId="ShortPickReason" description="Damaged" sequenceNum="3"/>
+            <moqui.basic.Enumeration enumId="SprWrongItem" enumTypeId="ShortPickReason" description="Wrong item at the location"
+                    sequenceNum="4"/>
+            <moqui.basic.EnumerationType enumTypeId="ShortPickResolution" description="Short pick resolution"/>
+            <moqui.basic.Enumeration enumId="SpresRecount" enumTypeId="ShortPickResolution" description="Recount requested"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="SpresReallocate" enumTypeId="ShortPickResolution"
+                    description="Reallocate other stock" sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="SpresSubstitute" enumTypeId="ShortPickResolution"
+                    description="Substitute (Customer Service decides)" sequenceNum="3"/>
+            <moqui.basic.Enumeration enumId="SpresBackorder" enumTypeId="ShortPickResolution" description="Backorder"
+                    sequenceNum="4"/>
+        </seed-data>
+    </entity>
+    <extend-entity entity-name="ShipmentItemSource" package="mantle.shipment">
+        <field name="putBackQuantity" type="number-decimal"><description>Picked quantity above the line's quantity after its
+            balance was cancelled (cancel#OrderItem): the stock to put back, until reverse#Pick does.</description></field>
+        <field name="putBackDate" type="date-time"/>
+    </extend-entity>
+    <!-- the pick operations of a source line, which reverse#Pick reads for the locations the stock came from -->
+    <extend-entity entity-name="PostingOperation" package="mantle.ledger.transaction">
+        <index name="POSTOP_RESULT"><index-field name="resultId"/><index-field name="operationType"/></index>
+    </extend-entity>
+</entities>

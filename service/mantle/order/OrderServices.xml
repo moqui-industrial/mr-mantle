@@ -1976,9 +1976,18 @@ General Order Placement and eCommerce Usage
                 <if condition="shipQuantityToReduce.isZero()"><continue/></if>
                 <script>shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] = toDecimal(shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] ?? 0).add(shipQuantityToReduce)</script>
                 <!-- reduce quantity by quantityNotHandled -->
+                <set field="newSisQuantity"
+                        from="toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)"/>
+                <!-- stock picked beyond the reduced quantity is flagged to put back (impl-warehouse P11, reverse#Pick) -->
+                <set field="sisPutBack" from="toDecimal(itemShipmentItemSource.quantityPicked ?? 0).subtract(newSisQuantity)"/>
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
                         in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
-                                quantity:toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)}"/>
+                                quantity:newSisQuantity}"/>
+                <if condition="sisPutBack.compare(0) &gt; 0">
+                    <service-call name="update#mantle.shipment.ShipmentItemSource"
+                            in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId,
+                                putBackQuantity:sisPutBack, putBackDate:ec.user.nowTimestamp}"/>
+                </if>
 
                 <set field="shipQuantityRemaining" from="shipQuantityRemaining.subtract(shipQuantityToReduce)"/>
             </iterate>
@@ -2231,9 +2240,18 @@ General Order Placement and eCommerce Usage
                 <if condition="shipQuantityToReduce.isZero()"><continue/></if>
                 <script>shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] = toDecimal(shipmentItemQuantityReducedMap[itemShipmentItemSource.shipmentId] ?? 0).add(shipQuantityToReduce)</script>
                 <!-- reduce quantity by quantityNotHandled -->
+                <set field="newSisQuantity"
+                        from="toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)"/>
+                <!-- stock picked beyond the reduced quantity is flagged to put back (impl-warehouse P11, reverse#Pick) -->
+                <set field="sisPutBack" from="toDecimal(itemShipmentItemSource.quantityPicked ?? 0).subtract(newSisQuantity)"/>
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
                         in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
-                                quantity:toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)}"/>
+                                quantity:newSisQuantity}"/>
+                <if condition="sisPutBack.compare(0) &gt; 0">
+                    <service-call name="update#mantle.shipment.ShipmentItemSource"
+                            in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId,
+                                putBackQuantity:sisPutBack, putBackDate:ec.user.nowTimestamp}"/>
+                </if>
 
                 <set field="shipQuantityRemaining" from="shipQuantityRemaining.subtract(shipQuantityToReduce)"/>
             </iterate>

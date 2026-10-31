@@ -176,9 +176,13 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="shipmentItemSourceId"><then>
                 <!-- if shipmentItemSourceId passed in, update that one -->
                 <entity-find-one entity-name="mantle.shipment.ShipmentItemSource" value-field="sis"/>
+                <!-- the source's own quantities change by the item's change; entity-set would give it the item's quantity
+                    (impl-warehouse F256) -->
+                <set field="sisQuantityBefore" from="sis.quantity"/>
+                <set field="sisNotHandledBefore" from="sis.quantityNotHandled"/>
                 <entity-set value-field="sis"/>
-                <set field="sis.quantity" from="toDecimal(sis.quantity ?? 0).add(quantityChange)"/>
-                <set field="sis.quantityNotHandled" from="toDecimal(sis.quantityNotHandled ?? 0).add(quantityChange)"/>
+                <set field="sis.quantity" from="toDecimal(sisQuantityBefore ?? 0).add(quantityChange)"/>
+                <set field="sis.quantityNotHandled" from="toDecimal(sisNotHandledBefore ?? 0).add(quantityChange)"/>
                 <entity-update value-field="sis"/>
             </then><else>
                 <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="sisList">
@@ -852,12 +856,19 @@ along with this software (see the LICENSE.md file). If not, see
 
             <parameter name="quantity" type="BigDecimal" default="1.0"/>
             <parameter name="insufficientQtyWarn" type="Boolean" default="true"/>
+            <parameter name="shipmentItemSourceId"><description>Pick for this source line only (the Warehouse pick guard,
+                mantle.shipment.WarehouseTaskServices.pick#ShipmentStock); empty picks the shipment's lines of the product in
+                order.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="quantityPicked" type="BigDecimal"/>
+            <parameter name="pickedMoveList" type="List"><description>Each reservation picked: shipmentItemSourceId,
+                assetReservationId, assetId, fromLocationSeqId, fromContainerId, toAssetId (the asset now in the pick
+                container, or the asset itself when nothing moved), toContainerId and quantity.</description></parameter>
         </out-parameters>
         <actions>
             <set field="quantityPicked" from="toDecimal(0)"/>
+            <set field="pickedMoveList" from="[]"/>
             <if condition="!shipmentId"><return error="true" message="No Shipment ID specified"/></if>
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
             <if condition="shipment == null"><return error="true" message="Shipment not found with ID ${shipmentId}"/></if>
@@ -901,6 +912,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="sisList">
                 <econdition field-name="shipmentId"/>
                 <econdition field-name="productId"/>
+                <econdition field-name="shipmentItemSourceId" ignore-if-empty="true"/>
                 <order-by field-name="productId,orderId"/>
             </entity-find>
             <iterate list="sisList" entry="sis">
@@ -958,12 +970,22 @@ along with this software (see the LICENSE.md file). If not, see
                         <set field="sis.quantityPicked" from="toDecimal(sis.quantityPicked ?? 0).add(quantityToPick)"/>
 
                         <!-- move Asset to pick container (and reservation with it) -->
+                        <set field="pickMoveOut" from="{}"/>
+                        <set field="pickFromLocationSeqId" from="curAsset.locationSeqId"/>
+                        <set field="pickFromContainerId" from="curAsset.containerId"/>
                         <if condition="toContainer != null">
-                            <service-call name="mantle.product.AssetServices.move#Asset"
+                            <service-call name="mantle.product.AssetServices.move#Asset" out-map="pickMoveOut"
+                                    out-map-add-to-existing="false"
                                     in-map="{assetId:curAsset.assetId, quantity:quantityToPick, facilityId:toContainer.facilityId,
                                         locationSeqId:toContainer.locationSeqId, containerId:toContainer.containerId,
                                         moveAssetReservationId:assetReservation.assetReservationId}"/>
                         </if>
+                        <script>pickedMoveList.push({shipmentItemSourceId: sis.shipmentItemSourceId,
+                            assetReservationId: assetReservation.assetReservationId, assetId: curAsset.assetId,
+                            fromLocationSeqId: pickFromLocationSeqId || null, fromContainerId: pickFromContainerId || null,
+                            toAssetId: pickMoveOut.newAssetId || curAsset.assetId,
+                            toContainerId: toContainer != null ? toContainer.containerId : null,
+                            quantity: String(quantityToPick)})</script>
                     </iterate>
 
                     <!-- update sis record for updated quantityPicked -->

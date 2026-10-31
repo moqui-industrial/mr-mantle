@@ -77,6 +77,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toFacilityId"><description>Given only to refuse another facility.</description></parameter>
             <parameter name="reason"/>
             <parameter name="workEffortId"/>
+            <parameter name="assetReservationId"><description>A reservation on the asset that moves with the quantity (a
+                pick-face move of reserved stock, PickLocationMoves; impl-warehouse P11); another asset's is
+                RECORD_UNAVAILABLE.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode MOVED, assetId, toAssetId, productId, quantity,
@@ -88,7 +91,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
             <!-- 1. permission and operation key: a retry answers the first move before any other check -->
             <set field="begun" from="posting.begin(context, 'StockMove', 'STOCK_MOVE', ['assetId', 'quantity',
-                    'toLocationSeqId', 'toContainerId', 'toFacilityId', 'reason', 'workEffortId'])"/>
+                    'toLocationSeqId', 'toContainerId', 'toFacilityId', 'reason', 'workEffortId', 'assetReservationId'])"/>
             <if condition="begun.previous">
                 <set field="result" from="begun.previous"/>
                 <return/>
@@ -99,6 +102,14 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="toContainerId"><script>posting.container(userScope, toContainerId)</script></if>
             <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
+            <if condition="assetReservationId">
+                <entity-find-one entity-name="mantle.product.issuance.AssetReservation" value-field="movedReservation"
+                        disable-authz="true"/>
+                <if condition="movedReservation?.assetId != assetId">
+                    <return error="true"
+                            message="RECORD_UNAVAILABLE: Reservation ${assetReservationId} is not on asset ${assetId}"/>
+                </if>
+            </if>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
             <!-- 3. the destination: the same facility, one owner in a container, open, and the status it gives -->
@@ -115,7 +126,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="moveQuantity" from="quantity ?? asset.quantityOnHandTotal"/>
             <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
                     in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
-                        containerId:target.containerId, assetPoolId:asset.assetPoolId, quantity:moveQuantity}"/>
+                        containerId:target.containerId, assetPoolId:asset.assetPoolId, quantity:moveQuantity,
+                        moveAssetReservationId:assetReservationId || null}"/>
             <set field="toAssetId" from="moved.newAssetId || assetId"/>
             <set field="reservationsChecked" from="posting.recheckReservations(toAssetId)"/>
             <!-- 6. the answer, stored with the operation -->
@@ -125,7 +137,7 @@ along with this software (see the LICENSE.md file). If not, see
                         fromLocationSeqId: asset.locationSeqId || null, toLocationSeqId: target.locationSeqId,
                         toContainerId: target.containerId, fromStatusId: asset.statusId, statusId: statusAfter,
                         reservationsChecked: reservationsChecked, warnings: warnings, reason: reason || null,
-                        workEffortId: workEffortId || null})"/>
+                        workEffortId: workEffortId || null, assetReservationId: assetReservationId || null})"/>
         </actions>
     </service>
     <service verb="relocate" noun="Assets" allow-remote="false">
@@ -435,6 +447,296 @@ along with this software (see the LICENSE.md file). If not, see
                     {resultCode: 'REPAIRED', facilityId: facilityId, productId: productId || null, rows: rows,
                         repairedCount: rows.filter(row =&gt; row.ok).length,
                         failedCount: rows.filter(row =&gt; !row.ok).length})"/>
+        </actions>
+    </service>
+    <!-- ===== picking (impl-warehouse P11, design-warehouse §9 Pick and PickLocationMoves): the pick entry points, on
+        StockPosting.js's steps with Picking.js; a pick posts no value (stock is issued at pack), so there is no period check.
+        Lock order: the shipment, its source line, a container, assets by id, the location. ===== -->
+    <service verb="pick" noun="ShipmentStock" allow-remote="false">
+        <description>Pick a quantity of one shipment source line through
+            mantle.shipment.ShipmentServices.pickMove#ShipmentProduct, for that line only: its reserved stock at the scanned
+            location (and the scanned asset, when given), moved with its
+            reservation into the pick container (toContainerId, else the shipment's pickContainerId) when there is one, and the
+            line's quantityPicked raised; the entered quantity fields written (F7). A retry with the same operation key answers
+            the first pick. Requires SHIPMENT_PICK (PERMISSION_DENIED); refuses a shipment outside the user's facilities, an
+            incoming or drop shipment, or a line of another shipment (RECORD_UNAVAILABLE), a shipment no longer unpicked
+            (SHIPMENT_NOT_PICKABLE), a cancelled line (SOURCE_CANCELLED), no quantity (QUANTITY_INVALID) or more than is left
+            to pick (QUANTITY_EXCEEDS_REMAINING), less reserved at the location than the quantity (NOT_RESERVED_HERE: record a
+            short pick), a container whose location is closed (LOCATION_CLOSED) or would change the stock's status
+            (HELD_STOCK). Expired and near-expiry stock is picked with a warning naming its date.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId" required="true"/>
+            <parameter name="quantity" type="BigDecimal">
+                <description>Empty picks what is left on the line.</description></parameter>
+            <parameter name="locationSeqId"><description>The scanned source location; empty takes the line's reserved stock
+                anywhere in the facility.</description></parameter>
+            <parameter name="assetId"><description>The scanned stock, of the line's product.</description></parameter>
+            <parameter name="toContainerId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PICKED, shipmentId, shipmentItemSourceId, productId,
+                facilityId, locationSeqId, toContainerId, quantity, quantityPicked, remainingQuantity, moves (assetId,
+                fromLocationSeqId, toAssetId, toContainerId, quantity, assetReservationId), warnings, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <!-- 1. permission and operation key: a double scan answers the first pick -->
+            <set field="begun" from="posting.begin(context, 'ShipmentPick', 'SHIPMENT_PICK', ['shipmentId',
+                    'shipmentItemSourceId', 'quantity', 'locationSeqId', 'assetId', 'toContainerId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the shipment, its line, the container, the reserved stock by asset id; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <script>picking.requirePickable(sh)</script>
+            <set field="src" from="picking.sourceOf(sh, shipmentItemSourceId)"/>
+            <set field="pickQuantity" from="picking.quantityToPick(src, quantity)"/>
+            <set field="containerId" from="toContainerId || sh.shipment.pickContainerId || null"/>
+            <if condition="containerId"><script>posting.container(userScope, containerId)</script></if>
+            <!-- 3-4. the container's open location and the status it gives, then the stock reserved there for the line -->
+            <set field="target" from="containerId ? posting.destination(userScope, sh.facilityId,
+                    {toContainerId: containerId}) : null"/>
+            <set field="pickAssets" from="picking.reservedAt(userScope, sh, src, context, pickQuantity, target)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="warnings" from="picking.expiryWarnings(pickAssets)"/>
+            <!-- 5. Mantle's pick of this line, and what was entered -->
+            <service-call name="mantle.shipment.ShipmentServices.pickMove#ShipmentProduct" disable-authz="true"
+                    out-map="picked" in-map="{shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
+                        scanProduct:src.productId, locationSeqId:locationSeqId || null, toContainerId:containerId,
+                        quantity:pickQuantity, insufficientQtyWarn:false}"/>
+            <if condition="picking.number(picked.quantityPicked) != pickQuantity">
+                <return error="true" message="NOT_RESERVED_HERE: Only ${picked.quantityPicked} of ${pickQuantity} could be
+                        picked on line ${shipmentItemSourceId}"/>
+            </if>
+            <set field="fresh" from="picking.recordEntered(src)"/>
+            <!-- 6. the answer, kept with the line for a put back -->
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId,
+                    'mantle.shipment.ShipmentItemSource', shipmentItemSourceId,
+                    {resultCode: 'PICKED', shipmentId: shipmentId, shipmentItemSourceId: shipmentItemSourceId,
+                        productId: src.productId, facilityId: sh.facilityId, locationSeqId: locationSeqId || null,
+                        toContainerId: containerId, quantity: picking.text(pickQuantity),
+                        quantityPicked: picking.text(fresh.quantityPicked),
+                        remainingQuantity: picking.text(picking.toPickOf(fresh)), moves: picked.pickedMoveList,
+                        warnings: warnings})"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ShortPick" allow-remote="false">
+        <description>Record a short pick without inventing a stock correction (design Pick ShortPick): a
+            ShipmentPickException of the line with the quantity not found, the stock or location, the reason and the
+            resolution (SpresRecount by default), a recount through mantle.product.InventoryCountServices.request#Count
+            (CntSrcShortPick: the asset, else the location; an open recount of the same stock answers it) unless
+            requestRecount is N, and the WarehouseShortPick notice to the facility owner's SHIPMENT_LOAD_EDIT holders. On-hand,
+            the reservation and the line's quantities are not changed: reallocation or a reviewed adjustment resolves the
+            difference. A retry with the same operation key answers the first. Requires SHIPMENT_PICK; refuses as
+            pick#ShipmentStock for the shipment and line, a quantity not above zero (QUANTITY_INVALID) or above what is left
+            unpicked and not already short (QUANTITY_EXCEEDS_REMAINING), no reason (REASON_REQUIRED) or another kind of value
+            (REASON_INVALID, RESOLUTION_INVALID), an asset that is not the line's stock here (RECORD_UNAVAILABLE), a location
+            not of the facility (LOCATION_UNAVAILABLE), and neither (LOCATION_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId" required="true"/>
+            <parameter name="quantityShort" type="BigDecimal" required="true"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="assetId"/>
+            <parameter name="reasonEnumId"/>
+            <parameter name="resolutionEnumId"/>
+            <parameter name="requestRecount" default-value="Y"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SHORT, exceptionId, physicalInventoryId (the recount),
+                recountExisting, shipmentId, shipmentItemSourceId, productId, quantityShort, locationSeqId, assetId,
+                resolutionEnumId, shortQuantity (the line's total short), and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentShortPick', 'SHIPMENT_PICK', ['shipmentId',
+                    'shipmentItemSourceId', 'quantityShort', 'locationSeqId', 'assetId', 'reasonEnumId', 'resolutionEnumId',
+                    'requestRecount'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <script>picking.requirePickable(sh)</script>
+            <set field="src" from="picking.sourceOf(sh, shipmentItemSourceId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="plan" from="picking.shortPlan(userScope, sh, src, context)"/>
+            <set field="written" from="picking.writeShort(sh, src, plan, context, begun.op)"/>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId,
+                    'mantle.shipment.ShipmentPickException', written.exceptionId,
+                    {resultCode: 'SHORT', exceptionId: written.exceptionId,
+                        physicalInventoryId: written.physicalInventoryId, recountExisting: written.recountExisting,
+                        shipmentId: shipmentId, shipmentItemSourceId: shipmentItemSourceId, productId: src.productId,
+                        quantityShort: picking.text(plan.quantity), locationSeqId: plan.locationSeqId,
+                        assetId: plan.asset?.assetId || null, resolutionEnumId: plan.resolutionEnumId,
+                        shortQuantity: picking.text(picking.shortOf(shipmentItemSourceId))})"/>
+        </actions>
+    </service>
+    <service verb="reverse" noun="Pick" allow-remote="false">
+        <description>Put back picked stock of a line (design Pick PutBack; Unpick): only once the picker confirms
+            (CONFIRMATION_REQUIRED, nothing moves before), the quantity (by default the line's putBackQuantity, which
+            cancel#OrderItem flags when a cancelled balance leaves more picked than the line's quantity, else all picked and not
+            packed) moved out of the pick container back to the location each guarded pick took it from (or toLocationSeqId),
+            the line's reservation travelling with it so the allocation is restored (a cancelled balance has none); the line's
+            quantityPicked lowered and its flag cleared; a picked shipment that is short again goes back to Scheduled. Stock
+            picked without a container moves nothing (untrackedQuantity). A retry answers the first. Requires SHIPMENT_PICK;
+            refuses as pick#ShipmentStock for the shipment and line, a packed shipment (ALREADY_PACKED: put back from Pack),
+            nothing to put back (NOTHING_TO_PUT_BACK), more than is picked and not packed (QUANTITY_EXCEEDS_PICKED), a pick with
+            no location to return to (LOCATION_REQUIRED), and a closed location (LOCATION_CLOSED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="confirmed"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PUT_BACK, shipmentId, shipmentItemSourceId, productId,
+                quantity, moves (assetId, toAssetId, quantity, fromContainerId, toLocationSeqId, reservationKept),
+                untrackedQuantity, quantityPicked, statusId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentPickReverse', 'SHIPMENT_PICK', ['shipmentId',
+                    'shipmentItemSourceId', 'quantity', 'toLocationSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!picking.truthy(confirmed)">
+                <return error="true" message="CONFIRMATION_REQUIRED: Confirm the put back; nothing moves until you do"/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <set field="src" from="picking.sourceOf(sh, shipmentItemSourceId)"/>
+            <set field="plan" from="picking.reversePlan(userScope, sh, src, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="done" from="picking.putBack(sh, src, plan)"/>
+            <set field="fresh" from="ec.entity.find('mantle.shipment.ShipmentItemSource')
+                    .condition('shipmentItemSourceId', shipmentItemSourceId).disableAuthz().one()"/>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId,
+                    'mantle.shipment.ShipmentItemSource', shipmentItemSourceId,
+                    {resultCode: 'PUT_BACK', shipmentId: shipmentId, shipmentItemSourceId: shipmentItemSourceId,
+                        productId: src.productId, quantity: picking.text(plan.quantity), moves: done.moves,
+                        untrackedQuantity: picking.text(plan.untracked), quantityPicked: picking.text(fresh.quantityPicked),
+                        statusId: done.statusId})"/>
+        </actions>
+    </service>
+    <service verb="finish" noun="Pick" allow-remote="false">
+        <description>Finish picking (design Pick FinishPick, PicklistDetail LoadCompletion). For a shipment (SHIPMENT_PICK):
+            what is left unpicked must be acknowledged by backordering it (backorderRemaining Y: each outstanding line lowered
+            to what was picked through update#ShipmentItem, so the order's remainder ships later, and its short picks marked
+            SpresBackorder), else OUTSTANDING names each line; nothing picked at all is NOTHING_PICKED; then the shipment goes
+            to ShipPicked (the load's status follows by Mantle's SECA). For a picklist (workEffortId, SHIPMENT_LOAD_EDIT): its
+            shipments not picked yet must be acknowledged (acknowledged Y, else OUTSTANDING names them), then
+            mantle.work.ShipmentWorkServices.complete#ShipmentLoadShip takes them off the load and completes it. A retry
+            answers the first. Refuses a shipment or load outside the user's facilities (RECORD_UNAVAILABLE), a shipment no
+            longer unpicked (SHIPMENT_NOT_PICKABLE) and neither given (RECORD_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="backorderRemaining"/>
+            <parameter name="acknowledged"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PICKED (a shipment) or LOAD_COMPLETED, shipmentId or
+                workEffortId, statusId, backordered (shipmentItemSourceId, productId, quantity), removedShipmentIds, and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <if condition="!shipmentId &amp;&amp; !workEffortId">
+                <return error="true" message="RECORD_REQUIRED: Give the shipment or the picklist to finish"/>
+            </if>
+            <set field="begun" from="posting.begin(context, 'ShipmentPickFinish',
+                    shipmentId ? 'SHIPMENT_PICK' : 'SHIPMENT_LOAD_EDIT',
+                    ['shipmentId', 'workEffortId', 'backorderRemaining', 'acknowledged'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <if condition="shipmentId"><then>
+                <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+                <script>picking.requirePickable(sh)</script>
+                <set field="result" from="posting.settled(begun.op)"/>
+                <if condition="result"><return/></if>
+                <set field="lines" from="picking.outstandingOf(sh)"/>
+                <if condition="!lines.some(row =&gt; row.picked &gt; 0)">
+                    <return error="true" message="NOTHING_PICKED: Nothing is picked on shipment ${shipmentId}"/>
+                </if>
+                <set field="outstandingText" from="picking.outstandingText(lines)"/>
+                <if condition="outstandingText &amp;&amp; !picking.truthy(backorderRemaining)">
+                    <return error="true" message="OUTSTANDING: Not picked yet: ${outstandingText}. Backorder it to finish"/>
+                </if>
+                <set field="backordered" from="outstandingText ? picking.backorder(sh, lines) : []"/>
+                <service-call name="update#mantle.shipment.Shipment" disable-authz="true"
+                        in-map="{shipmentId:shipmentId, statusId:'ShipPicked'}"/>
+                <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                        shipmentId, {resultCode: 'PICKED', shipmentId: shipmentId, statusId: 'ShipPicked',
+                            backordered: backordered, comments: comments || null})"/>
+            </then><else>
+                <set field="loaded" from="picking.loadOf(userScope, workEffortId)"/>
+                <set field="result" from="posting.settled(begun.op)"/>
+                <if condition="result"><return/></if>
+                <set field="removedShipmentIds" from="picking.loadOutstanding(workEffortId)"/>
+                <if condition="removedShipmentIds.length &amp;&amp; !picking.truthy(acknowledged)">
+                    <return error="true" message="OUTSTANDING: Not picked yet: ${removedShipmentIds.join(', ')}. Acknowledge
+                            that completing the picklist takes them off it"/>
+                </if>
+                <service-call name="mantle.work.ShipmentWorkServices.complete#ShipmentLoadShip" disable-authz="true"
+                        in-map="{workEffortId:workEffortId}"/>
+                <set field="after" from="ec.entity.find('mantle.work.effort.WorkEffort')
+                        .condition('workEffortId', workEffortId).disableAuthz().one()"/>
+                <set field="result" from="posting.complete(begun.op, loaded.facility.ownerPartyId,
+                        'mantle.work.effort.WorkEffort', workEffortId, {resultCode: 'LOAD_COMPLETED',
+                            workEffortId: workEffortId, statusId: after.statusId, removedShipmentIds: removedShipmentIds,
+                            comments: comments || null})"/>
+            </else></if>
+        </actions>
+    </service>
+    <service verb="find" noun="PickFaceReplenishment" allow-remote="false">
+        <description>PickLocationMoves' BelowMinimum (design-warehouse §9): the pick faces of a facility of the user's
+            organizations (ProductFacilityLocation rows of open pick locations with a minimumStock, F19: the first reader of
+            these levels) whose available stock there is below the minimum, each with its bulk sources (available stock at
+            open bulk locations, earliest expiry first) and the suggested quantity (moveQuantity, else up to the minimum), at
+            most what bulk holds. A face with no bulk stock is left out unless includeWithoutSource. Each move goes through
+            move#Stock (STOCK_MOVE). Reads only; requires STOCK_MOVE, SHIPMENT_PICK or SHIPMENT_LOAD_EDIT; refuses a facility
+            outside the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="includeWithoutSource"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="faceRows" type="List"><description>productId, productName, locationSeqId, minimumStock,
+                moveQuantity, currentQuantity, bulkQuantity, suggestedQuantity, sources (assetId, locationSeqId, lotId,
+                available, expiryDate).</description></parameter>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')
+                    .pickFaceReplenishment(context)"/>
+            <set field="faceRows" from="found.faceRows"/>
+            <set field="truncated" from="found.truncated"/>
         </actions>
     </service>
     <!-- ===== adjustments, scrap, lot corrections and repack (impl-warehouse P6) ===== -->

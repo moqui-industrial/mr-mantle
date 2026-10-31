@@ -3396,7 +3396,10 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.product.AssetServices.check#ScanLocation" in-map="context" out-map="context"/>
 
             <!-- get facilityId and locationSeqId from Container, do here instead of relying on EECA rule just in case involves a move to another facility -->
-            <if condition="!containerId &amp;&amp; asset.containerId">
+            <!-- a part of the asset (less than on hand) becomes a new asset at the target and the rest stays in its
+                container (impl-warehouse F255): only a whole move clears the container -->
+            <if condition="!containerId &amp;&amp; asset.containerId &amp;&amp; !(quantity != null &amp;&amp;
+                    !toDecimal(quantity).isZero() &amp;&amp; toDecimal(quantity).compare(asset.quantityOnHandTotal) &lt; 0)">
                 <!-- no containerId passed but Asset has containerId, clear otherwise new location won't get set (will be overridden by container) -->
                 <set field="asset.containerId" from="null"/>
                 <entity-update value-field="asset"/>
