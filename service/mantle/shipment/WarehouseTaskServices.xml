@@ -437,4 +437,512 @@ along with this software (see the LICENSE.md file). If not, see
                         failedCount: rows.filter(row =&gt; !row.ok).length})"/>
         </actions>
     </service>
+    <!-- ===== adjustments, scrap, lot corrections and repack (impl-warehouse P6) ===== -->
+    <service verb="define" noun="AdjustmentScope" type="interface">
+        <description>The exact stock bucket an adjustment changes (design-warehouse Adjustments AdjustmentScope), as
+            record#PhysicalInventoryQuantity and record#PhysicalInventoryChange find it: one asset, or a product at a
+            facility with a location and a lot each a value, None (blank) or Any (chosen), the owner (the facility owner
+            when blank, as Mantle's change takes it), and a pool and status each a value or Any (blank); stock received on
+            or before the effective date.</description>
+        <in-parameters>
+            <parameter name="assetId"><description>One asset: the bucket is that asset alone.</description></parameter>
+            <parameter name="productId"/>
+            <parameter name="facilityId"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="locationScope"><description>With no location: none (the default) or any.</description></parameter>
+            <parameter name="lotId"/>
+            <parameter name="lotScope"><description>With no lot: none (the default) or any.</description></parameter>
+            <parameter name="ownerPartyId"/>
+            <parameter name="assetPoolId"/>
+            <parameter name="statusId"/>
+            <parameter name="mode" default-value="count"><description>count: quantity is what is there (zero is a count);
+                delta: quantity is the change.</description></parameter>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="physicalInventoryDate" type="Timestamp"><description>The effective date, now when empty; a
+                backdated adjustment reads the bucket as of then.</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="StockAdjustment" allow-remote="false">
+        <description>The before and after of an adjustment of an exact stock bucket, read only: the quantity on hand as of
+            the effective date, the change, the result, the assets it reaches and previewFingerprint, which
+            adjust#Stock compares so a movement after the preview refuses the posting. The value of the change, at the
+            cost of the assets it reaches (Mantle's order: oldest received first), only for a user with ACCOUNTING_VIEW
+            (cost is not read otherwise), unavailable when one of them has no cost. Refuses without STOCK_ADJUST
+            (PERMISSION_DENIED), a facility outside the user's organizations (RECORD_UNAVAILABLE), a future date
+            (DATE_INVALID), a count below zero or a zero change (QUANTITY_INVALID), a reduction beyond what was on hand
+            (QUANTITY_EXCEEDS_ON_HAND) and a bucket of more than 500 assets (BUCKET_TOO_LARGE).</description>
+        <implements service="mantle.shipment.WarehouseTaskServices.define#AdjustmentScope"/>
+        <out-parameters>
+            <parameter name="preview" type="Map"><description>mode, the bucket (productId, facilityId, assetId,
+                locationSeqId, locationScope, lotId, lotScope, ownerPartyId, assetPoolId, statusId), physicalInventoryDate,
+                quantityBefore, quantityChange, quantityAfter (text), previewFingerprint, assets (assetId, lotId,
+                locationSeqId, statusId, ownerPartyId, quantityOnHand as of the date), valueIncluded and, with financial
+                read, valueChange, valueAvailable and costUomId.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="adjustments"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
+            <script>posting.requirePermission('STOCK_ADJUST')</script>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="bucket" from="adjustments.bucketOf(context)"/>
+            <script>posting.facility(userScope, bucket.facilityId)</script>
+            <set field="preview" from="adjustments.previewOf(adjustments.plan(context, false))"/>
+        </actions>
+    </service>
+    <service verb="adjust" noun="Stock" allow-remote="false">
+        <description>Post an adjustment of an exact stock bucket as previewed: a count through
+            mantle.product.AssetServices.record#PhysicalInventoryQuantity, a change (or any adjustment of one asset) through
+            record#PhysicalInventoryChange, on a PhysicalInventory of its own with the reason, so the variance posts by its
+            reason (post#PhysicalInventoryVariance). A retry with the same operation key and request answers the first
+            adjustment (alreadyApplied); a different request under the key is OPERATION_KEY_CONFLICT. The bucket's
+            assets are locked and read again: a movement since the preview is PREVIEW_CHANGED (preview again). Refuses
+            without STOCK_ADJUST (PERMISSION_DENIED), without a variance reason (REASON_REQUIRED, REASON_INVALID), a
+            facility outside the user's organizations (RECORD_UNAVAILABLE), a closed fiscal period of the effective date
+            for an organization it posts to (PERIOD_CLOSED), and as preview#StockAdjustment. A count that matches answers
+            NO_CHANGE and posts nothing.</description>
+        <implements service="mantle.shipment.WarehouseTaskServices.define#AdjustmentScope"/>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="previewFingerprint" required="true"/>
+            <parameter name="varianceReasonEnumId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ADJUSTED or NO_CHANGE, physicalInventoryId,
+                productId, facilityId, quantityBefore, quantityChange, quantityAfter, assetIds, varianceReasonEnumId,
+                physicalInventoryDate, comments, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="adjustments"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
+            <!-- 1. permission and operation key: a retry answers the first adjustment before any other check -->
+            <set field="begun" from="posting.begin(context, 'StockAdjust', 'STOCK_ADJUST', ['assetId', 'productId',
+                    'facilityId', 'locationSeqId', 'locationScope', 'lotId', 'lotScope', 'ownerPartyId', 'assetPoolId',
+                    'statusId', 'mode', 'quantity', 'physicalInventoryDate', 'varianceReasonEnumId', 'comments',
+                    'previewFingerprint'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!varianceReasonEnumId">
+                <return error="true" message="REASON_REQUIRED: Choose the reason for the adjustment"/>
+            </if>
+            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="reason" cache="true">
+                <field-map field-name="enumId" from="varianceReasonEnumId"/>
+            </entity-find-one>
+            <if condition="reason?.enumTypeId != 'InventoryVarianceReason'">
+                <return error="true" message="REASON_INVALID: ${varianceReasonEnumId} is not an inventory variance reason"/>
+            </if>
+            <!-- 2. the bucket's assets locked by id, in a facility of the user's organizations; the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <script>posting.facility(userScope, adjustments.bucketOf(context).facilityId)</script>
+            <set field="adjustment" from="adjustments.plan(context, true)"/>
+            <set field="bucket" from="adjustment.bucket"/>
+            <set field="home" from="posting.facility(userScope, bucket.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3. still as previewed; 4. the fiscal period of the effective date open for each organization it posts to -->
+            <if condition="adjustment.fingerprint != previewFingerprint">
+                <return error="true" message="PREVIEW_CHANGED: The stock changed since the preview; preview again"/>
+            </if>
+            <script>posting.period(adjustments.postingOrganizations(adjustment), bucket.date)</script>
+            <set field="answer" from="{productId: bucket.productId, facilityId: bucket.facilityId, assetId: bucket.assetId,
+                    quantityBefore: String(adjustment.before.toNumber()), quantityChange: String(adjustment.change.toNumber()),
+                    quantityAfter: String(adjustment.after.toNumber()), varianceReasonEnumId: varianceReasonEnumId,
+                    physicalInventoryDate: bucket.date, comments: comments || null}"/>
+            <if condition="adjustment.change.isZero()">
+                <set field="result" from="posting.complete(begun.op, home.ownerPartyId, null, null,
+                        Object.assign({resultCode: 'NO_CHANGE', physicalInventoryId: null, assetIds: []}, answer))"/>
+                <return/>
+            </if>
+            <!-- 5. Mantle's physical inventory services, on a PhysicalInventory of this operation -->
+            <service-call name="create#mantle.product.asset.PhysicalInventory" disable-authz="true" out-map="created"
+                    in-map="{physicalInventoryDate:bucket.date, statusId:'PIComplete', facilityId:bucket.facilityId,
+                        partyId:ec.user.userAccount?.partyId, comments:comments}"/>
+            <set field="filters" from="{productId:bucket.productId, facilityId:bucket.facilityId,
+                    locationSeqId:bucket.location.value, lotId:bucket.lot.value, ownerPartyId:bucket.ownerPartyId,
+                    assetPoolId:bucket.assetPoolId, statusId:bucket.statusId, strictLocation:bucket.location.scope == 'none',
+                    strictLot:bucket.lot.scope == 'none', physicalInventoryId:created.physicalInventoryId,
+                    physicalInventoryDate:bucket.date, varianceReasonEnumId:varianceReasonEnumId, comments:comments}"/>
+            <if condition="bucket.assetId">
+                <then>
+                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
+                            in-map="Object.assign({}, filters, {quantityChange:adjustment.change, assetList:adjustment.assets})"/>
+                </then>
+                <else-if condition="adjustment.mode == 'count'">
+                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryQuantity" disable-authz="true"
+                            in-map="Object.assign({}, filters, {quantity:adjustment.after})"/>
+                </else-if>
+                <else>
+                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
+                            in-map="Object.assign({}, filters, {quantityChange:adjustment.change})"/>
+                </else>
+            </if>
+            <entity-find entity-name="mantle.product.asset.AssetDetail" list="details" disable-authz="true">
+                <econdition field-name="physicalInventoryId" from="created.physicalInventoryId"/>
+                <select-field field-name="assetId"/>
+            </entity-find>
+            <!-- 6. the answer, stored with the operation -->
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.PhysicalInventory',
+                    created.physicalInventoryId, Object.assign({resultCode: 'ADJUSTED',
+                        physicalInventoryId: created.physicalInventoryId,
+                        assetIds: [...new Set(Array.from(details).map(row =&gt; row.assetId))]}, answer))"/>
+        </actions>
+    </service>
+    <service verb="scrap" noun="Asset" allow-remote="false">
+        <description>Scrap free stock (WH-SCRAP): an asset, or part of it, perhaps moved first to a morgue location of its
+            facility (move#Asset; the location type's status, AstMorgue), then taken out of stock through
+            record#PhysicalInventoryChange with a scrap reason (InVrScrap or InVrExpired, enumCode scrap) or InVrDamaged,
+            on a PhysicalInventory of its own marked scrapIndicator Y, one per operation (F5), which Counts leave out. The
+            variance posts by its reason (post#PhysicalInventoryVariance: the organization's VarianceReasonGlAccount, then
+            the asset type's scrapGlAccountId). A retry with the same operation key answers the first scrap, so it posts
+            once. Refuses without STOCK_ADJUST (PERMISSION_DENIED); as move#Stock: the user's facilities, equipment,
+            nothing on hand, a quantity above on hand; a reason that is not a scrap reason (REASON_INVALID); quarantined
+            stock (HELD_STOCK: its inspection's disposition scraps it); reserved stock beyond what is free
+            (RESERVED_STOCK); a location that is not a morgue (LOCATION_NOT_MORGUE), closed or missing; a closed fiscal
+            period today (PERIOD_CLOSED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"><description>Empty scraps all of it.</description></parameter>
+            <parameter name="varianceReasonEnumId" required="true"/>
+            <parameter name="toLocationSeqId"><description>A morgue location (FltMorgue) of the facility to move the stock to
+                first.</description></parameter>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SCRAPPED, assetId, scrappedAssetId, productId, lotId,
+                quantity, facilityId, fromLocationSeqId, locationSeqId, statusId, physicalInventoryId, varianceReasonEnumId,
+                warnings (the stock's expiry), comments, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'StockScrap', 'STOCK_ADJUST', ['assetId', 'quantity',
+                    'varianceReasonEnumId', 'toLocationSeqId', 'comments'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
+            <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="reason" cache="true">
+                <field-map field-name="enumId" from="varianceReasonEnumId"/>
+            </entity-find-one>
+            <if condition="reason?.enumTypeId != 'InventoryVarianceReason' || !(reason.enumCode == 'scrap'
+                    || reason.enumId == 'InVrDamaged')">
+                <return error="true" message="REASON_INVALID: Scrap with a scrap, expired or damaged reason"/>
+            </if>
+            <if condition="posting.heldStatuses.includes(asset.statusId)">
+                <return error="true"
+                        message="HELD_STOCK: Asset ${assetId} is quarantined; its inspection's disposition scraps it"/>
+            </if>
+            <!-- free stock only: what is on hand and not reserved -->
+            <set field="scrapQuantity" from="toDecimal(quantity ?? asset.quantityOnHandTotal)"/>
+            <entity-find entity-name="mantle.product.issuance.AssetReservation" list="reservations" disable-authz="true">
+                <econdition field-name="assetId"/>
+            </entity-find>
+            <!-- what a reservation holds of this asset's stock: not yet issued, less what was never available -->
+            <set field="reserved" from="Array.from(reservations).reduce((sum, row) =&gt;
+                    sum.add(toDecimal(row.quantityNotIssued ?? row.quantity ?? 0)
+                        .subtract(toDecimal(row.quantityNotAvailable ?? 0))), toDecimal(0))"/>
+            <set field="free" from="toDecimal(asset.quantityOnHandTotal).subtract(reserved)"/>
+            <if condition="scrapQuantity.compare(free) &gt; 0">
+                <set field="freeText" from="String(free.toNumber()) + ' of asset ' + assetId + ' is free; ' +
+                        String(reserved.toNumber()) + ' is reserved'"/>
+                <return error="true" message="RESERVED_STOCK: Only ${freeText}"/>
+            </if>
+            <!-- the morgue location first, when given: open, of the morgue type, and the status it gives by a flow -->
+            <set field="target" from="null"/>
+            <set field="statusAfter" from="asset.statusId"/>
+            <if condition="toLocationSeqId">
+                <set field="target"
+                        from="posting.destination(userScope, asset.facilityId, {toLocationSeqId: toLocationSeqId})"/>
+                <if condition="target.locationTypeEnumId != 'FltMorgue'">
+                    <return error="true" message="LOCATION_NOT_MORGUE: Location ${toLocationSeqId} is not a morgue location"/>
+                </if>
+                <set field="statusAfter" from="posting.keepHeld(asset, target)"/>
+            </if>
+            <set field="warnings" from="posting.expiryWarnings(assetId)"/>
+            <script>posting.period([asset.ownerPartyId || home.ownerPartyId], ec.user.nowTimestamp)</script>
+            <set field="scrappedAssetId" from="assetId"/>
+            <if condition="target &amp;&amp; target.locationSeqId != asset.locationSeqId">
+                <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
+                        in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
+                            assetPoolId:asset.assetPoolId, quantity:scrapQuantity}"/>
+                <set field="scrappedAssetId" from="moved.newAssetId || assetId"/>
+            </if>
+            <!-- the scrap's own PhysicalInventory, then the stock out of it at the asset, posting by the reason -->
+            <service-call name="create#mantle.product.asset.PhysicalInventory" disable-authz="true" out-map="created"
+                    in-map="{physicalInventoryDate:ec.user.nowTimestamp, statusId:'PIComplete', facilityId:asset.facilityId,
+                        partyId:ec.user.userAccount?.partyId, comments:comments, scrapIndicator:'Y'}"/>
+            <entity-find entity-name="mantle.product.asset.Asset" list="scrapAssets" for-update="true" disable-authz="true">
+                <econdition field-name="assetId" from="scrappedAssetId"/>
+            </entity-find>
+            <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
+                    in-map="{productId:asset.productId, facilityId:asset.facilityId, ownerPartyId:asset.ownerPartyId,
+                        quantityChange:scrapQuantity.negate(), physicalInventoryId:created.physicalInventoryId,
+                        varianceReasonEnumId:varianceReasonEnumId, comments:comments, assetList:scrapAssets}"/>
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.PhysicalInventory',
+                    created.physicalInventoryId, {resultCode: 'SCRAPPED', assetId: assetId, scrappedAssetId: scrappedAssetId,
+                        productId: asset.productId, lotId: asset.lotId || null, quantity: String(scrapQuantity.toNumber()),
+                        facilityId: asset.facilityId, fromLocationSeqId: asset.locationSeqId || null,
+                        locationSeqId: target ? target.locationSeqId : (asset.locationSeqId || null), statusId: statusAfter,
+                        physicalInventoryId: created.physicalInventoryId, varianceReasonEnumId: varianceReasonEnumId,
+                        warnings: warnings, comments: comments || null})"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="LotMetadata" allow-remote="false">
+        <description>Correct a lot's metadata (WH-EXPIRY corrections): its number, manufacturer, manufactured date and
+            expiration date, each change kept in the audit log with its old and new values, the reason and the user. Only
+            the fields given change (clearExpirationDate removes the expiry). An asset of the lot whose expected end of
+            life is the old expiration follows it. Extending the expiry (a later date, or none) needs LOT_EXPIRY_EXTEND
+            and releases no quarantine; any other change, an earlier expiry among them, needs STOCK_ADJUST. A retry with
+            the same operation key answers the first correction. Refuses without either permission (PERMISSION_DENIED),
+            without a reason (REASON_REQUIRED), a lot whose stock is not in the user's facilities (RECORD_UNAVAILABLE) or
+            is also another organization's (LOT_SHARED), nothing changed (NO_CHANGE), and a number the manufacturer
+            already has (LOT_EXISTS).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="lotId" required="true"/>
+            <parameter name="lotNumber"/>
+            <parameter name="mfgPartyId"/>
+            <parameter name="manufacturedDate" type="Timestamp"/>
+            <parameter name="expirationDate" type="Date"/>
+            <parameter name="clearExpirationDate" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CORRECTED, lotId, changes (field, oldValue,
+                newValue), expiryExtended, assetIds (the assets whose expected end of life followed), changeReason,
+                changedByUserId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="adjustments"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
+            <set field="begun" from="posting.begin(context, 'LotCorrect', ['STOCK_ADJUST', 'LOT_EXPIRY_EXTEND'], ['lotId',
+                    'lotNumber', 'mfgPartyId', 'manufacturedDate', 'expirationDate', 'clearExpirationDate',
+                    'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!changeReason || !String(changeReason).trim()">
+                <return error="true" message="REASON_REQUIRED: Give the reason for the correction"/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="scoped" from="adjustments.lotScope(userScope, lotId)"/>
+            <set field="lot" from="scoped.lot"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <script><![CDATA[
+                const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                const dayOf = value => (value == null || value === '' ? null : lib.calendarDateText(value))
+                const stampOf = value => (value == null || value === '' ? null : String(lib.ms(value)))
+                const wanted = {}
+                if (lotNumber != null && String(lotNumber).trim() !== '') wanted.lotNumber = String(lotNumber).trim()
+                if (mfgPartyId != null && mfgPartyId !== '') wanted.mfgPartyId = mfgPartyId
+                if (manufacturedDate != null && manufacturedDate !== '') wanted.manufacturedDate = manufacturedDate
+                if (clearExpirationDate) wanted.expirationDate = null
+                else if (expirationDate != null && expirationDate !== '') wanted.expirationDate = expirationDate
+                const same = {
+                    lotNumber: (a, b) => (a || null) === (b || null),
+                    mfgPartyId: (a, b) => (a || null) === (b || null),
+                    manufacturedDate: (a, b) => stampOf(a) === stampOf(b),
+                    expirationDate: (a, b) => dayOf(a) === dayOf(b)
+                }
+                const shown = {lotNumber: v => v || null, mfgPartyId: v => v || null,
+                    manufacturedDate: v => (v == null ? null : lib.dateText(v)), expirationDate: dayOf}
+                changes = Object.keys(wanted).filter(field => !same[field](lot[field], wanted[field]))
+                    .map(field => ({field, oldValue: shown[field](lot[field]), newValue: shown[field](wanted[field])}))
+                const expiry = changes.find(change => change.field === 'expirationDate')
+                expiryExtended = !!expiry && expiry.oldValue != null &&
+                    (expiry.newValue == null || expiry.newValue > expiry.oldValue)
+                otherChanges = changes.some(change => change.field !== 'expirationDate') || (!!expiry && !expiryExtended)
+                newValues = Object.fromEntries(changes.map(change => [change.field, wanted[change.field]]))
+                oldExpiration = expiry ? expiry.oldValue : null
+                mayExtend = lib.access.has('LOT_EXPIRY_EXTEND')
+                mayAdjust = lib.access.has('STOCK_ADJUST')
+            ]]></script>
+            <if condition="!changes.length">
+                <return error="true" message="NO_CHANGE: Nothing to correct on lot ${lotId}"/>
+            </if>
+            <if condition="expiryExtended &amp;&amp; !mayExtend">
+                <return error="true" message="PERMISSION_DENIED: Extending an expiry needs LOT_EXPIRY_EXTEND"/>
+            </if>
+            <if condition="otherChanges &amp;&amp; !mayAdjust">
+                <return error="true" message="PERMISSION_DENIED: Correcting a lot needs STOCK_ADJUST"/>
+            </if>
+            <if condition="newValues.lotNumber !== undefined || newValues.mfgPartyId !== undefined">
+                <entity-find entity-name="mantle.product.asset.Lot" list="sameNumber" disable-authz="true">
+                    <econdition field-name="lotNumber" from="newValues.lotNumber ?? lot.lotNumber"/>
+                    <econdition field-name="mfgPartyId" from="newValues.mfgPartyId ?? lot.mfgPartyId"/>
+                    <econdition field-name="lotId" operator="not-equals" from="lotId"/>
+                </entity-find>
+                <if condition="sameNumber.length">
+                    <return error="true" message="LOT_EXISTS: The manufacturer already has lot ${sameNumber[0].lotNumber}"/>
+                </if>
+            </if>
+            <!-- the corrected fields, each audit-logged with the reason; the assets that carried the old expiry follow -->
+            <script>ec.context.putAll(Object.fromEntries(changes.map(change =&gt;
+                [change.field + '_changeReason', String(changeReason).trim()])))</script>
+            <service-call name="update#mantle.product.asset.Lot" disable-authz="true"
+                    in-map="Object.assign({lotId:lotId}, newValues)"/>
+            <set field="assetIds" from="[]"/>
+            <if condition="oldExpiration &amp;&amp; newValues.expirationDate !== undefined">
+                <entity-find entity-name="mantle.product.asset.Asset" list="followers" for-update="true" disable-authz="true">
+                    <econdition field-name="lotId"/>
+                    <econdition field-name="expectedEndOfLife" from="oldExpiration"/>
+                    <order-by field-name="assetId"/>
+                </entity-find>
+                <script>ec.context.putAll({expectedEndOfLife_changeReason: String(changeReason).trim()})</script>
+                <iterate list="followers" entry="follower">
+                    <service-call name="update#mantle.product.asset.Asset" disable-authz="true"
+                            in-map="{assetId:follower.assetId, expectedEndOfLife:newValues.expirationDate}"/>
+                    <script>assetIds.push(follower.assetId)</script>
+                </iterate>
+            </if>
+            <set field="result" from="posting.complete(begun.op, scoped.owners[0] || null, 'mantle.product.asset.Lot', lotId,
+                    {resultCode: 'CORRECTED', lotId: lotId, changes: changes, expiryExtended: expiryExtended,
+                        assetIds: assetIds, changeReason: String(changeReason).trim(), changedByUserId: ec.user.userId})"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="Repack" allow-remote="false">
+        <description>What a repack of an asset would post, read only: the direction (unpack a pack into its contents, or
+            repack contents into packs, by Products' packaging through resolve#ScannedProduct), the target product and
+            quantity, the lot carried and, for a user with ACCOUNTING_VIEW, the unit cost carried (the issued cost divided
+            by the target quantity). Refuses as repack#Asset: STOCK_MOVE, the user's facilities, the stock and its
+            quantity, no packaging between the products (PACK_UNDEFINED), a repack that is not whole packs
+            (QUANTITY_NOT_WHOLE_PACKS).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="targetProductId"><description>Empty unpacks into the pack's contents.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="preview" type="Map"><description>direction, assetId, sourceProductId, quantity, targetProductId,
+                targetQuantity, factor (contents of one pack), lotId, facilityId, locationSeqId, statusId, costIncluded and,
+                with financial read, sourceUnitCost, unitCost, issuedCost and costUomId.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="adjustments"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
+            <script>posting.requirePermission('STOCK_MOVE')</script>
+            <set field="asset" from="posting.stock(posting.scope(), assetId, quantity)"/>
+            <set field="conversion" from="adjustments.repackPlan(asset, targetProductId, quantity)"/>
+            <set field="costIncluded" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
+                    .has('ACCOUNTING_VIEW')"/>
+            <set field="preview" from="{direction: conversion.direction, assetId: assetId,
+                    sourceProductId: conversion.sourceProductId, quantity: String(toDecimal(quantity).toNumber()),
+                    targetProductId: conversion.targetProductId, targetQuantity: String(conversion.targetQuantity.toNumber()),
+                    factor: String(conversion.factor.toNumber()), lotId: asset.lotId || null, facilityId: asset.facilityId,
+                    locationSeqId: asset.locationSeqId || null, statusId: asset.statusId, costIncluded: costIncluded}"/>
+            <if condition="costIncluded &amp;&amp; asset.acquireCost != null">
+                <set field="issuedCost" from="toDecimal(quantity).multiply(asset.acquireCost)"/>
+                <script>Object.assign(preview, {sourceUnitCost: String(toDecimal(asset.acquireCost).toNumber()),
+                    issuedCost: String(issuedCost.toNumber()), costUomId: asset.acquireCostUomId || null,
+                    unitCost: String(issuedCost.divide(conversion.targetQuantity, 6, 'HALF_UP').toNumber())})</script>
+            </if>
+        </actions>
+    </service>
+    <service verb="repack" noun="Asset" allow-remote="false">
+        <description>Unpack or repack stock (design-warehouse Repack): the source asset's quantity is issued
+            (issue#AssetToWorkEffort) to a new organization-owned WepAssembling WorkEffort, which posts it to WIP, and the
+            target product is received (receive#Asset) from it with the source's lot, expiry and owner and the acquireCost
+            of the issued cost divided by the target quantity, which relieves WIP: the two postings net to zero through
+            AssetIssuanceGlPost and AssetReceiptGlPost. The receipt links its source issuance
+            (AssetReceipt.sourceAssetIssuanceId) and keeps the entered source quantity and the conversion factor. Both
+            movements post or neither does. The conversion is Products' packaging (resolve#ScannedProduct): unpack a pack
+            into its contents, or repack contents into whole packs. A retry with the same operation key answers the first
+            repack. Refuses without STOCK_MOVE (PERMISSION_DENIED); as move#Stock: the user's facilities, the stock and
+            quantity, a closed or missing location, held stock or a status change with no flow (HELD_STOCK); stock that is
+            not free to issue (RESERVED_STOCK); no packaging between the products (PACK_UNDEFINED); not whole packs
+            (QUANTITY_NOT_WHOLE_PACKS); a closed fiscal period today (PERIOD_CLOSED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="targetProductId"><description>Empty unpacks into the pack's contents.</description></parameter>
+            <parameter name="toLocationSeqId"><description>Where the target is received; the source's location when
+                empty.</description></parameter>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REPACKED, direction, assetId, sourceProductId,
+                quantity, targetProductId, targetQuantity, factor, toAssetId, lotId, facilityId, locationSeqId, statusId,
+                workEffortId, assetIssuanceId, assetReceiptId, reason, warnings, and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="adjustments"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
+            <set field="begun" from="posting.begin(context, 'StockRepack', 'STOCK_MOVE', ['assetId', 'quantity',
+                    'targetProductId', 'toLocationSeqId', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
+            <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <if condition="toDecimal(quantity).compare(toDecimal(asset.availableToPromiseTotal ?? 0)) &gt; 0">
+                <set field="freeText" from="String(toDecimal(asset.availableToPromiseTotal ?? 0).toNumber())"/>
+                <return error="true" message="RESERVED_STOCK: Only ${freeText} of asset ${assetId} is free to repack"/>
+            </if>
+            <set field="conversion" from="adjustments.repackPlan(asset, targetProductId, quantity)"/>
+            <set field="target" from="posting.destination(userScope, asset.facilityId,
+                    {toLocationSeqId: toLocationSeqId || asset.locationSeqId})"/>
+            <set field="statusAfter" from="posting.keepHeld(asset, target)"/>
+            <set field="warnings" from="posting.expiryWarnings(assetId)"/>
+            <script>posting.period([asset.ownerPartyId || home.ownerPartyId], ec.user.nowTimestamp)</script>
+            <!-- the organization-owned assembling work effort the issue goes into and the receipt comes out of -->
+            <service-call name="create#mantle.work.effort.WorkEffort" disable-authz="true" out-map="effort"
+                    in-map="{workEffortTypeEnumId:'WetTask', purposeEnumId:'WepAssembling', statusId:'WeInProgress',
+                        ownerPartyId:asset.ownerPartyId || home.ownerPartyId, facilityId:asset.facilityId,
+                        workEffortName:(conversion.direction == 'unpack' ? 'Unpack ' : 'Repack ') + assetId,
+                        description:reason || null, actualStartDate:ec.user.nowTimestamp}"/>
+            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort" disable-authz="true"
+                    in-map="{assetId:assetId, workEffortId:effort.workEffortId, quantity:quantity, noConsumeProduct:'add',
+                        noOriginFacility:'ignore'}"/>
+            <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="issuances" disable-authz="true">
+                <econdition field-name="workEffortId" from="effort.workEffortId"/>
+                <econdition field-name="assetId"/>
+            </entity-find>
+            <set field="assetIssuanceId" from="issuances[0].assetIssuanceId"/>
+            <set field="unitCost" from="asset.acquireCost == null ? null : toDecimal(quantity).multiply(asset.acquireCost)
+                    .divide(conversion.targetQuantity, 6, 'HALF_UP')"/>
+            <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
+                    in-map="{productId:conversion.targetProductId, quantity:conversion.targetQuantity,
+                        facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
+                        ownerPartyId:asset.ownerPartyId || home.ownerPartyId, lotId:asset.lotId,
+                        expectedEndOfLife:asset.expectedEndOfLife, manufacturedDate:asset.manufacturedDate,
+                        assetPoolId:asset.assetPoolId, statusId:statusAfter, acquireCost:unitCost,
+                        acquireCostUomId:asset.acquireCostUomId, workEffortId:effort.workEffortId}"/>
+            <service-call name="update#mantle.product.receipt.AssetReceipt" disable-authz="true"
+                    in-map="{assetReceiptId:received.assetReceiptId, sourceAssetIssuanceId:assetIssuanceId,
+                        enteredQuantity:quantity, appliedConversionFactor:conversion.direction == 'unpack'
+                            ? conversion.factor : toDecimal(1).divide(conversion.factor, 6, 'HALF_UP')}"/>
+            <service-call name="update#mantle.work.effort.WorkEffort" disable-authz="true"
+                    in-map="{workEffortId:effort.workEffortId, statusId:'WeComplete',
+                        actualCompletionDate:ec.user.nowTimestamp}"/>
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
+                    received.assetReceiptId, {resultCode: 'REPACKED', direction: conversion.direction, assetId: assetId,
+                        sourceProductId: conversion.sourceProductId, quantity: String(toDecimal(quantity).toNumber()),
+                        targetProductId: conversion.targetProductId,
+                        targetQuantity: String(conversion.targetQuantity.toNumber()),
+                        factor: String(conversion.factor.toNumber()), toAssetId: received.assetId, lotId: asset.lotId || null,
+                        facilityId: asset.facilityId, locationSeqId: target.locationSeqId, statusId: statusAfter,
+                        workEffortId: effort.workEffortId, assetIssuanceId: assetIssuanceId,
+                        assetReceiptId: received.assetReceiptId, reason: reason || null, warnings: warnings})"/>
+        </actions>
+    </service>
 </services>
