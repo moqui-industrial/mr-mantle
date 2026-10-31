@@ -451,8 +451,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>What keeps a location of one of the user's facilities from closing now (FACILITY_EDIT), each kind with
             the records it names: stock with on-hand or available-to-promise not zero (a depleted asset does not block),
             equipment that has not left (not delivered or deactivated, no actualEndOfLife), containers, reservations not
-            issued on an asset there (open picks), counts not complete with a line there, and product location policies
-            (ProductFacilityLocation) naming it.</description>
+            issued on an asset there (open picks), counts not complete with a line there, product location policies
+            (ProductFacilityLocation) naming it, and warehouse operation policies in effect or to come naming it as a
+            default location (operationPolicy).</description>
         <in-parameters>
             <parameter name="facilityId" required="true"/>
             <parameter name="locationSeqId" required="true"/>

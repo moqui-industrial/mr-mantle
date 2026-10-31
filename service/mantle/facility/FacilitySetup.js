@@ -162,7 +162,8 @@ function storeLocationType(p) {
 // What keeps a location from closing, each named: stock there with on-hand or available-to-promise not zero (a depleted
 // asset stays at zero and does not block), equipment there that has not left (an asset counted by quantity with on-hand
 // and available-to-promise both zero is gone, whatever its type), a container, a reservation not issued on an asset there
-// (an open pick), a count line there on a count not complete, and a product's location policy naming it. Each kind is
+// (an open pick), a count line there on a count not complete, a product's location policy naming it, and a warehouse
+// operation policy in effect or to come naming it as a default location. Each kind is
 // one find filtered in the database: its count and the first records it names.
 function blockersOf(facilityId, locationSeqId) {
     const at = {facilityId, locationSeqId}
@@ -224,6 +225,23 @@ function blockersOf(facilityId, locationSeqId) {
             "physicalInventoryId"
         )
     add("productLocation", "product location policies of", () => find("mantle.facility.ProductFacilityLocation", at), "productId")
+    // a warehouse operation policy in effect or to come that names it as a default location (WarehousePolicy.js)
+    add(
+        "operationPolicy",
+        "warehouse operation policies naming it, from",
+        () =>
+            find("mantle.facility.WarehousePolicy", {facilityId, policyType: "operation"})
+                .condition(
+                    anyOf(
+                        ["receivingLocationSeqId", "quarantineLocationSeqId", "stagingLocationSeqId"].map(field =>
+                            cond(field, "equals", locationSeqId)
+                        )
+                    )
+                )
+                .condition(anyOf([cond("thruDate", "is-null", null), cond("thruDate", "greater", ec.user.nowTimestamp)])),
+        "fromDate",
+        row => ec.l10n.format(new Date(ms(row.fromDate)), "yyyy-MM-dd HH:mm")
+    )
     return blockers
 }
 function locationOf(userScope, p, lock) {
