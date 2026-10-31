@@ -72,6 +72,10 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_DISPOSE" fromDate="0"/>
     <userPermissions userPermissionId="QUALITY_TEMPLATE_EDIT" description="Quality Template Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="QUALITY_TEMPLATE_EDIT" fromDate="0"/>
+    <!-- Purchasing's order changes (mantle.order.OrderServices.close#PurchaseRemainders; ensure#PurchaseReceipt admits it for
+        the expected receipt of a purchase order part) -->
+    <userPermissions userPermissionId="PURCHASE_ORDER_EDIT" description="Purchase Order Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="CARD_NUMBER_EDIT" description="Credit Card Number Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="CARD_NUMBER_EDIT" fromDate="0"/>
 
@@ -239,6 +243,14 @@ along with this software (see the LICENSE.md file). If not, see
             showAlert="Y" alertNoAutoHide="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="High Priority Order ${orderId}:${orderPartSeqId} - Priority ${priority}"
             linkTemplate="/vapps/PopcAdmin/Order/OrderDetail?orderId=${orderId}"/>
+
+    <!-- Notification: a receipt exception (mantle.shipment.WarehouseTaskServices: rejected units, a remainder closed or
+        backordered), to the receiving organization's users holding STOCK_POLICY_MANAGE. No link template: the receipt's
+        screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="WarehouseReceiptException" description="Receipt exception" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Receipt ${shipmentId}: ${kind == 'REJECTED' ? 'units rejected'
+                : 'short, remainder ' + kind.toLowerCase()}"/>
 
     <!-- Notification: a user mentioned in a note or message on a record, and the followers of a record (Chatter;
         mantle.party.CommunicationServices.notify#RecordMention and notify#RecordFollowers). No link template: the

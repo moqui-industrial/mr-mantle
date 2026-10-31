@@ -1204,6 +1204,30 @@ function release(p) {
         if (!source || !statuses.includes(source.statusId))
             denied("SOURCE_OPEN", "Only a closed or cancelled source's commitments are released, or by BUDGET_OVERRIDE")
     }
+    return releaseOpen(organizationPartyId, p)
+}
+// release#ClosedSourceCommitments: internal to a service that closed the source in its own checked operation (Purchasing's
+// close#PurchaseRemainders completing or cancelling an order): what is left of the closed source's open commitments, in
+// each organization that holds them. The source must be closed or cancelled; no permission of its own.
+function releaseClosed(p) {
+    const [pkName, statuses] = closedSources[p.sourceEntityName] || []
+    const source = pkName && p.sourceId ? one(p.sourceEntityName, {[pkName]: p.sourceId}) : null
+    if (!source || !statuses.includes(source.statusId))
+        denied("SOURCE_OPEN", "Only a closed or cancelled source's commitments are released")
+    const organizations = [
+        ...new Set(
+            rows(COMMITMENT, {sourceEntityName: p.sourceEntityName, sourceId: p.sourceId, statusId: "BcReserved"}).map(
+                row => row.organizationPartyId
+            )
+        )
+    ]
+    const released = organizations.map(organizationPartyId => releaseOpen(organizationPartyId, p))
+    return {
+        releasedCount: released.reduce((total, part) => total + part.releasedCount, 0),
+        budgetCommitmentIds: released.flatMap(part => part.budgetCommitmentIds)
+    }
+}
+function releaseOpen(organizationPartyId, p) {
     const open = Array.from(
         find(COMMITMENT, {
             organizationPartyId,
@@ -1369,6 +1393,7 @@ const operations = {
     reserve,
     convert,
     release,
+    releaseClosed,
     reverseInvoice,
     editScope: p => ({organizationPartyId: editScope(p).organizationPartyId}),
     check,

@@ -678,6 +678,27 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="budgetCommitmentIds" from="released.budgetCommitmentIds"/>
         </actions>
     </service>
+    <service verb="release" noun="ClosedSourceCommitments" allow-remote="false">
+        <description>Internal to a service that closed or cancelled the source in its own checked operation
+            (mantle.order.OrderServices.close#PurchaseRemainders, which completes a purchase order when nothing is open):
+            release what is left of the source's open commitments in each organization that holds them, as
+            release#Commitment does for a closed source. Refuses a source that is not closed or cancelled (SOURCE_OPEN);
+            no permission of its own, as reverse#InvoiceActuals.</description>
+        <in-parameters>
+            <parameter name="sourceEntityName" required="true"/>
+            <parameter name="sourceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="releasedCount" type="Integer"/>
+            <parameter name="budgetCommitmentIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="released" from="ec.resource.script('component://mr-mantle/service/mantle/other/Budgets.js')
+                .execute('releaseClosed', context)"/>
+            <set field="releasedCount" from="released.releasedCount"/>
+            <set field="budgetCommitmentIds" from="released.budgetCommitmentIds"/>
+        </actions>
+    </service>
     <service verb="record" noun="BlockedCommitment" allow-remote="false">
         <description>Internal to the commitment services, run in its own transaction while the refusing caller rolls
             back: keep a refused Stop as a blocked commitment (once per source key) and send its BudgetOverride

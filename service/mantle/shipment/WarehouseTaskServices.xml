@@ -973,4 +973,509 @@ along with this software (see the LICENSE.md file). If not, see
                         assetReceiptId: receipts[0].assetReceiptId, reason: reason || null, warnings: warnings})"/>
         </actions>
     </service>
+    <!-- ===== receiving (impl-warehouse P7, design-warehouse §4): the receipt entry points, on StockPosting.js's steps and
+        Receiving.js's receipt steps ===== -->
+    <service verb="ensure" noun="PurchaseReceipt" allow-remote="false">
+        <description>The one open receipt of a purchase order part: the part's ShpTpPurchase shipment in Input or Scheduled
+            (resultCode EXISTING), or a new one through mantle.shipment.ShipmentServices.create#OrderPartShipment to the
+            facility (CREATED), its sources in the product's stock unit (create#OrderPartShipment converts a line in
+            another unit, OrderServices.get#OrderItemStockFactor). EXISTING answers that receipt's own facility.
+            Warehouse's NewReceipt and Purchasing's expected receipt both call it, so a second request for the part opens
+            the same receipt; a retry with the same operation key answers the first. Requires STOCK_RECEIVE or
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses a part outside the user's organizations (RECORD_UNAVAILABLE),
+            an order that is not a purchase (NOT_PURCHASE) or not approved (ORDER_NOT_OPEN), a facility outside them
+            (RECORD_UNAVAILABLE) or none (FACILITY_REQUIRED), and a part with nothing left to receive
+            (NOTHING_TO_RECEIVE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+            <parameter name="facilityId"><description>Defaults to the order part's facility.</description></parameter>
+            <parameter name="estimatedArrivalDate" type="Timestamp"/>
+            <parameter name="excludeShipmentId"><description>A receipt not to reuse: the one a backorder is closing
+                (close#ReceiptRemainder).</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CREATED or EXISTING, shipmentId, orderId,
+                orderPartSeqId, facilityId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="begun" from="posting.begin(context, 'ReceiptEnsure', ['STOCK_RECEIVE', 'PURCHASE_ORDER_EDIT'],
+                    ['orderId', 'orderPartSeqId', 'facilityId', 'estimatedArrivalDate', 'excludeShipmentId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- the part, locked (two requests for it wait on each other), then its facility -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="part" from="receiving.purchasePart(userScope, orderId, orderPartSeqId)"/>
+            <if condition="!(facilityId || part.facilityId)">
+                <return error="true" message="FACILITY_REQUIRED: Choose the facility that receives order ${orderId}"/>
+            </if>
+            <set field="home" from="posting.facility(userScope, facilityId || part.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="shipmentId" from="receiving.openReceipt(orderId, orderPartSeqId, excludeShipmentId || null)"/>
+            <set field="resultCode" from="shipmentId ? 'EXISTING' : 'CREATED'"/>
+            <if condition="!shipmentId">
+                <service-call name="mantle.shipment.ShipmentServices.create#OrderPartShipment" disable-authz="true"
+                        out-map="created" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId,
+                            destinationFacilityId:home.facilityId, tryAutoPackage:false}"/>
+                <set field="shipmentId" from="created.shipmentId"/>
+                <if condition="!shipmentId">
+                    <return error="true"
+                            message="NOTHING_TO_RECEIVE: Order ${orderId} part ${orderPartSeqId} has nothing left to receive"/>
+                </if>
+                <if condition="estimatedArrivalDate">
+                    <service-call name="update#mantle.shipment.Shipment" disable-authz="true"
+                            in-map="{shipmentId:shipmentId, estimatedArrivalDate:estimatedArrivalDate}"/>
+                </if>
+            </if>
+            <!-- the receipt's own facility (its route segment's destination), which for an existing one may not be the one
+                asked for (P7 review C2) -->
+            <entity-find entity-name="mantle.shipment.ShipmentRouteSegment" list="segments" disable-authz="true">
+                <econdition field-name="shipmentId"/>
+                <econdition field-name="destinationFacilityId" operator="is-not-null"/>
+                <order-by field-name="-shipmentRouteSegmentSeqId"/>
+            </entity-find>
+            <set field="result" from="posting.complete(begun.op, part.customerPartyId, 'mantle.shipment.Shipment', shipmentId,
+                    {resultCode: resultCode, shipmentId: shipmentId, orderId: orderId, orderPartSeqId: orderPartSeqId,
+                        facilityId: segments[0]?.destinationFacilityId || home.facilityId})"/>
+        </actions>
+    </service>
+    <service verb="adjust" noun="ExpectedReceipt" allow-remote="false">
+        <description>Purchasing's revision of an order's quantities, called in the revision's transaction: each open
+            purchase receipt source of the order (or of one part) is set to the line's new remaining quantity in stock units
+            (the line less what its other receipts expect), never below what was received on it; each product's shipment
+            item follows. The receipt is locked first, as the receive guard locks it, so a revision made while a receive
+            holds the receipt waits for it and then applies to what was received (the framework's scripts have no
+            skip-locked find to answer ReceiptInProgress at once: impl-warehouse F175). Requires STOCK_RECEIVE or
+            PURCHASE_ORDER_EDIT; refuses an order outside the user's organizations (RECORD_UNAVAILABLE) or not a purchase
+            (NOT_PURCHASE). A retry with the same operation key answers the first.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ADJUSTED, orderId, sources (shipmentId,
+                shipmentItemSourceId, orderItemSeqId, productId, fromQuantity, quantity, receivedQuantity).</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="begun" from="posting.begin(context, 'ReceiptAdjust', ['STOCK_RECEIVE', 'PURCHASE_ORDER_EDIT'],
+                    ['orderId', 'orderPartSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <entity-find entity-name="mantle.order.OrderPart" list="parts" disable-authz="true">
+                <econdition field-name="orderId"/>
+                <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
+                <order-by field-name="orderPartSeqId"/>
+            </entity-find>
+            <if condition="!parts.length">
+                <return error="true" message="RECORD_UNAVAILABLE: Order ${orderId} is not available"/>
+            </if>
+            <script><![CDATA[
+                const purchase = ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRemainders.js')
+                const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                const dec = value => toDecimal(value ?? 0)
+                // one lock order (P7 review B1): the open receipts by id first, found without locks, then the parts
+                const receiptIds = [...new Set(Array.from(parts).map(part => receiving.openReceipt(orderId,
+                    part.orderPartSeqId, null)).filter(Boolean))].sort()
+                for (const shipmentId of receiptIds)
+                    lib.find('mantle.shipment.Shipment', {shipmentId}).forUpdate(true).one()
+                partList = Array.from(parts).map(part => receiving.purchasePart(userScope, orderId, part.orderPartSeqId))
+                const items = Array.from(lib.find('mantle.order.OrderItem', {orderId}).orderBy('orderItemSeqId').list())
+                    .filter(item => partList.some(part => part.orderPartSeqId === item.orderPartSeqId) && item.productId)
+                adjusted = []
+                for (const item of items) {
+                    const product = lib.one('mantle.product.Product', {productId: item.productId})
+                    const ordered = dec(item.quantity).multiply(purchase.lineFactor(item, product))
+                    const all = Array.from(lib.find('mantle.shipment.ShipmentItemSource',
+                            {orderId, orderItemSeqId: item.orderItemSeqId}).forUpdate(true).list())
+                        .filter(source => source.statusId !== 'SisCancelled')
+                    for (const source of all.filter(row => receiptIds.includes(row.shipmentId))) {
+                        const others = all.filter(row => row.shipmentItemSourceId !== source.shipmentItemSourceId)
+                            .filter(row => lib.one('mantle.shipment.Shipment', {shipmentId: row.shipmentId})?.statusId
+                                !== 'ShipCancelled')
+                            .reduce((sum, row) => sum.add(dec(row.quantity)), toDecimal(0))
+                        const received = lib.rows('mantle.product.receipt.AssetReceipt',
+                                {shipmentItemSourceId: source.shipmentItemSourceId})
+                            .reduce((sum, row) => sum.add(dec(row.quantityAccepted)).add(dec(row.quantityRejected)),
+                                toDecimal(0))
+                        let target = ordered.subtract(others)
+                        if (target.compare(received) < 0) target = received
+                        if (target.compare(dec(source.quantity)) === 0) continue
+                        lib.call('update#mantle.shipment.ShipmentItemSource', {shipmentItemSourceId:
+                            source.shipmentItemSourceId, quantity: target, quantityNotHandled: target.subtract(received)})
+                        adjusted.push({shipmentId: source.shipmentId, shipmentItemSourceId: source.shipmentItemSourceId,
+                            orderItemSeqId: item.orderItemSeqId, productId: item.productId,
+                            fromQuantity: receiving.text(source.quantity), quantity: receiving.text(target),
+                            receivedQuantity: receiving.text(received)})
+                    }
+                }
+                // each changed product's shipment item is the sum of its sources
+                for (const key of [...new Set(adjusted.map(row => row.shipmentId + '|' + row.productId))]) {
+                    const [shipmentId, productId] = key.split('|')
+                    const total = lib.rows('mantle.shipment.ShipmentItemSource', {shipmentId, productId})
+                        .reduce((sum, row) => sum.add(dec(row.quantity)), toDecimal(0))
+                    lib.call('update#mantle.shipment.ShipmentItem', {shipmentId, productId, quantity: total})
+                }
+            ]]></script>
+            <set field="result" from="posting.complete(begun.op, partList[0].customerPartyId, 'mantle.order.OrderHeader',
+                    orderId, {resultCode: 'ADJUSTED', orderId: orderId, sources: adjusted})"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="ShipmentStock" allow-remote="false">
+        <description>Receive one line of a purchase receipt through mantle.shipment.ShipmentServices.receive#ShipmentProduct,
+            atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of
+            the product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents),
+            converted to the product's stock unit and kept as entered on each receipt (enteredQuantity,
+            enteredQuantityUomId, appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none
+            is given) and, for serialized stock, one unique serial per accepted unit; to the operation policy's receipt
+            step at posting (resolve#WarehousePolicy): 1 the product's default location or the receiver's, 2 the receiving
+            location, 3 a quarantine location; a rejected quantity becomes no stock (with nothing accepted, the guard writes
+            the rejection as an AssetReceipt with no stock on the sources in order, since receive#Asset receives nothing for
+            a zero quantity: F177). A retry with the same operation key
+            answers the first receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's
+            facilities (RECORD_UNAVAILABLE), one that is not a purchase receipt (RECEIPT_TYPE) or no longer open
+            (RECEIPT_CLOSED), a product not on it (PRODUCT_NOT_ON_RECEIPT), no quantity (QUANTITY_INVALID), a rejection
+            without a reason (REASON_REQUIRED), more than the policy's over-receipt tolerance allows, zero by default
+            (OVER_RECEIPT), a serial count that does not match the accepted units (SERIAL_COUNT_MISMATCH), a serial given
+            twice or already in stock (SERIAL_DUPLICATE), a lot-tracked product without a lot (LOT_REQUIRED), a unit with
+            no conversion (UNIT_CONVERSION), a closed or missing destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE,
+            LOCATION_REQUIRED for a two- or three-step receipt with no receiving or quarantine location), and a closed fiscal
+            period today for the facility owner (PERIOD_CLOSED; the periods are read without locking them, so receipts do
+            not serialize on them).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="productId" required="true"><description>The product, or a pack of it.</description></parameter>
+            <parameter name="quantityAccepted" type="BigDecimal"/>
+            <parameter name="quantityRejected" type="BigDecimal"/>
+            <parameter name="quantityUomId"><description>The unit the quantities were entered in.</description></parameter>
+            <parameter name="rejectionReasonEnumId"/>
+            <parameter name="lotId"/>
+            <parameter name="lotNumber"/>
+            <parameter name="expirationDate" type="Date"/>
+            <parameter name="mfgPartyId"/>
+            <parameter name="serialNumbers" type="List"/>
+            <parameter name="locationSeqId"><description>The receiver's destination, within the receipt step.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, facilityId, productId,
+                packProductId, quantityAccepted and quantityRejected (stock unit), the entered quantities, unit and factor,
+                receiptSteps, locationSeqId, statusId, lotNumber, serialNumbers, assetIds, assetReceiptIds,
+                remainingQuantity, warnings, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <!-- 1. permission and operation key: a double submit answers the first receipt -->
+            <set field="begun" from="posting.begin(context, 'StockReceive', 'STOCK_RECEIVE', ['shipmentId', 'productId',
+                    'quantityAccepted', 'quantityRejected', 'quantityUomId', 'rejectionReasonEnumId', 'lotId', 'lotNumber',
+                    'expirationDate', 'serialNumbers', 'locationSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the receipt, then the line's sources, locked and scoped; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="recv" from="receiving.receipt(userScope, shipmentId)"/>
+            <set field="ln" from="receiving.line(recv, productId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3-4. units, tracking, over-receipt and the receipt step's open destination, all before anything posts -->
+            <set field="pl" from="receiving.plan(userScope, recv, ln, context)"/>
+            <!-- the open period of today for the facility owner, read without locking the periods (P7 review B2) -->
+            <script>posting.period([recv.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- 5. Mantle's receipt, and the entered quantity on each receipt it wrote -->
+            <set field="posted" from="receiving.postLine(recv, ln, pl, context)"/>
+            <if condition="pl.rejected.compare(0) &gt; 0">
+                <script>receiving.notifyException(recv, 'REJECTED', {productId: ln.product.productId,
+                    quantityRejected: receiving.text(pl.rejected), rejectionReasonEnumId: rejectionReasonEnumId})</script>
+            </if>
+            <!-- 6. the answer -->
+            <set field="result" from="posting.complete(begun.op, recv.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, receiving.lineAnswer(recv, ln, pl, posted, context))"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="ExpectedShipment" allow-remote="false">
+        <description>"Receive all as expected": every line's remaining quantity accepted through receive#ShipmentStock (its
+            unit, policy, step and checks), then the receipt delivered (deliver#Shipment), all or nothing. It needs the
+            explicit confirmation (CONFIRMATION_REQUIRED) and never stands in for a short receipt: what did not arrive is
+            closed or backordered with close#ReceiptRemainder. Not receive#EntireShipment, which accepts every unit not yet
+            handled without the receipt steps or the tracking policy (and multiplies a transfer's totals, F37). Refuses a
+            receipt with a lot- or serial-tracked line still to receive (TRACKING_REQUIRED: receive it line by line) and
+            one with nothing left (NOTHING_TO_RECEIVE); and as receive#ShipmentStock. A retry answers the first.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="confirmed" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED_ALL, shipmentId, lines (productId,
+                quantity, result), delivered.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="begun" from="posting.begin(context, 'ReceiptReceiveAll', 'STOCK_RECEIVE', ['shipmentId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!confirmed">
+                <return error="true" message="CONFIRMATION_REQUIRED: Confirm that every remaining unit arrived as expected"/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="recv" from="receiving.receipt(userScope, shipmentId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <script>posting.period([recv.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <set field="open" from="receiving.remainders(shipmentId).filter(row =&gt; row.remaining.compare(0) &gt; 0)"/>
+            <if condition="!open.length">
+                <return error="true" message="NOTHING_TO_RECEIVE: Receipt ${shipmentId} has nothing left to receive"/>
+            </if>
+            <set field="tracked" from="open.filter(row =&gt; {const policy = receiving.policyOf(recv.facilityId,
+                    row.productId).tracking; return policy.lotRequired == 'Y' || policy.serialRequired == 'Y'})
+                    .map(row =&gt; row.productId)"/>
+            <if condition="tracked.length">
+                <set field="trackedText" from="tracked.join(', ')"/>
+                <return error="true"
+                        message="TRACKING_REQUIRED: Receive the lot or serial-tracked lines one by one: ${trackedText}"/>
+            </if>
+            <set field="lines" from="[]"/>
+            <iterate list="open" entry="lineRow">
+                <service-call name="mantle.shipment.WarehouseTaskServices.receive#ShipmentStock" disable-authz="true"
+                        out-map="lineOut" in-map="{operationKey:begun.op.clientKey + '/' + lineRow.productId,
+                            shipmentId:shipmentId, productId:lineRow.productId, quantityAccepted:lineRow.remaining,
+                            quantityUomId:ec.entity.find('mantle.product.Product').condition('productId', lineRow.productId)
+                                .disableAuthz().one()?.amountUomId}"/>
+                <script>lines.push({productId: lineRow.productId, quantity: receiving.text(lineRow.remaining),
+                    result: lineOut.result})</script>
+            </iterate>
+            <service-call name="mantle.shipment.ShipmentServices.deliver#Shipment" disable-authz="true"
+                    in-map="{shipmentId:shipmentId}"/>
+            <set field="result" from="posting.complete(begun.op, recv.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'RECEIVED_ALL', shipmentId: shipmentId, lines: lines, delivered: true})"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="AdHocStock" allow-remote="false">
+        <description>AdHocReceipt: receive stock with no order or shipment, through mantle.product.AssetServices.receive#Asset,
+            with a reason kept on the receipt (AssetReceipt.itemDescription) and an optional cost: the quantity in the
+            entered unit converted to the stock unit and kept as entered, a lot and expiry, one unique serial per unit of
+            serialized stock, to the operation policy's receipt step (as receive#ShipmentStock), owned by the facility's
+            organization or another of the user's. A retry with the same operation key answers the first. Requires
+            STOCK_RECEIVE; refuses a facility outside the user's organizations (RECORD_UNAVAILABLE), an owner outside them
+            (OWNER_UNAVAILABLE), a product that holds no stock (NOT_STOCK), no reason (REASON_REQUIRED), no quantity
+            (QUANTITY_INVALID), a cost given without financial read (COST_NOT_PERMITTED: with none, the product's approved
+            standard cost, else its latest acquire cost, is used), a closed fiscal period today (PERIOD_CLOSED, read without
+            locking), and the tracking and destination refusals of receive#ShipmentStock.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="productId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="lotId"/>
+            <parameter name="lotNumber"/>
+            <parameter name="expirationDate" type="Date"/>
+            <parameter name="mfgPartyId"/>
+            <parameter name="serialNumbers" type="List"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="reason"><description>Required: checked by the service (REASON_REQUIRED).</description>
+            </parameter>
+            <parameter name="acquireCost" type="BigDecimal"/>
+            <parameter name="acquireCostUomId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED, facilityId, productId, quantity (stock
+                unit), the entered quantity, unit and factor, receiptSteps, locationSeqId, statusId, ownerPartyId,
+                assetIds, assetReceiptIds, warnings.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="begun" from="posting.begin(context, 'StockReceiveAdHoc', 'STOCK_RECEIVE', ['facilityId', 'productId',
+                    'quantity', 'quantityUomId', 'ownerPartyId', 'lotId', 'lotNumber', 'expirationDate', 'serialNumbers',
+                    'locationSeqId', 'reason', 'acquireCost', 'acquireCostUomId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="home" from="posting.facility(userScope, facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <if condition="!(reason || '').trim()">
+                <return error="true" message="REASON_REQUIRED: Give the reason stock is received without an order"/>
+            </if>
+            <set field="owner" from="ownerPartyId || home.ownerPartyId"/>
+            <if condition="!ec.resource.script('component://mr-mantle/service/mantle/facility/FacilityScope.js')
+                    .owns(userScope, owner)">
+                <return error="true" message="OWNER_UNAVAILABLE: Stock is owned by one of your organizations"/>
+            </if>
+            <entity-find-one entity-name="mantle.product.Product" value-field="product" disable-authz="true"/>
+            <if condition="!product || !receiving.stockProductTypes.includes(product.productTypeEnumId)">
+                <return error="true" message="NOT_STOCK: Product ${productId} holds no stock"/>
+            </if>
+            <set field="unitId" from="quantityUomId || product.amountUomId"/>
+            <set field="unit" from="receiving.stockQuantity(quantity, unitId, product, null)"/>
+            <if condition="unit.quantity.compare(0) &lt;= 0">
+                <return error="true" message="QUANTITY_INVALID: Give a quantity above zero"/>
+            </if>
+            <script>posting.period([owner], ec.user.nowTimestamp, {lock: false})</script>
+            <set field="cost" from="receiving.adHocCost(product, home, owner, acquireCost, acquireCostUomId)"/>
+            <set field="policy" from="receiving.policyOf(home.facilityId, productId)"/>
+            <set field="track" from="receiving.tracking(policy.tracking, product, unit.quantity, context)"/>
+            <set field="target" from="receiving.destination(userScope, home.facilityId, productId, policy.operation,
+                    locationSeqId)"/>
+            <set field="common" from="{productId: productId, facilityId: home.facilityId, locationSeqId: target.locationSeqId,
+                    statusId: target.statusId, ownerPartyId: owner, lotId: lotId || null, lotNumber: lotNumber || null,
+                    expirationDate: track.expirationDate, mfgPartyId: mfgPartyId || null, acquireCost: cost.acquireCost,
+                    acquireCostUomId: cost.acquireCostUomId}"/>
+            <set field="receiptIds" from="[]"/>
+            <set field="assetIds" from="[]"/>
+            <iterate list="track.serialized ? track.serials : [null]" entry="serialNumber">
+                <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="receivedOut"
+                        in-map="Object.assign({}, common, {serialNumber: serialNumber,
+                            quantity: serialNumber ? 1 : unit.quantity})"/>
+                <script>assetIds.push(receivedOut.assetId); receiptIds.push(receivedOut.assetReceiptId)</script>
+            </iterate>
+            <set field="written" from="receiptIds.filter(Boolean).map(id =&gt;
+                    ec.entity.find('mantle.product.receipt.AssetReceipt').condition('assetReceiptId', id).disableAuthz().one())"/>
+            <script>receiving.stamp(written, {enteredUomId: unitId, factor: unit.factor,
+                itemDescription: String(reason).trim().slice(0, 255)})</script>
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
+                    receiptIds[0] || null, {resultCode: 'RECEIVED', facilityId: home.facilityId, productId: productId,
+                        quantity: receiving.text(unit.quantity), enteredQuantity: receiving.text(quantity),
+                        enteredQuantityUomId: unitId || null, appliedConversionFactor: receiving.text(unit.factor),
+                        receiptSteps: target.receiptSteps, locationSeqId: target.locationSeqId, statusId: target.statusId,
+                        ownerPartyId: owner, costSource: cost.costSource, serialNumbers: track.serials,
+                        assetIds: assetIds.filter(Boolean),
+                        assetReceiptIds: receiptIds.filter(Boolean), reason: String(reason).trim(),
+                        warnings: track.warnings})"/>
+        </actions>
+    </service>
+    <service verb="close" noun="ReceiptRemainder" allow-remote="false">
+        <description>Finish a short purchase receipt (ReceiveRemaining): only what was received stays on it, and the
+            remainder of each line is either closed, through Purchasing's close of purchase remainders
+            (mantle.order.OrderServices.close#PurchaseRemainders' close, run in this operation under its STOCK_RECEIVE
+            check: cancel#OrderItem with what this receipt expected and did not get, lowering only its sources, so a remainder
+            on another open receipt stays; the Requirement allocation and the budget commitment released, the order
+            completed when nothing is open), or backordered, this receipt's items lowered to what was received
+            (update#ShipmentItem; a receipt that received nothing is cancelled) and the order part's remainder put on its
+            open receipt (ensure#PurchaseReceipt). Only then is the receipt delivered (deliver#Shipment, whose
+            ShipmentIncomingDeliveredCreateInvoices SECA bills the accepted quantity of a self-billing supplier as Accounting
+            conditioned it), unless it was cancelled. A remainder sends the receipt exception notice. A retry with the same
+            operation key answers the first. Requires STOCK_RECEIVE; refuses a receipt outside the user's facilities
+            (RECORD_UNAVAILABLE), not a purchase receipt (RECEIPT_TYPE) or no longer open (RECEIPT_CLOSED), a choice other
+            than close or backorder (CHOICE_INVALID) and a missing reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="choice" required="true"><description>close or backorder.</description></parameter>
+            <parameter name="reason"><description>Required: checked by the service (REASON_REQUIRED).</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CLOSED or BACKORDERED, shipmentId, choice, reason,
+                lines (productId, expected, received, remaining), orders (close: orderId, closedItems, orderStatusId,
+                releasedCommitments), backorders (backorder: orderId, orderPartSeqId, shipmentId), delivered,
+                shipmentStatusId.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="begun" from="posting.begin(context, 'ReceiptClose', 'STOCK_RECEIVE', ['shipmentId', 'choice',
+                    'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="recv" from="receiving.receipt(userScope, shipmentId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <if condition="!['close', 'backorder'].includes(choice)">
+                <return error="true" message="CHOICE_INVALID: Choose to close the remainder or to backorder it"/>
+            </if>
+            <if condition="!(reason || '').trim()">
+                <return error="true" message="REASON_REQUIRED: Give the reason the receipt is short"/>
+            </if>
+            <set field="lines" from="receiving.remainders(shipmentId)"/>
+            <set field="open" from="lines.filter(row =&gt; row.remaining.compare(0) &gt; 0)"/>
+            <set field="orders" from="[]"/>
+            <set field="backorders" from="[]"/>
+            <if condition="open.length">
+                <if condition="choice == 'close'">
+                    <then><set field="orders" from="receiving.closeRemainders(userScope, recv, open, reason.trim())"/></then>
+                    <else><set field="backorders" from="receiving.backorderRemainders(recv, open, begun.op.clientKey)"/></else>
+                </if>
+            </if>
+            <!-- only then the delivery; a receipt the close cancelled (nothing received) is not delivered -->
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="after" disable-authz="true"/>
+            <set field="delivered" from="after.statusId != 'ShipCancelled'"/>
+            <if condition="delivered">
+                <service-call name="mantle.shipment.ShipmentServices.deliver#Shipment" disable-authz="true"
+                        in-map="{shipmentId:shipmentId}"/>
+            </if>
+            <set field="lineRows" from="lines.map(row =&gt; ({productId: row.productId, expected: receiving.text(row.expected),
+                    received: receiving.text(row.received), remaining: receiving.text(row.remaining)}))"/>
+            <if condition="open.length">
+                <script>receiving.notifyException(recv, choice == 'close' ? 'CLOSED' : 'BACKORDERED',
+                    {reason: reason.trim(), lines: lineRows.filter(row =&gt; row.remaining != '0')})</script>
+            </if>
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="final" disable-authz="true"/>
+            <set field="result" from="posting.complete(begun.op, recv.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: choice == 'close' ? 'CLOSED' : 'BACKORDERED', shipmentId: shipmentId,
+                        choice: choice, reason: reason.trim(), lines: lineRows, orders: orders, backorders: backorders,
+                        delivered: delivered, shipmentStatusId: final.statusId})"/>
+        </actions>
+    </service>
+    <service verb="generate" noun="TrackingIdentities" allow-remote="false">
+        <description>GenerateTracking's preview: serial or lot values for many units, from a first value counted up (its
+            trailing number, width kept) or the tracking policy's serial or lot pattern ({seq} or {seq:N}, {yyyy}, {yy},
+            {MM}, {dd} in the user's zone, {product}), each flagged when it is a duplicate: a serial already on the product's
+            stock (IN_STOCK), a lot number already used (LOT_EXISTS, of the manufacturer when given), or given twice
+            (REPEATED). Writes nothing: the confirmed values post through receive#ShipmentStock under one operation key
+            (Manufacturing's output receipt uses it too). Requires STOCK_RECEIVE or STOCK_ISSUE; refuses a facility outside
+            the user's organizations (RECORD_UNAVAILABLE), a count outside 1 to 1000 (COUNT_INVALID), a first value with
+            no number (FIRST_VALUE_INVALID), a pattern with no sequence (PATTERN_INVALID), and neither
+            (FIRST_VALUE_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="trackingKind" default-value="serial"><description>serial or lot.</description></parameter>
+            <parameter name="productId" required="true"/>
+            <parameter name="facilityId"><description>Whose tracking policy gives the pattern.</description></parameter>
+            <parameter name="count" type="Integer" required="true"/>
+            <parameter name="firstValue"/>
+            <parameter name="pattern"/>
+            <parameter name="startNumber" type="Integer"/>
+            <parameter name="mfgPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="trackingKind"/>
+            <parameter name="pattern"/>
+            <parameter name="identityRows" type="List"><description>value, duplicate, reason.</description></parameter>
+            <parameter name="duplicateCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="generated" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')
+                    .generate(context)"/>
+            <set field="trackingKind" from="generated.trackingKind"/>
+            <set field="pattern" from="generated.pattern"/>
+            <set field="identityRows" from="generated.identityRows"/>
+            <set field="duplicateCount" from="generated.duplicateCount"/>
+        </actions>
+    </service>
 </services>

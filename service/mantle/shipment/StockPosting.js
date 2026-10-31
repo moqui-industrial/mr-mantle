@@ -72,7 +72,7 @@ function stored(op) {
         denied("OPERATION_KEY_CONFLICT", "Operation " + op.clientKey + " was already used for another request")
     return old
 }
-// The permission, or one of a list of permissions.
+// The permission, or one of a list of permissions (ensure#PurchaseReceipt: the receiver's or the buyer's).
 function requirePermission(permission) {
     const any = Array.isArray(permission) ? permission : [permission]
     if (!any.some(access.has)) denied("PERMISSION_DENIED", any.join(" or ") + " is required")
@@ -199,11 +199,14 @@ function expiryWarnings(assetId) {
 // The fiscal period of the effective date, for each organization that posts: refused when a period of the organization,
 // or of one it rolls up to, holds the day and is closed (PERIOD_CLOSED). The periods are read for update, so a close
 // waits for the posting. Accounting's own check (PostingGuard.js) runs again inside post#AcctgTrans.
-function period(organizationPartyIds, effectiveDate) {
+// options.lock false reads the periods without locking them: the high-volume receipts (P7 review B2) check the period
+// without serializing every receipt of an organization on its TimePeriod rows; post#AcctgTrans's own guard still runs.
+function period(organizationPartyIds, effectiveDate, options = {}) {
     const guard = ec.resource.script("component://mr-mantle/service/mantle/ledger/PostingGuard.js")
     const date = effectiveDate || ec.user.nowTimestamp
+    const lock = options.lock !== false
     for (const organizationPartyId of [...new Set(organizationPartyIds.filter(Boolean))].sort()) {
-        const closed = guard.fiscal(organizationPartyId, date, true).findings.find(row => row.code === "PERIOD_CLOSED")
+        const closed = guard.fiscal(organizationPartyId, date, lock).findings.find(row => row.code === "PERIOD_CLOSED")
         if (closed)
             denied(
                 "PERIOD_CLOSED",
