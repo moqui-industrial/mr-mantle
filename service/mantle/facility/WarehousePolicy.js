@@ -78,6 +78,14 @@ const families = {
 }
 const storeFields = {reservationOrderEnumId: "reservationOrderEnumId", reservationAutoEnumId: "reservationAutoEnumId"}
 const current = (r, at) => (ms(r.fromDate) ?? -Infinity) <= at && (ms(r.thruDate) ?? Infinity) > at
+const isClosed = location => location.thruDate != null && ms(location.thruDate) <= ms(ec.user.nowTimestamp)
+const openLocation = () => {
+    const cf = ec.entity.conditionFactory
+    return cf.makeCondition(
+        [cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater", ec.user.nowTimestamp)],
+        "or"
+    )
+}
 const pick = (p, fields) =>
     Object.fromEntries(fields.filter(k => Object.keys(p).includes(k)).map(k => [k, p[k] === "" ? null : p[k]]))
 // The organizations are FacilityScope.js's, as for every facility and stock guard.
@@ -207,7 +215,9 @@ function layered(type, g, all, at) {
     if (type === "operation" && g.facilityId !== "_NA_")
         for (const [field, locationTypeEnumId] of Object.entries(locationTypes)) {
             if (policy[field] != null) continue
+            // a closed location (FacilityLocation.thruDate passed) is no default
             const first = find(E + "FacilityLocation", {facilityId: g.facilityId, locationTypeEnumId})
+                .condition(openLocation())
                 .orderBy("locationSeqId")
                 .limit(1)
                 .list()
@@ -221,6 +231,12 @@ function layered(type, g, all, at) {
 function warningsOf(operationPolicy, g) {
     if (g.facilityId === "_NA_") return []
     const warnings = []
+    // a policy row may still name a location closed since (the close refuses one named by a current row)
+    for (const field of Object.keys(locationTypes)) {
+        if (!operationPolicy[field]) continue
+        const location = one(E + "FacilityLocation", {facilityId: g.facilityId, locationSeqId: operationPolicy[field]})
+        if (location && isClosed(location)) warnings.push({code: "LOCATION_CLOSED", field, locationSeqId: location.locationSeqId})
+    }
     if (Number(operationPolicy.receiptSteps) === 2 && !operationPolicy.receivingLocationSeqId)
         warnings.push({code: "NO_RECEIVING_LOCATION", field: "receivingLocationSeqId"})
     if (Number(operationPolicy.receiptSteps) === 3 && !operationPolicy.quarantineLocationSeqId)
@@ -286,7 +302,7 @@ const validators = {
             if (data[field] != null && (String(data[field]).length > 255 || /[\r\n\x00]/.test(String(data[field]))))
                 throw new Error("Use a single-line tracking pattern of at most 255 characters")
     },
-    operation(data, g) {
+    operation(data, g, prior) {
         for (const field of ["receiptSteps", "deliverySteps"])
             if (data[field] != null && ![1, 2, 3].includes(Number(String(data[field]))))
                 denied("POLICY_INVALID", "Choose 1, 2 or 3 " + (field === "receiptSteps" ? "receipt" : "delivery") + " steps")
@@ -306,6 +322,10 @@ const validators = {
             if (!location) denied("POLICY_INVALID", "Location " + data[field] + " is not in the selected facility")
             if (location.locationTypeEnumId !== locationTypeEnumId)
                 denied("POLICY_INVALID", "Location " + data[field] + " is not a " + locationTypeEnumId + " location")
+            // a location newly named must be open (P2's check, which also refuses a closed facility); one carried
+            // over from the row before is not re-checked, so an unrelated change is not refused
+            if (data[field] !== prior[field])
+                call(E + "FacilityServices.check#FacilityLocationOpen", {facilityId: g.facilityId, locationSeqId: data[field]})
         }
     },
     reservation(data) {
@@ -341,7 +361,7 @@ function storeDated(p, type) {
         after = all.find(r => ms(r.fromDate) > at),
         fromDate = iso(at)
     const data = Object.assign({}, before ? pick(map(before), family.fields) : {}, pick(p, family.fields))
-    validators[type](data, g)
+    validators[type](data, g, before ? pick(map(before), family.fields) : {})
     audit(["fromDate", "thruDate", ...family.fields, "changeReason"], why)
     if (before) call("update#" + W, Object.assign({}, key, {fromDate: iso(before.fromDate), thruDate: fromDate}))
     call("create#" + W, Object.assign({}, key, data, {fromDate, thruDate: after ? iso(after.fromDate) : null, changeReason: why}))

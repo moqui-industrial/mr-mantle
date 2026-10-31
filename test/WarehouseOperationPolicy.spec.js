@@ -29,7 +29,7 @@ function invoke(n, p) {
     }
 }
 const groups = {
-    WOP_STOCK_MANAGER: ["STOCK_POLICY_PLAN", "STOCK_POLICY_MANAGE"],
+    WOP_STOCK_MANAGER: ["STOCK_POLICY_PLAN", "STOCK_POLICY_MANAGE", "FACILITY_EDIT"],
     WOP_STOCK_PLANNER: ["STOCK_POLICY_PLAN"],
     WOP_STOCK_READER: []
 }
@@ -76,6 +76,7 @@ spec({
             for (const [facilityId, ownerPartyId] of [
                 ["WOP_FAC", "WOP_ORG"],
                 ["WOP_FAC_PLAIN", "WOP_ORG"],
+                ["WOP_FAC_CLOSE", "WOP_ORG"],
                 ["WOP_OTHER_FAC", "WOP_OTHER"]
             ])
                 call("create#mantle.facility.Facility", {facilityId, ownerPartyId, facilityTypeEnumId: "FcTpWarehouse"})
@@ -86,6 +87,14 @@ spec({
                 ["P1", "FltPick"]
             ])
                 call("create#mantle.facility.FacilityLocation", {facilityId: "WOP_FAC", locationSeqId, locationTypeEnumId})
+            for (const [locationSeqId, locationTypeEnumId] of [
+                ["C1", "FltReceiving"],
+                ["C2", "FltReceiving"],
+                ["C3", "FltReceiving"],
+                ["CQ1", "FltQuarantine"],
+                ["CQ2", "FltQuarantine"]
+            ])
+                call("create#mantle.facility.FacilityLocation", {facilityId: "WOP_FAC_CLOSE", locationSeqId, locationTypeEnumId})
             call("create#mantle.product.Product", {
                 productId: "WOP_PRODUCT",
                 productName: "Operation policy fixture",
@@ -716,5 +725,76 @@ feature("a pool member keeps a scheduled end when re-saved without one, and a st
         resavedRole == "Vendor"
         openedEnd == null
         mixed.error.includes("another organization")
+    }
+})
+
+feature("closed locations: no default, refused when newly named, a close blocked by the policy naming it", {
+    when() {
+        const F = "mantle.facility.FacilityServices."
+        const latest = () =>
+            call(W + "resolve#WarehousePolicy", {facilityId: "WOP_FAC_CLOSE", policyType: "operation"}).configuredPolicy.fromDate
+        return as("wop_manager", () => {
+            const closeQ = invoke(F + "close#FacilityLocation", {
+                facilityId: "WOP_FAC_CLOSE",
+                locationSeqId: "CQ1",
+                changeReason: "Unused"
+            })
+            const fallback = call(W + "resolve#WarehousePolicy", {facilityId: "WOP_FAC_CLOSE"}).operationPolicy
+            const named = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_CLOSE",
+                receivingLocationSeqId: "C1",
+                changeReason: "Receive at C1"
+            })
+            const closeNamed = invoke(F + "close#FacilityLocation", {
+                facilityId: "WOP_FAC_CLOSE",
+                locationSeqId: "C1",
+                changeReason: "Refused"
+            })
+            const closeOther = invoke(F + "close#FacilityLocation", {
+                facilityId: "WOP_FAC_CLOSE",
+                locationSeqId: "C2",
+                changeReason: "Unused"
+            })
+            const toClosed = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_CLOSE",
+                expectedFromDate: latest(),
+                receivingLocationSeqId: "C2",
+                changeReason: "Refused"
+            })
+            // a location closed while a row names it (as before the close checked policies): an unrelated change goes on
+            const toC3 = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_CLOSE",
+                expectedFromDate: latest(),
+                receivingLocationSeqId: "C3",
+                changeReason: "Receive at C3"
+            })
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            const c3 = find("mantle.facility.FacilityLocation", {facilityId: "WOP_FAC_CLOSE", locationSeqId: "C3"}).one()
+            c3.set("thruDate", new Date(Date.now() - 60000).toISOString())
+            c3.update()
+            login("wop_manager")
+            ec.artifactExecution.disableAuthz()
+            const unrelated = invoke(W + "store#OperationPolicy", {
+                facilityId: "WOP_FAC_CLOSE",
+                expectedFromDate: latest(),
+                autoPrint: "Y",
+                changeReason: "Auto-print"
+            })
+            const warned = call(W + "resolve#WarehousePolicy", {facilityId: "WOP_FAC_CLOSE"}).warnings
+            return {closeQ, fallback, named, closeNamed, closeOther, toClosed, toC3, unrelated, warned}
+        })
+    },
+    then({closeQ, fallback, named, closeNamed, closeOther, toClosed, toC3, unrelated, warned}) {
+        closeQ.error == ""
+        fallback.quarantineLocationSeqId == "CQ2"
+        named.error == ""
+        closeNamed.error.includes("LOCATION_IN_USE")
+        closeNamed.error.includes("warehouse operation policies")
+        closeOther.error == ""
+        toClosed.error.includes("LOCATION_CLOSED")
+        toC3.error == ""
+        unrelated.error == ""
+        warned.some(row => row.code === "LOCATION_CLOSED" && row.locationSeqId === "C3")
     }
 })
