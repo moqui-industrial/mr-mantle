@@ -219,6 +219,28 @@ feature("with the gate on issue refuses an expired asset with its date, and a fr
     }
 })
 
+feature("with the gate on a return to a supplier still ships expired stock", {
+    when() {
+        const expired = receive("WHX_GATED", 2, "WHX_LOT_OLD", "2025-04-01 00:00:00")
+        const returnShipment = call("mantle.shipment.ShipmentServices.create#Shipment", {
+            shipmentTypeEnumId: "ShpTpPurchaseReturn",
+            fromPartyId: org,
+            toPartyId: customer,
+            originFacilityId: facility
+        }).shipmentId
+        return {
+            issued: invoke("mantle.product.AssetServices.issue#Asset", {
+                shipmentId: returnShipment,
+                assetId: expired,
+                quantity: 1
+            })
+        }
+    },
+    then({issued}) {
+        issued.error == ""
+    }
+})
+
 feature("expired stock still moves, with its date as a warning, and near-expiry stock is warned with its date", {
     when() {
         const expired = receive("WHX_GATED", 2, "WHX_LOT_OLD", "2025-03-01 00:00:00")

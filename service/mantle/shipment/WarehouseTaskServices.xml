@@ -53,18 +53,19 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <!-- ===== moves (impl-warehouse P5) ===== -->
     <service verb="move" noun="Stock" allow-remote="false">
-        <description>Move an asset, or part of it, to a location or a container of its own facility (Move, HandheldMove,
-            Relocate's rows), through mantle.product.AssetServices.move#Asset: a part becomes its own asset there, the whole
+        <description>Move an asset, or part of it, to a location or a container of its own facility, through
+            mantle.product.AssetServices.move#Asset: a part becomes its own asset there, the whole
             asset moves, and the reservations it carries move with it as Mantle moves them. A retry with the same
             operation key and request answers the first move (alreadyApplied); a different request under the key is
             OPERATION_KEY_CONFLICT. Refuses without STOCK_MOVE (PERMISSION_DENIED); an asset outside the user's facilities
             (RECORD_UNAVAILABLE), equipment (NOT_STOCK), nothing on hand (NO_STOCK), a quantity above on hand
             (QUANTITY_EXCEEDS_ON_HAND); another facility (OTHER_FACILITY: a transfer); a closed or missing location
-            (LOCATION_CLOSED, LOCATION_UNAVAILABLE); the place it is already (SAME_LOCATION); a quarantined asset to a
-            location whose type would release it (HELD_STOCK, F8). Reservations carried onto stock that is not available
+            (LOCATION_CLOSED, LOCATION_UNAVAILABLE); the place it is already (SAME_LOCATION); a container holding another
+            owner's stock (CONTAINER_OWNER); a quarantined asset to a location whose type would release it, or any status
+            change with no status flow transition (HELD_STOCK, F8). Reservations carried onto stock that is not available
             are checked again, so the order is re-reserved on available stock (F38). Expired and near-expiry stock moves
-            with a warning naming its date. workEffortId is the production run a staging move is for (Manufacturing's
-            Stage), kept in the answer.</description>
+            with a warning naming its date. workEffortId is the production run a staging move is for, kept in the
+            answer.</description>
         <in-parameters>
             <parameter name="operationKey" required="true"><description>The client's operation id (a scan id or a form's
                 operation id), at most 200 characters; scoped by user and operation type.</description></parameter>
@@ -92,25 +93,30 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="result" from="begun.previous"/>
                 <return/>
             </if>
-            <!-- 2. the stock, locked, in the user's facilities -->
+            <!-- 2. the records, locked in the one order (a target container, the asset, then the location), in the user's
+                facilities; then the operation once more, for a concurrent submit that waited on the locks -->
             <set field="userScope" from="posting.scope()"/>
+            <if condition="toContainerId"><script>posting.container(userScope, toContainerId)</script></if>
             <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
-            <!-- 3. the destination: the same facility, open, and the status it gives -->
-            <set field="target" from="posting.destination(userScope, asset.facilityId, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3. the destination: the same facility, one owner in a container, open, and the status it gives -->
+            <set field="target" from="posting.destination(userScope, asset.facilityId, {toLocationSeqId: toLocationSeqId,
+                    toContainerId: toContainerId, toFacilityId: toFacilityId, ownerPartyId: asset.ownerPartyId})"/>
             <if condition="target.locationSeqId == asset.locationSeqId &amp;&amp;
                     (target.containerId || null) == (asset.containerId || null)">
                 <return error="true" message="SAME_LOCATION: Asset ${assetId} is already at ${target.locationSeqId}"/>
             </if>
-            <!-- 4. status and expiry: held stock stays held; expiry is a warning on a move -->
+            <!-- 4. status and expiry: held stock stays held, a status changes only by a flow; expiry is a warning -->
             <set field="statusAfter" from="posting.keepHeld(asset, target)"/>
             <set field="warnings" from="posting.expiryWarnings(assetId)"/>
             <!-- 5. Mantle's move, and the reservations it carried onto stock that is not available -->
             <set field="moveQuantity" from="quantity ?? asset.quantityOnHandTotal"/>
-            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true"
+            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
                     in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
                         containerId:target.containerId, assetPoolId:asset.assetPoolId, quantity:moveQuantity}"/>
-            <set field="toAssetId" from="posting.movedTo(asset, quantity)"/>
+            <set field="toAssetId" from="moved.newAssetId || assetId"/>
             <set field="reservationsChecked" from="posting.recheckReservations(toAssetId)"/>
             <!-- 6. the answer, stored with the operation -->
             <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.Asset', toAssetId,
@@ -123,11 +129,12 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="relocate" noun="Assets" allow-remote="false">
-        <description>Move each of the selected whole assets to one location or container (Relocate on Assets and
-            Availability): each asset is its own move#Stock, in its own transaction, under the operation
-            "operationKey/assetId", so an asset that cannot move is named with its reason and the others move; a retry of
-            the batch answers the assets already moved. Refuses the whole batch only without STOCK_MOVE
-            (PERMISSION_DENIED) or with no asset.</description>
+        <description>Move each of the given whole assets to one location or container: each asset is its own move#Stock, in
+            its own transaction, under the operation "operationKey/assetId", so an asset that cannot move is named with its
+            reason and the others move. The batch is an operation too (StockRelocate, its request the assets and the
+            destination): a retry answers the first batch's results, and a different request under the key is
+            OPERATION_KEY_CONFLICT. Refuses the whole batch only without STOCK_MOVE (PERMISSION_DENIED) or with no
+            asset.</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="assetIds" type="List" required="true"/>
@@ -144,8 +151,18 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
-            <script>posting.requirePermission('STOCK_MOVE')</script>
-            <set field="rows" from="[...new Set(Array.from(assetIds || []).map(id =&gt; String(id).trim()).filter(Boolean))]"/>
+            <set field="rows" from="[...new Set(Array.from(assetIds || []).map(id =&gt; String(id).trim()).filter(Boolean))]
+                    .sort()"/>
+            <set field="batchRequest" from="{assetIds: rows, toLocationSeqId: toLocationSeqId, toContainerId: toContainerId,
+                    toFacilityId: toFacilityId, reason: reason, operationKey: operationKey}"/>
+            <set field="begun" from="posting.begin(batchRequest, 'StockRelocate', 'STOCK_MOVE', ['assetIds',
+                    'toLocationSeqId', 'toContainerId', 'toFacilityId', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="results" from="begun.previous.results"/>
+                <set field="movedCount" from="begun.previous.movedCount"/>
+                <set field="failedCount" from="begun.previous.failedCount"/>
+                <return/>
+            </if>
             <if condition="!rows.length">
                 <return error="true" message="ASSETS_REQUIRED: Choose the assets to move"/>
             </if>
@@ -156,13 +173,15 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="results" from="answer.results"/>
             <set field="movedCount" from="answer.okCount"/>
             <set field="failedCount" from="answer.failedCount"/>
+            <script>posting.complete(begun.op, null, null, null, {resultCode: 'RELOCATED', results: results,
+                movedCount: movedCount, failedCount: failedCount})</script>
         </actions>
     </service>
 
     <!-- ===== containers (F9: attaching or detaching never moves stock; a container moves with its contents) ===== -->
     <service verb="attach" noun="AssetToContainer" allow-remote="false">
-        <description>Put an asset, or part of it, into a container where both are (ContainerDetail's AddOrRemoveAsset):
-            through move#Asset at the container's own location, so nothing moves. Refuses an asset away from the container
+        <description>Put an asset, or part of it, into a container where both are: through move#Asset at the container's own
+            location, so nothing moves. Refuses an asset away from the container
             (ASSET_AWAY_FROM_CONTAINER: move it there, F9), one in another container (IN_OTHER_CONTAINER) or already in
             this one (ALREADY_IN_CONTAINER), a container holding another owner's stock (CONTAINER_OWNER), and a status the
             location would change (STATUS_CHANGE); and as move#Stock: STOCK_MOVE, the user's facilities, the stock, the
@@ -186,9 +205,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <return/>
             </if>
             <set field="userScope" from="posting.scope()"/>
+            <set field="box" from="posting.container(userScope, containerId)"/>
             <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
-            <set field="box" from="posting.container(userScope, containerId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
             <if condition="asset.containerId == containerId">
                 <return error="true" message="ALREADY_IN_CONTAINER: Asset ${assetId} is already in container ${containerId}"/>
             </if>
@@ -201,30 +222,24 @@ along with this software (see the LICENSE.md file). If not, see
                         ', container ' + containerId + ' at ' + (box.locationSeqId || 'no location') + '; move it there first'"/>
                 <return error="true" message="ASSET_AWAY_FROM_CONTAINER: ${awayText}"/>
             </if>
-            <entity-find-count entity-name="mantle.product.asset.Asset" count-field="otherOwnerCount" disable-authz="true">
-                <econdition field-name="containerId"/>
-                <econdition field-name="ownerPartyId" operator="not-equals" from="asset.ownerPartyId"/>
-            </entity-find-count>
-            <if condition="otherOwnerCount &gt; 0">
-                <return error="true" message="CONTAINER_OWNER: Container ${containerId} holds another owner's stock"/>
-            </if>
-            <set field="target" from="posting.destination(userScope, asset.facilityId, {toContainerId: containerId})"/>
+            <set field="target" from="posting.destination(userScope, asset.facilityId, {toContainerId: containerId,
+                    ownerPartyId: asset.ownerPartyId})"/>
             <if condition="posting.keepHeld(asset, target) != asset.statusId">
                 <return error="true" message="STATUS_CHANGE: Asset ${assetId} would change status; move it instead"/>
             </if>
             <set field="moveQuantity" from="quantity ?? asset.quantityOnHandTotal"/>
-            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true"
+            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
                     in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:box.locationSeqId,
                         containerId:containerId, assetPoolId:asset.assetPoolId, quantity:moveQuantity}"/>
-            <set field="toAssetId" from="posting.movedTo(asset, quantity)"/>
+            <set field="toAssetId" from="moved.newAssetId || assetId"/>
             <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.Asset', toAssetId,
                     {resultCode: 'ATTACHED', assetId: assetId, toAssetId: toAssetId, containerId: containerId,
                         quantity: String(moveQuantity), facilityId: asset.facilityId, locationSeqId: box.locationSeqId})"/>
         </actions>
     </service>
     <service verb="detach" noun="AssetFromContainer" allow-remote="false">
-        <description>Take an asset, or part of it, out of its container where it is (ContainerDetail's AddOrRemoveAsset):
-            through move#Asset at the same location with no container, so nothing moves. Refuses an asset in no container
+        <description>Take an asset, or part of it, out of its container where it is: through move#Asset at the same location
+            with no container, so nothing moves. Refuses an asset in no container
             (NOT_IN_CONTAINER) and a status the location would change (STATUS_CHANGE); and as move#Stock: STOCK_MOVE, the
             user's facilities, the stock, the quantity, an open location. A retry with the same operation key answers the
             first.</description>
@@ -247,6 +262,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="userScope" from="posting.scope()"/>
             <set field="asset" from="posting.stock(userScope, assetId, quantity)"/>
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
             <if condition="!asset.containerId">
                 <return error="true" message="NOT_IN_CONTAINER: Asset ${assetId} is in no container"/>
             </if>
@@ -256,18 +273,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <return error="true" message="STATUS_CHANGE: Asset ${assetId} would change status; move it instead"/>
             </if>
             <set field="moveQuantity" from="quantity ?? asset.quantityOnHandTotal"/>
-            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true"
+            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
                     in-map="{assetId:assetId, facilityId:asset.facilityId, locationSeqId:asset.locationSeqId,
                         containerId:null, assetPoolId:asset.assetPoolId, quantity:moveQuantity}"/>
-            <set field="toAssetId" from="posting.movedTo(asset, quantity)"/>
+            <set field="toAssetId" from="moved.newAssetId || assetId"/>
             <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.asset.Asset', toAssetId,
                     {resultCode: 'DETACHED', assetId: assetId, toAssetId: toAssetId, containerId: asset.containerId,
                         quantity: String(moveQuantity), facilityId: asset.facilityId, locationSeqId: asset.locationSeqId})"/>
         </actions>
     </service>
     <service verb="move" noun="Container" allow-remote="false">
-        <description>Move a container with all its contents to another location of its facility (ContainerDetail's
-            MoveContainer), all or nothing: every content asset is checked first (a quarantined one the new location would
+        <description>Move a container with all its contents to another location of its facility, all or nothing: every content
+            asset is checked first (a quarantined one the new location would
             release refuses the whole move, HELD_STOCK, naming it), then the container's location changes and each asset
             moves with it through move#Asset, which gives it the location type's status; reservations carried onto stock
             that is not available are checked again (F38). Refuses as move#Stock: STOCK_MOVE, the user's facilities,
@@ -294,18 +311,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <return/>
             </if>
             <set field="userScope" from="posting.scope()"/>
+            <!-- the container, then its contents by id, then the location: the one lock order -->
             <set field="box" from="posting.container(userScope, containerId)"/>
             <set field="home" from="posting.facility(userScope, box.facilityId)"/>
+            <entity-find entity-name="mantle.product.asset.Asset" list="contents" for-update="true" disable-authz="true">
+                <econdition field-name="containerId"/>
+                <order-by field-name="assetId"/>
+            </entity-find>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
             <set field="target" from="posting.destination(userScope, box.facilityId,
                     {toLocationSeqId: toLocationSeqId, toFacilityId: toFacilityId})"/>
             <if condition="target.locationSeqId == box.locationSeqId">
                 <return error="true" message="SAME_LOCATION: Container ${containerId} is already at ${target.locationSeqId}"/>
             </if>
             <!-- every content line checked before anything moves -->
-            <entity-find entity-name="mantle.product.asset.Asset" list="contents" for-update="true" disable-authz="true">
-                <econdition field-name="containerId"/>
-                <order-by field-name="assetId"/>
-            </entity-find>
             <set field="lines" from="Array.from(contents).map(asset =&gt; ({assetId: asset.assetId, productId: asset.productId,
                     quantity: String(asset.quantityOnHandTotal ?? 0), assetPoolId: asset.assetPoolId,
                     fromStatusId: asset.statusId, statusId: posting.keepHeld(asset, target)}))"/>
@@ -331,11 +351,13 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <!-- ===== reservations (ReservationPolicies' ReservationCheck repair) ===== -->
     <service verb="repair" noun="FacilityReservations" allow-remote="false">
-        <description>Repair the reservations at a facility that the preview (WarehousePolicyServices.preview#FacilityReservations)
+        <description>Repair the reservations at a facility that WarehousePolicyServices.preview#FacilityReservations
             named, as previewed: refuses when they changed since (PREVIEW_CHANGED: preview again). A reservation on stock
             no longer available, for another facility's order or on a pool the order does not qualify for is checked again
-            (check#AssetReservationValid: removed and re-reserved); a not-available reservation of a product with
-            available stock there is moved onto it (reserve#IncreasedAsset on that stock). Each in its own transaction:
+            (check#AssetReservationValid: removed and re-reserved). For a not-available reservation of a product with
+            available stock there, the product's not-available reservations at the facility, the previewed ones among
+            them, are moved onto that stock (reserve#IncreasedAsset, which takes them in its own order), and each
+            previewed one is reported as repaired or as still not available. Each in its own transaction:
             one that fails is named and the others go on. Requires STOCK_POLICY_MANAGE (PERMISSION_DENIED) and a facility
             of the user's organizations (RECORD_UNAVAILABLE). A retry with the same operation key answers the
             first.</description>

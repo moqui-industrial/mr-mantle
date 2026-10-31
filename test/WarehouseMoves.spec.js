@@ -125,7 +125,9 @@ spec({
             ["BULK1", "FltBulk"],
             ["BULK2", "FltBulk"],
             ["QUAR1", "FltQuarantine"],
-            ["QUAR2", "FltQuarantine"]
+            ["QUAR2", "FltQuarantine"],
+            ["MORGUE1", "FltMorgue"],
+            ["RECV1", "FltReceiving"]
         ])
             call("create#mantle.facility.FacilityLocation", {facilityId: facility, locationSeqId, locationTypeEnumId})
         call("create#mantle.facility.FacilityLocation", {
@@ -154,6 +156,16 @@ spec({
             locationTypeEnumId: "FltQuarantine",
             autoStatusId: "AstQuarantine"
         })
+        call("create#mantle.facility.FacilityLocationType", {
+            facilityId: facility,
+            locationTypeEnumId: "FltMorgue",
+            autoStatusId: "AstMorgue"
+        })
+        call("create#mantle.facility.FacilityLocationType", {
+            facilityId: facility,
+            locationTypeEnumId: "FltReceiving",
+            autoStatusId: "AstOnHold"
+        })
         for (const productId of ["WHM_PART", "WHM_HELD", "WHM_RESERVED", "WHM_BATCH", "WHM_BOX", "WHM_REPAIR", "WHM_OTHER_P"])
             call("create#mantle.product.Product", {
                 productId,
@@ -162,7 +174,7 @@ spec({
                 assetTypeEnumId: "AstTpInventory",
                 amountUomId: "OTH_ea"
             })
-        for (const containerId of ["WHM_TOTE", "WHM_HELD_TOTE"])
+        for (const containerId of ["WHM_TOTE", "WHM_HELD_TOTE", "WHM_FOREIGN_TOTE"])
             call("create#mantle.product.asset.Container", {containerId, facilityId: facility, locationSeqId: "BULK1"})
         ec.artifactExecution.enableAuthz()
     },
@@ -309,19 +321,23 @@ feature("a relocation of five assets with one invalid names it and moves the oth
         const parameters = {operationKey: key(), assetIds: assetIds.concat([held]), toLocationSeqId: "PICK2"}
         const first = as("whm_mover", () => invoke(T + "relocate#Assets", parameters))
         const retry = as("whm_mover", () => invoke(T + "relocate#Assets", parameters))
+        const changed = as("whm_mover", () =>
+            invoke(T + "relocate#Assets", Object.assign({}, parameters, {toLocationSeqId: "BULK2"}))
+        )
         const reader = as("whm_reader", () => invoke(T + "relocate#Assets", Object.assign({}, parameters, {operationKey: key()})))
-        return {assetIds, held, first, retry, reader, moved: assetIds.map(asset)}
+        return {assetIds, held, first, retry, changed, reader, moved: assetIds.map(asset)}
     },
-    then({held, first, retry, reader, moved}) {
+    then({held, first, retry, changed, reader, moved}) {
         first.error == ""
         first.movedCount == 4
         first.failedCount == 1
         first.results.find(row => row.key == held).reasonCode == "HELD_STOCK"
         first.results.filter(row => row.ok).every(row => row.result.toLocationSeqId == "PICK2")
         moved.every(row => row.locationSeqId == "PICK2")
-        // the retry answers the moved ones from their operations and refuses the held one again
+        // the retry answers the first batch's results; a changed request under the key is refused
         retry.movedCount == 4
-        retry.results.filter(row => row.ok).every(row => row.result.alreadyApplied == true)
+        retry.results.find(row => row.key == held).reasonCode == "HELD_STOCK"
+        changed.error.includes("OPERATION_KEY_CONFLICT")
         reader.error.includes("PERMISSION_DENIED")
     }
 })
@@ -454,5 +470,50 @@ feature("the reservation repair posts what its preview named, and refuses a stal
             reservations.filter(r => r.assetId == spare),
             "quantity"
         ) == 2
+    }
+})
+
+feature("a partial move cannot change a status that has no flow to the new one; a receiving hold is put away", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        const morgue = receive("WHM_PART", 10, "MORGUE1")
+        const received = receive("WHM_PART", 10, "RECV1")
+        ec.artifactExecution.enableAuthz()
+        return {
+            morgueStatus: asset(morgue).statusId,
+            receivedStatus: asset(received).statusId,
+            part: move("whm_mover", {operationKey: key(), assetId: morgue, quantity: 5, toLocationSeqId: "PICK1"}),
+            whole: move("whm_mover", {operationKey: key(), assetId: morgue, toLocationSeqId: "PICK1"}),
+            putaway: move("whm_mover", {operationKey: key(), assetId: received, quantity: 4, toLocationSeqId: "PICK1"}),
+            left: asset(morgue)
+        }
+    },
+    then({morgueStatus, receivedStatus, part, whole, putaway, left}) {
+        morgueStatus == "AstMorgue"
+        receivedStatus == "AstOnHold"
+        part.error.includes("HELD_STOCK")
+        whole.error.includes("HELD_STOCK")
+        n(left.quantityOnHandTotal) == 10
+        putaway.error == ""
+        putaway.result.statusId == "AstAvailable"
+    }
+})
+
+feature("a move into a container holding another owner's stock is refused, as an attach is", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        const foreign = receive("WHM_BOX", 2, "BULK1", facility, "WHM_OTHER")
+        call("update#mantle.product.asset.Asset", {assetId: foreign, containerId: "WHM_FOREIGN_TOTE"})
+        const own = receive("WHM_BOX", 2, "BULK2")
+        ec.artifactExecution.enableAuthz()
+        return {
+            moved: move("whm_mover", {operationKey: key(), assetId: own, toContainerId: "WHM_FOREIGN_TOTE"}),
+            after: asset(own)
+        }
+    },
+    then({moved, after}) {
+        moved.error.includes("CONTAINER_OWNER")
+        after.containerId == null
+        after.locationSeqId == "BULK2"
     }
 })

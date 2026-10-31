@@ -4,12 +4,15 @@
 //      retry with the same request answers the first result before any other check, a changed request under the key is
 //      refused. The key is the client's (a scan id, a form's operation id), so the stored key is scoped per user and
 //      operation type (F143): another user's or another operation's same key is a different operation.
-//   2. stock: the record, locked, in a facility of the user's organizations (FacilityScope.js), still stock, with the
-//      quantity on hand.
-//   3. destination: the target in the same facility (another facility is a transfer), open (check#FacilityLocationOpen,
-//      which locks it), and the status its location type gives (FacilityLocationType.autoStatusId).
-//   4. status, expiry and policy: held stock stays held (F8); the expiry of the stock (a warning on a move; the gate of
-//      WarehousePolicy.expiryBlock refuses reservation and issue in Mantle itself, §4).
+//   2. stock: the records, locked, in a facility of the user's organizations (FacilityScope.js), still stock, with the
+//      quantity on hand. One lock order everywhere: containers (the one moved or the target), then assets by id, then
+//      the destination location. Then settled: the operation key once more, so a concurrent submit of the same operation
+//      that waited on the locks answers the first.
+//   3. destination: the target in the same facility (another facility is a transfer; a container holds one owner's
+//      stock), open (check#FacilityLocationOpen, which locks it), and the status its location type gives.
+//   4. status, expiry and policy: held stock stays held, and any other status change needs a status flow transition
+//      (F8); the expiry of the stock (a warning on a move; the gate of WarehousePolicy.expiryBlock refuses reservation
+//      and issue in Mantle itself, §4).
 //   5. the Mantle primitive and its dependent writes, in the entry point's one transaction.
 //   6. complete: the answer, stored with the operation and returned.
 // A batch runs each row as its own operation in its own transaction and names each failure (batch). The period check is
@@ -56,10 +59,16 @@ function operation(p, operationType, request) {
         denied("OPERATION_KEY_REQUIRED", "An operation key of at most " + keyLimit + " characters is required")
     const operationKey = storedKey(operationType, clientKey)
     const requestHash = hash(request)
-    const old = one(lib.operationEntity, {operationKey})
-    if (old && old.requestHash !== requestHash)
-        denied("OPERATION_KEY_CONFLICT", "Operation " + clientKey + " was already used for another request")
-    return {operationKey, clientKey, requestHash, old, operationType, organizationPartyId: null}
+    const op = {operationKey, clientKey, requestHash, old: null, operationType, organizationPartyId: null}
+    op.old = stored(op)
+    return op
+}
+// The stored row of the operation, refusing one made for another user, operation type or request.
+function stored(op) {
+    const old = one(lib.operationEntity, {operationKey: op.operationKey})
+    if (old && (old.requestHash !== op.requestHash || old.operationType !== op.operationType || old.userId !== ec.user.userId))
+        denied("OPERATION_KEY_CONFLICT", "Operation " + op.clientKey + " was already used for another request")
+    return old
 }
 function requirePermission(permission) {
     if (!access.has(permission)) denied("PERMISSION_DENIED", permission + " is required")
@@ -69,6 +78,12 @@ function begin(p, operationType, permission, requestFields) {
     requirePermission(permission)
     const op = operation(p, operationType, requestOf(p, requestFields))
     return {op, previous: lib.previous(op)}
+}
+// After the records are locked, the operation once more: a concurrent submit of the same operation, which waited on the
+// lock, finds the first one's row now and answers it (alreadyApplied) rather than failing on what that one changed.
+function settled(op) {
+    op.old = stored(op)
+    return lib.previous(op)
 }
 
 // ===== 2. stock =====
@@ -126,6 +141,11 @@ function destination(userScope, facilityId, p) {
         if (!target.locationSeqId) denied("LOCATION_REQUIRED", "Container " + target.containerId + " has no location")
         if (locationSeqId && locationSeqId !== target.locationSeqId)
             denied("LOCATION_MISMATCH", "Container " + target.containerId + " is at " + target.locationSeqId)
+        // a container holds one owner's stock
+        const otherOwners = p.ownerPartyId
+            ? find(ASSET, {containerId: target.containerId}).condition("ownerPartyId", "not-equals", p.ownerPartyId).count()
+            : 0
+        if (otherOwners) denied("CONTAINER_OWNER", "Container " + target.containerId + " holds another owner's stock")
         locationSeqId = target.locationSeqId
     }
     if (!locationSeqId) denied("LOCATION_REQUIRED", "Choose a location to move to")
@@ -144,18 +164,22 @@ function destination(userScope, facilityId, p) {
 
 // ===== 4. status, expiry and policy =====
 // The status stock has after the move, refusing one that would release held stock (F8): only a quality disposition
-// changes a quarantined asset's status, so it moves only where its status stays.
+// changes a quarantined asset's status, so it moves only where its status stays. Any other change of status needs a
+// status flow transition from the current status to the new one (move#Asset checks one on a whole move only, so a part
+// moved into a pick bin would otherwise leave the morgue or a defect as available stock): HELD_STOCK too.
 function keepHeld(asset, target) {
     const after = target.autoStatusId || asset.statusId
-    if (heldStatuses.includes(asset.statusId) && after !== asset.statusId)
+    if (after === asset.statusId) return after
+    const released = heldStatuses.includes(asset.statusId)
+    const flows =
+        released || !asset.statusId
+            ? 0
+            : find("moqui.basic.StatusFlowTransition", {statusId: asset.statusId, toStatusId: after}).count()
+    if (released || (asset.statusId && !flows))
         denied(
             "HELD_STOCK",
-            "Asset " +
-                asset.assetId +
-                " is quarantined; location " +
-                target.locationSeqId +
-                " would release it. " +
-                "Only an inspection's disposition releases held stock"
+            `Asset ${asset.assetId} is ${asset.statusId}; location ${target.locationSeqId} would make it ${after}` +
+                (released ? ". Only an inspection's disposition releases held stock" : "")
         )
     return after
 }
@@ -169,18 +193,6 @@ function expiryWarnings(assetId) {
 }
 
 // ===== 5. the posting and its dependent writes =====
-// The asset a move#Asset of quantity left the stock in: the asset itself when it moved whole, else the asset its newest
-// move detail names (move#Asset answers no ids).
-function movedTo(asset, quantity) {
-    if (quantity == null || quantity === "" || number(quantity) === number(asset.quantityOnHandTotal)) return asset.assetId
-    const detail = find("mantle.product.asset.AssetDetail", {assetId: asset.assetId})
-        .condition("otherAssetId", "is-not-null", null)
-        .condition("quantityOnHandDiff", "less", 0)
-        .orderBy("-effectiveDate,-assetDetailId")
-        .limit(1)
-        .list()
-    return detail.size() ? detail.get(0).otherAssetId : asset.assetId
-}
 // A reservation carried onto stock that is not available (a partial move into a held location carries the quantity
 // beyond the source's ATP) is checked again, so the order is re-reserved on available stock (F38). A whole asset that
 // changes status is checked by Mantle's AssetStatusNotAvailableReservations.
@@ -235,6 +247,7 @@ function batch(p, rows, rowKey, serviceName, parametersOf) {
     heldStatuses,
     requirePermission,
     begin,
+    settled,
     scope,
     facility,
     stock,
@@ -242,7 +255,6 @@ function batch(p, rows, rowKey, serviceName, parametersOf) {
     destination,
     keepHeld,
     expiryWarnings,
-    movedTo,
     recheckReservations,
     complete,
     reasonOf,

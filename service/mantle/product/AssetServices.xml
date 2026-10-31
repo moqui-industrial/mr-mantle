@@ -959,9 +959,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="assetPoolIdSet" from="poolsOut.assetPoolIdSet"/>
 
             <!-- the expiry gate (WarehousePolicy tracking expiryBlock, off by default; impl-warehouse F12): expired stock, by
-                the asset's own or its lot's expiry, is not reserved, and a shortfall names what was skipped -->
+                the asset's own or its lot's expiry, is not reserved, and a shortfall names what was skipped; the policy is
+                the inventory facility owner's, as for issue and moves -->
             <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="expiryGate" disable-authz="true"
-                    in-map="{organizationPartyId:organizationPartyId || inventoryFacility?.ownerPartyId,
+                    in-map="{organizationPartyId:inventoryFacility?.ownerPartyId || organizationPartyId,
                         facilityId:inventoryFacilityId, productId:productId}"/>
             <set field="expiryToday" from="expiryGate.expiryBlock ? ec.l10n.format(nowTimestamp, 'yyyy-MM-dd') : null"/>
             <set field="expiredSkipped" from="[]"/>
@@ -2080,7 +2081,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="asset" from="assetReservation.asset"/>
             <!-- the expiry gate (WarehousePolicy, off by default): an expired asset is not issued -->
             <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
-                    in-map="{assetId:asset.assetId}"/>
+                    in-map="{assetId:asset.assetId, asset:asset}"/>
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true">
                 <field-map field-name="facilityId" from="asset?.facilityId"/></entity-find-one>
             <if condition="facility?.assetAllowIssueOverQoh != 'Y'">
@@ -2206,13 +2207,19 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
             <if condition="facility == null"><return error="true" message="Could not find facility to issue asset from for shipment ${shipmentId}"/></if>
-            <!-- the expiry gate (WarehousePolicy, off by default): an expired asset named is refused, others are skipped -->
-            <if condition="passedAsset != null">
-                <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
-                        in-map="{assetId:passedAsset.assetId}"/>
-            </if>
+            <!-- the expiry gate (WarehousePolicy, off by default): an expired asset named is refused, others are skipped;
+                a return to a supplier ships expired stock too -->
             <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="expiryGate" disable-authz="true"
                     in-map="{organizationPartyId:facility.ownerPartyId, facilityId:facilityId, productId:productId}"/>
+            <if condition="expiryGate.expiryBlock">
+                <entity-find-one entity-name="mantle.shipment.Shipment" value-field="issueShipment"/>
+                <if condition="issueShipment?.shipmentTypeEnumId == 'ShpTpPurchaseReturn'">
+                    <set field="expiryGate" from="{expiryBlock: false}"/></if>
+            </if>
+            <if condition="passedAsset != null &amp;&amp; expiryGate.expiryBlock">
+                <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
+                        in-map="{assetId:passedAsset.assetId, asset:passedAsset}"/>
+            </if>
 
             <set field="baseMap" from="{productId:productId, orderId:orderId, orderItemSeqId:orderItemSeqId,
                     invoiceId:invoiceId, invoiceItemSeqId:invoiceItemSeqId, shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId}"/>
@@ -2367,7 +2374,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="asset == null"><return error="true" message="Asset not found with ID ${assetId}"/></if>
             <!-- the expiry gate (WarehousePolicy, off by default): an expired asset is not issued -->
             <service-call name="mantle.facility.WarehousePolicyServices.check#AssetExpiryGate" disable-authz="true"
-                    in-map="{assetId:asset.assetId}"/>
+                    in-map="{assetId:asset.assetId, asset:asset}"/>
 
             <if condition="quantity != null &amp;&amp; !toDecimal(quantity).isZero() &amp;&amp; quantityUomId"><then>
                 <service-call name="mantle.shipment.ShipmentServices.convert#ProductBoxQuantity" out-map="cvtQty"
@@ -3376,6 +3383,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <description>If true create a new Asset record for the move rather than updating the existing Asset record even if moving full quantity on hand to the same facility.</description></parameter>
             <parameter name="moveAssetReservationId"/>
         </in-parameters>
+        <out-parameters>
+            <parameter name="newAssetId"><description>The asset the moved quantity is in: a new or matching asset for a part,
+                another facility or pool, else the asset itself.</description></parameter>
+        </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
             <if condition="asset == null"><message error="true">No asset found for ID ${assetId}</message></if>

@@ -292,15 +292,29 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="check" noun="AssetExpiryGate" allow-remote="false">
         <description>For the issue services (sales and production): refuses an expired asset, naming its date
-            (ASSET_EXPIRED), when its tracking policy blocks expired stock (get#AssetExpiry); with no such policy, or an
-            asset not expired, it passes. Internal: it checks no permission.</description>
+            (ASSET_EXPIRED), when its tracking policy blocks expired stock. With the asset the caller holds it reads only the
+            cached facility and policy (get#ExpiryGate) and returns at once when the policy does not block, so an issuance
+            with no such policy reads nothing more; only then get#AssetExpiry reads the asset's and lot's dates. Internal:
+            it checks no permission.</description>
         <in-parameters>
             <parameter name="assetId" required="true"/>
+            <parameter name="asset" type="Map"><description>The asset the caller already read, if any.</description></parameter>
         </in-parameters>
         <actions>
+            <if condition="asset == null">
+                <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" disable-authz="true"/>
+            </if>
+            <if condition="asset == null"><return/></if>
+            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true" disable-authz="true">
+                <field-map field-name="facilityId" from="asset.facilityId"/>
+            </entity-find-one>
+            <service-call name="mantle.facility.WarehousePolicyServices.get#ExpiryGate" out-map="gate" disable-authz="true"
+                    in-map="{organizationPartyId:facility?.ownerPartyId || asset.ownerPartyId, facilityId:asset.facilityId,
+                        productId:asset.productId}"/>
+            <if condition="!gate.expiryBlock"><return/></if>
             <service-call name="mantle.facility.WarehousePolicyServices.get#AssetExpiry" in-map="{assetId:assetId}"
                     out-map="expiry" disable-authz="true"/>
-            <if condition="expiry.expiryBlock &amp;&amp; expiry.expired">
+            <if condition="expiry.expired">
                 <return error="true" message="ASSET_EXPIRED: Asset ${assetId} expired on ${expiry.expiryDate}"/>
             </if>
         </actions>
