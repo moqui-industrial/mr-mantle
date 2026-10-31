@@ -142,11 +142,11 @@ function memberDates(p, old) {
         if (!Number.isFinite(fromDate)) denied("POLICY_INVALID", "Choose a valid start date")
         if (fromDate < now) denied("POLICY_INVALID", "A membership starts now or later")
     }
-    const thruDate = blank(p.thruDate) ? null : ms(p.thruDate)
+    const endNow = p.endNow === true || p.endNow === "true" || p.endNow === "Y"
+    const thruDate = endNow ? now : blank(p.thruDate) ? null : ms(p.thruDate)
     if (thruDate != null && !Number.isFinite(thruDate)) denied("POLICY_INVALID", "Choose a valid end date")
     if (thruDate != null && thruDate < now) denied("POLICY_INVALID", "A membership ends now or later")
-    if (thruDate != null && fromDate != null && thruDate <= fromDate)
-        denied("POLICY_INVALID", "A membership ends after it starts")
+    if (thruDate != null && fromDate != null && thruDate < fromDate) denied("POLICY_INVALID", "A membership ends after it starts")
     return {
         fromDate: fromDate == null ? null : new Date(fromDate).toISOString(),
         thruDate: thruDate == null ? null : new Date(thruDate).toISOString()

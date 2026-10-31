@@ -94,6 +94,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="roleTypeId"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="endNow" type="Boolean"><description>End the membership now (thruDate is then
+                ignored)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="pool" type="Map"/>
@@ -114,6 +116,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productStoreId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="endNow" type="Boolean"><description>End the membership now (thruDate is then
+                ignored)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="pool" type="Map"/>
