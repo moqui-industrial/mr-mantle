@@ -1,23 +1,24 @@
-// The organization scope of stock records for the current user (impl-warehouse §2): the organizations they belong to by
-// party relationship (get#PartyOrganizationInfo), every one for a system administrator. An asset is in scope when its
-// owner or its facility's owner is one of them; a facility when its owner is. Whether they read cost (ACCOUNTING_VIEW).
-// An app narrows this further (Warehouse's facility scope); nothing here widens what an app allows.
+// The organization scope of stock records for the current user (impl-warehouse §2), on Mantle's one facility and stock
+// scope rule (mantle/facility/FacilityScope.js: the user's organizations by party relationship, narrowed to the active one
+// when it is theirs, every organization for a system administrator or FACILITY_ALL_ORGANIZATIONS). An asset is in scope
+// when its owner or its facility's owner is one of them; a facility when its owner is. Whether they read cost
+// (ACCOUNTING_VIEW). An app narrows this further (Warehouse's facility scope); nothing here widens what an app allows.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const {one, denied, call} = lib
+const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
+const {one, denied} = lib
 const access = lib.access
 
 function scope() {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "A signed-in user is required")
-    const systemAdmin = access.systemAdmin()
-    const info = systemAdmin ? {} : call("mantle.party.PartyServices.get#PartyOrganizationInfo")
+    const shared = facilityScope.scope()
     return {
-        systemAdmin,
-        organizationIds: systemAdmin ? null : Array.from(info.userOrgIds || []),
+        systemAdmin: shared.systemAdmin,
+        organizationIds: shared.organizationPartyIds,
         financeRead: access.has("ACCOUNTING_VIEW")
     }
 }
 function ownerAllowed(userScope, partyId) {
-    return !!partyId && (userScope.organizationIds == null || userScope.organizationIds.includes(partyId))
+    return facilityScope.owns({organizationPartyIds: userScope.organizationIds}, partyId)
 }
 function facilityAllowed(userScope, facility) {
     return !!facility && ownerAllowed(userScope, facility.ownerPartyId)
