@@ -713,6 +713,57 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
         </actions>
     </service>
+    <service verb="create" noun="OutgoingShipment" allow-remote="false">
+        <description>Shipments' NewOutgoing and OrderDetail's create shipment (design-warehouse §10): a shipment of an order
+            part through mantle.shipment.ShipmentServices.create#OrderPartShipment (with a package), from the part's facility,
+            which must be one of the user's organizations'. A held order gets no new shipment (ORDER_HELD), an unapproved part
+            none (NOT_APPROVED), and a part with nothing left to ship is NOTHING_TO_SHIP. A retry answers the first. Requires
+            SHIPMENT_LOAD_EDIT; refuses a part outside the scope or with no facility (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" default-value="01"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CREATED, shipmentId, orderId, orderPartSeqId,
+                facilityId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentCreate', 'SHIPMENT_LOAD_EDIT', ['orderId',
+                    'orderPartSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <!-- the order part, then its header, locked (the one lock order) -->
+            <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"
+                    disable-authz="true"/>
+            <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"
+                    disable-authz="true"/>
+            <if condition="orderPart == null || orderHeader == null || !orderPart.facilityId">
+                <return error="true" message="RECORD_UNAVAILABLE: Order ${orderId} part ${orderPartSeqId} is not available"/>
+            </if>
+            <set field="home" from="posting.facility(userScope, orderPart.facilityId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <if condition="orderHeader.statusId == 'OrderHold' || orderPart.statusId == 'OrderHold'">
+                <return error="true" message="ORDER_HELD: Order ${orderId} is on hold and gets no new shipment"/>
+            </if>
+            <if condition="orderPart.statusId != 'OrderApproved'">
+                <return error="true" message="NOT_APPROVED: Order ${orderId} part ${orderPartSeqId} is not approved"/>
+            </if>
+            <service-call name="mantle.shipment.ShipmentServices.create#OrderPartShipment" disable-authz="true"
+                    out-map="createdShipment" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId, createPackage:true}"/>
+            <if condition="!createdShipment.shipmentId">
+                <return error="true" message="NOTHING_TO_SHIP: Order ${orderId} part ${orderPartSeqId} has nothing left to ship"/>
+            </if>
+            <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.shipment.Shipment',
+                    createdShipment.shipmentId, {resultCode: 'CREATED', shipmentId: createdShipment.shipmentId,
+                        orderId: orderId, orderPartSeqId: orderPartSeqId, facilityId: orderPart.facilityId})"/>
+        </actions>
+    </service>
     <service verb="find" noun="PickFaceReplenishment" allow-remote="false">
         <description>PickLocationMoves' BelowMinimum (design-warehouse §9): the pick faces of a facility of the user's
             organizations (ProductFacilityLocation rows of open pick locations with a minimumStock, F19: the first reader of

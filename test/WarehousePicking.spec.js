@@ -334,6 +334,20 @@ feature("finishing the shipment names what is outstanding until it is backordere
     }
 })
 
+feature("a new outgoing shipment needs SHIPMENT_LOAD_EDIT and an order that is not held", {
+    when() {
+        const held = run("wpk_supervisor", T + "create#OutgoingShipment", {operationKey: key(), orderId: state.order3})
+        const picker = run("wpk_picker", T + "create#OutgoingShipment", {operationKey: key(), orderId: state.order3})
+        const outsider = run("wpk_outsider", T + "create#OutgoingShipment", {operationKey: key(), orderId: state.order3})
+        return {held, picker, outsider}
+    },
+    then({held, picker, outsider}) {
+        held.error.includes("ORDER_HELD")
+        picker.error.includes("PERMISSION_DENIED")
+        outsider.error.includes("RECORD_UNAVAILABLE")
+    }
+})
+
 feature("a pick face below its minimum lists its bulk source and is replenished through the move guard", {
     when() {
         as("john.doe", () => {
