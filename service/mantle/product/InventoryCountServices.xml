@@ -1,0 +1,574 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Counts with snapshots, review and guarded posting (design-warehouse §17 WH-COUNT and its services; impl-warehouse P10),
+    over PhysicalInventory (a count, with a count mode) and PhysicalInventoryCount (its lines). STOCK_COUNT creates, starts,
+    records and submits; STOCK_COUNT_REVIEW reviews, recounts and resolves; STOCK_ADJUST posts. The organization is checked
+    by party relationship (FacilityScope.js, through StockPosting.js); refusals are "CODE: message" (reasonCode).
+    Mantle's record#PhysicalInventoryQuantity stays an immediate posting for its callers (§2); these services never call
+    it. The logic is InventoryCounts.js. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="CountScope" type="interface">
+        <description>The scope fields of a count: a location type, an area or a location of its facility, a product, a
+            product category, a lot and an ABC class; empty is any.</description>
+        <in-parameters>
+            <parameter name="scopeLocationTypeEnumId"/>
+            <parameter name="scopeAreaId"/>
+            <parameter name="scopeLocationSeqId"/>
+            <parameter name="scopeProductId"/>
+            <parameter name="scopeProductCategoryId"/>
+            <parameter name="scopeLotId"/>
+            <parameter name="scopeAbcClassEnumId"/>
+        </in-parameters>
+    </service>
+
+    <service verb="create" noun="Count" allow-remote="false">
+        <description>Plan a count of a facility (PIInPlanning): its scope (or given assets, each a line to count), mode
+            (default cycle), blind flag (default the facility's operation policy, blindCount), assignee, planned date and
+            comments. A cycle or spot count needs a scope or assets (SCOPE_REQUIRED); a full count with none counts the whole
+            facility. Refuses without STOCK_COUNT (PERMISSION_DENIED), a facility outside the user's organizations or an asset
+            not of it (RECORD_UNAVAILABLE), equipment (NOT_STOCK) and an unknown scope value (COUNT_INVALID).</description>
+        <implements service="mantle.product.InventoryCountServices.define#CountScope"/>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="assetIds" type="List"/>
+            <parameter name="countModeEnumId"/>
+            <parameter name="blindIndicator"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="plannedDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="countScheduleId"><description>The schedule a due count comes from.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="lineCount" type="Integer"/>
+            <parameter name="blindIndicator"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('create', context)"/>
+            <set field="physicalInventoryId" from="answer.physicalInventoryId"/>
+            <set field="lineCount" from="answer.lineCount"/>
+            <set field="blindIndicator" from="answer.blindIndicator"/>
+        </actions>
+    </service>
+    <service verb="request" noun="Count" allow-remote="false">
+        <description>The ad hoc dues (design Counts): Request a count on selected stock, and the short-pick recount
+            (countSourceEnumId CntSrcShortPick, which Picking calls in its operation). A planned spot count of the given assets,
+            location or product, dated now unless given, with an assignee and the blind flag; find#DueCounts lists it until it
+            starts. A short-pick recount of stock that an open recount of the facility already holds answers that count
+            (existing). Needs STOCK_COUNT, or for a short-pick recount SHIPMENT_PICK; otherwise as create#Count.</description>
+        <implements service="mantle.product.InventoryCountServices.define#CountScope"/>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="assetIds" type="List"/>
+            <parameter name="countSourceEnumId" default-value="CntSrcRequest"/>
+            <parameter name="sourceReference"/>
+            <parameter name="countModeEnumId"/>
+            <parameter name="blindIndicator"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="plannedDate" type="Timestamp"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="existing" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('request', context)"/>
+            <set field="physicalInventoryId" from="answer.physicalInventoryId"/>
+            <set field="existing" from="answer.existing"/>
+        </actions>
+    </service>
+    <service verb="update" noun="Count" allow-remote="false">
+        <description>Change a planned count: scope (raising scopeVersion), mode, blind flag, assignee, planned date and
+            comments; a field not given keeps its value, an empty one clears it. Refuses a count that has started
+            (COUNT_NOT_PLANNED) and a stale scopeVersion (COUNT_CHANGED); needs STOCK_COUNT.</description>
+        <implements service="mantle.product.InventoryCountServices.define#CountScope"/>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="expectedScopeVersion"/>
+            <parameter name="countModeEnumId"/>
+            <parameter name="blindIndicator"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="plannedDate" type="Timestamp"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="scopeVersion" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('update', context)"/>
+            <set field="scopeVersion" from="answer.scopeVersion"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Count" allow-remote="false">
+        <description>Start a planned count (PIInPlanning to PIInProgress): its scope is fixed and snapshotted, one line per
+            asset of the facility the scope holds with a quantity (and given assets), each with its identity (location,
+            lot, owner, pool, status, container) and the quantity and time of the snapshot; stock awaiting scrap
+            (AstMorgue) is left out. A zero-confirmation count also holds the stock at its locations that reached zero since
+            the location was last counted, not by scrap. Refuses more than 5000 assets (SCOPE_TOO_LARGE), a count already
+            started (COUNT_NOT_PLANNED); needs STOCK_COUNT.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="lineCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('start', context)"/>
+            <set field="lineCount" from="answer.lineCount"/>
+        </actions>
+    </service>
+    <service verb="record" noun="CountLine" allow-remote="false">
+        <description>Save an observation of a count line, never changing stock: the quantity counted (zero is a count, blank
+            is no entry: QUANTITY_REQUIRED; a negative one is QUANTITY_INVALID), when and comments, or a skip with its reason.
+            Without physicalInventoryCountId, stock found that the snapshot did not hold: a reviewed extra line of the count for
+            that product, location and lot (a snapshot line of the same stock is LINE_EXISTS). With increment the quantity adds to
+            the line's observation (scan-quantity mode), which needs an operationKey: a repeated request answers the first.
+            Refuses a count not being counted (COUNT_NOT_IN_PROGRESS), a line a reviewer approved or posted (LINE_REVIEWED: it is
+            sent back by a recount), a time counted before the snapshot or in the future (COUNT_DATE_INVALID); needs STOCK_COUNT.
+            The answer's line carries no expected quantity on a blind count.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryCountId"><description>A line of physicalInventoryId (another count's is
+                RECORD_UNAVAILABLE).</description></parameter>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="lotId"/>
+            <parameter name="quantity"/>
+            <parameter name="increment" type="Boolean" default="false"/>
+            <parameter name="countDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="skipReasonEnumId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="physicalInventoryCountId"/>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="result" from="counts.execute('record', context)"/>
+            <set field="physicalInventoryCountId" from="result.physicalInventoryCountId"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="Count" allow-remote="false">
+        <description>Submit a count for review (PIInProgress to PIInValidation): entry stops, lines not counted stay
+            uncounted. Refuses a count not being counted (COUNT_NOT_IN_PROGRESS); needs STOCK_COUNT.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+        </in-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <script>posting.requirePermission('STOCK_COUNT')</script>
+            <set field="found" from="counts.countOf(posting.scope(), physicalInventoryId, true)"/>
+            <script>counts.requireStatus(found.count, ['PIInProgress'], 'COUNT_NOT_IN_PROGRESS', 'is not being counted')</script>
+            <service-call name="update#mantle.product.asset.PhysicalInventory" disable-authz="true"
+                    in-map="{physicalInventoryId:physicalInventoryId, statusId:'PIInValidation',
+                        submittedDate:ec.user.nowTimestamp}"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Count" allow-remote="false">
+        <description>Cancel a count before anything of it posts (PICancelled); its lines stay as they are. Refuses a
+            complete or cancelled count and one with a posted line (COUNT_POSTED); needs STOCK_COUNT.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <script>posting.requirePermission('STOCK_COUNT')</script>
+            <set field="found" from="counts.countOf(posting.scope(), physicalInventoryId, true)"/>
+            <script>counts.requireStatus(found.count, counts.openCountStatuses, 'COUNT_CLOSED', 'is already closed')</script>
+            <entity-find-count entity-name="mantle.product.asset.PhysicalInventoryCount" count-field="postedCount">
+                <econdition field-name="physicalInventoryId"/>
+                <econdition field-name="statusId" value="PicPosted"/>
+            </entity-find-count>
+            <if condition="postedCount &gt; 0">
+                <return error="true"
+                        message="COUNT_POSTED: Count ${physicalInventoryId} has posted lines; review and post the rest"/>
+            </if>
+            <service-call name="update#mantle.product.asset.PhysicalInventory" disable-authz="true"
+                    in-map="{physicalInventoryId:physicalInventoryId, statusId:'PICancelled',
+                        comments:comments || found.count.comments}"/>
+        </actions>
+    </service>
+    <service verb="review" noun="Count" allow-remote="false">
+        <description>Review a submitted count: each counted line is compared with its snapshot, the asset's balance when it
+            was counted and its movements since the snapshot. With no movement and no move of the asset it is approved with
+            the delta observed less snapshot (the variance reason given, else found or lost by sign); otherwise it is a
+            conflict (PicConflict, naming the movements or the move), resolved by resolve#CountConflict or recount#Count.
+            Lines not counted are skipped as not counted unless skipUncounted is false. Raises reviewVersion, which
+            post#Count checks. Refuses a count not submitted (COUNT_NOT_IN_REVIEW) and a scrap reason (REASON_INVALID); needs
+            STOCK_COUNT_REVIEW.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="varianceReasonEnumId"/>
+            <parameter name="skipUncounted" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reviewVersion" type="Integer"/>
+            <parameter name="approvedCount" type="Integer"/>
+            <parameter name="conflictCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('review', context)"/>
+            <set field="reviewVersion" from="answer.reviewVersion"/>
+            <set field="approvedCount" from="answer.approvedCount"/>
+            <set field="conflictCount" from="answer.conflictCount"/>
+            <set field="skippedCount" from="answer.skippedCount"/>
+        </actions>
+    </service>
+    <service verb="recount" noun="Count" allow-remote="false">
+        <description>Send a submitted count back to counting (PIInValidation to PIInProgress) for the given lines, by default
+            those in conflict or failed: each takes a new snapshot of its asset where it is now and its observation is
+            cleared, the earlier one kept in the audit log. Refuses a posted line (LINE_FINAL), nothing to recount
+            (NOTHING_TO_RECOUNT); needs STOCK_COUNT_REVIEW.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="lineIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recountCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="recountCount" from="counts.execute('recount', context).recountCount"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="CountConflict" allow-remote="false">
+        <description>Resolve a line whose stock moved during counting (or whose posting failed): recount (the default; the
+            count goes back to counting) or carry the observed variance forward, the delta being the observation less the
+            asset's balance when it was counted, with a required reason (REASON_REQUIRED), never the stale count written over
+            the current quantity; an asset that moved since the snapshot is counted again (MOVED_RECOUNT). Refuses a line with no
+            conflict (NO_CONFLICT); needs STOCK_COUNT_REVIEW.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="physicalInventoryCountId" required="true"><description>A line of that count; another count's
+                is RECORD_UNAVAILABLE.</description></parameter>
+            <parameter name="resolution" default-value="recount"><description>recount or carry</description></parameter>
+            <parameter name="varianceReasonEnumId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resolution"/>
+            <parameter name="approvedDelta"/>
+            <parameter name="countStatusId"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('resolve', context)"/>
+            <set field="resolution" from="answer.resolution"/>
+            <set field="approvedDelta" from="answer.approvedDelta"/>
+            <set field="countStatusId" from="answer.countStatusId"/>
+        </actions>
+    </service>
+    <service verb="post" noun="Count" allow-remote="false">
+        <description>Post a reviewed count's approved lines (all, or lineIds) at an effective date (now or earlier), through
+            the posting guard (StockPosting.js: STOCK_ADJUST, then the operation key; a retry answers the first result, a changed
+            request is OPERATION_KEY_CONFLICT). The lines are grouped into disjoint stock buckets (an asset; stock found by
+            product, location and lot), each posted in its own transaction (post#CountLines) with its summed delta added once, so
+            the variance SECA values each asset once per count (F5). A bucket that fails is named with its reason and the others
+            post; a move since the review returns its lines to conflict (STOCK_MOVED). Lines already posted are skipped, so a new
+            attempt posts only what failed. Uncounted and skipped lines change nothing (NOTHING_TO_POST when no line is approved).
+            Once a line has posted, the count's date is fixed (DATE_FIXED for another). A date in a closed fiscal period refuses
+            the whole post before anything is written (PERIOD_CLOSED); each bucket checks it again under the period lock. With
+            every line posted or skipped the count is complete. Refuses a count not reviewed (COUNT_NOT_IN_REVIEW,
+            COUNT_NOT_REVIEWED) or reviewed again since (REVIEW_CHANGED) and a future date (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="lineIds" type="List"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="reviewVersion"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode POSTED, PARTIAL or FAILED, postedCount, failedCount,
+                results (per bucket: key, ok, lineIds, assetId, quantity, assetDetailId, accountingResult, or reasonCode and
+                message), countStatusId, effectiveDate, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="result" from="counts.execute('post', context)"/>
+        </actions>
+    </service>
+    <service verb="post" noun="CountLines" allow-remote="false">
+        <description>Internal to post#Count, which runs each stock bucket through it in its own transaction (no screen calls it,
+            and it refuses a count not under review at the version reviewed: COUNT_NOT_IN_REVIEW, REVIEW_CHANGED): the lines
+            locked, then the asset, then the location (stock found); the asset still where the line found it with no movement
+            since the review (STOCK_MOVED), the fiscal period of the date open for the facility's and the stock's owner
+            (PERIOD_CLOSED), and no earlier variance of this count (ALREADY_POSTED); the summed delta through
+            change#AssetQuantity, or for stock found a new asset (create#ProductAssetAdHoc, at an open location) with its
+            AssetDetail; a decrease beyond on hand is QUANTITY_EXCEEDS_ON_HAND. Each line is marked posted with the asset and
+            AssetDetail, and FacilityLocation.lastCountDate and ProductFacility.lastCountDate take its count time. Needs
+            STOCK_ADJUST.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="lineIds" type="List" required="true"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="reviewVersion" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="result" from="counts.execute('postLines', context).result"/>
+        </actions>
+    </service>
+    <service verb="fail" noun="CountLines" allow-remote="false">
+        <description>Internal to post#Count: the lines of a bucket it could not post, of the count named (others left
+            alone), named with the reason (PicFailed; a move since the
+            review, STOCK_MOVED, back to PicConflict). Needs STOCK_ADJUST.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="lineIds" type="List" required="true"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+        </in-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <script>counts.execute('failLines', context)</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Count" allow-remote="false">
+        <description>One count of the user's organizations (narrowed to facilityIds when given): its header, line totals by
+            status and a page of lines (by location, product, asset, line status, or remaining ones), with the movements of
+            each conflict. Expected quantities, variances and deltas are in the answer only when the count is not blind, or
+            when a blind one is submitted and the user reviews or adjusts; values (unit cost, valueAmount) only with
+            ACCOUNTING_VIEW besides. Needs STOCK_COUNT, STOCK_COUNT_REVIEW or STOCK_ADJUST.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="locationSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="assetId"/>
+            <parameter name="lineStatusId"/>
+            <parameter name="remainingOnly" type="Boolean" default="false"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="count" type="Map"/>
+            <parameter name="expectedShown" type="Boolean"/>
+            <parameter name="financialShown" type="Boolean"/>
+            <parameter name="lineTotals" type="Map"/>
+            <parameter name="lineCount" type="Integer"/>
+            <parameter name="countedCount" type="Integer"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="linesPageIndex" type="Integer"/>
+            <parameter name="linesPageSize" type="Integer"/>
+            <parameter name="linesPageMaxIndex" type="Integer"/>
+            <parameter name="linesPageRangeLow" type="Integer"/>
+            <parameter name="linesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('get', context)"/>
+            <set field="count" from="answer.count"/>
+            <set field="expectedShown" from="answer.expectedShown"/>
+            <set field="financialShown" from="answer.financialShown"/>
+            <set field="lineTotals" from="answer.lineTotals"/>
+            <set field="lineCount" from="answer.lineCount"/>
+            <set field="countedCount" from="answer.countedCount"/>
+            <set field="lines" from="answer.lines"/>
+            <set field="linesPageIndex" from="answer.linesPageIndex"/>
+            <set field="linesPageSize" from="answer.linesPageSize"/>
+            <set field="linesPageMaxIndex" from="answer.linesPageMaxIndex"/>
+            <set field="linesPageRangeLow" from="answer.linesPageRangeLow"/>
+            <set field="linesPageRangeHigh" from="answer.linesPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Counts" allow-remote="false">
+        <description>The counts of the user's organizations' facilities (narrowed to facilityIds), newest first, with each
+            count's lines, counted and failed totals; never an immediate posting or a scrap record (no count mode). Needs
+            STOCK_COUNT, STOCK_COUNT_REVIEW or STOCK_ADJUST.</description>
+        <in-parameters>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="facilityId"/>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="statusId"/>
+            <parameter name="openOnly" type="Boolean" default="false"/>
+            <parameter name="countModeEnumId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="counts" type="List"/>
+            <parameter name="countsCount" type="Integer"/>
+            <parameter name="countsPageIndex" type="Integer"/>
+            <parameter name="countsPageSize" type="Integer"/>
+            <parameter name="countsPageMaxIndex" type="Integer"/>
+            <parameter name="countsPageRangeLow" type="Integer"/>
+            <parameter name="countsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('list', context)"/>
+            <set field="counts" from="answer.counts"/>
+            <set field="countsCount" from="answer.countsCount"/>
+            <set field="countsPageIndex" from="answer.countsPageIndex"/>
+            <set field="countsPageSize" from="answer.countsPageSize"/>
+            <set field="countsPageMaxIndex" from="answer.countsPageMaxIndex"/>
+            <set field="countsPageRangeLow" from="answer.countsPageRangeLow"/>
+            <set field="countsPageRangeHigh" from="answer.countsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="find" noun="DueCounts" allow-remote="false">
+        <description>What is due for counting in the user's organizations' facilities (narrowed to facilityIds or
+            facilityId) up to today plus horizonDays, or throughDate: each location, or product at a facility, at the earlier
+            of its last count plus a periodic schedule's days and an annual schedule's next date, the earliest of every
+            schedule in effect that reaches it (the facility's and the organization's rows); a location whose stock reached
+            zero since its last count (a zero-confirmation schedule, not by scrap); and the planned ad hoc counts (Request a
+            count, the short-pick recount) by their date. Each row: itemType (location, product or count), kind (periodic,
+            annual, zero, request, shortPick), nextDate, overdue, lastCountDay, the schedule's mode, blind flag and assignee,
+            and an open count already there. assignedOnly keeps the user's own. Needs STOCK_COUNT, STOCK_COUNT_REVIEW or
+            STOCK_ADJUST.</description>
+        <in-parameters>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="facilityId"/>
+            <parameter name="horizonDays" type="Integer" default="0"/>
+            <parameter name="throughDate" type="Timestamp"/>
+            <parameter name="assignedOnly" type="Boolean" default="false"/>
+            <parameter name="summaryOnly" type="Boolean" default="false"><description>Only dueCount, overdueCount and
+                truncated (Home's queue).</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueRows" type="List"/>
+            <parameter name="dueCount" type="Integer"/>
+            <parameter name="overdueCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"><description>A facility had more open locations than the 2000 a
+                find reads; those past them are not in the answer.</description></parameter>
+            <parameter name="dueRowsPageIndex" type="Integer"/>
+            <parameter name="dueRowsPageSize" type="Integer"/>
+            <parameter name="dueRowsPageMaxIndex" type="Integer"/>
+            <parameter name="dueRowsPageRangeLow" type="Integer"/>
+            <parameter name="dueRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('due', context)"/>
+            <set field="dueRows" from="answer.dueRows"/>
+            <set field="dueCount" from="answer.dueCount"/>
+            <set field="overdueCount" from="answer.overdueCount"/>
+            <set field="truncated" from="answer.truncated"/>
+            <set field="dueRowsPageIndex" from="answer.dueRowsPageIndex"/>
+            <set field="dueRowsPageSize" from="answer.dueRowsPageSize"/>
+            <set field="dueRowsPageMaxIndex" from="answer.dueRowsPageMaxIndex"/>
+            <set field="dueRowsPageRangeLow" from="answer.dueRowsPageRangeLow"/>
+            <set field="dueRowsPageRangeHigh" from="answer.dueRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="notify" noun="DueCounts" allow-remote="false">
+        <description>The nightly due-count notice (ServiceJob notify_DueCounts): once a day for each facility with counts due,
+            its organization's users with STOCK_COUNT and the due items' assignees get WarehouseCountsDue. A facility that
+            fails is logged and the others go on.</description>
+        <out-parameters>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="notifiedCount" from="counts.execute('notifyDue', context).notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="import" noun="CountLines" allow-remote="false">
+        <description>Count lines from CSV text with a header (line or asset, or location, product and lot for stock found;
+            quantity; countedAt; comments; skipReason), each row through record#CountLine in its own transaction: a row that
+            fails is named with its reason and the others are saved. With preview nothing is saved. resultCsv is the
+            row-result file (rowNumber, lineId, ok, reasonCode, message), with no expected quantity. Refuses a count not being
+            counted (COUNT_NOT_IN_PROGRESS); needs STOCK_COUNT.</description>
+        <in-parameters>
+            <parameter name="physicalInventoryId" required="true"/>
+            <parameter name="csvText" required="true" allow-html="any"/>
+            <parameter name="delimiter"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="savedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="resultCsv"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('importLines', context)"/>
+            <set field="results" from="answer.results"/>
+            <set field="savedCount" from="answer.savedCount"/>
+            <set field="failedCount" from="answer.failedCount"/>
+            <set field="resultCsv" from="answer.resultCsv"/>
+        </actions>
+    </service>
+    <service verb="find" noun="CountVariance" allow-remote="false">
+        <description>The variance report (CountVariance): reviewed and posted count lines of the user's organizations'
+            facilities (narrowed to facilityIds), with snapshot, observed, approved and posted delta, reason and counter, by
+            facility, count, counted date, counter, product and reason; unit cost and value only with ACCOUNTING_VIEW. Counts
+            not yet submitted are left out, and it needs STOCK_COUNT_REVIEW or STOCK_ADJUST, so no counter receives a blind
+            count's quantities.</description>
+        <in-parameters>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="facilityId"/>
+            <parameter name="physicalInventoryId"/>
+            <parameter name="productId"/>
+            <parameter name="countedByUserId"/>
+            <parameter name="varianceReasonEnumId"/>
+            <parameter name="varianceOnly" type="Boolean" default="false"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="varianceRows" type="List"/>
+            <parameter name="financialShown" type="Boolean"/>
+            <parameter name="varianceRowsCount" type="Integer"/>
+            <parameter name="varianceRowsPageIndex" type="Integer"/>
+            <parameter name="varianceRowsPageSize" type="Integer"/>
+            <parameter name="varianceRowsPageMaxIndex" type="Integer"/>
+            <parameter name="varianceRowsPageRangeLow" type="Integer"/>
+            <parameter name="varianceRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryCounts.js')"/>
+            <set field="answer" from="counts.execute('variance', context)"/>
+            <set field="varianceRows" from="answer.varianceRows"/>
+            <set field="financialShown" from="answer.financialShown"/>
+            <set field="varianceRowsCount" from="answer.varianceRowsCount"/>
+            <set field="varianceRowsPageIndex" from="answer.varianceRowsPageIndex"/>
+            <set field="varianceRowsPageSize" from="answer.varianceRowsPageSize"/>
+            <set field="varianceRowsPageMaxIndex" from="answer.varianceRowsPageMaxIndex"/>
+            <set field="varianceRowsPageRangeLow" from="answer.varianceRowsPageRangeLow"/>
+            <set field="varianceRowsPageRangeHigh" from="answer.varianceRowsPageRangeHigh"/>
+        </actions>
+    </service>
+</services>
