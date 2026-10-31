@@ -491,13 +491,15 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="adjust" noun="Stock" allow-remote="false">
-        <description>Post an adjustment of an exact stock bucket as previewed: a count through
-            mantle.product.AssetServices.record#PhysicalInventoryQuantity, a change (or any adjustment of one asset) through
-            record#PhysicalInventoryChange, on a PhysicalInventory of its own with the reason, so the variance posts by its
-            reason (post#PhysicalInventoryVariance). A retry with the same operation key and request answers the first
-            adjustment (alreadyApplied); a different request under the key is OPERATION_KEY_CONFLICT. The bucket's
-            assets are locked and read again: a movement since the preview is PREVIEW_CHANGED (preview again). Refuses
-            without STOCK_ADJUST (PERMISSION_DENIED), without a variance reason (REASON_REQUIRED, REASON_INVALID), a
+        <description>Post an adjustment of an exact stock bucket as previewed: the change computed from the locked plan (a
+            count less what was on hand, or the change) through mantle.product.AssetServices.record#PhysicalInventoryChange
+            on the plan's assets in its order, on a PhysicalInventory of its own with the reason, so the variance posts by
+            its reason (post#PhysicalInventoryVariance) and what posts is what was previewed. A retry with the same
+            operation key and request answers the first adjustment (alreadyApplied); a different request under the key
+            is OPERATION_KEY_CONFLICT. The bucket's assets are locked and read again: a movement since the preview is
+            PREVIEW_CHANGED (preview again). Refuses
+            without STOCK_ADJUST (PERMISSION_DENIED), without a variance reason (REASON_REQUIRED, REASON_INVALID; a scrap
+            reason is Scrap's), equipment (NOT_STOCK), a
             facility outside the user's organizations (RECORD_UNAVAILABLE), a closed fiscal period of the effective date
             for an organization it posts to (PERIOD_CLOSED), and as preview#StockAdjustment. A count that matches answers
             NO_CHANGE and posts nothing.</description>
@@ -535,6 +537,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="reason?.enumTypeId != 'InventoryVarianceReason'">
                 <return error="true" message="REASON_INVALID: ${varianceReasonEnumId} is not an inventory variance reason"/>
             </if>
+            <!-- waste leaves by scrap#Asset, which takes free stock only and marks its PhysicalInventory (WH-SCRAP) -->
+            <if condition="reason.enumCode == 'scrap'">
+                <return error="true" message="REASON_INVALID: ${varianceReasonEnumId} is a scrap reason; use Scrap"/>
+            </if>
             <!-- 2. the bucket's assets locked by id, in a facility of the user's organizations; the operation once more -->
             <set field="userScope" from="posting.scope()"/>
             <script>posting.facility(userScope, adjustments.bucketOf(context).facilityId)</script>
@@ -561,25 +567,16 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.product.asset.PhysicalInventory" disable-authz="true" out-map="created"
                     in-map="{physicalInventoryDate:bucket.date, statusId:'PIComplete', facilityId:bucket.facilityId,
                         partyId:ec.user.userAccount?.partyId, comments:comments}"/>
-            <set field="filters" from="{productId:bucket.productId, facilityId:bucket.facilityId,
-                    locationSeqId:bucket.location.value, lotId:bucket.lot.value, ownerPartyId:bucket.ownerPartyId,
-                    assetPoolId:bucket.assetPoolId, statusId:bucket.statusId, strictLocation:bucket.location.scope == 'none',
-                    strictLot:bucket.lot.scope == 'none', physicalInventoryId:created.physicalInventoryId,
-                    physicalInventoryDate:bucket.date, varianceReasonEnumId:varianceReasonEnumId, comments:comments}"/>
-            <if condition="bucket.assetId">
-                <then>
-                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
-                            in-map="Object.assign({}, filters, {quantityChange:adjustment.change, assetList:adjustment.assets})"/>
-                </then>
-                <else-if condition="adjustment.mode == 'count'">
-                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryQuantity" disable-authz="true"
-                            in-map="Object.assign({}, filters, {quantity:adjustment.after})"/>
-                </else-if>
-                <else>
-                    <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
-                            in-map="Object.assign({}, filters, {quantityChange:adjustment.change})"/>
-                </else>
-            </if>
+            <!-- the change computed from the locked plan, on the plan's assets in its order (oldest received first), so what
+                posts is what was previewed; a count of a bucket and a change alike (record#PhysicalInventoryQuantity reads
+                its assets in no order, F165). An empty bucket gets a new asset with the bucket's fields. -->
+            <service-call name="mantle.product.AssetServices.record#PhysicalInventoryChange" disable-authz="true"
+                    in-map="{productId:bucket.productId, facilityId:bucket.facilityId, locationSeqId:bucket.location.value,
+                        lotId:bucket.lot.value, ownerPartyId:bucket.ownerPartyId, assetPoolId:bucket.assetPoolId,
+                        statusId:bucket.statusId, strictLocation:bucket.location.scope == 'none',
+                        strictLot:bucket.lot.scope == 'none', physicalInventoryId:created.physicalInventoryId,
+                        physicalInventoryDate:bucket.date, varianceReasonEnumId:varianceReasonEnumId, comments:comments,
+                        quantityChange:adjustment.change, assetList:adjustments.changeOrder(adjustment.assets)}"/>
             <entity-find entity-name="mantle.product.asset.AssetDetail" list="details" disable-authz="true">
                 <econdition field-name="physicalInventoryId" from="created.physicalInventoryId"/>
                 <select-field field-name="assetId"/>
@@ -827,14 +824,16 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="preview" type="Map"><description>direction, assetId, sourceProductId, quantity, targetProductId,
                 targetQuantity, factor (contents of one pack), lotId, facilityId, locationSeqId, statusId, costIncluded and,
-                with financial read, sourceUnitCost, unitCost, issuedCost and costUomId.</description></parameter>
+                with financial read, costAvailable and, when the source has a cost, sourceUnitCost, unitCost, issuedCost
+                and costUomId.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
             <set field="adjustments"
                     from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockAdjustments.js')"/>
             <script>posting.requirePermission('STOCK_MOVE')</script>
-            <set field="asset" from="posting.stock(posting.scope(), assetId, quantity)"/>
+            <!-- a read: the asset is not locked -->
+            <set field="asset" from="posting.stock(posting.scope(), assetId, quantity, false)"/>
             <set field="conversion" from="adjustments.repackPlan(asset, targetProductId, quantity)"/>
             <set field="costIncluded" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
                     .has('ACCOUNTING_VIEW')"/>
@@ -842,12 +841,13 @@ along with this software (see the LICENSE.md file). If not, see
                     sourceProductId: conversion.sourceProductId, quantity: String(toDecimal(quantity).toNumber()),
                     targetProductId: conversion.targetProductId, targetQuantity: String(conversion.targetQuantity.toNumber()),
                     factor: String(conversion.factor.toNumber()), lotId: asset.lotId || null, facilityId: asset.facilityId,
-                    locationSeqId: asset.locationSeqId || null, statusId: asset.statusId, costIncluded: costIncluded}"/>
+                    locationSeqId: asset.locationSeqId || null, statusId: asset.statusId, costIncluded: costIncluded,
+                    costAvailable: costIncluded ? asset.acquireCost != null : null}"/>
             <if condition="costIncluded &amp;&amp; asset.acquireCost != null">
                 <set field="issuedCost" from="toDecimal(quantity).multiply(asset.acquireCost)"/>
                 <script>Object.assign(preview, {sourceUnitCost: String(toDecimal(asset.acquireCost).toNumber()),
                     issuedCost: String(issuedCost.toNumber()), costUomId: asset.acquireCostUomId || null,
-                    unitCost: String(issuedCost.divide(conversion.targetQuantity, 6, 'HALF_UP').toNumber())})</script>
+                    unitCost: String(issuedCost.divide(conversion.targetQuantity, 4, 'HALF_UP').toNumber())})</script>
             </if>
         </actions>
     </service>
@@ -860,9 +860,12 @@ along with this software (see the LICENSE.md file). If not, see
             (AssetReceipt.sourceAssetIssuanceId) and keeps the entered source quantity and the conversion factor. Both
             movements post or neither does. The conversion is Products' packaging (resolve#ScannedProduct): unpack a pack
             into its contents, or repack contents into whole packs. A retry with the same operation key answers the first
-            repack. Refuses without STOCK_MOVE (PERMISSION_DENIED); as move#Stock: the user's facilities, the stock and
-            quantity, a closed or missing location, held stock or a status change with no flow (HELD_STOCK); stock that is
-            not free to issue (RESERVED_STOCK); no packaging between the products (PACK_UNDEFINED); not whole packs
+            repack. When the unit cost at the four decimals acquireCost keeps leaves a remainder, the last unit is
+            received apart at the remainder's cost, so the receipts carry the issued value exactly. Refuses without
+            STOCK_MOVE (PERMISSION_DENIED); as move#Stock: the user's facilities, the stock and quantity, a closed or
+            missing location, a status change with
+            no flow (HELD_STOCK); stock that is not available or on hold (HELD_STOCK); stock with no owner (OWNER_REQUIRED);
+            stock that is not free to issue (RESERVED_STOCK); no packaging between the products (PACK_UNDEFINED); not whole packs
             (QUANTITY_NOT_WHOLE_PACKS); a closed fiscal period today (PERIOD_CLOSED).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
@@ -875,7 +878,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode REPACKED, direction, assetId, sourceProductId,
-                quantity, targetProductId, targetQuantity, factor, toAssetId, lotId, facilityId, locationSeqId, statusId,
+                quantity, targetProductId, targetQuantity, factor, toAssetId, receipts (assetId, assetReceiptId,
+                quantity: one, or two when the last unit carries the remainder), lotId, facilityId, locationSeqId, statusId,
                 workEffortId, assetIssuanceId, assetReceiptId, reason, warnings, and the operation fields.</description>
             </parameter>
         </out-parameters>
@@ -894,6 +898,15 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
+            <!-- only stock free of holds: quarantined, morgue or defective stock would come out of the work effort held,
+                with no inspection to release it -->
+            <if condition="!['AstAvailable', 'AstOnHold'].includes(asset.statusId)">
+                <return error="true"
+                        message="HELD_STOCK: Asset ${assetId} is ${asset.statusId}; only available stock is repacked"/>
+            </if>
+            <if condition="!asset.ownerPartyId">
+                <return error="true" message="OWNER_REQUIRED: Asset ${assetId} has no owner, so its work effort would have none"/>
+            </if>
             <if condition="toDecimal(quantity).compare(toDecimal(asset.availableToPromiseTotal ?? 0)) &gt; 0">
                 <set field="freeText" from="String(toDecimal(asset.availableToPromiseTotal ?? 0).toNumber())"/>
                 <return error="true" message="RESERVED_STOCK: Only ${freeText} of asset ${assetId} is free to repack"/>
@@ -903,11 +916,11 @@ along with this software (see the LICENSE.md file). If not, see
                     {toLocationSeqId: toLocationSeqId || asset.locationSeqId})"/>
             <set field="statusAfter" from="posting.keepHeld(asset, target)"/>
             <set field="warnings" from="posting.expiryWarnings(assetId)"/>
-            <script>posting.period([asset.ownerPartyId || home.ownerPartyId], ec.user.nowTimestamp)</script>
+            <script>posting.period([asset.ownerPartyId], ec.user.nowTimestamp)</script>
             <!-- the organization-owned assembling work effort the issue goes into and the receipt comes out of -->
             <service-call name="create#mantle.work.effort.WorkEffort" disable-authz="true" out-map="effort"
                     in-map="{workEffortTypeEnumId:'WetTask', purposeEnumId:'WepAssembling', statusId:'WeInProgress',
-                        ownerPartyId:asset.ownerPartyId || home.ownerPartyId, facilityId:asset.facilityId,
+                        ownerPartyId:asset.ownerPartyId, facilityId:asset.facilityId,
                         workEffortName:(conversion.direction == 'unpack' ? 'Unpack ' : 'Repack ') + assetId,
                         description:reason || null, actualStartDate:ec.user.nowTimestamp}"/>
             <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort" disable-authz="true"
@@ -918,31 +931,46 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="assetId"/>
             </entity-find>
             <set field="assetIssuanceId" from="issuances[0].assetIssuanceId"/>
-            <set field="unitCost" from="asset.acquireCost == null ? null : toDecimal(quantity).multiply(asset.acquireCost)
-                    .divide(conversion.targetQuantity, 6, 'HALF_UP')"/>
-            <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
-                    in-map="{productId:conversion.targetProductId, quantity:conversion.targetQuantity,
-                        facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
-                        ownerPartyId:asset.ownerPartyId || home.ownerPartyId, lotId:asset.lotId,
-                        expectedEndOfLife:asset.expectedEndOfLife, manufacturedDate:asset.manufacturedDate,
-                        assetPoolId:asset.assetPoolId, statusId:statusAfter, acquireCost:unitCost,
-                        acquireCostUomId:asset.acquireCostUomId, workEffortId:effort.workEffortId}"/>
-            <service-call name="update#mantle.product.receipt.AssetReceipt" disable-authz="true"
-                    in-map="{assetReceiptId:received.assetReceiptId, sourceAssetIssuanceId:assetIssuanceId,
-                        enteredQuantity:quantity, appliedConversionFactor:conversion.direction == 'unpack'
-                            ? conversion.factor : toDecimal(1).divide(conversion.factor, 6, 'HALF_UP')}"/>
+            <!-- the receipt carries the issued value exactly: the unit cost at the four decimals Asset.acquireCost keeps
+                (currency-amount), and when that leaves a remainder
+                the last unit is received apart at the remainder's cost, so issue and receipt net to zero in WIP (F166) -->
+            <set field="issuedCost" from="asset.acquireCost == null ? null : toDecimal(quantity).multiply(asset.acquireCost)"/>
+            <set field="unitCost" from="issuedCost == null ? null
+                    : issuedCost.divide(conversion.targetQuantity, 4, 'HALF_UP')"/>
+            <set field="split" from="issuedCost != null &amp;&amp; conversion.targetQuantity.compare(1) &gt; 0
+                    &amp;&amp; !conversion.targetQuantity.multiply(unitCost).eq(issuedCost)"/>
+            <set field="receiptLines" from="split ? [{quantity: conversion.targetQuantity.subtract(1), cost: unitCost},
+                    {quantity: toDecimal(1), cost: issuedCost.subtract(conversion.targetQuantity.subtract(1).multiply(unitCost))}]
+                    : [{quantity: conversion.targetQuantity, cost: unitCost}]"/>
+            <set field="receipts" from="[]"/>
+            <iterate list="receiptLines" entry="line">
+                <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
+                        in-map="{productId:conversion.targetProductId, quantity:line.quantity,
+                            facilityId:asset.facilityId, locationSeqId:target.locationSeqId,
+                            ownerPartyId:asset.ownerPartyId, lotId:asset.lotId,
+                            expectedEndOfLife:asset.expectedEndOfLife, manufacturedDate:asset.manufacturedDate,
+                            assetPoolId:asset.assetPoolId, statusId:statusAfter, acquireCost:line.cost,
+                            acquireCostUomId:asset.acquireCostUomId, workEffortId:effort.workEffortId}"/>
+                <service-call name="update#mantle.product.receipt.AssetReceipt" disable-authz="true"
+                        in-map="{assetReceiptId:received.assetReceiptId, sourceAssetIssuanceId:assetIssuanceId,
+                            enteredQuantity:quantity, appliedConversionFactor:conversion.direction == 'unpack'
+                                ? conversion.factor : toDecimal(1).divide(conversion.factor, 6, 'HALF_UP')}"/>
+                <script>receipts.push({assetId: received.assetId, assetReceiptId: received.assetReceiptId,
+                    quantity: String(line.quantity.toNumber())})</script>
+            </iterate>
             <service-call name="update#mantle.work.effort.WorkEffort" disable-authz="true"
                     in-map="{workEffortId:effort.workEffortId, statusId:'WeComplete',
                         actualCompletionDate:ec.user.nowTimestamp}"/>
             <set field="result" from="posting.complete(begun.op, home.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
-                    received.assetReceiptId, {resultCode: 'REPACKED', direction: conversion.direction, assetId: assetId,
+                    receipts[0].assetReceiptId, {resultCode: 'REPACKED', direction: conversion.direction, assetId: assetId,
                         sourceProductId: conversion.sourceProductId, quantity: String(toDecimal(quantity).toNumber()),
                         targetProductId: conversion.targetProductId,
                         targetQuantity: String(conversion.targetQuantity.toNumber()),
-                        factor: String(conversion.factor.toNumber()), toAssetId: received.assetId, lotId: asset.lotId || null,
+                        factor: String(conversion.factor.toNumber()), toAssetId: receipts[0].assetId, receipts: receipts,
+                        lotId: asset.lotId || null,
                         facilityId: asset.facilityId, locationSeqId: target.locationSeqId, statusId: statusAfter,
                         workEffortId: effort.workEffortId, assetIssuanceId: assetIssuanceId,
-                        assetReceiptId: received.assetReceiptId, reason: reason || null, warnings: warnings})"/>
+                        assetReceiptId: receipts[0].assetReceiptId, reason: reason || null, warnings: warnings})"/>
         </actions>
     </service>
 </services>

@@ -14,6 +14,8 @@ const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/f
 const {find, one, denied, call, hash, access} = lib
 
 const ASSET = "mantle.product.asset.Asset"
+// the asset types that are stock (StockPosting.js); no type is stock
+const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 // a bucket larger than this is refused: choose a location or lot
 const bucketLimit = 500
 const scopes = ["value", "none", "any"]
@@ -186,6 +188,11 @@ function plan(p, lock = false) {
     if (mode === "delta" && entered.isZero()) denied("QUANTITY_INVALID", "A change cannot be zero; enter a count instead")
     const bucket = bucketOf(p)
     const assets = assetsOf(bucket, lock)
+    // stock only: equipment is not adjusted here, and a product whose assets are not stock adds none (create#ProductAssetAdHoc)
+    const product = one("mantle.product.Product", {productId: bucket.productId})
+    const notStock = type => !!type && !stockTypes.includes(type)
+    if (assets.some(asset => notStock(asset.assetTypeEnumId)) || (!assets.length && notStock(product?.assetTypeEnumId)))
+        denied("NOT_STOCK", "Product " + bucket.productId + " is equipment, not stock")
     const quantities = quantitiesAsOf(
         assets.map(asset => asset.assetId),
         bucket.date
@@ -283,13 +290,17 @@ function lotScope(userScope, lotId) {
 // The conversion of a repack of the source asset's product into the target product, through Products' scan resolver
 // (resolve#ScannedProduct, PRD-PACKAGING): unpack when the source is a pack whose contents are the target, repack when the
 // target is a pack of the source. quantity is in the source's unit; a repack needs whole packs.
-function repackPlan(asset, targetProductId, quantity) {
-    const source = asset.productId
-    const resolve = productId =>
+// Products' scan resolver for a product id, in the stock owner's catalog scope.
+function resolverOf(asset) {
+    return productId =>
         call("mantle.product.ProductServices.resolve#ScannedProduct", {
             scanId: productId,
             organizationPartyId: asset.ownerPartyId || null
         })
+}
+function repackPlan(asset, targetProductId, quantity) {
+    const source = asset.productId
+    const resolve = resolverOf(asset)
     const wanted = decimal(quantity)
     if (!(wanted.compare(0) > 0)) denied("QUANTITY_INVALID", "Give a quantity above zero")
     const asSource = resolve(source)
@@ -330,4 +341,63 @@ function repackPlan(asset, targetProductId, quantity) {
     denied("PACK_UNDEFINED", "No packaging converts " + source + " into " + targetProductId)
 }
 
-;({bucketOf, assetsOf, quantitiesAsOf, plan, previewOf, postingOrganizations, lotScope, repackPlan})
+// What the asset's product can become, by the same resolver as repackPlan: unpacked into its contents (the deepest base, so a
+// pallet of cases unpacks into units) when it is a pack, and repacked into each pack whose contents, through any levels
+// (at most five), are the product. Each: direction, targetProductId, factor (contents of one pack, as text). A pack the
+// resolver cannot read (several definitions, outside the catalog scope) is left out and logged.
+function repackTargets(asset) {
+    const resolve = resolverOf(asset)
+    const tryResolve = productId => {
+        try {
+            const found = resolve(productId)
+            return found.found ? found : null
+        } catch (error) {
+            ec.logger.warn("Repack target " + productId + " of asset " + asset.assetId + ": " + error.message)
+            return null
+        }
+    }
+    const targets = []
+    const self = tryResolve(asset.productId)
+    if (self && self.packProductId === asset.productId)
+        targets.push({
+            direction: "unpack",
+            targetProductId: self.productId,
+            factor: String(decimal(self.containedQuantity).toNumber())
+        })
+    const seen = new Set([asset.productId])
+    let frontier = [asset.productId]
+    for (let depth = 0; depth < 5 && frontier.length; depth++) {
+        const packs = Array.from(
+            find("mantle.product.ProductAssoc", {productAssocTypeEnumId: "PatPackagingFor"})
+                .condition("toProductId", "in", frontier)
+                .list()
+        ).filter(row => lib.active(row))
+        frontier = []
+        for (const row of packs) {
+            if (seen.has(row.productId)) continue
+            seen.add(row.productId)
+            frontier.push(row.productId)
+            const pack = tryResolve(row.productId)
+            if (pack && pack.packProductId === row.productId && pack.productId === asset.productId)
+                targets.push({
+                    direction: "repack",
+                    targetProductId: row.productId,
+                    factor: String(decimal(pack.containedQuantity).toNumber())
+                })
+        }
+    }
+    return targets
+}
+
+;({
+    bucketOf,
+    assetsOf,
+    quantitiesAsOf,
+    changeOrder,
+    plan,
+    previewOf,
+    postingOrganizations,
+    lotScope,
+    repackPlan,
+    repackTargets
+})

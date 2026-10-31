@@ -102,10 +102,10 @@ function facility(userScope, facilityId) {
         denied("RECORD_UNAVAILABLE", "Facility " + (facilityId || "") + " is not available")
     return row
 }
-// The asset, locked: stock in a facility of the user's organizations, with on hand; quantity (when given) above zero and
-// at most the on-hand quantity.
-function stock(userScope, assetId, quantity) {
-    const asset = blank(assetId) ? null : find(ASSET, {assetId}).forUpdate(true).one()
+// The asset, locked (a preview reads it with lock false): stock in a facility of the user's organizations, with on hand;
+// quantity (when given) above zero and at most the on-hand quantity.
+function stock(userScope, assetId, quantity, lock = true) {
+    const asset = blank(assetId) ? null : find(ASSET, {assetId}).forUpdate(lock).one()
     const home = asset?.facilityId ? one(FACILITY, {facilityId: asset.facilityId}) : null
     if (!asset || !home || !facilityScope.owns(userScope, home.ownerPartyId))
         denied("RECORD_UNAVAILABLE", "Asset " + (assetId || "") + " is not available")

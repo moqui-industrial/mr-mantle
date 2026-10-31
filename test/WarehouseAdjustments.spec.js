@@ -142,7 +142,7 @@ spec({
             scrapGlAccountId: "519200000"
         })
         user("WHA_ADJUSTER", ["WHA_ADJUSTERS"], org)
-        user("WHA_FINANCIAL", ["WHA_ADJUSTERS", "WHA_FINANCE"], org)
+        user("WHA_FINANCIAL", ["WHA_ADJUSTERS", "WHA_FINANCE", "WHA_MOVERS"], org)
         user("WHA_QUALITY", ["WHA_QUALITY"], org)
         user("WHA_MOVER", ["WHA_MOVERS"], org)
         user("WHA_READER", ["WHA_READERS"], org)
@@ -161,7 +161,17 @@ spec({
             ["FltMorgue", "AstMorgue"]
         ])
             call("create#mantle.facility.FacilityLocationType", {facilityId: facility, locationTypeEnumId, autoStatusId})
-        for (const productId of ["WHA_COUNTED", "WHA_DATED", "WHA_SCRAP", "WHA_UNIT", "WHA_CASE", "WHA_LOOSE"])
+        for (const productId of [
+            "WHA_COUNTED",
+            "WHA_DATED",
+            "WHA_SCRAP",
+            "WHA_UNIT",
+            "WHA_CASE",
+            "WHA_LOOSE",
+            "WHA_ORDER",
+            "WHA_UNIT7",
+            "WHA_CASE7"
+        ])
             call("create#mantle.product.Product", {
                 productId,
                 productName: productId,
@@ -176,6 +186,20 @@ spec({
             productAssocTypeEnumId: "PatPackagingFor",
             fromDate: since,
             quantity: 12
+        })
+        call("create#mantle.product.ProductAssoc", {
+            productId: "WHA_CASE7",
+            toProductId: "WHA_UNIT7",
+            productAssocTypeEnumId: "PatPackagingFor",
+            fromDate: since,
+            quantity: 7
+        })
+        call("create#mantle.product.Product", {
+            productId: "WHA_TOOL",
+            productName: "WHA_TOOL",
+            productTypeEnumId: "PtAsset",
+            assetTypeEnumId: "AstTpEquipment",
+            ownerPartyId: org
         })
         for (const [lotId, expirationDate] of [
             ["WHA_LOT_A", dayText(400)],
@@ -530,5 +554,96 @@ feature("unpacking 2 cases into 24 units carries the lot and the unit cost, nets
         r.noPack.error.includes("PACK_UNDEFINED")
         r.back.error == "" && r.back.result.direction == "repack" && r.back.result.targetQuantity == "1"
         r.partial.error.includes("QUANTITY_NOT_WHOLE_PACKS")
+    }
+})
+
+feature("a count posts on the assets the preview named, oldest received first; equipment and scrap reasons are refused", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        const at = days => ec.l10n.parseTimestamp(dayText(days) + " 09:00:00", "yyyy-MM-dd HH:mm:ss")
+        const newer = receive("WHA_ORDER", 5, "BULK1", {receivedDate: at(-1)})
+        const older = receive("WHA_ORDER", 5, "BULK1", {receivedDate: at(-3)})
+        ec.artifactExecution.enableAuthz()
+        const scope = {productId: "WHA_ORDER", facilityId: facility, locationSeqId: "BULK1", mode: "count", quantity: 7}
+        const preview = run("wha_adjuster", "preview#StockAdjustment", scope)
+        const post = Object.assign({}, scope, {
+            operationKey: key(),
+            previewFingerprint: preview.preview?.previewFingerprint,
+            varianceReasonEnumId: "InVrLost"
+        })
+        const scrapReason = run("wha_adjuster", "adjust#Stock", Object.assign({}, post, {varianceReasonEnumId: "InVrScrap"}))
+        const posted = run("wha_adjuster", "adjust#Stock", post)
+        const tool = run("wha_adjuster", "preview#StockAdjustment", {
+            productId: "WHA_TOOL",
+            facilityId: facility,
+            locationSeqId: "BULK1",
+            mode: "count",
+            quantity: 1
+        })
+        return {newer, older, scrapReason, posted, tool}
+    },
+    then({newer, older, scrapReason, posted, tool}) {
+        scrapReason.error.includes("REASON_INVALID")
+        posted.error == "" && posted.result.quantityChange == "-3"
+        qoh(older) == 2 && qoh(newer) == 5
+        tool.error.includes("NOT_STOCK")
+    }
+})
+
+feature("a repack refuses held and ownerless stock, shows an unknown cost as unavailable, and nets exactly with a remainder", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        const held = receive("WHA_CASE", 2, "QUAR1", {statusId: "AstQuarantine"})
+        const sevens = receive("WHA_CASE7", 3, "BULK1", {acquireCost: 10})
+        const costless = receive("WHA_CASE7", 1, "BULK1", {acquireCost: null})
+        call("create#mantle.product.asset.Asset", {
+            assetId: "WHA_NO_OWNER",
+            assetTypeEnumId: "AstTpInventory",
+            statusId: "AstAvailable",
+            productId: "WHA_CASE7",
+            facilityId: facility,
+            locationSeqId: "BULK1",
+            hasQuantity: "Y",
+            quantityOnHandTotal: 0,
+            availableToPromiseTotal: 0
+        })
+        call("create#mantle.product.asset.AssetDetail", {
+            assetId: "WHA_NO_OWNER",
+            productId: "WHA_CASE7",
+            effectiveDate: ec.user.nowTimestamp,
+            quantityOnHandDiff: 1,
+            availableToPromiseDiff: 1
+        })
+        ec.artifactExecution.enableAuthz()
+        const heldRepack = run("wha_mover", "repack#Asset", {operationKey: key(), assetId: held, quantity: 1})
+        const ownerless = run("wha_mover", "repack#Asset", {operationKey: key(), assetId: "WHA_NO_OWNER", quantity: 1})
+        const costPreview = run("wha_financial", "preview#Repack", {assetId: costless, quantity: 1})
+        const unpacked = run("wha_mover", "repack#Asset", {operationKey: key(), assetId: sevens, quantity: 1})
+        const result = unpacked.result || {}
+        const receipts = (result.receipts || []).map(row =>
+            one("mantle.product.receipt.AssetReceipt", {assetReceiptId: row.assetReceiptId})
+        )
+        // the close check's WIP measure: issued quantity times the source's cost less received quantity times each cost
+        const received = receipts.reduce(
+            (sum, row) => sum.add(toDecimal(row.quantityAccepted).multiply(asset(row.assetId).acquireCost)),
+            toDecimal(0)
+        )
+        const trans = [
+            ...rows("mantle.ledger.transaction.AcctgTrans", {assetIssuanceId: result.assetIssuanceId || "-"}),
+            ...receipts.flatMap(row => rows("mantle.ledger.transaction.AcctgTrans", {assetReceiptId: row.assetReceiptId}))
+        ].map(row => row.acctgTransId)
+        return {heldRepack, ownerless, costPreview, unpacked, receipts, received: String(received.toNumber()), trans}
+    },
+    then({heldRepack, ownerless, costPreview, unpacked, receipts, received, trans}) {
+        heldRepack.error.includes("HELD_STOCK")
+        ownerless.error.includes("OWNER_REQUIRED")
+        costPreview.error == "" && costPreview.preview.costIncluded === true && costPreview.preview.costAvailable === false
+        costPreview.preview.unitCost === undefined
+        unpacked.error == "" && unpacked.result.targetQuantity == "7"
+        receipts.length == 2
+        receipts.every(row => row.sourceAssetIssuanceId == unpacked.result.assetIssuanceId)
+        received == "10"
+        trans.length == 3
+        net(trans, "141200000") == 0
     }
 })
