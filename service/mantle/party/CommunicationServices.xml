@@ -2020,7 +2020,10 @@ along with this software (see the LICENSE.md file). If not, see
             organization filter, as in search#Universal, and so does a communication event filed on a wiki page the user
             may not see (the event or the root of its thread, WikiPageCommunicationEvent). Without an organization filter
             work efforts, requests, orders and other communication events are seen as found. A wiki page has its own rule
-            (below). Any other record type has only its entity filters.
+            (below). An asset with no book (stock, equipment) and its files (AssetContent): under an organization filter, its
+            owner or its facility's owner is one of the filter's organizations (no entity filter covers Asset), unless it has
+            neither or the user has an entity authorization for Asset; a booked fixed asset follows its book's read. Any other
+            record type has only its entity filters.
 
             A client contact (the PROJECT_CLIENT permission) sees only what get#ClientRecordVisibility shows it, with
             authorization disabled too.
@@ -2088,7 +2091,8 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.request.Request': {entityName: 'mantle.request.RequestNote', keyField: 'requestId'},
                 'mantle.order.OrderHeader': {entityName: 'mantle.order.OrderNote', keyField: 'orderId'},
                 'mantle.facility.Facility': {entityName: 'mantle.facility.FacilityNote', keyField: 'facilityId'}}
-            // the record types with a *Content entity: the 13 with create and save services, and Facility
+            // the record types with a *Content entity: the 14 with create and save services (Asset with AssetRecordServices),
+            // and Facility
             const content = (entityName, keyField, typeField, dateField) =>
                     ({entityName: entityName, keyField: keyField, typeField: typeField, dateField: dateField || 'contentDate'})
             const contentEntities = {
@@ -2110,7 +2114,8 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.request.Request': content('mantle.request.RequestContent', 'requestId', 'contentTypeEnumId'),
                 'mantle.shipment.Shipment': content('mantle.shipment.ShipmentContent', 'shipmentId', 'shipmentContentTypeEnumId'),
                 'mantle.work.effort.WorkEffort': content('mantle.work.effort.WorkEffortContent', 'workEffortId', 'contentTypeEnumId'),
-                'mantle.facility.Facility': content('mantle.facility.FacilityContent', 'facilityId', 'facilityContentTypeEnumId')}
+                'mantle.facility.Facility': content('mantle.facility.FacilityContent', 'facilityId', 'facilityContentTypeEnumId'),
+                'mantle.product.asset.Asset': content('mantle.product.asset.AssetContent', 'assetId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2461,6 +2466,21 @@ along with this software (see the LICENSE.md file). If not, see
                 // asset with no book stays its app's record (a calendar's equipment, Products' stock)
                 if (entityName === 'mantle.product.asset.Asset' && bookedAsset(value))
                     return assetBookVisible(value.assetId)
+                // an asset's file follows its asset
+                if (entityName === 'mantle.product.asset.AssetContent')
+                    return visible('mantle.product.asset.Asset', 'assetId', value.assetId, depth)
+                // any other asset (stock, equipment) under an organization filter: its owner or its facility's owner is one of
+                // the filter's organizations, as Warehouse scopes stock (no entity filter covers Asset); one with neither stays
+                // as found, and so does every asset for a user with no organization filter or an entity authorization for Asset
+                if (entityName === 'mantle.product.asset.Asset') {
+                    const s = userScope()
+                    if (s.orgIds != null && !staffSees(entityName)) {
+                        const facility = value.facilityId ? ec.entity.find('mantle.facility.Facility')
+                                .condition('facilityId', value.facilityId).disableAuthz().one() : null
+                        const owners = [value.ownerPartyId, facility?.ownerPartyId].filter(Boolean)
+                        if (owners.length && !owners.some((partyId) => s.orgIds.includes(partyId))) return false
+                    }
+                }
                 // an agreement: of one of the user's organizations, with a party the user may see
                 if (entityName === 'mantle.party.agreement.Agreement') {
                     const orgIds = userOrganizationIds()

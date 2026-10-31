@@ -134,9 +134,13 @@ function partyNames(ids) {
     }
     return names
 }
-// One page of a query, with the page fields a form-list reads, both plain and prefixed by field.
-function page(query, p, field = "records", recordCount) {
-    const pageSize = Math.min(100, Math.max(1, Number(p.pageSize) || 20))
+// One page of a query, with the page fields a form-list reads, both plain and prefixed by field. With options.noLimitCap, a
+// request with pageNoLimit (a form-list's export) gets every row on one page, up to that cap.
+function page(query, p, field = "records", recordCount, options = {}) {
+    const noLimit = options.noLimitCap && (p.pageNoLimit === true || p.pageNoLimit === "true")
+    const pageSize = noLimit
+        ? Math.max(1, Math.min(recordCount, options.noLimitCap))
+        : Math.min(100, Math.max(1, Number(p.pageSize) || 20))
     const pageMaxIndex = Math.max(0, Math.ceil(recordCount / pageSize) - 1)
     const pageIndex = Math.min(pageMaxIndex, Math.max(0, Number(p.pageIndex) || 0))
     const result = {
