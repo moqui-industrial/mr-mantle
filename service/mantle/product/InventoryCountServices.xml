@@ -286,7 +286,9 @@ along with this software (see the LICENSE.md file). If not, see
             changed request is OPERATION_KEY_CONFLICT). The lines are grouped into disjoint stock buckets (an asset; stock
             found by product, location and lot), each posted in its own transaction (post#CountLines) with its summed delta
             added once, so the variance SECA values each asset once per count (F5). A bucket that fails is named with its
-            reason and the others post; a move since the review returns its lines to conflict (STOCK_MOVED). Lines already
+            reason and the others post; a move since the review returns its lines to conflict (STOCK_MOVED), and an effective
+            date in a closed fiscal period of the facility's or stock's owner fails each bucket (PERIOD_CLOSED, StockPosting.js's
+            period step, F240). Lines already
             posted are skipped, so a new attempt posts only what failed. Uncounted and skipped lines change nothing. With
             every line posted or skipped the count is complete. Refuses a count not reviewed (COUNT_NOT_IN_REVIEW,
             COUNT_NOT_REVIEWED) or reviewed again since (REVIEW_CHANGED) and a future date (DATE_INVALID).</description>
@@ -310,7 +312,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="post" noun="CountLines" allow-remote="false">
         <description>One stock bucket of post#Count, in the caller's transaction (post#Count runs each in its own): the lines
             locked, then the asset, then the location (stock found); the asset still where the line found it with no movement
-            since the review (STOCK_MOVED) and no earlier variance of this count (ALREADY_POSTED); the summed delta through
+            since the review (STOCK_MOVED), the fiscal period of the date open for the facility's and the stock's owner
+            (PERIOD_CLOSED), and no earlier variance of this count (ALREADY_POSTED); the summed delta through
             change#AssetQuantity, or for stock found a new asset (create#ProductAssetAdHoc, at an open location) with its
             AssetDetail; a decrease beyond on hand is QUANTITY_EXCEEDS_ON_HAND. Each line is marked posted with the asset and
             AssetDetail, and FacilityLocation.lastCountDate and ProductFacility.lastCountDate take its count time. Needs
