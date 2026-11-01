@@ -2502,6 +2502,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
             <parameter name="workEffortOnly" type="Boolean" default="false">
                 <description>Issue only to WorkEffort, not to Order, Shipment, or Invoice</description></parameter>
+            <parameter name="componentProductId"><description>The component to issue for a pick assembly source
+                (pack#ShipmentAssemblyComponent); defaults to the source's own product (impl-warehouse P12,
+                F282).</description></parameter>
             <parameter name="assetId"><description>Issue this asset only, of the source's product at the shipment's origin
                 facility, in any status (a supplier return sends back quarantined stock, which reservation never selects;
                 WarehouseTaskServices.issue#SupplierReturnStock), up to its quantity on hand: its other reservations are
@@ -2527,7 +2530,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <return type="warning" message="No origin Facility found for Shipment ${shipmentId}, ShipmentItemSource ${shipmentItemSourceId}, not trying to issue other inventory"/></if>
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
 
-            <set field="productId" from="shipmentItemSource.productId"/>
+            <set field="productId" from="componentProductId || shipmentItemSource.productId"/>
             <set field="productStoreId" from="shipment.productStoreId"/>
             <set field="vendorPartyId" from="shipment.fromPartyId"/>
             <set field="customerPartyId" from="shipment.toPartyId"/>
@@ -2601,8 +2604,16 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="assetList" entry="asset">
                 <set field="curQuantity" from="toDecimal(asset.availableToPromiseTotal).compare(quantityRemaining) &gt; 0 ? quantityRemaining : asset.availableToPromiseTotal"/>
                 <if condition="!toDecimal(curQuantity).isZero()">
-                    <service-call name="mantle.product.AssetServices.issue#Asset"
-                            in-map="Object.assign({}, baseMap, {quantity:curQuantity, issuedDate:issuedDate, assetId:asset.assetId})"/>
+                    <if condition="workEffortOnly"><then>
+                        <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                        <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                in-map="{assetId:asset.assetId, workEffortId:workEffortId,
+                                    quantity:curQuantity, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                    </then><else>
+                        <service-call name="mantle.product.AssetServices.issue#Asset"
+                                in-map="Object.assign({}, baseMap, {quantity:curQuantity,
+                                    issuedDate:issuedDate, assetId:asset.assetId})"/>
+                    </else></if>
                     <set field="quantityRemaining" from="toDecimal(quantityRemaining).subtract(curQuantity)"/>
                     <if condition="toDecimal(quantityRemaining).isZero()"><break/></if>
                 </if>
@@ -2628,8 +2639,16 @@ along with this software (see the LICENSE.md file). If not, see
                         <service-call name="mantle.product.AssetServices.displace#AssetReservations"
                                 in-map="{assetId:asset.assetId, quantity:curQuantity}"/>
 
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:curQuantity, issuedDate:issuedDate, assetId:asset.assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:asset.assetId, workEffortId:workEffortId,
+                                        quantity:curQuantity, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:curQuantity,
+                                        issuedDate:issuedDate, assetId:asset.assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(quantityRemaining).subtract(curQuantity)"/>
                         <if condition="toDecimal(quantityRemaining).isZero()"><break/></if>
                     </if>
@@ -2649,16 +2668,32 @@ along with this software (see the LICENSE.md file). If not, see
                         <order-by field-name="-receivedDate,-assetId"/>
                     </entity-find>
                     <if condition="(recentAssetList?.length > 0)"><then>
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:quantityRemaining, issuedDate:issuedDate, assetId:recentAssetList[0].assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:recentAssetList[0].assetId, workEffortId:workEffortId,
+                                        quantity:quantityRemaining, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:quantityRemaining,
+                                        issuedDate:issuedDate, assetId:recentAssetList[0].assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(0)"/>
                     </then><else>
                         <!-- no asset... create a shell one to record the reservation and detail against -->
                         <service-call name="mantle.product.AssetServices.create#ProductAssetAdHoc" out-map="createAssetOut"
                                 in-map="{productId:productId, facilityId:facilityId, ownerPartyId:vendorPartyId,
                                     createdDate:nowTimestamp}"/>
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:quantityRemaining, issuedDate:issuedDate, assetId:createAssetOut.assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:createAssetOut.assetId, workEffortId:workEffortId,
+                                        quantity:quantityRemaining, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:quantityRemaining,
+                                        issuedDate:issuedDate, assetId:createAssetOut.assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(0)"/>
                     </else></if>
                 </if>
