@@ -238,12 +238,77 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="excludeOnPicklist"/>
             <parameter name="excludeNotPickLoc"/>
             <parameter name="onlyPartlyShipped"/>
+
+            <!-- the guarded wave (impl-warehouse P11, design-warehouse CreatePicklists): with an operation key -->
+            <parameter name="operationKey"><description>Given, the guarded create: SHIPMENT_LOAD_EDIT and the facility's
+                organization checked, a retry answering the first result, each group its own operation and transaction
+                (create#ShipmentLoadGroup) whose order parts are checked again under their locks, a failed group named and
+                the others created. Without it the service creates as it always has.</description></parameter>
+            <parameter name="orderParts" type="List"><description>The order parts to consider (maps of orderId and
+                orderPartSeqId, or "orderId:orderPartSeqId"), instead of the search of inputFieldsMap.</description></parameter>
+            <parameter name="groups"><description>The groups of a preview to create (a List, or its JSON text): groupKey,
+                workEffortName, orderParts.</description></parameter>
+            <parameter name="assigneePartyId"><description>A picker put on each new load (WorkEffortParty, Worker).</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="picklistsCreated" type="Long"/>
             <parameter name="workEffortIdList" type="List"><parameter name="workEffortId"/></parameter>
+            <parameter name="groupResults" type="List"><description>The guarded create's result per group: groupKey, ok,
+                workEffortId, added (orderId, orderPartSeqId, binLocationNumber, shipmentIds), excluded, or reasonCode and
+                message.</description></parameter>
+            <parameter name="excludedParts" type="List"><description>The guarded create's order parts left out before
+                grouping, each with its reasonCode and message.</description></parameter>
+            <parameter name="result" type="Map"><description>The guarded create's stored answer.</description></parameter>
         </out-parameters>
         <actions>
+            <if condition="operationKey">
+                <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+                <set field="loads" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')"/>
+                <set field="begun" from="posting.begin(context, 'ShipmentLoadWave', 'SHIPMENT_LOAD_EDIT', ['facilityId',
+                        'workEffortName', 'ordersPerPicklist', 'orderParts', 'groups', 'excludeOnPicklist',
+                        'excludeNotPickLoc', 'onlyPartlyShipped', 'assigneePartyId'])"/>
+                <set field="result" from="begun.previous"/>
+                <if condition="!result">
+                    <set field="userScope" from="posting.scope()"/>
+                    <set field="facility" from="posting.facility(userScope, facilityId)"/>
+                    <set field="groupList" from="loads.groupsOf(groups)"/>
+                    <set field="excludedParts" from="[]"/>
+                    <if condition="!groupList">
+                        <if condition="orderParts"><then>
+                            <set field="candidates" from="loads.partsOf(orderParts)"/>
+                        </then><else>
+                            <service-call name="mantle.work.ShipmentWorkServices.find#ShipmentLoadCandidates"
+                                    out-map="found" in-map="{facilityId:facilityId, inputFieldsMap:inputFieldsMap,
+                                        orderByField:orderByField}"/>
+                            <set field="candidates" from="found.orderParts"/>
+                        </else></if>
+                        <set field="previewed" from="loads.preview(context, candidates)"/>
+                        <set field="groupList" from="previewed.groups"/>
+                        <set field="excludedParts" from="previewed.excludedRows"/>
+                    </if>
+                    <set field="batch" from="posting.batch(context, groupList, group =&gt; String(group.groupKey),
+                            'mantle.work.ShipmentWorkServices.create#ShipmentLoadGroup', group =&gt; ({facilityId: facilityId,
+                                workEffortName: group.workEffortName || (workEffortName + ' ' + group.groupKey),
+                                estimatedStartDate: estimatedStartDate, orderParts: group.orderParts,
+                                excludeOnPicklist: excludeOnPicklist, excludeNotPickLoc: excludeNotPickLoc,
+                                onlyPartlyShipped: onlyPartlyShipped, assigneePartyId: assigneePartyId}))"/>
+                    <set field="groupResults" from="batch.results.map(row =&gt; ({groupKey: row.key, ok: row.ok,
+                            workEffortId: row.result?.workEffortId || null, workEffortName: row.result?.workEffortName || null,
+                            added: row.result?.added || [], excluded: row.result?.excluded || [],
+                            reasonCode: row.reasonCode || null, message: row.message || null}))"/>
+                    <set field="createdIds" from="groupResults.filter(row =&gt; row.ok).map(row =&gt; row.workEffortId)"/>
+                    <set field="result" from="posting.complete(begun.op, facility.ownerPartyId, 'mantle.facility.Facility',
+                            facilityId, {resultCode: 'CREATED', facilityId: facilityId, picklistsCreated: createdIds.length,
+                                workEffortIdList: createdIds, groupResults: groupResults, excludedParts: excludedParts,
+                                okCount: batch.okCount, failedCount: batch.failedCount})"/>
+                </if>
+                <set field="picklistsCreated" from="result.picklistsCreated"/>
+                <set field="workEffortIdList" from="result.workEffortIdList"/>
+                <set field="groupResults" from="result.groupResults"/>
+                <set field="excludedParts" from="result.excludedParts"/>
+                <return/>
+            </if>
             <set field="excludeOnPicklist" from="excludeOnPicklist || inputFieldsMap.excludeOnPicklist || 'true'"/>
             <set field="excludeNotPickLoc" from="excludeNotPickLoc || inputFieldsMap.excludeNotPickLoc || 'true'"/>
             <set field="onlyPartlyShipped" from="onlyPartlyShipped || inputFieldsMap.onlyPartlyShipped || 'false'"/>
@@ -320,6 +385,203 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <message type="success">Created ${picklistsCreated} picklists for ${orderPartList.length} orders</message>
+        </actions>
+    </service>
+
+    <!-- ===== Warehouse picklists (impl-warehouse P11, design-warehouse §9): the wave preview, a group of the guarded
+        wave create, and PicklistDetail's edits; each checks SHIPMENT_LOAD_EDIT and the facility's organization, and checks
+        again what the screen posts back (ShipmentLoads.js) ===== -->
+    <service verb="find" noun="ShipmentLoadCandidates" allow-remote="false">
+        <description>The order parts create#ShipmentLoadsForOrders' search reaches at a facility (its inputFieldsMap over
+            OrderPartFindView: approved or held parts of internal vendors with product items), before any eligibility rule,
+            at most 500; preview#ShipmentLoadsForOrders then says which can go on a load and why not. Requires
+            SHIPMENT_LOAD_EDIT.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="inputFieldsMap" type="Map"/>
+            <parameter name="orderByField"/>
+        </in-parameters>
+        <out-parameters><parameter name="orderParts" type="List"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')
+                .requirePermission('SHIPMENT_LOAD_EDIT')</script>
+            <set field="inputFieldsMap" from="inputFieldsMap ?? {}"/>
+            <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
+                <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
+            <set field="itemTypeEnumIdList" from="productItemTypeEgms.map((it) =&gt; it.enumId)"/>
+            <entity-find entity-name="mantle.order.OrderPartFindView" list="candidateList" limit="500" distinct="true">
+                <search-form-inputs default-order-by="${orderByField || 'orderId,orderPartSeqId'}" paginate="false"
+                        input-fields-map="inputFieldsMap"
+                        skip-fields="vendorRoleTypeId,customerRoleTypeId,customerClassificationId,itemTypeEnumId,orderType,
+                            facilityId,workEffortId,partStatusId"/>
+                <econdition field-name="partStatusId" operator="in" value="OrderApproved,OrderHold"/>
+                <econdition field-name="vendorRoleTypeId" value="OrgInternal"/>
+                <econdition field-name="itemTypeEnumId" operator="in" from="itemTypeEnumIdList"/>
+                <econdition field-name="facilityId"/>
+                <select-field field-name="orderId,orderPartSeqId"/>
+            </entity-find>
+            <set field="orderParts"
+                    from="candidateList.map((it) =&gt; ({orderId: it.orderId, orderPartSeqId: it.orderPartSeqId}))"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ShipmentLoadsForOrders" allow-remote="false">
+        <description>CreatePicklists' LoadPreview (design-warehouse §9): the order parts given (orderParts) or found
+            (find#ShipmentLoadCandidates), each checked as the guarded create checks it, the eligible put in groups of
+            ordersPerPicklist in order with their staging bins, the excluded named with their reason (ORDER_HELD,
+            NOT_APPROVED, OTHER_FACILITY, ON_PICKLIST, NOTHING_TO_SHIP, NOT_PARTLY_SHIPPED, NOT_RESERVED_AT_PICK with the
+            shortfall). Selecting a wave reserves nothing; reads only. Requires SHIPMENT_LOAD_EDIT; refuses a facility outside
+            the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="workEffortName" default-value="Picklist"/>
+            <parameter name="ordersPerPicklist" type="Long" default="10"/>
+            <parameter name="orderByField"/>
+            <parameter name="inputFieldsMap" type="Map"/>
+            <parameter name="orderParts" type="List"/>
+            <parameter name="excludeOnPicklist"/>
+            <parameter name="excludeNotPickLoc"/>
+            <parameter name="onlyPartlyShipped"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="groups" type="List"><description>groupKey, workEffortName, orderParts (orderId,
+                orderPartSeqId, binLocationNumber).</description></parameter>
+            <parameter name="partRows" type="List"><description>The eligible parts: orderId, orderPartSeqId, customerName,
+                itemCount, quantity, reservedAtPick, groupKey, binLocationNumber.</description></parameter>
+            <parameter name="excludedRows" type="List"><description>The others with reasonCode, message and
+                shortfall.</description></parameter>
+            <parameter name="previewFingerprint"/>
+        </out-parameters>
+        <actions>
+            <set field="loads" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')"/>
+            <if condition="orderParts"><then>
+                <set field="candidates" from="loads.partsOf(orderParts)"/>
+            </then><else>
+                <service-call name="mantle.work.ShipmentWorkServices.find#ShipmentLoadCandidates" out-map="found"
+                        in-map="{facilityId:facilityId, inputFieldsMap:inputFieldsMap, orderByField:orderByField}"/>
+                <set field="candidates" from="found.orderParts"/>
+            </else></if>
+            <set field="previewed" from="loads.preview(context, candidates)"/>
+            <set field="groups" from="previewed.groups"/>
+            <set field="partRows" from="previewed.partRows"/>
+            <set field="excludedRows" from="previewed.excludedRows"/>
+            <set field="previewFingerprint" from="previewed.previewFingerprint"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ShipmentLoadGroup" allow-remote="false">
+        <description>One group of the guarded create#ShipmentLoadsForOrders, as its own operation (the wave's key and the
+            group's): its order parts locked and checked again (the excluded named in the answer), a load of the facility
+            (create#ShipmentLoadShip) with the eligible parts added in bin order (add#OrderPartToShipmentLoad) and the
+            picker assigned; NOTHING_ELIGIBLE when none can go on a load now. Requires SHIPMENT_LOAD_EDIT.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="workEffortName" required="true"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="orderParts" type="List" required="true"/>
+            <parameter name="excludeOnPicklist"/>
+            <parameter name="excludeNotPickLoc"/>
+            <parameter name="onlyPartlyShipped"/>
+            <parameter name="assigneePartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CREATED, workEffortId, workEffortName, added,
+                excluded, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="loads" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentLoadGroup', 'SHIPMENT_LOAD_EDIT', ['facilityId',
+                    'workEffortName', 'orderParts', 'excludeOnPicklist', 'excludeNotPickLoc', 'onlyPartlyShipped',
+                    'assigneePartyId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="created" from="loads.createGroup(context)"/>
+            <set field="result" from="posting.complete(begun.op, created.facility.ownerPartyId, 'mantle.work.effort.WorkEffort',
+                    created.workEffortId, {resultCode: 'CREATED', workEffortId: created.workEffortId,
+                        workEffortName: created.workEffortName, added: created.added, excluded: created.excluded})"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ShipmentLoad" allow-remote="false">
+        <description>Picklists' NewPicklist and PicklistDetail's LoadHeader: a manual load of a facility of the user's
+            organizations (create#ShipmentLoadShip, a WetEvent of purpose WepShipmentShip owned by the facility owner, with
+            an optional picker), or an open load's name, dates and description (LOAD_CLOSED once complete, closed or
+            cancelled). Requires SHIPMENT_LOAD_EDIT; refuses a facility or load outside the scope (RECORD_UNAVAILABLE), no
+            name (NAME_REQUIRED), a picker who is not a person of the facility owner (PARTY_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="assigneePartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')
+                    .storeLoad(context)"/>
+            <set field="workEffortId" from="stored.workEffortId"/>
+            <set field="created" from="stored.created"/>
+        </actions>
+    </service>
+    <service verb="edit" noun="ShipmentLoadMember" allow-remote="false">
+        <description>PicklistDetail's LoadShipments: memberAction addOrder (an order part of the load's facility, approved,
+            not held and not on a load: add#OrderPartToShipmentLoad), addShipment (an open shipment leaving the facility, not
+            on another load: add#ShipmentToShipmentLoad), remove (a shipment of the load nothing of which is picked;
+            PICK_STARTED otherwise) or bin (the staging bin, on the shipment and on each of its lines that has one, since a
+            line's bin wins, F18). Requires SHIPMENT_LOAD_EDIT; refuses a load outside the scope or a shipment not leaving its
+            facility (RECORD_UNAVAILABLE), a closed load (LOAD_CLOSED), a bin not above zero (BIN_INVALID) and the wave's
+            reasons for an order part.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="memberAction" required="true"/>
+            <parameter name="shipmentId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="binLocationNumber"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shipmentIds" type="List"/>
+            <parameter name="binLocationNumber"/>
+        </out-parameters>
+        <actions>
+            <set field="edited" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')
+                    .editMember(context)"/>
+            <set field="shipmentIds" from="edited.shipmentIds"/>
+            <set field="binLocationNumber" from="edited.binLocationNumber"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ShipmentLoadAssignment" allow-remote="false">
+        <description>PicklistDetail's LoadPeople and LoadEquipment: assignmentKind party (a person of the facility owner as
+            picker, Worker, or supervisor, Manager: WorkEffortParty) or equipment (a non-stock asset of the load's facility
+            that has not left and is on no other open load: WorkEffortAssetAssign), or with endAssignment Y the assignment of
+            that fromDate ended now. Requires SHIPMENT_LOAD_EDIT; refuses a load outside the scope (RECORD_UNAVAILABLE), a
+            closed load (LOAD_CLOSED), PARTY_UNAVAILABLE, ROLE_INVALID, EQUIPMENT_UNAVAILABLE, EQUIPMENT_BUSY and an unknown
+            assignment (ASSIGNMENT_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="assignmentKind" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="assetId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="endAssignment"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ShipmentLoads.js')
+                    .storeAssignment(context)"/>
+            <set field="fromDate" from="stored.fromDate ?? fromDate"/>
+            <set field="ended" from="stored.ended"/>
         </actions>
     </service>
 
