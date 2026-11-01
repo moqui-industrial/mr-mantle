@@ -31,8 +31,18 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId"/>
         </out-parameters>
         <actions>
+            <!-- an internal stock request (impl-warehouse P15 WH-REQUEST) names the facility the stock is for, one of the
+                user's organizations' (FACILITY_REQUIRED, RECORD_UNAVAILABLE); that organization is its OrgInternal party -->
+            <set field="inventoryRequest" from="null"/>
+            <if condition="requestTypeEnumId == 'RqtInventory'">
+                <set field="inventoryRequests" value="component://mr-mantle/service/mantle/request/InventoryRequests.js"/>
+                <set field="inventoryRequest" from="ec.resource.script(inventoryRequests).validate(context)"/>
+            </if>
             <set field="visitId" from="ec.user.visitId"/>
             <service-call name="create#mantle.request.Request" out-map="context" in-map="context"/>
+            <if condition="inventoryRequest"><service-call name="create#mantle.request.RequestParty"
+                    in-map="{requestId:requestId, partyId:inventoryRequest.organizationPartyId, roleTypeId:'OrgInternal',
+                        fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="filedByPartyId"><service-call name="create#mantle.request.RequestParty"
                     in-map="{requestId:requestId, partyId:filedByPartyId, roleTypeId:'Reporter', fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="assignToPartyId"><service-call name="create#mantle.request.RequestParty"
@@ -41,6 +51,89 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{requestId:requestId, partyId:customerPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="clientPartyId"><service-call name="create#mantle.request.RequestParty"
                     in-map="{requestId:requestId, partyId:clientPartyId, roleTypeId:'Customer', fromDate:ec.user.nowTimestamp}"/></if>
+        </actions>
+    </service>
+    <!-- ===== internal stock requests (impl-warehouse P15 WH-REQUEST, crosscut §3.11 InventoryRequestProgress) ===== -->
+    <service verb="add" noun="InventoryRequestItem" allow-remote="false">
+        <description>Add an item to a draft or submitted internal stock request (RqtInventory): a stocked product and a
+            quantity in its stock unit, needed by a date (the request's response date by default). Refuses a request outside
+            the user's organizations or of another type (RECORD_UNAVAILABLE), one past submission (REQUEST_CLOSED), a product
+            that is not stocked (NOT_STOCK, PRODUCT_REQUIRED) and a quantity not above zero (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="productId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters><parameter name="requestItemSeqId"/></out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/request/InventoryRequests.js')
+                    .addItem(context)"/>
+            <set field="requestItemSeqId" from="added.requestItemSeqId"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="InventoryRequest" allow-remote="false">
+        <description>Approve an internal stock request under stock authority (design-warehouse §8 RequestDetail): each item an
+            approved RqTpInventory Requirement of the request's facility for its product and quantity, linked through
+            RequirementRequestItem (an item already linked keeps its requirement), and the request in progress
+            (update#Request), ready to allocate (WarehouseTaskServices.allocate#InventoryRequest). It duplicates no purchase
+            request and moves no stock. A retry with the same operation key answers the first. Requires STOCK_POLICY_PLAN
+            (PERMISSION_DENIED); refuses a request outside the user's organizations or of another type (RECORD_UNAVAILABLE),
+            one not submitted (NOT_SUBMITTED), one with no items (NO_ITEMS), and an item with no stocked product or quantity
+            (NOT_STOCK, ITEM_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="requestId" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode APPROVED, requestId, requirementIds, statusId, and
+                the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="requests" from="ec.resource.script('component://mr-mantle/service/mantle/request/InventoryRequests.js')"/>
+            <set field="begun" from="posting.begin(context, 'InventoryRequestApprove', 'STOCK_POLICY_PLAN',
+                    ['requestId', 'comments'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <script>requests.requestOf(requestId, true)</script>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="approved" from="requests.approve(userScope, context)"/>
+            <set field="result" from="posting.complete(begun.op, approved.organizationPartyId, 'mantle.request.Request',
+                    requestId, {resultCode: 'APPROVED', requestId: requestId, requirementIds: approved.requirementIds,
+                        statusId: approved.statusId})"/>
+        </actions>
+    </service>
+    <service verb="get" noun="InventoryRequestProgress" allow-remote="false">
+        <description>An internal stock request's progress, read from its movements (crosscut §3.11 InventoryRequestProgress):
+            for each item the requested, approved (its approved Requirements), allocated (transfer lines and moves not
+            cancelled), transferred (issued on its transfer lines, or moved), received (accepted at the request's facility, or
+            moved), in transit and remaining quantity, in the product's stock unit, with its requirement ids and each
+            allocation's shipment line or asset. Refuses a request outside the user's organizations or of another type
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="facilityId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="itemRows" type="List"><description>requestItemSeqId, productId, productName, quantityUomId,
+                requiredByDate, facilityId, requested, approved, allocated, transferred, received, inTransit, remaining,
+                requirementIds, links (allocationId, kind transfer or move, shipmentId, shipmentItemSourceId, assetId,
+                quantity, sent, received, statusId, cancelled).</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/request/InventoryRequests.js')
+                    .progress(context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="facilityId" from="answer.facilityId"/>
+            <set field="organizationPartyId" from="answer.organizationPartyId"/>
+            <set field="itemRows" from="answer.itemRows"/>
         </actions>
     </service>
     <service verb="update" noun="Request">

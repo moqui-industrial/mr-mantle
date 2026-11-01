@@ -104,6 +104,76 @@ function reservedAt(userScope, sh, source, p, quantity, containerId) {
         )
     return assets
 }
+// A transfer line's stock at the location (and the asset, when one was scanned): a transfer has no order and so no
+// reservation (impl-warehouse P15), so the pick takes the line's product available at the origin (available or on a
+// receiving hold, never held stock, with available to promise: stock reserved for orders stays theirs), each asset locked in
+// id order; refuses less there than the quantity (NOT_AVAILABLE_HERE).
+function transferStockAt(userScope, sh, source, p, quantity, containerId) {
+    if (blank(p.assetId) && blank(p.locationSeqId))
+        denied("ASSET_REQUIRED", "Scan the stock or the location to pick line " + source.shipmentItemSourceId + " from")
+    let query = find(ASSET, {facilityId: sh.facilityId, productId: source.productId})
+        .condition("availableToPromiseTotal", "greater", 0)
+        .orderBy("assetId")
+    if (!blank(p.assetId)) query = query.condition("assetId", p.assetId)
+    if (!blank(p.locationSeqId)) query = query.condition("locationSeqId", p.locationSeqId)
+    let available = 0
+    const assets = []
+    for (const candidate of Array.from(query.list())) {
+        if (containerId && candidate.containerId === containerId) continue
+        const asset = posting.stock(userScope, candidate.assetId, null)
+        if (posting.heldStatuses.includes(asset.statusId))
+            denied("HELD_STOCK", "Asset " + asset.assetId + " is " + asset.statusId + "; held stock is not picked")
+        if (!["AstAvailable", "AstOnHold"].includes(asset.statusId)) continue
+        available += number(asset.availableToPromiseTotal)
+        assets.push(asset)
+    }
+    if (available < quantity)
+        denied(
+            "NOT_AVAILABLE_HERE",
+            "Only " + text(available) + " of " + source.productId + " is available" +
+                (blank(p.locationSeqId) ? "" : " at " + p.locationSeqId) + " for line " + source.shipmentItemSourceId
+        )
+    return assets
+}
+// A transfer line's pick: each asset's available quantity in id order, moved into the pick container (move#Asset, no
+// reservation) when there is one; the line's quantityPicked raised. Answers what pickMove#ShipmentProduct answers.
+function pickTransfer(sh, source, assets, quantity, containerId) {
+    const container = containerId ? one("mantle.product.asset.Container", {containerId}) : null
+    const pickedMoveList = []
+    let left = quantity
+    for (const asset of assets) {
+        if (left <= 0) break
+        const take = Math.min(left, number(asset.availableToPromiseTotal))
+        if (!(take > 0)) continue
+        const moved = container
+            ? call("mantle.product.AssetServices.move#Asset", {
+                  assetId: asset.assetId,
+                  quantity: take,
+                  facilityId: container.facilityId,
+                  locationSeqId: container.locationSeqId,
+                  containerId: container.containerId
+              })
+            : {}
+        pickedMoveList.push({
+            shipmentItemSourceId: source.shipmentItemSourceId,
+            assetReservationId: null,
+            assetId: asset.assetId,
+            fromLocationSeqId: asset.locationSeqId || null,
+            fromContainerId: asset.containerId || null,
+            toAssetId: moved.newAssetId || asset.assetId,
+            toContainerId: container?.containerId || null,
+            quantity: text(take)
+        })
+        left -= take
+    }
+    const quantityPicked = quantity - left
+    const fresh = one(SOURCE, {shipmentItemSourceId: source.shipmentItemSourceId})
+    call("update#" + SOURCE, {
+        shipmentItemSourceId: fresh.shipmentItemSourceId,
+        quantityPicked: number(fresh.quantityPicked) + quantityPicked
+    })
+    return {quantityPicked, pickedMoveList}
+}
 // The entered quantity fields of a guarded pick (F7): what the picker entered, in the stock unit, factor 1.
 function recordEntered(source) {
     const fresh = one(SOURCE, {shipmentItemSourceId: source.shipmentItemSourceId})
@@ -480,6 +550,8 @@ function pickFaceReplenishment(p) {
     shortOf,
     quantityToPick,
     reservedAt,
+    transferStockAt,
+    pickTransfer,
     recordEntered,
     expiryWarnings,
     shortPlan,

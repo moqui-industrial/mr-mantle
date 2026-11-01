@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Transfers, stock requests and the subcontract dispatch (design-warehouse §8, §17 WH-REQUEST and WH-SUBCONTRACT;
+    impl-warehouse P15). A transfer is a ShpTpTransfer shipment between two facilities of one owner (its route segment's
+    origin and destination, F55), issued at the origin and received at the destination by the guarded entry points of
+    mantle.shipment.WarehouseTaskServices. A subcontract dispatch is a transfer to or from an organization-owned
+    vendor-custody facility (a FacilityParty in the Custodian role) that names the production work it is for and the
+    service purchase order item (OrderItemWorkEffort links the two). An internal stock request (RqtInventory) is approved
+    into Requirements (RequirementRequestItem) and allocated by transfers or moves, each allocation one row here. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Shipment" package="mantle.shipment">
+        <!-- WH-SUBCONTRACT: the production work (a run's operation, or the run) and the service PO item a dispatch of
+            components, or the return of what was not used, is for; set by create#Transfer and never changed -->
+        <field name="subcontractWorkEffortId" type="id"/>
+        <field name="subcontractOrderId" type="id"/>
+        <field name="subcontractOrderItemSeqId" type="id"/>
+        <relationship type="one" title="Subcontract" related="mantle.work.effort.WorkEffort" short-alias="subcontractWorkEffort">
+            <key-map field-name="subcontractWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="Subcontract" related="mantle.order.OrderItem" short-alias="subcontractOrderItem">
+            <key-map field-name="subcontractOrderId" related="orderId"/>
+            <key-map field-name="subcontractOrderItemSeqId" related="orderItemSeqId"/></relationship>
+    </extend-entity>
+    <entity entity-name="InventoryRequestAllocation" package="mantle.request" cache="never">
+        <description>Stock allocated to an internal stock request item (WH-REQUEST): a line of a transfer shipment to the
+            request's facility, or a guarded move within it (the asset the quantity moved into). Written by
+            mantle.shipment.WarehouseTaskServices.allocate#InventoryRequest; read by
+            mantle.request.RequestServices.get#InventoryRequestProgress, which takes what was issued and received from the
+            shipment line's own movements.</description>
+        <field name="allocationId" type="id" is-pk="true"/>
+        <field name="requestId" type="id" not-null="true"/>
+        <field name="requestItemSeqId" type="id" not-null="true"/>
+        <field name="allocationTypeEnumId" type="id"><description>IratTransfer or IratMove.</description></field>
+        <field name="quantity" type="number-decimal"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentItemSourceId" type="id"/>
+        <field name="fromFacilityId" type="id"/>
+        <field name="assetId" type="id"><description>For a move, the asset the quantity is in after it.</description></field>
+        <field name="operationKey" type="id"><description>The posting operation that allocated it.</description></field>
+        <field name="allocatedByUserId" type="id"/>
+        <field name="allocatedDate" type="date-time"/>
+        <relationship type="one" related="mantle.request.RequestItem" short-alias="requestItem">
+            <key-map field-name="requestId"/><key-map field-name="requestItemSeqId"/></relationship>
+        <relationship type="one" title="InventoryRequestAllocationType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="allocationTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one" related="mantle.shipment.ShipmentItemSource" short-alias="source"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <index name="INV_REQ_ALLOC_ITEM"><index-field name="requestId"/><index-field name="requestItemSeqId"/></index>
+        <index name="INV_REQ_ALLOC_SRC"><index-field name="shipmentItemSourceId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Inventory Request Allocation Type" enumTypeId="InventoryRequestAllocationType"/>
+            <moqui.basic.Enumeration enumId="IratTransfer" description="Transfer" enumTypeId="InventoryRequestAllocationType"/>
+            <moqui.basic.Enumeration enumId="IratMove" description="Move" enumTypeId="InventoryRequestAllocationType"/>
+            <!-- WH-SUBCONTRACT (impl-warehouse F22): the supplier holding the organization's stock in a vendor-custody
+                facility; the facility itself stays the organization's (Facility.ownerPartyId), so receipts there stay its stock -->
+            <mantle.party.RoleType roleTypeId="Custodian" description="Custodian"/>
+        </seed-data>
+    </entity>
+</entities>
