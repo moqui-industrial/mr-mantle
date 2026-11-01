@@ -2502,6 +2502,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
             <parameter name="workEffortOnly" type="Boolean" default="false">
                 <description>Issue only to WorkEffort, not to Order, Shipment, or Invoice</description></parameter>
+            <parameter name="componentProductId"><description>The component to issue for a pick assembly source
+                (pack#ShipmentAssemblyComponent); defaults to the source's own product (impl-warehouse P12,
+                F282).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="quantityRemaining" type="BigDecimal"/>
@@ -2522,7 +2525,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <return type="warning" message="No origin Facility found for Shipment ${shipmentId}, ShipmentItemSource ${shipmentItemSourceId}, not trying to issue other inventory"/></if>
             <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" cache="true"/>
 
-            <set field="productId" from="shipmentItemSource.productId"/>
+            <set field="productId" from="componentProductId || shipmentItemSource.productId"/>
             <set field="productStoreId" from="shipment.productStoreId"/>
             <set field="vendorPartyId" from="shipment.fromPartyId"/>
             <set field="customerPartyId" from="shipment.toPartyId"/>

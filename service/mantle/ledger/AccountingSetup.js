@@ -29,6 +29,7 @@ const preferenceFields = [
     "receiptInvoiceSelfBilledOnly",
     "returnSettlementRequired",
     "salesInvoiceFinalizedAtShip",
+    "kitCostFromComponents",
     "projectCostPostingEnabled",
     "taxGatewayConfigId",
     "invoicePayGatewayConfigId",

@@ -1938,4 +1938,432 @@ along with this software (see the LICENSE.md file). If not, see
                         warnings: warnings, reason: reason || null})"/>
         </actions>
     </service>
+    <!-- ===== packing (impl-warehouse P12, design-warehouse §10 Pack): the pack entry points, on StockPosting.js's steps with
+        Packing.js. A pack issues stock (it posts cost of goods sold), so it checks the fiscal period without locking it, as
+        the high-volume receipts do (F171). Lock order: the shipment, its source line, then the assets Mantle's pack locks by
+        id. ===== -->
+    <service verb="pack" noun="ShipmentStock" allow-remote="false">
+        <description>PackScan (design Pack): pack a quantity into a package of an outgoing shipment, through Mantle's
+            pack#ShipmentItemSource (one line, shipmentItemSourceId), pack#ShipmentProduct (a product's lines, productId) or
+            pack#ShipmentProductScan (a scanned product, asset, serial or identification; a component of a pick assembly on
+            the shipment packs through pack#ShipmentAssemblyComponent, whose kit produce#AvailableAssemblies costs, F41).
+            The package is the one given, else the shipment's newest, else a new one. A retry with the same operation key
+            answers the first. Requires SHIPMENT_PACK (PERMISSION_DENIED); refuses a shipment outside the user's
+            facilities, an incoming or drop shipment, a line of another shipment (RECORD_UNAVAILABLE), a shipment that
+            shipped (SHIPMENT_SHIPPED) or is packed (PACK_CLOSED: reopen a package), a cancelled line (SOURCE_CANCELLED), a
+            package not on the shipment (PACKAGE_UNAVAILABLE), no quantity (QUANTITY_INVALID) or more than is left to pack
+            (QUANTITY_EXCEEDS_REMAINING), held stock (HELD_STOCK), a closed fiscal period (PERIOD_CLOSED), a scan that
+            matches nothing left on the shipment (NOT_ON_SHIPMENT) and nothing to pack (RECORD_REQUIRED). Mantle's issue
+            refuses expired stock under the expiry gate.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId"/>
+            <parameter name="productId"/>
+            <parameter name="scanInput"/>
+            <parameter name="assetId"><description>The stock to pack, of the line's product (it need not be reserved; Mantle
+                moves other reservations off it).</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="shipmentPackageSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PACKED, shipmentId, shipmentPackageSeqId,
+                shipmentItemSourceId, productId, quantity, issuedQuantity, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <!-- 1. permission and operation key: a double scan answers the first pack -->
+            <set field="begun" from="posting.begin(context, 'ShipmentPack', 'SHIPMENT_PACK', ['shipmentId',
+                    'shipmentItemSourceId', 'productId', 'scanInput', 'assetId', 'quantity', 'shipmentPackageSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the shipment, then its line; what is left to pack -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <script>packing.requirePackable(sh)</script>
+            <if condition="shipmentItemSourceId"><then>
+                <set field="src" from="picking.sourceOf(sh, shipmentItemSourceId)"/>
+                <set field="packQuantity" from="packing.quantityToPack(packing.number(src.quantityNotHandled), quantity,
+                        'line ' + shipmentItemSourceId)"/>
+                <script>packing.requireNotHeld(src)</script>
+                <set field="packProductId" from="src.productId"/>
+            </then><else-if condition="productId">
+                <set field="productLines" from="packing.linesOf(sh).filter(line =&gt; line.productId == productId)"/>
+                <if condition="!productLines.length">
+                    <return error="true" message="NOT_ON_SHIPMENT: Product ${productId} is not on shipment ${shipmentId}"/>
+                </if>
+                <set field="packQuantity" from="packing.quantityToPack(productLines.reduce((sum, line) =&gt; sum + line.left, 0),
+                        quantity, productId)"/>
+                <script>for (const line of productLines) packing.requireNotHeld(line)</script>
+                <set field="packProductId" from="productId"/>
+            </else-if><else-if condition="scanInput">
+                <set field="packQuantity" from="packing.quantityToPack(Number.MAX_VALUE, quantity, scanInput)"/>
+                <set field="packProductId" from="null"/>
+            </else-if><else>
+                <return error="true" message="RECORD_REQUIRED: Scan or choose what to pack"/>
+            </else></if>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3-4. the package, and the period of the issue's cost of goods sold -->
+            <set field="packageSeqId" from="packing.activePackage(sh, shipmentPackageSeqId)"/>
+            <script>posting.period([sh.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <set field="issuedBefore" from="packing.issuedTotal(sh)"/>
+            <!-- 5. Mantle's pack -->
+            <if condition="shipmentItemSourceId"><then>
+                <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentItemSource" disable-authz="true"
+                        in-map="{shipmentItemSourceId:shipmentItemSourceId, quantity:packQuantity, assetId:assetId || null,
+                            shipmentPackageSeqId:packageSeqId}"/>
+            </then><else-if condition="productId">
+                <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentProduct" disable-authz="true"
+                        in-map="{productId:productId, shipmentId:shipmentId, quantity:packQuantity,
+                            assetId:assetId || null, shipmentPackageSeqId:packageSeqId}"/>
+            </else-if><else>
+                <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentProductScan" disable-authz="true"
+                        in-map="{shipmentId:shipmentId, scanInput:scanInput, quantity:packQuantity,
+                            shipmentPackageSeqId:packageSeqId}"/>
+            </else></if>
+            <set field="issuedQuantity" from="packing.issuedTotal(sh) - issuedBefore"/>
+            <if condition="!(issuedQuantity &gt; 0)">
+                <return error="true" message="NOT_ON_SHIPMENT: Nothing left to pack on shipment ${shipmentId} matches ${scanInput
+                        || productId || shipmentItemSourceId}"/>
+            </if>
+            <!-- 6. the answer -->
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'PACKED', shipmentId: shipmentId, shipmentPackageSeqId: packageSeqId,
+                        shipmentItemSourceId: shipmentItemSourceId || null, productId: packProductId,
+                        scanInput: scanInput || null, quantity: packing.text(packQuantity),
+                        issuedQuantity: packing.text(issuedQuantity)})"/>
+        </actions>
+    </service>
+    <service verb="pack" noun="ShipmentAssembly" allow-remote="false">
+        <description>PackAssembly (design Pack; crosscut §3.9 AssemblyReconciliation): pack a component of a pick assembly
+            on the shipment through Mantle's pack#ShipmentAssemblyComponent, which issues it to the shipment's assembly work
+            effort and, once a kit's components are there, makes the kit (produce#AvailableAssemblies: costed from the
+            component issuances with the organization's kitCostFromComponents, F41) and packs it. Unused components go back
+            when the pack completes (pack#Shipment). A retry answers the first. Requires SHIPMENT_PACK; refuses as
+            pack#ShipmentStock for the shipment, package, quantity and period, and Mantle's own refusals (a product that is
+            not a component of an assembly on the shipment, a component already issued in full, stock not
+            available).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="productId" required="true"><description>The component.</description></parameter>
+            <parameter name="assemblyProductId"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="shipmentPackageSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PACKED, shipmentId, shipmentPackageSeqId, productId,
+                assemblyProductId, quantity, assemblyWorkEffortId, kits (assetId, productId, quantity, and with
+                ACCOUNTING_VIEW acquireCost), and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentPackAssembly', 'SHIPMENT_PACK', ['shipmentId', 'productId',
+                    'assemblyProductId', 'quantity', 'assetId', 'shipmentPackageSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <script>packing.requirePackable(sh)</script>
+            <set field="packQuantity" from="packing.quantityToPack(Number.MAX_VALUE, quantity, productId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="packageSeqId" from="packing.activePackage(sh, shipmentPackageSeqId)"/>
+            <script>posting.period([sh.facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentAssemblyComponent" disable-authz="true"
+                    in-map="{shipmentId:shipmentId, productId:productId, assemblyProductId:assemblyProductId || null,
+                        quantity:packQuantity, assetId:assetId || null, shipmentPackageSeqId:packageSeqId}"/>
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="packedShipment" disable-authz="true"/>
+            <entity-find entity-name="mantle.product.receipt.AssetReceipt" list="kitReceipts" disable-authz="true">
+                <econdition field-name="workEffortId" from="packedShipment.assemblyWorkEffortId"/>
+                <order-by field-name="assetReceiptId"/>
+            </entity-find>
+            <!-- the kit's cost only with financial read (§2) -->
+            <set field="financialRead" from="ec.user.hasPermission('ACCOUNTING_VIEW')"/>
+            <set field="kits" from="Array.from(kitReceipts).map(receipt =&gt; {
+                    const kit = ec.entity.find('mantle.product.asset.Asset').condition('assetId', receipt.assetId)
+                        .disableAuthz().one()
+                    return {assetId: receipt.assetId, productId: receipt.productId,
+                        quantity: packing.text(receipt.quantityAccepted),
+                        acquireCost: financialRead &amp;&amp; kit?.acquireCost != null ? String(kit.acquireCost) : null}
+                })"/>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'PACKED', shipmentId: shipmentId, shipmentPackageSeqId: packageSeqId,
+                        productId: productId, assemblyProductId: assemblyProductId || null,
+                        quantity: packing.text(packQuantity), assemblyWorkEffortId: packedShipment.assemblyWorkEffortId,
+                        kits: kits})"/>
+        </actions>
+    </service>
+    <service verb="edit" noun="ShipmentPackage" allow-remote="false">
+        <description>PackageEditor and PackOptions (design Pack): action create (a new package, with a box type, weight and
+            unit), update (box type, weight, unit), weigh (the weight of the box type and contents,
+            get#ShipmentPackageWeight), delete (an empty package) or move (quantity of a product into another package, or
+            a new one with toPackageSeqId empty), on a shipment that is not packed yet. A box type must be in use and, when
+            the facility names its box types, one of them. Packing above a box type's maxWeight warns. A retry answers the
+            first. Requires SHIPMENT_PACK; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE), shipped
+            (SHIPMENT_SHIPPED) or packed (PACK_CLOSED), a package not on it (PACKAGE_UNAVAILABLE), a box type not used here
+            (BOX_TYPE_UNAVAILABLE), a negative weight (WEIGHT_INVALID), a weight that cannot be computed
+            (WEIGHT_UNAVAILABLE, naming why), a package that is not empty (PACKAGE_NOT_EMPTY), more than the package holds
+            (QUANTITY_EXCEEDS_PACKED) and an unknown action (ACTION_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="shipmentPackageSeqId"/>
+            <parameter name="shipmentBoxTypeId"/>
+            <parameter name="weight" type="BigDecimal"/>
+            <parameter name="weightUomId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="toPackageSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode (CREATED, UPDATED, WEIGHED, DELETED, MOVED),
+                shipmentId, shipmentPackageSeqId, toPackageSeqId, weight, weightUomId, shipmentBoxTypeId, warnings, and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentPackageEdit', 'SHIPMENT_PACK', ['shipmentId', 'action',
+                    'shipmentPackageSeqId', 'shipmentBoxTypeId', 'weight', 'weightUomId', 'productId', 'quantity',
+                    'toPackageSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!['create', 'update', 'weigh', 'delete', 'move'].includes(action)">
+                <return error="true" message="ACTION_INVALID: Choose create, update, weigh, delete or move"/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <script>packing.requirePackable(sh)</script>
+            <set field="pkg" from="action == 'create' ? null : packing.packageOf(sh, shipmentPackageSeqId)"/>
+            <set field="box" from="packing.boxTypeOf(sh, shipmentBoxTypeId || null)"/>
+            <if condition="weight != null &amp;&amp; toDecimal(weight).compare(0) &lt; 0">
+                <return error="true" message="WEIGHT_INVALID: A weight is not below zero"/>
+            </if>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="warnings" from="[]"/>
+            <set field="seqId" from="pkg?.shipmentPackageSeqId || null"/>
+            <set field="movedTo" from="null"/>
+            <if condition="action == 'create'">
+                <service-call name="mantle.shipment.ShipmentServices.create#ShipmentPackage" disable-authz="true"
+                        out-map="created" in-map="{shipmentId:shipmentId, shipmentBoxTypeId:box?.shipmentBoxTypeId || null,
+                            weight:weight, weightUomId:weightUomId || box?.weightUomId || null}"/>
+                <set field="seqId" from="created.shipmentPackageSeqId"/>
+                <set field="resultCode" value="CREATED"/>
+            </if>
+            <if condition="action == 'weigh'">
+                <service-call name="mantle.shipment.ShipmentServices.get#ShipmentPackageWeight" disable-authz="true"
+                        out-map="weighed" in-map="{shipmentId:shipmentId, shipmentPackageSeqId:seqId,
+                            shipmentBoxTypeId:box?.shipmentBoxTypeId || pkg.shipmentBoxTypeId || null,
+                            weightUomId:weightUomId || null}"/>
+                <if condition="weighed.weight == null">
+                    <set field="whyText" from="ec.message.getMessages().join('; ')"/>
+                    <return error="true" message="WEIGHT_UNAVAILABLE: Package ${seqId} cannot be weighed: ${whyText}"/>
+                </if>
+                <set field="weight" from="weighed.weight"/>
+                <set field="weightUomId" from="weighed.weightUomId"/>
+            </if>
+            <if condition="action == 'update' || action == 'weigh'">
+                <set field="changes" from="Object.fromEntries([['shipmentBoxTypeId', box?.shipmentBoxTypeId],
+                        ['weight', weight], ['weightUomId', weightUomId || (box ? box.weightUomId : null)]]
+                        .filter(entry =&gt; entry[1] != null))"/>
+                <service-call name="update#mantle.shipment.ShipmentPackage" disable-authz="true"
+                        in-map="Object.assign({shipmentId:shipmentId, shipmentPackageSeqId:seqId}, changes)"/>
+                <set field="resultCode" from="action == 'weigh' ? 'WEIGHED' : 'UPDATED'"/>
+            </if>
+            <if condition="action == 'delete'">
+                <if condition="packing.contentsOf(shipmentId, seqId).length">
+                    <return error="true" message="PACKAGE_NOT_EMPTY: Package ${seqId} is not empty; move its contents first"/>
+                </if>
+                <service-call name="mantle.shipment.ShipmentServices.delete#ShipmentPackage" disable-authz="true"
+                        in-map="{shipmentId:shipmentId, shipmentPackageSeqId:seqId}"/>
+                <set field="resultCode" value="DELETED"/>
+            </if>
+            <if condition="action == 'move'">
+                <set field="content" from="packing.contentsOf(shipmentId, seqId).find(row =&gt; row.productId == productId)"/>
+                <set field="held" from="packing.number(content?.quantity)"/>
+                <set field="moveQuantity" from="quantity == null ? held : packing.number(quantity)"/>
+                <if condition="!(moveQuantity &gt; 0) || moveQuantity &gt; held">
+                    <return error="true" message="QUANTITY_EXCEEDS_PACKED: Package ${seqId} holds ${packing.text(held)} of
+                            ${productId}"/>
+                </if>
+                <set field="movedTo" from="toPackageSeqId ? packing.packageOf(sh, toPackageSeqId).shipmentPackageSeqId : null"/>
+                <if condition="movedTo == seqId">
+                    <return error="true" message="PACKAGE_UNAVAILABLE: Choose another package to move to"/>
+                </if>
+                <service-call name="mantle.shipment.ShipmentServices.update#ShipmentPackageContent" disable-authz="true"
+                        in-map="{shipmentId:shipmentId, shipmentPackageSeqId:seqId, productId:productId,
+                            quantity:held - moveQuantity}"/>
+                <service-call name="mantle.shipment.ShipmentServices.add#ItemToPackage" disable-authz="true"
+                        out-map="added" in-map="{shipmentId:shipmentId, productId:productId, shipmentPackageSeqId:movedTo,
+                            quantity:moveQuantity}"/>
+                <set field="movedTo" from="added.shipmentPackageSeqId || movedTo"/>
+                <set field="resultCode" value="MOVED"/>
+            </if>
+            <!-- a weight above the box type's maximum warns -->
+            <set field="stored" from="action == 'delete' ? null : ec.entity.find('mantle.shipment.ShipmentPackage')
+                    .condition('shipmentId', shipmentId).condition('shipmentPackageSeqId', seqId).disableAuthz().one()"/>
+            <set field="storedBox" from="stored?.shipmentBoxTypeId ? ec.entity.find('mantle.shipment.ShipmentBoxType')
+                    .condition('shipmentBoxTypeId', stored.shipmentBoxTypeId).disableAuthz().one() : null"/>
+            <if condition="storedBox?.maxWeight != null &amp;&amp; stored.weight != null
+                    &amp;&amp; toDecimal(stored.weight).compare(storedBox.maxWeight) &gt; 0">
+                <script>warnings.push({code: 'OVER_MAX_WEIGHT', message: 'Package ' + seqId + ' weighs ' +
+                    String(stored.weight) + ', above the ' + String(storedBox.maxWeight) + ' its box type takes'})</script>
+            </if>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: resultCode, shipmentId: shipmentId, shipmentPackageSeqId: seqId,
+                        toPackageSeqId: movedTo, weight: stored?.weight != null ? String(stored.weight) : null,
+                        weightUomId: stored?.weightUomId || null, shipmentBoxTypeId: stored?.shipmentBoxTypeId || null,
+                        warnings: warnings})"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="Pack" allow-remote="false">
+        <description>CompletePack (design Pack): check the packed quantities (Packing.js completePlan: something packed,
+            every packed product in a package, no empty package and a weight on each, picked stock packed or put back, what is
+            left unpacked acknowledged) and release the shipment to shipping through Mantle's complete#ShipmentPack with
+            getLabels and getReturnLabels false (F17): no label is requested here, labels are bought in Ship (P13).
+            pack#Shipment lowers each line to what was packed, returns unused kit components, sets ShipPacked, and its SECA
+            (ShipmentOutgoingPackedCreateInvoices, which BOSS keeps) creates the sales invoice; with the organization's
+            salesInvoiceFinalizedAtShip (D3) it stays in process until the shipment ships. complete#ShipmentPack commits the
+            pack in its own transaction, so the checks hold no lock across it (F276): a retry answers the first by the
+            operation key. Requires SHIPMENT_PACK; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE),
+            shipped (SHIPMENT_SHIPPED) or packed (PACK_CLOSED), NOTHING_PACKED, UNPACKAGED, EMPTY_PACKAGE, WEIGHT_REQUIRED,
+            PUT_BACK_FIRST, OUTSTANDING (until acknowledged), and a pack Mantle did not complete (PACK_FAILED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="acknowledged"><description>Y: ship only what is packed; the lines are lowered to it.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode PACKED, shipmentId, statusId, packageCount, invoices
+                (invoiceId, statusId), labelsRequested (false), reduced (productId, quantity: left unpacked), and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentPackComplete', 'SHIPMENT_PACK', ['shipmentId',
+                    'acknowledged'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <!-- read, not locked: complete#ShipmentPack packs the shipment in its own transaction (F276) -->
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId, false)"/>
+            <script>packing.requirePackable(sh)</script>
+            <set field="plan" from="packing.completePlan(sh, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <service-call name="mantle.shipment.ShipmentServices.complete#ShipmentPack" disable-authz="true"
+                    in-map="{shipmentId:shipmentId, getLabels:false, getReturnLabels:false}"/>
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="packedShipment" disable-authz="true"/>
+            <if condition="packedShipment.statusId != 'ShipPacked'">
+                <return error="true" message="PACK_FAILED: Shipment ${shipmentId} is ${packedShipment.statusId}, not packed"/>
+            </if>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'PACKED', shipmentId: shipmentId, statusId: packedShipment.statusId,
+                        packageCount: plan.packages.length, invoices: packing.invoicesOf(shipmentId),
+                        labelsRequested: false, reduced: plan.outstanding.map(line =&gt; ({productId: line.productId,
+                            quantity: packing.text(line.left)}))})"/>
+        </actions>
+    </service>
+    <service verb="reopen" noun="ShipmentPackage" allow-remote="false">
+        <description>ReopenPackage (design Pack): take a package's contents (or, with productId and quantity, part of one
+            product in it) back off a shipment that has not shipped, for a correction or a reduced line, once the packer
+            confirms with a reason. A packed shipment's sales invoice is released first through Accounting's
+            release#ShipmentInvoiceLines (the release of release#ShipmentDraftInvoice, F275; impl-accounting P17): behind
+            D3's flag it is still in process between pack and ship, so its lines and billing links come off it and packing
+            again bills again; a finalized invoice keeps the package closed (INVOICE_FINALIZED: correct it with a credit
+            memo). Then the shipment goes back to Picked and unpack#ShipmentItemIssuance (F11) cancels each issued quantity,
+            newest first, its reservation restored on the same asset (never reset), and the package's contents are lowered;
+            the stock stays where it was packed, for Pick's put back or another pack. A retry answers the first. Requires
+            SHIPMENT_PACK; refuses CONFIRMATION_REQUIRED, REASON_REQUIRED, a shipment outside the user's facilities
+            (RECORD_UNAVAILABLE), SHIPMENT_SHIPPED, PACKAGE_UNAVAILABLE, NOTHING_TO_REOPEN, QUANTITY_INVALID,
+            QUANTITY_EXCEEDS_PACKED and INVOICE_FINALIZED.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="reason"/>
+            <parameter name="confirmed"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REOPENED, shipmentId, shipmentPackageSeqId, unpacked
+                (productId, quantity, assetIssuanceIds), releasedInvoiceIds, cancelledInvoiceIds, releasedItemCount,
+                statusId, reason, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <set field="begun" from="posting.begin(context, 'ShipmentPackReopen', 'SHIPMENT_PACK', ['shipmentId',
+                    'shipmentPackageSeqId', 'productId', 'quantity', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <if condition="!picking.truthy(confirmed)">
+                <return error="true" message="CONFIRMATION_REQUIRED: Confirm the reopen; nothing changes until you do"/>
+            </if>
+            <if condition="!reason || !String(reason).trim()">
+                <return error="true" message="REASON_REQUIRED: Say why the package is reopened"/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
+            <if condition="['ShipShipped', 'ShipDelivered'].includes(sh.shipment.statusId)">
+                <return error="true" message="SHIPMENT_SHIPPED: Shipment ${shipmentId} has shipped; change it with a return"/>
+            </if>
+            <if condition="!packing.packable.concat(['ShipPacked']).includes(sh.shipment.statusId)">
+                <return error="true" message="PACK_CLOSED: Shipment ${shipmentId} is ${sh.shipment.statusId}"/>
+            </if>
+            <set field="pkg" from="packing.packageOf(sh, shipmentPackageSeqId)"/>
+            <set field="plan" from="packing.reopenPlan(sh, pkg, context)"/>
+            <!-- the pack invoice: a finalized one keeps the package closed -->
+            <set field="invoices" from="packing.invoicesOf(shipmentId).filter(row =&gt; row.statusId != 'InvoiceCancelled')"/>
+            <set field="finalized" from="invoices.find(row =&gt; row.statusId != 'InvoiceInProcess')"/>
+            <if condition="finalized">
+                <return error="true" message="INVOICE_FINALIZED: Invoice ${finalized.invoiceId} of shipment ${shipmentId} is
+                        final, so the package stays closed; correct it with a credit memo"/>
+            </if>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="released" from="{invoiceIdList: [], cancelledInvoiceIdList: [], releasedItemCount: 0}"/>
+            <if condition="invoices.length">
+                <service-call name="mantle.account.InvoiceServices.release#ShipmentInvoiceLines" disable-authz="true"
+                        out-map="released" in-map="{shipmentId:shipmentId, reason:reason}"/>
+            </if>
+            <if condition="sh.shipment.statusId == 'ShipPacked'">
+                <service-call name="update#mantle.shipment.Shipment" disable-authz="true"
+                        in-map="{shipmentId:shipmentId, statusId:'ShipPicked'}"/>
+            </if>
+            <set field="unpacked" from="packing.unpack(sh, pkg, plan)"/>
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="reopened" disable-authz="true"/>
+            <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'REOPENED', shipmentId: shipmentId, shipmentPackageSeqId: shipmentPackageSeqId,
+                        unpacked: unpacked, releasedInvoiceIds: released.invoiceIdList || [],
+                        cancelledInvoiceIds: released.cancelledInvoiceIdList || [],
+                        releasedItemCount: released.releasedItemCount || 0, statusId: reopened.statusId,
+                        reason: String(reason).trim()})"/>
+        </actions>
+    </service>
 </services>

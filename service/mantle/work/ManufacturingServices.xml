@@ -331,6 +331,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="produce" noun="AvailableAssemblies">
+        <description>Receive the assemblies the work effort's issued components can make and, with a shipment, pack them
+            to it. With the owner's PartyAcctgPreference.kitCostFromComponents (impl-warehouse F41, off by default) each
+            kit is received at the cost of the component issuances it uses (KitCost.js), so the components leave work in
+            process exactly; otherwise with no cost, as before.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="shipmentId"><description>If specified will issue to this Shipment</description></parameter>
@@ -338,6 +342,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/>
+            <set field="kitCost" from="ec.resource.script('component://mr-mantle/service/mantle/work/KitCost.js')"/>
+            <set field="costKits" from="kitCost.enabled(workEffort.ownerPartyId)"/>
 
             <service-call name="mantle.work.ManufacturingServices.get#ConsumedAssetRemaining"
                     in-map="{workEffortId:workEffortId}" out-map="context"/>
@@ -345,7 +351,47 @@ along with this software (see the LICENSE.md file). If not, see
             <while condition="assemblyCanProduceQty &amp;&amp; Object.keys(assemblyCanProduceQty).length &gt; 0">
                 <set field="assemblyProductId" from="Object.keys(assemblyCanProduceQty)[0]"/>
                 <set field="assemblyProduceQty" from="assemblyCanProduceQty[assemblyProductId]"/>
-                <if condition="assemblyProduceQty != null &amp;&amp; !toDecimal(assemblyProduceQty).isZero()">
+                <!-- the kit costed from the component issuances it uses (F41), else null and received as before -->
+                <set field="kitLines" from="costKits &amp;&amp; assemblyProduceQty != null ? kitCost.receiptLines({
+                        workEffortId:workEffortId, assemblyProductId:assemblyProductId, quantity:assemblyProduceQty,
+                        componentUsedQtyByProduct:componentUsedQtyByProduct}) : null"/>
+                <if condition="kitLines"><then>
+                    <iterate list="kitLines" entry="kitLine">
+                        <!-- a later pack adds to the kit asset of the same cost; another cost is its own asset -->
+                        <entity-find entity-name="mantle.product.receipt.AssetReceipt" list="existingReceiptList">
+                            <econdition field-name="productId" from="assemblyProductId"/>
+                            <econdition field-name="workEffortId"/>
+                            <order-by field-name="assetReceiptId"/>
+                        </entity-find>
+                        <set field="sameCostReceipt" from="Array.from(existingReceiptList).find(receipt =&gt; {
+                                const kit = ec.entity.find('mantle.product.asset.Asset')
+                                    .condition('assetId', receipt.assetId).one()
+                                return kit?.acquireCost != null &amp;&amp; toDecimal(kit.acquireCost).eq(kitLine.acquireCost)
+                            }) || null"/>
+                        <if condition="sameCostReceipt"><then>
+                            <service-call name="mantle.product.AssetServices.update#AssetAndReceipt" out-map="updateOut"
+                                    out-map-add-to-existing="false"
+                                    in-map="{assetId:sameCostReceipt.assetId, assetReceiptId:sameCostReceipt.assetReceiptId,
+                                        workEffortId:workEffortId, acquireCost:kitLine.acquireCost,
+                                        quantityAccepted:toDecimal(sameCostReceipt.quantityAccepted ?? 0)
+                                            .add(kitLine.quantity)}"/>
+                            <set field="packAssetId" from="sameCostReceipt.assetId"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.receive#Asset" out-map="receiveOut"
+                                    out-map-add-to-existing="false"
+                                    in-map="{productId:assemblyProductId, quantity:kitLine.quantity, statusId:'AstPromised',
+                                        receivedDate:receivedDate, facilityId:workEffort.facilityId,
+                                        ownerPartyId:workEffort.ownerPartyId, workEffortId:workEffortId,
+                                        acquireCost:kitLine.acquireCost, acquireCostUomId:kitLine.acquireCostUomId}"/>
+                            <set field="packAssetId" from="receiveOut.assetId"/>
+                        </else></if>
+                        <if condition="shipmentId">
+                            <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentProduct"
+                                    in-map="{productId:assemblyProductId, shipmentId:shipmentId,
+                                        quantity:kitLine.quantity, assetId:packAssetId}"/>
+                        </if>
+                    </iterate>
+                </then><else-if condition="assemblyProduceQty != null &amp;&amp; !toDecimal(assemblyProduceQty).isZero()">
                     <!-- look for existing Asset to update instead of receiving new -->
                     <entity-find entity-name="mantle.product.receipt.AssetReceipt" list="existingReceiptList">
                         <econdition field-name="productId" from="assemblyProductId"/>
@@ -376,7 +422,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 in-map="{productId:assemblyProductId, shipmentId:shipmentId,
                                     quantity:assemblyProduceQty, assetId:packAssetId}"/>
                     </if>
-                </if>
+                </else-if></if>
 
                 <!-- call get#ConsumedAssetRemaining again to reset assemblyCanProduceQty Map for next iteration -->
                 <service-call name="mantle.work.ManufacturingServices.get#ConsumedAssetRemaining"

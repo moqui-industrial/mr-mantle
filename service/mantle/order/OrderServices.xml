@@ -1980,8 +1980,11 @@ General Order Placement and eCommerce Usage
                         from="toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)"/>
                 <!-- stock picked beyond the reduced quantity is flagged to put back (impl-warehouse P11, reverse#Pick) -->
                 <set field="sisPutBack" from="toDecimal(itemShipmentItemSource.quantityPicked ?? 0).subtract(newSisQuantity)"/>
+                <!-- the reduced quantity leaves what is not handled; what was handled (packed) stays handled (P12, F277) -->
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
-                        in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
+                        in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId,
+                                quantityNotHandled:toDecimal(itemShipmentItemSource.quantityNotHandled ?? 0)
+                                    .subtract(shipQuantityToReduce),
                                 quantity:newSisQuantity}"/>
                 <if condition="sisPutBack.compare(0) &gt; 0">
                     <service-call name="update#mantle.shipment.ShipmentItemSource"
@@ -2269,8 +2272,11 @@ General Order Placement and eCommerce Usage
                         from="toDecimal(itemShipmentItemSource.quantity ?? 0).subtract(shipQuantityToReduce)"/>
                 <!-- stock picked beyond the reduced quantity is flagged to put back (impl-warehouse P11, reverse#Pick) -->
                 <set field="sisPutBack" from="toDecimal(itemShipmentItemSource.quantityPicked ?? 0).subtract(newSisQuantity)"/>
+                <!-- the reduced quantity leaves what is not handled; what was handled (packed) stays handled (P12, F277) -->
                 <service-call name="update#mantle.shipment.ShipmentItemSource"
-                        in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId, quantityNotHandled:0,
+                        in-map="{shipmentItemSourceId:itemShipmentItemSource.shipmentItemSourceId,
+                                quantityNotHandled:toDecimal(itemShipmentItemSource.quantityNotHandled ?? 0)
+                                    .subtract(shipQuantityToReduce),
                                 quantity:newSisQuantity}"/>
                 <if condition="sisPutBack.compare(0) &gt; 0">
                     <service-call name="update#mantle.shipment.ShipmentItemSource"
