@@ -94,9 +94,9 @@ function purchaseOrder(productId, quantity) {
     call("mantle.order.OrderServices.approve#Order", {orderId: created.orderId})
     return created.orderId
 }
-function salesOrder(productId, quantity) {
+function salesOrder(productId, quantity, vendorPartyId = org) {
     const created = call("mantle.order.OrderServices.create#Order", {
-        vendorPartyId: org,
+        vendorPartyId,
         customerPartyId: customer,
         currencyUomId: "USD",
         facilityId: facility
@@ -181,6 +181,7 @@ spec({
         organization(org, "OrgInternal")
         organization(supplier, "Supplier")
         organization(customer, "Customer")
+        organization("WHQ_OTHER", "OrgInternal")
         call("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {
             organizationPartyId: org,
             sourcePartyId: "DefaultSettings",
@@ -217,7 +218,7 @@ spec({
             ["FltMorgue", "AstMorgue"]
         ])
             call("create#mantle.facility.FacilityLocationType", {facilityId: facility, locationTypeEnumId, autoStatusId})
-        for (const productId of ["WHQ_GAUGE", "WHQ_TRACKED", "WHQ_PEGGED", "WHQ_REVISED"])
+        for (const productId of ["WHQ_GAUGE", "WHQ_TRACKED", "WHQ_PEGGED", "WHQ_REVISED", "WHQ_KEPT", "WHQ_HELD"])
             call("create#mantle.product.Product", {
                 productId,
                 productName: productId,
@@ -287,7 +288,17 @@ feature("a change to a published template item starts a new row, and an earlier 
             changeReason: "Supplier drawing revision B"
         })
         tick()
-        const later = run("whq_inspector", Q + "create#Inspection", {assetId: stock.assetId, quantity: 1})
+        // one open inspection holds an asset (P8 review C): the later one inspects other stock of the product
+        const second = run("whq_inspector", Q + "create#Inspection", {assetId: stock.assetId, quantity: 1})
+        const otherStock = call("mantle.product.AssetServices.receive#Asset", {
+            productId: "WHQ_REVISED",
+            facilityId: facility,
+            locationSeqId: "QUAR1",
+            quantity: 2,
+            ownerPartyId: org,
+            statusId: "AstQuarantine"
+        })
+        const later = run("whq_inspector", Q + "create#Inspection", {assetId: otherStock.assetId, quantity: 1})
         const earlierRead = run("whq_inspector", Q + "get#Inspection", {qualityInspectionId: earlier.qualityInspectionId})
         const laterRead = run("whq_inspector", Q + "get#Inspection", {qualityInspectionId: later.qualityInspectionId})
         const history = run("whq_reader", Q + "get#InspectionTemplate", {inspectionTemplateId: templateId})
@@ -312,7 +323,8 @@ feature("a change to a published template item starts a new row, and an earlier 
             asOfBefore,
             rowsOf,
             listed,
-            inspections
+            inspections,
+            second
         }
     },
     then({
@@ -327,7 +339,8 @@ feature("a change to a published template item starts a new row, and an earlier 
         asOfBefore,
         rowsOf,
         listed,
-        inspections
+        inspections,
+        second
     }) {
         denied.error.includes("PERMISSION_DENIED")
         earlier.error == ""
@@ -346,6 +359,7 @@ feature("a change to a published template item starts a new row, and an earlier 
         history.revisionRows.length == 3
         history.items.length == 2
         asOfBefore.items.some(item => item.characteristicName == "Diameter" && item.upperLimit == "10.1")
+        second.error.includes("INSPECTION_EXISTS")
         listed.templates.length == 1
         listed.templates[0].itemCount == 2
         inspections.inspections.length == 2
@@ -361,9 +375,15 @@ feature("a receipt that needs inspection lands in quarantine with its inspection
         const gaugeInspection = inspectionOf(gauge.received.result.qualityInspectionIds[0])
         const trackedInspection = inspectionOf(tracked.received.result.qualityInspectionIds[0])
         const status = run("whq_reader", Q + "get#SourceInspectionStatus", {orderId: gauge.orderId, orderItemSeqId: "01"})
-        return {templateId, gauge, tracked, gaugeInspection, trackedInspection, status}
+        // a receipt's inspection is of the receipt's own stock (P8 review B4)
+        const otherAsset = run("whq_inspector", Q + "create#Inspection", {
+            assetReceiptId: gauge.received.result.assetReceiptIds[0],
+            assetId: tracked.received.result.assetIds[0]
+        })
+        return {templateId, gauge, tracked, gaugeInspection, trackedInspection, status, otherAsset}
     },
-    then({templateId, gauge, tracked, gaugeInspection, trackedInspection, status}) {
+    then({templateId, gauge, tracked, gaugeInspection, trackedInspection, status, otherAsset}) {
+        otherAsset.error.includes("VALUE_INVALID")
         gauge.received.error == ""
         gauge.received.result.statusId == "AstQuarantine"
         gauge.received.result.locationSeqId == "QUAR1"
@@ -529,7 +549,8 @@ feature("a quality manager releases part, reserved to the waiting order, and scr
         after.statusId == "QiDisposed"
         n(after.heldQuantity) == 0
         n(status.heldQuantity) == 0
-        n(status.matchEligibleQuantity) == 10
+        // the scrapped 4 leave the match too (P8 review B2)
+        n(status.matchEligibleQuantity) == 6
         n(status.inspectionRejectedQuantity) == 4
     }
 })
@@ -589,5 +610,116 @@ feature("pegged demand is reserved before an earlier waiting order, and scrap#As
         !firstReservations.some(row => row.assetId == released.result.resultAssetId)
         scrapOther.error.includes("PERMISSION_DENIED")
         scrapPlain.error.includes("PERMISSION_DENIED")
+    }
+})
+
+feature("a forged demand peg is refused, and a pegged order that already holds reservations keeps them", {
+    when() {
+        const foreign = salesOrder("WHQ_KEPT", 3, "WHQ_OTHER")
+        const otherProduct = salesOrder("WHQ_PEGGED", 3)
+        // two available units first, so the pegged order of five holds two and waits for three
+        call("mantle.product.AssetServices.receive#Asset", {
+            productId: "WHQ_KEPT",
+            facilityId: facility,
+            locationSeqId: "PICK1",
+            quantity: 2,
+            ownerPartyId: org,
+            statusId: "AstAvailable"
+        })
+        const pegged = salesOrder("WHQ_KEPT", 5)
+        const held = rows("mantle.product.issuance.AssetReservation", {orderId: pegged}).filter(
+            row => n(row.quantityNotAvailable) == 0
+        )
+        const stock = call("mantle.product.AssetServices.receive#Asset", {
+            productId: "WHQ_KEPT",
+            facilityId: facility,
+            locationSeqId: "QUAR1",
+            quantity: 3,
+            ownerPartyId: org,
+            statusId: "AstQuarantine"
+        })
+        const forged = run("whq_inspector", Q + "create#Inspection", {
+            assetId: stock.assetId,
+            demandOrderId: foreign,
+            demandOrderItemSeqId: "01"
+        })
+        const wrongProduct = run("whq_inspector", Q + "create#Inspection", {
+            assetId: stock.assetId,
+            demandOrderId: otherProduct,
+            demandOrderItemSeqId: "01"
+        })
+        const created = run("whq_inspector", Q + "create#Inspection", {
+            assetId: stock.assetId,
+            demandOrderId: pegged,
+            demandOrderItemSeqId: "01"
+        })
+        run("whq_inspector", Q + "submit#Inspection", {qualityInspectionId: created.qualityInspectionId, quantityAccepted: 3})
+        run("whq_manager", Q + "verify#Inspection", {qualityInspectionId: created.qualityInspectionId})
+        const released = run("whq_manager", Q + "dispose#Inspection", {
+            operationKey: key(),
+            qualityInspectionId: created.qualityInspectionId,
+            dispositionEnumId: "QdRelease",
+            quantity: 3
+        })
+        const after = rows("mantle.product.issuance.AssetReservation", {orderId: pegged})
+        return {forged, wrongProduct, held, released, after}
+    },
+    then({forged, wrongProduct, held, released, after}) {
+        forged.error.includes("DEMAND_INVALID")
+        wrongProduct.error.includes("DEMAND_INVALID")
+        held.length >= 1
+        released.error == ""
+        held.every(kept =>
+            after.some(row => row.assetReservationId == kept.assetReservationId && n(row.quantity) == n(kept.quantity))
+        )
+        after.some(row => row.assetId == released.result.resultAssetId && n(row.quantity) == 3)
+        after.reduce((sum, row) => sum + n(row.quantityNotAvailable), 0) == 0
+    }
+})
+
+feature("stock a disposition keeps held is inspected again, and a draft is cancelled with its reason", {
+    when() {
+        const stock = call("mantle.product.AssetServices.receive#Asset", {
+            productId: "WHQ_HELD",
+            facilityId: facility,
+            locationSeqId: "QUAR1",
+            quantity: 4,
+            ownerPartyId: org,
+            statusId: "AstQuarantine"
+        })
+        const first = run("whq_inspector", Q + "create#Inspection", {assetId: stock.assetId})
+        run("whq_inspector", Q + "submit#Inspection", {
+            qualityInspectionId: first.qualityInspectionId,
+            quantityAccepted: 0,
+            quantityRejected: 4,
+            resultReason: "Supplier to confirm the batch"
+        })
+        run("whq_manager", Q + "verify#Inspection", {qualityInspectionId: first.qualityInspectionId})
+        const kept = run("whq_manager", Q + "dispose#Inspection", {
+            operationKey: key(),
+            qualityInspectionId: first.qualityInspectionId,
+            dispositionEnumId: "QdQuarantine",
+            quantity: 4
+        })
+        const again = run("whq_inspector", Q + "create#Inspection", {reinspectQualityInspectionId: first.qualityInspectionId})
+        const twice = run("whq_inspector", Q + "create#Inspection", {reinspectQualityInspectionId: first.qualityInspectionId})
+        const noReason = run("whq_inspector", Q + "cancel#Inspection", {qualityInspectionId: again.qualityInspectionId})
+        const cancelled = run("whq_inspector", Q + "cancel#Inspection", {
+            qualityInspectionId: again.qualityInspectionId,
+            reason: "Batch confirmed by the supplier; inspected under another inspection"
+        })
+        return {first, kept, again, twice, noReason, cancelled}
+    },
+    then({first, kept, again, twice, noReason, cancelled}) {
+        kept.error == ""
+        inspectionOf(first.qualityInspectionId).statusId == "QiDisposed"
+        n(inspectionOf(first.qualityInspectionId).heldQuantity) == 0
+        again.error == ""
+        n(again.quantity) == 4
+        n(again.heldQuantity) == 4
+        inspectionOf(again.qualityInspectionId).previousInspectionId == first.qualityInspectionId
+        twice.error.includes("NOT_HELD")
+        noReason.error.includes("REASON_REQUIRED")
+        cancelled.statusId == "QiCancelled"
     }
 })

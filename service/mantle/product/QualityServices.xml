@@ -139,8 +139,13 @@ along with this software (see the LICENSE.md file). If not, see
             (PRODUCT_REQUIRED); a quantity not above zero (QUANTITY_INVALID) or above on hand (QUANTITY_EXCEEDS_ON_HAND); a
             template not published for the organization (TEMPLATE_UNAVAILABLE); an inspector who is not one of the
             organization's (INSPECTOR_INVALID); a sample outside 1 to the quantity (SAMPLE_INVALID); a second open inspection
-            of a receipt (INSPECTION_EXISTS); an unknown demand order item (DEMAND_INVALID).</description>
+            of a receipt or an asset (INSPECTION_EXISTS); an asset that is not the receipt's (VALUE_INVALID); a demand order
+            item that is not the facility owner's sale of the product, in the user's organizations, given or from the run
+            (DEMAND_INVALID).</description>
         <in-parameters>
+            <parameter name="reinspectQualityInspectionId"><description>A disposed inspection whose stock is still held
+                (Quarantine, Rework, a return): the new inspection takes its receipt and held asset, and the held quantity
+                moves to it (NOT_HELD otherwise).</description></parameter>
             <parameter name="assetId"/>
             <parameter name="assetReceiptId"/>
             <parameter name="facilityId"/>
@@ -276,11 +281,30 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="statusId" from="answer.statusId"/>
         </actions>
     </service>
+    <service verb="cancel" noun="Inspection" allow-remote="false">
+        <description>Cancel a draft or submitted inspection with the reason; its stock stays where it is (a quarantined
+            receipt with no other inspection counts as held and may be inspected again). Refuses without QUALITY_INSPECT or
+            QUALITY_VERIFY (PERMISSION_DENIED); an inspection outside the user's organizations or facilityIds
+            (RECORD_UNAVAILABLE); a verified or closed one (INSPECTION_CLOSED); no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('cancelInspection', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
     <service verb="dispose" noun="Inspection" allow-remote="false">
         <description>A disposition of part of a verified inspection, through the Warehouse posting guard
             (StockPosting.js): Release takes the accepted quantity, the others (Quarantine, Rework or repair, Return to
             customer, Return to supplier, Scrap, Use as is) the rejected. Release and Use as is first reserve the
-            inspection's pegged customer demand on the released stock (reserve#AssetForOrderItem) and then set AstAvailable
+            inspection's pegged customer demand (checked again: DEMAND_INVALID) on the released stock, keeping the order
+            item's reservations (only its not-available quantity is reduced, then reserve#AssetForOrderItem with the asset)
+            and then set AstAvailable
             through update#Asset, the only path out of quarantine (its AssetStatusAvailableReservations SECA gives the rest to
             waiting reservations), then move it to toLocationSeqId when given; Scrap sets AstMorgue (moving it to a morgue
             location when given) and calls WarehouseTaskServices.scrap#Asset with this disposition, in the one transaction;
@@ -412,9 +436,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="SourceInspectionStatus" allow-remote="false">
         <description>For bill matching and planning (D21): each receipt of a receipt id, an order line or a shipment, with its
-            accepted and dock-rejected quantity, its held quantity (the heldQuantity of its inspections; a receipt with no
-            inspection whose stock is quarantined is held whole), match-eligible (accepted less held) and what its
-            inspections rejected (scrapped or returned to the supplier), and the totals. An internal read: the caller checks
+            accepted and dock-rejected quantity, its held quantity (the heldQuantity of its inspections, a re-inspection
+            holding what it took from the earlier one; a receipt with no inspection whose stock is quarantined is held
+            whole), what its inspections rejected (scrapped or returned to the supplier), match-eligible (accepted less held
+            and less inspection-rejected), and the totals. An internal read: the caller checks
             its own permission (as InvoiceMatch.js does). Refuses no source (SOURCE_REQUIRED).</description>
         <in-parameters>
             <parameter name="assetReceiptId"/>

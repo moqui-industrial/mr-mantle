@@ -143,14 +143,18 @@ function receiptsOf(orderId, orderItemSeqId) {
     const status = receipts.length
         ? call("mantle.product.QualityServices.get#SourceInspectionStatus", {orderId, orderItemSeqId})
         : {receiptRows: []}
-    const held = Object.fromEntries(Array.from(status.receiptRows || []).map(row => [row.assetReceiptId, row.heldQuantity]))
+    const byReceipt = Object.fromEntries(Array.from(status.receiptRows || []).map(row => [row.assetReceiptId, row]))
+    const quantityOf = (row, field) =>
+        byReceipt[row.assetReceiptId]?.[field] != null ? dec(byReceipt[row.assetReceiptId][field]) : zero()
     return receipts.map(row => ({
         record: row,
         assetReceiptId: row.assetReceiptId,
         shipmentId: row.shipmentId,
         receivedDate: row.receivedDate,
         accepted: dec(row.quantityAccepted),
-        held: held[row.assetReceiptId] != null ? dec(held[row.assetReceiptId]) : zero()
+        held: quantityOf(row, "heldQuantity"),
+        // scrapped or returned to the supplier at inspection: no longer match-eligible (P8 review B2)
+        inspectionRejected: quantityOf(row, "inspectionRejectedQuantity")
     }))
 }
 // What other bills have billed of an order line, or of one receipt (billing links of other invoices; a cancelled bill's
@@ -189,13 +193,14 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     const receipts = receiptsOf(item.orderId, item.orderItemSeqId)
     const accepted = receipts.reduce((sum, row) => sum.add(row.accepted), zero())
     const held = receipts.reduce((sum, row) => sum.add(row.held), zero())
+    const inspectionRejected = receipts.reduce((sum, row) => sum.add(row.inspectionRejected), zero())
     const orderKey = {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}
     const priorBilled = billedByOthers(scope.invoiceId, orderKey)
     const thisBill = takenOf(taken, "order", orderKeyText(orderKey))
     const orderQuantity = dec(item.quantity ?? 1)
     const basis = policy.billBasisEnumId || "ImbReceived"
     // the tolerance is a share of the source's base (accepted less held, or ordered), not of what is left of it
-    const base = basis === "ImbReceived" ? accepted.subtract(held) : orderQuantity
+    const base = basis === "ImbReceived" ? accepted.subtract(held).subtract(inspectionRejected) : orderQuantity
     const used = priorBilled.add(thisBill)
     const quantity = dec(allocation.quantity)
     const baseAllowance = allowance(base, policy.quantityTolerancePercent, policy.quantityToleranceQuantity)
@@ -206,7 +211,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     if (allocation.assetReceiptId) {
         receipt = receipts.find(row => row.assetReceiptId === allocation.assetReceiptId)
         if (!receipt) denied("SOURCE_INVALID", "Receipt " + allocation.assetReceiptId + " is not of this order line")
-        const receiptBase = receipt.accepted.subtract(receipt.held)
+        const receiptBase = receipt.accepted.subtract(receipt.held).subtract(receipt.inspectionRejected)
         const receiptUsed = billedByOthers(scope.invoiceId, {assetReceiptId: receipt.assetReceiptId}).add(
             takenOf(taken, "receipt", receipt.assetReceiptId)
         )

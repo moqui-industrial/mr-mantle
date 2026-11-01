@@ -523,17 +523,105 @@ function checkInspector(partyId, organizationPartyId) {
     return partyId
 }
 
+// A demand peg (P8 review A1): an item of a sales order the facility owner sells (OrderPart.vendorPartyId, in the user's
+// scope) for the product inspected; anything else is DEMAND_INVALID, so a forged peg reaches no other order.
+function checkDemand(userScope, orderId, orderItemSeqId, productId, ownerPartyId) {
+    const item = blank(orderItemSeqId) ? null : one("mantle.order.OrderItem", {orderId, orderItemSeqId})
+    const part = item ? one("mantle.order.OrderPart", {orderId, orderPartSeqId: item.orderPartSeqId}) : null
+    if (
+        !item ||
+        !part ||
+        item.productId !== productId ||
+        part.vendorPartyId !== ownerPartyId ||
+        !facilityScope.owns(userScope, part.vendorPartyId)
+    )
+        denied("DEMAND_INVALID", "Order item " + orderId + ":" + (orderItemSeqId || "") + " is not a sale of this product")
+    return item
+}
+// The stock a disposed inspection still holds, for its re-inspection: the asset of its latest disposition that kept the
+// stock held (else its own asset), still quarantined, and the held quantity up to what is on hand there.
+function heldForReinspection(userScope, qualityInspectionId) {
+    const inspection = inspectionOf(userScope, qualityInspectionId, true)
+    if (inspection.statusId !== "QiDisposed" || dec(inspection.heldQuantity).compare(0) <= 0)
+        denied("NOT_HELD", "Inspection " + qualityInspectionId + " holds no stock to inspect again")
+    const keeping = rows(DISPOSITION, {qualityInspectionId})
+        .filter(row => !endingDispositions.includes(row.dispositionEnumId) && row.resultAssetId)
+        .sort((a, b) => String(b.dispositionSeqId).localeCompare(String(a.dispositionSeqId)))
+    const assetId = keeping[0]?.resultAssetId || inspection.assetId
+    const asset = assetId ? one(ASSET, {assetId}) : null
+    if (!asset || asset.statusId !== "AstQuarantine")
+        denied("NOT_HELD", "The stock of inspection " + qualityInspectionId + " is not held")
+    const onHand = dec(asset.quantityOnHandTotal)
+    const quantity = onHand.compare(dec(inspection.heldQuantity)) < 0 ? onHand : dec(inspection.heldQuantity)
+    if (quantity.compare(0) <= 0) denied("NOT_HELD", "The stock of inspection " + qualityInspectionId + " has nothing on hand")
+    return {inspection, assetId, quantity}
+}
+
 // An inspection (QiDraft) for a source: an asset (its facility, product, lot and on-hand quantity), a receipt (its asset,
 // shipment and order line) or a facility and product; the template given (published, of the organization) or the one
 // that applies; the items read as of now; the stock held when the asset is quarantined; the demand of a run's
 // OrderItemWorkEffort when none is given. Called by create#Inspection after its permission, and by the receipt guard in its
 // own operation (that entry point's check, impl-warehouse §2).
-function createInspection(userScope, p) {
+const inspectionFields = [
+    "assetReceiptId",
+    "assetId",
+    "facilityId",
+    "productId",
+    "lotId",
+    "quantity",
+    "shipmentId",
+    "orderId",
+    "orderItemSeqId",
+    "returnId",
+    "returnItemSeqId",
+    "workEffortId",
+    "sourceTypeEnumId",
+    "inspectionContextEnumId",
+    "inspectionTemplateId",
+    "sampleSize",
+    "inspectorPartyId",
+    "dueDate",
+    "demandOrderId",
+    "demandOrderItemSeqId",
+    "comments",
+    "reinspectQualityInspectionId"
+]
+function createInspection(userScope, given) {
+    // a plain copy of the fields read here (the caller may pass the service context)
+    let p = Object.fromEntries(inspectionFields.map(field => [field, given[field] ?? null]))
     let asset = null,
         receipt = null
+    // a re-inspection of stock a disposed inspection still holds (Quarantine, Rework, a return): the same receipt and the
+    // held asset, its quantity moved from the earlier inspection's held quantity (P8 review B3)
+    const earlier = blank(p.reinspectQualityInspectionId) ? null : heldForReinspection(userScope, p.reinspectQualityInspectionId)
+    if (earlier) {
+        p = Object.assign({}, p, {
+            assetReceiptId: earlier.inspection.assetReceiptId || null,
+            assetId: earlier.assetId,
+            quantity: blank(p.quantity) ? earlier.quantity : p.quantity,
+            inspectionContextEnumId: p.inspectionContextEnumId || earlier.inspection.inspectionContextEnumId,
+            sourceTypeEnumId: earlier.inspection.sourceTypeEnumId,
+            shipmentId: earlier.inspection.shipmentId,
+            orderId: earlier.inspection.orderId,
+            orderItemSeqId: earlier.inspection.orderItemSeqId,
+            returnId: earlier.inspection.returnId,
+            returnItemSeqId: earlier.inspection.returnItemSeqId,
+            workEffortId: earlier.inspection.workEffortId,
+            demandOrderId: p.demandOrderId || earlier.inspection.demandOrderId,
+            demandOrderItemSeqId: p.demandOrderItemSeqId || earlier.inspection.demandOrderItemSeqId
+        })
+        if (dec(p.quantity).compare(earlier.quantity) > 0)
+            denied(
+                "QUANTITY_INVALID",
+                "Inspection " + earlier.inspection.qualityInspectionId + " holds " + textOf(earlier.quantity)
+            )
+    }
     if (!blank(p.assetReceiptId)) {
         receipt = one(RECEIPT, {assetReceiptId: p.assetReceiptId})
         if (!receipt) denied("RECORD_UNAVAILABLE", "Receipt " + p.assetReceiptId + " is not available")
+        // a receipt's inspection is of its own stock (P8 review B4), except a re-inspection, of the stock its disposition moved
+        if (receipt && !earlier && !blank(p.assetId) && receipt.assetId && p.assetId !== receipt.assetId)
+            denied("VALUE_INVALID", "Asset " + p.assetId + " is not the stock of receipt " + receipt.assetReceiptId)
         const open = find(INSPECTION, {assetReceiptId: p.assetReceiptId}).condition("statusId", "in", openStatuses).count()
         if (open) denied("INSPECTION_EXISTS", "Receipt " + p.assetReceiptId + " already has an open inspection")
     }
@@ -541,6 +629,9 @@ function createInspection(userScope, p) {
     if (assetId) {
         asset = one(ASSET, {assetId})
         if (!asset) denied("RECORD_UNAVAILABLE", "Asset " + assetId + " is not available")
+        // one open inspection holds an asset (P8 review C)
+        const openOnAsset = find(INSPECTION, {assetId}).condition("statusId", "in", openStatuses).count()
+        if (openOnAsset) denied("INSPECTION_EXISTS", "Asset " + assetId + " already has an open inspection")
     }
     const facilityId = asset?.facilityId || text(p.facilityId)
     const facility = facilityId ? one(FACILITY, {facilityId}) : null
@@ -573,8 +664,6 @@ function createInspection(userScope, p) {
     if (!blank(p.inspectorPartyId)) checkInspector(p.inspectorPartyId, organizationPartyId)
     let demandOrderId = text(p.demandOrderId),
         demandOrderItemSeqId = text(p.demandOrderItemSeqId)
-    if (demandOrderId && !one("mantle.order.OrderItem", {orderId: demandOrderId, orderItemSeqId: demandOrderItemSeqId}))
-        denied("DEMAND_INVALID", "Order item " + demandOrderId + ":" + (demandOrderItemSeqId || "") + " is not available")
     if (!demandOrderId && !blank(p.workEffortId)) {
         const pegged = rows("mantle.order.OrderItemWorkEffort", {workEffortId: p.workEffortId})[0]
         if (pegged) {
@@ -582,6 +671,7 @@ function createInspection(userScope, p) {
             demandOrderItemSeqId = pegged.orderItemSeqId
         }
     }
+    if (demandOrderId) checkDemand(userScope, demandOrderId, demandOrderItemSeqId, productId, organizationPartyId)
     const sourceTypeEnumId =
         checkEnum(text(p.sourceTypeEnumId), "InspectionSourceType", "source") ||
         (receipt
@@ -624,6 +714,18 @@ function createInspection(userScope, p) {
         createdByUserId: ec.user.userId,
         comments: text(p.comments)
     })
+    if (earlier) {
+        // the held quantity moves to the re-inspection, so the source's held quantity counts it once
+        const left = dec(earlier.inspection.heldQuantity).subtract(quantity)
+        call("update#" + INSPECTION, {
+            qualityInspectionId: earlier.inspection.qualityInspectionId,
+            heldQuantity: left.compare(0) > 0 ? left : toDecimal(0)
+        })
+        call("update#" + INSPECTION, {
+            qualityInspectionId: created.qualityInspectionId,
+            previousInspectionId: earlier.inspection.qualityInspectionId
+        })
+    }
     return {
         qualityInspectionId: created.qualityInspectionId,
         inspectionTemplateId: template?.inspectionTemplateId || null,
@@ -858,6 +960,23 @@ function verifyInspection(p) {
     return {qualityInspectionId: inspection.qualityInspectionId, statusId}
 }
 
+// cancel#Inspection: a draft or submitted inspection cancelled with its reason; its stock stays as it is (a quarantined
+// receipt with no other inspection counts as held, and may be inspected again).
+function cancelInspection(p) {
+    requireAny(["QUALITY_INSPECT", "QUALITY_VERIFY"])
+    const userScope = scope()
+    const inspection = inspectionOf(userScope, p.qualityInspectionId, true, p.facilityIds)
+    requireStatus(inspection, ["QiDraft", "QiSubmitted"], "INSPECTION_CLOSED", "is verified or closed")
+    if (blank(p.reason)) denied("REASON_REQUIRED", "Give the reason for cancelling the inspection")
+    call("update#" + INSPECTION, {
+        qualityInspectionId: inspection.qualityInspectionId,
+        statusId: "QiCancelled",
+        heldQuantity: toDecimal(0),
+        comments: [inspection.comments, "Cancelled: " + String(p.reason).trim()].filter(Boolean).join("\n")
+    })
+    return {qualityInspectionId: inspection.qualityInspectionId, statusId: "QiCancelled"}
+}
+
 // ===== dispositions (dispose#Inspection, through StockPosting.js) =====
 // The inspection, locked first (the one lock order: the inspection, then its asset, then the location).
 function lockInspection(userScope, qualityInspectionId, facilityIds) {
@@ -893,6 +1012,15 @@ function dispositionPlan(userScope, inspection, asset, p) {
                 inspection.qualityInspectionId
         )
     const held = !!asset && asset.statusId === "AstQuarantine"
+    // the stored demand peg is checked again before Release reserves it (P8 review A1)
+    if (inspection.demandOrderId && ["QdRelease", "QdUseAsIs"].includes(dispositionEnumId))
+        checkDemand(
+            userScope,
+            inspection.demandOrderId,
+            inspection.demandOrderItemSeqId,
+            inspection.productId,
+            inspection.organizationPartyId
+        )
     if (dispositionEnumId === "QdScrap" && !held)
         denied("NOT_HELD", "Only held stock is scrapped by its inspection; scrap free stock with Adjustments")
     if (["QdScrap"].includes(dispositionEnumId) && !blank(p.varianceReasonEnumId)) {
@@ -926,6 +1054,37 @@ function splitOff(asset, quantity) {
     })
     return moved.newAssetId || asset.assetId
 }
+// Release's pegged demand (P8 review B1): the order item's reservations stay; only what is not available of them, up to the
+// released quantity, is taken off (reduce#AssetReservation, without offering the freed quantity to others), and the item is
+// reserved again with the released stock first (reserve#AssetForOrderItem with the asset, keeping its reservations).
+function reservePeg(inspection, assetId, quantity) {
+    let left = dec(quantity)
+    const waiting = rows("mantle.product.issuance.AssetReservation", {
+        orderId: inspection.demandOrderId,
+        orderItemSeqId: inspection.demandOrderItemSeqId
+    })
+        .filter(row => dec(row.quantityNotAvailable).compare(0) > 0)
+        .sort((a, b) => (ms(a.reservedDate) ?? 0) - (ms(b.reservedDate) ?? 0))
+    for (const row of waiting) {
+        if (left.compare(0) <= 0) break
+        const take = dec(row.quantityNotAvailable).compare(left) > 0 ? left : dec(row.quantityNotAvailable)
+        call("mantle.product.AssetServices.reduce#AssetReservation", {
+            assetReservationId: row.assetReservationId,
+            quantityToDeduct: take,
+            reserveIncreasedAsset: false
+        })
+        left = left.subtract(take)
+    }
+    if (left.compare(dec(quantity)) === 0) return false
+    call("mantle.product.AssetServices.reserve#AssetForOrderItem", {
+        orderId: inspection.demandOrderId,
+        orderItemSeqId: inspection.demandOrderItemSeqId,
+        assetId,
+        resetReservations: false
+    })
+    return true
+}
+
 // The disposition's stock postings and records, in the entry point's transaction: Release (and Use as is) reserves the
 // pegged demand on the released stock first and then sets AstAvailable (the SECA gives the rest to waiting reservations),
 // then moves it when a destination is given; Scrap sets AstMorgue (moved to the morgue when given) and calls scrap#Asset
@@ -945,12 +1104,7 @@ function disposeStock(inspection, asset, plan, p) {
     if (held && ["QdRelease", "QdUseAsIs"].includes(dispositionEnumId)) {
         resultAssetId = splitOff(asset, quantity)
         if (inspection.demandOrderId) {
-            call("mantle.product.AssetServices.reserve#AssetForOrderItem", {
-                orderId: inspection.demandOrderId,
-                orderItemSeqId: inspection.demandOrderItemSeqId,
-                assetId: resultAssetId,
-                resetReservations: true
-            })
+            reservePeg(inspection, resultAssetId, quantity)
             reserved = {orderId: inspection.demandOrderId, orderItemSeqId: inspection.demandOrderItemSeqId}
         }
         call("mantle.product.AssetServices.update#Asset", {assetId: resultAssetId, statusId: "AstAvailable"})
@@ -996,7 +1150,7 @@ function disposeStock(inspection, asset, plan, p) {
         resultAssetId,
         fromLocationSeqId: asset?.locationSeqId || null,
         toLocationSeqId: target?.locationSeqId || asset?.locationSeqId || null,
-        statusId: statusAfter,
+        assetStatusId: statusAfter,
         reservedOrderId: reserved?.orderId || null,
         reservedOrderItemSeqId: reserved?.orderItemSeqId || null,
         varianceReasonEnumId: dispositionEnumId === "QdScrap" ? text(p.varianceReasonEnumId) || "InVrScrap" : null,
@@ -1007,7 +1161,7 @@ function disposeStock(inspection, asset, plan, p) {
     if (held && dispositionEnumId === "QdScrap") {
         // the scrap itself: P6's guarded scrap#Asset, which admits QUALITY_DISPOSE for the result asset of this disposition
         const scrapped = call("mantle.shipment.WarehouseTaskServices.scrap#Asset", {
-            operationKey: String(p.operationKey) + "/scrap",
+            operationKey: nestedKey(p.operationKey, "scrap"),
             assetId: resultAssetId,
             quantity,
             varianceReasonEnumId: text(p.varianceReasonEnumId) || "InVrScrap",
@@ -1056,6 +1210,12 @@ function disposeStock(inspection, asset, plan, p) {
         heldQuantity: textOf(heldAfter.compare(0) > 0 ? heldAfter : 0),
         inspectionStatusId: complete ? "QiDisposed" : inspection.statusId
     }
+}
+// The operation key of a call this entry point makes in its operation: the client's key and a suffix, hashed when it would pass
+// StockPosting.js's limit of 200 characters (P8 review C).
+function nestedKey(operationKey, suffix) {
+    const key = String(operationKey) + "/" + suffix
+    return key.length <= 200 ? key : suffix + "/" + String(lib.hash([String(operationKey), suffix])).slice(0, 60)
 }
 // scrap#Asset's admission of a quality disposition: the asset is the result of a scrap disposition of the inspection that has
 // not been scrapped yet (only dispose#Inspection, which checked QUALITY_DISPOSE and the inspection, writes that row).
@@ -1218,6 +1378,13 @@ function getInspection(p) {
                 inspection.statusId === "QiSubmitted" &&
                 inspection.submittedByUserId !== ec.user.userId,
             canDispose: access.has("QUALITY_DISPOSE") && inspection.statusId === "QiVerified",
+            canReinspect:
+                access.has("QUALITY_INSPECT") &&
+                inspection.statusId === "QiDisposed" &&
+                dec(inspection.heldQuantity).compare(0) > 0,
+            canCancel:
+                ["QUALITY_INSPECT", "QUALITY_VERIFY"].some(access.has) &&
+                ["QiDraft", "QiSubmitted"].includes(inspection.statusId),
             canAssign:
                 ["QUALITY_INSPECT", "QUALITY_VERIFY", "QUALITY_DISPOSE"].some(access.has) &&
                 openStatuses.includes(inspection.statusId)
@@ -1375,7 +1542,8 @@ function sourceStatus(p) {
         const inspectionRejected = dispositions
             .filter(row => ownIds.has(row.qualityInspectionId))
             .reduce((sum, row) => sum.add(dec(row.quantity)), zero)
-        const eligible = accepted.subtract(held)
+        // what the inspection scrapped or returned to the supplier leaves the match too (P8 review B2)
+        const eligible = accepted.subtract(held).subtract(inspectionRejected)
         return {
             assetReceiptId: receipt.assetReceiptId,
             shipmentId: receipt.shipmentId,
@@ -1416,6 +1584,7 @@ const operations = {
     saveReading,
     submitInspection,
     verifyInspection,
+    cancelInspection,
     getInspection,
     findInspections,
     sourceStatus,

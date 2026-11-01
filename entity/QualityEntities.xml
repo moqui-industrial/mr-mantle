@@ -129,6 +129,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="createdDate" type="date-time"/>
         <field name="createdByUserId" type="id"/>
         <field name="comments" type="text-long"/>
+        <field name="previousInspectionId" type="id"><description>The disposed inspection whose held stock this one inspects
+            again (create#Inspection's reinspectQualityInspectionId).</description></field>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" related="mantle.facility.Facility"/>
@@ -186,7 +188,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="resultAssetId" type="id"/>
         <field name="fromLocationSeqId" type="id"/>
         <field name="toLocationSeqId" type="id"/>
-        <field name="statusId" type="id"><description>The stock's status after the disposition.</description></field>
+        <field name="assetStatusId" type="id"><description>The stock's status after the disposition.</description></field>
         <field name="reservedOrderId" type="id"/>
         <field name="reservedOrderItemSeqId" type="id"/>
         <field name="varianceReasonEnumId" type="id"/>
