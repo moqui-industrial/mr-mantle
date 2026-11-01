@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Mantle test carrier (impl-warehouse §4, F14; design-warehouse §12 Carriers, §17 WH-LABEL): every carrier interface
+    of mantle.shipment.CarrierServices implemented deterministically, for specs, demos and CarrierTest, by the seeded
+    ShippingGatewayConfig TEST_SHIPPING (carrier TEST_CARRIER). The rules are TestCarrier.js's: rates by weight and a zone
+    table, a PDF label with a Code 128 tracking number, its own record of issued labels (TestCarrierLabel), refund,
+    tracking and address validation; postal code 99901 times out after issuing the label, 99902 refuses the label, 99903
+    is an invalid address. Real carriers are their own gateways. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="ShippingRatesBulk">
+        <description>Rates of the asked methods of the carriers this gateway serves (ShippingGatewayCarrier): each package's
+            base and per-pound charge times the zone factor, summed; none for an invalid address or a package with no
+            weight.</description>
+        <implements service="mantle.shipment.CarrierServices.get#ShippingRatesBulk"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('ratesBulk', context)"/>
+            <set field="shippingRateInfoList" from="answer.shippingRateInfoList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ShippingRate">
+        <description>The rate of a shipment's packages (or one) at the route segment's method or the one given. Refuses an
+            invalid address (ADDRESS_INVALID), a method it does not serve (METHOD_UNAVAILABLE), no package (NO_PACKAGES)
+            and a package with no weight (WEIGHT_REQUIRED).</description>
+        <implements service="mantle.shipment.CarrierServices.get#ShippingRate"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('rate', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="request" noun="ShippingLabels">
+        <description>A label per package: recorded in TestCarrierLabel in its own transaction, then its PDF, tracking code,
+            charge and label id filled in on ShipmentPackageRouteSeg (the return fields for a return label). A request
+            reference already issued answers that label again. Postal code 99901 issues the label and then fails with
+            CARRIER_TIMEOUT (the answer is lost); 99902 is LABEL_REFUSED; 99903 ADDRESS_INVALID; a package with no weight
+            WEIGHT_REQUIRED.</description>
+        <implements service="mantle.shipment.CarrierServices.request#ShippingLabels"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('requestLabels', context)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="ShippingLabels">
+        <description>Whether the test carrier issued the label of a request reference (or the package's newest): a label
+            found and not refunded is filled in on the package; nothing is bought.</description>
+        <implements service="mantle.shipment.CarrierServices.find#ShippingLabels"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('findLabels', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="refund" noun="ShippingLabels">
+        <description>The packages' labels refunded: TestCarrierLabel.refundedDate and the package's gatewayRefundStatus;
+            NO_LABEL when there is none. A refunded label answers the same.</description>
+        <implements service="mantle.shipment.CarrierServices.refund#ShippingLabels"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('refundLabels', context)</script>
+        </actions>
+    </service>
+    <service verb="track" noun="ShippingLabels">
+        <description>Each labelled package in transit with its estimate (the label day plus the method's days); a refunded
+            label is a failure.</description>
+        <implements service="mantle.shipment.CarrierServices.track#ShippingLabels"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('trackLabels', context)</script>
+        </actions>
+    </service>
+    <service verb="validate" noun="ShippingPostalAddress">
+        <description>Postal code 99903 is CmtlInvalid with its message; any other address CmtlValid.</description>
+        <implements service="mantle.shipment.CarrierServices.validate#ShippingPostalAddress"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('validateAddress', context)"/>
+            <set field="contactMechId" from="answer.contactMechId"/>
+        </actions>
+    </service>
+</services>

@@ -97,7 +97,16 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentRouteSegmentSeqId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>
             <parameter name="shippingGatewayConfigId" required="true"/>
+            <parameter name="carrierPartyId"><description>Overrides the route segment's carrier</description></parameter>
+            <parameter name="shipmentMethodEnumId"><description>Overrides the route segment's method</description></parameter>
         </in-parameters>
+        <out-parameters>
+            <parameter name="shippingTotal"><description>The rate of the package, or of every package when none is
+                given</description></parameter>
+            <parameter name="currency"/>
+            <parameter name="days" type="Integer"/>
+            <parameter name="serviceName"/>
+        </out-parameters>
     </service>
     <service verb="request" noun="ShippingLabels" type="interface">
         <description>Request shipping labels and fill in details on ShipmentPackageRouteSeg for a single package if shipmentPackageSeqId is specified or all packages if not.</description>
@@ -109,6 +118,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentMethodEnumId"><description>If not specified use shipmentMethodEnumId on route segment</description></parameter>
             <parameter name="getReturnLabels" type="Boolean" default="false">
                 <description>Get return labels for the shipment INSTEAD of standard outbound labels; populate the return* fields on ShipmentPackageRouteSeg</description></parameter>
+            <parameter name="requestReference"><description>The caller's durable reference of this request
+                (ShippingGatewayRequest): a gateway that keeps it answers a repeated request with the label it already
+                issued instead of buying another</description></parameter>
         </in-parameters>
     </service>
     <service verb="refund" noun="ShippingLabels" type="interface">
@@ -117,7 +129,28 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentRouteSegmentSeqId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>
             <parameter name="shippingGatewayConfigId" required="true"/>
+            <parameter name="requestReference"><description>The caller's durable reference of this refund</description>
+            </parameter>
         </in-parameters>
+    </service>
+    <service verb="find" noun="ShippingLabels" type="interface">
+        <description>Ask the gateway what it did for a request whose answer was lost (a timeout): whether it issued the
+            label of the request reference (or of the package) and whether that label was refunded. A label found is filled
+            in on ShipmentPackageRouteSeg as request#ShippingLabels would; nothing is bought.</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentRouteSegmentSeqId" required="true"/>
+            <parameter name="shipmentPackageSeqId" required="true"/>
+            <parameter name="shippingGatewayConfigId" required="true"/>
+            <parameter name="requestReference"/>
+            <parameter name="getReturnLabels" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="found" type="Boolean"/>
+            <parameter name="refunded" type="Boolean"/>
+            <parameter name="trackingCode"/>
+            <parameter name="gatewayLabelId"/>
+        </out-parameters>
     </service>
     <service verb="track" noun="ShippingLabels" type="interface">
         <in-parameters>
@@ -586,6 +619,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentMethodEnumId"><description>Optional, defaults to shipmentMethodEnumId on route segment</description></parameter>
             <parameter name="getReturnLabels" type="Boolean" default="false">
                 <description>Get return labels for the shipment INSTEAD of standard outbound labels; populate the return* fields on ShipmentPackageRouteSeg</description></parameter>
+            <parameter name="requestReference"><description>Passed to the gateway (request#ShippingLabels)</description>
+            </parameter>
         </in-parameters>
         <actions>
             <service-call name="mantle.shipment.CarrierServices.get#ShipmentGatewayDetails" in-map="context" out-map="context"/>
@@ -595,7 +630,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="${requestLabelsServiceName}" out-map="context"
                     in-map="{shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
                         shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId,
-                        shipmentMethodEnumId:shipmentMethodEnumId, getReturnLabels:getReturnLabels}"/>
+                        shipmentMethodEnumId:shipmentMethodEnumId, getReturnLabels:getReturnLabels,
+                        requestReference:requestReference}"/>
 
             <!-- if Shipment has productStoreId and store has a label markup setting apply it now -->
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
@@ -699,6 +735,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>
             <parameter name="shipmentRouteSegmentSeqId"><description>Defaults to the first route segment</description></parameter>
+            <parameter name="requestReference"><description>Passed to the gateway (refund#ShippingLabels)</description>
+            </parameter>
         </in-parameters>
         <actions>
             <service-call name="mantle.shipment.CarrierServices.get#ShipmentGatewayDetails" in-map="context" out-map="context"/>
@@ -707,7 +745,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <service-call name="${refundLabelsServiceName}" out-map="context"
                     in-map="{shipmentId:shipmentId, shipmentRouteSegmentSeqId:shipmentRouteSegmentSeqId,
-                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId}"/>
+                        shipmentPackageSeqId:shipmentPackageSeqId, shippingGatewayConfigId:shippingGatewayConfigId,
+                        requestReference:requestReference}"/>
         </actions>
     </service>
     <service verb="track" noun="ShipmentLabels">

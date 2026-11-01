@@ -673,13 +673,41 @@ function shipSupplierReturn(p) {
 }
 
 // ===== the return label =====
-// request#ReturnLabel: Customer Service's "Issue return label": the approved customer return's shipment, a package and its
-// route segment ensured, then the label through the carrier interface (CarrierServices.request#ShipmentLabels) when a
-// shipping gateway applies to the shipment, else LABEL_NOT_CONFIGURED with the package ready for the carrier; a label already
-// bought answers LABEL_EXISTS and buys no second one. P13's provider-request records take over the carrier call.
+// Customer Service's return label (request#ReturnLabel) on the shipping gateway path (P13, F331): the request is recorded
+// and committed first (recordReturnLabel, record#ReturnLabelRequest: the return, its open return shipment's package and
+// route segment, and a ShippingGatewayRequest), then the carrier is called outside any transaction that could roll back,
+// and an earlier request that got no answer is asked about before any retry (Shipping.js sendOne).
 function requestReturnLabel(p) {
+    const shipping = ec.resource.script("component://mr-mantle/service/mantle/shipment/Shipping.js")
     const begun = posting.begin(p, "ReturnLabelRequest", ["SHIPMENT_SHIP", "RETURN_AUTHORIZE"], ["returnId"])
     if (begun.previous) return begun.previous
+    const recorded = lib.probe("mantle.shipment.WarehouseTaskServices.record#ReturnLabelRequest", p).recorded
+    const plan = recorded.plan
+    if (recorded.answer) return shipping.finish(begun.op, plan, Object.assign({unknownCount: 0}, recorded.answer))
+    const item = plan.packages[0]
+    const sent = shipping.sendOne(plan, item)
+    const routeSeg = one("mantle.shipment.ShipmentPackageRouteSeg", {
+        shipmentId: plan.shipmentId,
+        shipmentPackageSeqId: item.shipmentPackageSeqId,
+        shipmentRouteSegmentSeqId: plan.shipmentRouteSegmentSeqId
+    })
+    const states = {done: "LABEL_REQUESTED", unknown: "LABEL_PENDING", pending: "LABEL_PENDING", failed: "LABEL_FAILED"}
+    const answer = Object.assign({}, recorded.base, {
+        resultCode: states[sent.state] || "LABEL_FAILED",
+        trackingCode: routeSeg?.trackingCode || null,
+        labelUrl: routeSeg?.labelUrl || null,
+        shippingGatewayRequestId: item.requestId,
+        reasonCode: sent.reasonCode || null,
+        message: sent.message || null,
+        unknownCount: sent.state === "unknown" || sent.state === "pending" ? 1 : 0
+    })
+    return shipping.finish(begun.op, plan, answer)
+}
+// record#ReturnLabelRequest, in its own transaction: the return and its open return shipment locked, the package and route
+// segment made when missing, and the label's request row (or an answer at once: a label there, no gateway, a call under way).
+function recordReturnLabel(p) {
+    const shipping = ec.resource.script("component://mr-mantle/service/mantle/shipment/Shipping.js")
+    posting.requirePermission(["SHIPMENT_SHIP", "RETURN_AUTHORIZE"])
     const userScope = posting.scope()
     const header = blank(p.returnId) ? null : one(HEADER, {returnId: p.returnId})
     if (!header || !facilityScope.owns(userScope, header.vendorPartyId))
@@ -695,10 +723,8 @@ function requestReturnLabel(p) {
         return row?.shipmentTypeEnumId === "ShpTpSalesReturn" && !["ShipCancelled", "ShipDelivered"].includes(row.statusId)
     })
     if (!shipmentId) denied("RETURN_NO_SHIPMENT", "Return " + p.returnId + " has no open return shipment")
-    const shipment = find(SHIPMENT, {shipmentId}).forUpdate(true).one()
+    find(SHIPMENT, {shipmentId}).forUpdate(true).one()
     find(HEADER, {returnId: header.returnId}).forUpdate(true).one()
-    const settledAnswer = posting.settled(begun.op)
-    if (settledAnswer) return settledAnswer
     let segment = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId}).sort((a, b) =>
         String(a.shipmentRouteSegmentSeqId).localeCompare(String(b.shipmentRouteSegmentSeqId))
     )[0]
@@ -711,55 +737,85 @@ function requestReturnLabel(p) {
     }
     let packageSeqId = rows("mantle.shipment.ShipmentPackage", {shipmentId})[0]?.shipmentPackageSeqId
     if (!packageSeqId) packageSeqId = call("create#mantle.shipment.ShipmentPackage", {shipmentId}).shipmentPackageSeqId
-    const routeKey = {
-        shipmentId,
-        shipmentPackageSeqId: packageSeqId,
-        shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId
+    if (!blank(p.weight)) {
+        if (!(Number(String(p.weight)) > 0)) denied("WEIGHT_INVALID", "The package's weight must be above zero")
+        if (blank(p.weightUomId)) denied("WEIGHT_UNIT_REQUIRED", "Give the weight's unit")
+        call("update#mantle.shipment.ShipmentPackage", {
+            shipmentId,
+            shipmentPackageSeqId: packageSeqId,
+            weight: p.weight,
+            weightUomId: p.weightUomId
+        })
     }
-    let routeSeg = one("mantle.shipment.ShipmentPackageRouteSeg", routeKey)
-    if (!routeSeg) {
-        call("create#mantle.shipment.ShipmentPackageRouteSeg", routeKey)
-        routeSeg = one("mantle.shipment.ShipmentPackageRouteSeg", routeKey)
-    }
-    const answer = {
+    const routeSeg = shipping.routeSegOf(shipmentId, packageSeqId, segment.shipmentRouteSegmentSeqId)
+    const base = {
         shipmentId,
         returnId: header.returnId,
         shipmentPackageSeqId: packageSeqId,
         shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId
     }
-    const labelOf = row => ({trackingCode: row?.trackingCode || null, labelUrl: row?.labelUrl || null})
-    if (routeSeg.trackingCode || routeSeg.labelUrl || routeSeg.gatewayLabelId) {
-        Object.assign(answer, {resultCode: "LABEL_EXISTS"}, labelOf(routeSeg))
-    } else {
-        let gateway = null
-        try {
-            gateway = lib.probe("mantle.shipment.CarrierServices.get#ShipmentGatewayDetails", {shipmentId})
-        } catch (error) {
-            ec.logger.info("Return label for " + shipmentId + ": no shipping gateway (" + error.message + ")")
-        }
-        if (gateway?.shippingGatewayConfig?.requestLabelsServiceName) {
-            call("mantle.shipment.CarrierServices.request#ShipmentLabels", {
-                shipmentId,
-                shipmentPackageSeqId: packageSeqId,
-                shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId
-            })
-            Object.assign(
-                answer,
-                {resultCode: "LABEL_REQUESTED"},
-                labelOf(one("mantle.shipment.ShipmentPackageRouteSeg", routeKey))
-            )
-        } else
-            Object.assign(answer, {
-                resultCode: "LABEL_NOT_CONFIGURED",
-                trackingCode: null,
-                labelUrl: null,
-                message: "No shipping gateway applies to return shipment " + shipmentId + "; its package is ready for the carrier"
-            })
+    const plan = {
+        kind: "label",
+        shipmentId,
+        shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId,
+        organizationPartyId: header.vendorPartyId,
+        shippingGatewayConfigId: null,
+        packages: []
     }
-    return posting.complete(begun.op, header.vendorPartyId, SHIPMENT, shipmentId, answer)
+    if (shipping.activeLabel(routeSeg))
+        return {
+            recorded: {
+                plan,
+                base,
+                answer: Object.assign({}, base, {
+                    resultCode: "LABEL_EXISTS",
+                    trackingCode: routeSeg.trackingCode || null,
+                    labelUrl: routeSeg.labelUrl || null
+                })
+            }
+        }
+    // the gateway worked out in this transaction from the segment as it is now, so a segment made here counts (P13 review A1)
+    const gateway = shipping.gatewayFor(one(SHIPMENT, {shipmentId}), segment)
+    if (
+        gateway?.requestLabelsServiceName &&
+        !shipping.servesCarrier(gateway, one(SHIPMENT, {shipmentId}), segment.carrierPartyId)
+    )
+        denied("GATEWAY_NOT_FOR_CARRIER", "Gateway " + gateway.shippingGatewayConfigId + " does not serve the segment's carrier")
+    if (gateway?.requestLabelsServiceName && gateway.testMode === "Y" && !shipping.testGatewayAllowed(header.vendorPartyId))
+        denied(
+            "TEST_GATEWAY",
+            "Gateway " + gateway.shippingGatewayConfigId + " is a test gateway, not allowed for " + header.vendorPartyId
+        )
+    if (!gateway?.requestLabelsServiceName)
+        return {
+            recorded: {
+                plan,
+                base,
+                answer: Object.assign({}, base, {
+                    resultCode: "LABEL_NOT_CONFIGURED",
+                    trackingCode: null,
+                    labelUrl: null,
+                    message:
+                        "No shipping gateway applies to return shipment " + shipmentId + "; its package is ready for the carrier"
+                })
+            }
+        }
+    plan.shippingGatewayConfigId = gateway.shippingGatewayConfigId
+    plan.shipmentMethodEnumId = segment.shipmentMethodEnumId || null
+    const packageRow = one("mantle.shipment.ShipmentPackage", {shipmentId, shipmentPackageSeqId: packageSeqId})
+    plan.packages.push(shipping.planPackage("label", shipmentId, segment, gateway, packageRow, p.operationKey))
+    return {recorded: {plan, base, answer: null}}
 }
 
-const operations = {receive, returnableReceipts, addReceiptToReturn, issueSupplierReturn, shipSupplierReturn, requestReturnLabel}
+const operations = {
+    receive,
+    returnableReceipts,
+    addReceiptToReturn,
+    issueSupplierReturn,
+    shipSupplierReturn,
+    requestReturnLabel,
+    recordReturnLabel
+}
 ;({
     holdingAssets,
     returnedOf,
