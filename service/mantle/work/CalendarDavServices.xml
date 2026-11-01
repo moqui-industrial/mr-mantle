@@ -18,9 +18,10 @@ along with this software (see the LICENSE.md file). If not, see
         as VEVENT collections, each event series one object with its changed instances, and the user's tasks as a Tasks
         collection of VTODOs. Called as the user who logged in with an app password; every service checks the calendar's
         access as the screens do (check#CalendarAccess). An event a phone writes goes through store#CalendarFeedEvents, so it
-        is matched by its UID; an event a phone deletes is cancelled, or only taken out of this calendar when it is in
-        another too. Not carried over CalDAV: attendees and organizer written by a client (the app's own are served), and
-        the instances a client removes from a series. -->
+        is matched by its UID, after the bookings of an event it moves are checked (check#ResourceBookings); a task a phone
+        changes goes through the task services (update#Task, set#TaskStatus along its status flow); an event a phone deletes is
+        cancelled, or only taken out of this calendar when it is in another too. Not carried over CalDAV: attendees and
+        organizer written by a client (the app's own are served), and the instances a client removes from a series. -->
 
     <service verb="get" noun="CalendarObjectTags">
         <description>The objects of a calendar for CalDAV: each event series (not cancelled) by its name (the davName a
@@ -240,10 +241,18 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="put" noun="DavObject">
         <description>Store an object a CalDAV client wrote: a calendar's event series (edit permission, not a subscription
             calendar) through store#CalendarFeedEvents by its UID, the name kept as davName; or a task in Tasks (a new one
-            made with create#SimpleTask assigned to the user, one the user is assigned to updated: name, description,
-            status, priority, percent complete, start, due and completion). ifMatch and ifNoneMatch are the client's
-            preconditions; status is 412 when one fails, 403 for a calendar the user may not change, 400 for text that holds
-            no event or to-do (or several UIDs).</description>
+            made with create#SimpleTask assigned to the user). A task the user is assigned to changes through the task
+            services, as on the screens: its name, description, priority, percent complete, start and due through
+            TaskServices.update#Task, its status through set#TaskStatus along the task's status flow (get#TaskStatusFlow; Complete
+            sets the resolution and the completion date), COMPLETED being Complete or Closed; a to-do reopened from Complete,
+            Closed or Cancelled goes to the first open status the flow allows from there. A status move the flow has not is
+            refused with status 409 and nothing changes. A new start or end of an event that holds a meeting room or equipment
+            (a current booking) is checked first as a move on the screens is (EventServices.check#ResourceBookings with the
+            new time and checkOnly): a clash with another booking of it is refused with 409 and nothing changes; once stored,
+            a booking of a resource with approvers is asked again (check#ResourceBookings). ifMatch and ifNoneMatch are the
+            client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change, 400 for text that
+            holds no event or to-do (or several UIDs). Another refusal of a service it calls is an error: the whole change
+            rolls back and the DAV server answers by it (409, 403 for access).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
             <parameter name="objectName" required="true"/>
@@ -290,12 +299,35 @@ along with this software (see the LICENSE.md file). If not, see
                     if (ec.message.hasError()) return
                     created = true
                 } else {
-                    const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', existing.workEffortId).one()
-                    for (const [field, value] of Object.entries(fields)) if (field !== 'priority' || value != null) row.set(field, value)
-                    const next = statusOf[todo.status]
-                    if (next) row.set('statusId', next)
-                    else if (['WeComplete', 'WeClosed', 'WeCancelled'].includes(row.statusId)) row.set('statusId', 'WeApproved')
-                    row.update()
+                    // as on the screens: the status along the task's flow, checked before anything changes, so a move the flow
+                    // has not leaves the task as it was (409)
+                    const flow = ec.service.sync().name('mantle.work.TaskServices.get#TaskStatusFlow').parameters({workEffortId: existing.workEffortId}).call()
+                    if (ec.message.hasError()) return
+                    const done = ['WeComplete', 'WeClosed', 'WeCancelled']
+                    const moves = Array.from(flow.transitionList || []).map((transition) => transition.toStatusId)
+                    let next = statusOf[todo.status] || null
+                    // COMPLETED is how Complete and Closed are written
+                    if (next === 'WeComplete' && flow.statusId === 'WeClosed') next = null
+                    // reopened: the first open status the flow goes to from here (by the statuses' sequence)
+                    if (next == null && done.includes(flow.statusId)) next = moves.find((statusId) => !done.includes(statusId)) || 'WeInPlanning'
+                    if (next === flow.statusId) next = null
+                    if (next && !moves.includes(next)) {
+                        status = 409
+                        ec.logger.info(`CalDAV tasks/${objectName}: task ${existing.workEffortId} may not go from ${flow.statusId} to ${next} in its status flow ${flow.statusFlowId}`)
+                        return
+                    }
+                    // the task's own time unit, which update#Task would otherwise set to hours
+                    const timeUomId = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', existing.workEffortId).one()?.timeUomId || null
+                    const changes = {workEffortId: existing.workEffortId, workEffortName: fields.workEffortName, description: fields.description,
+                        percentComplete: fields.percentComplete, estimatedStartDate: fields.estimatedStartDate, estimatedCompletionDate: fields.estimatedCompletionDate}
+                    if (timeUomId) changes.timeUomId = timeUomId
+                    if (fields.priority != null) changes.priority = fields.priority
+                    ec.service.sync().name('mantle.work.TaskServices.update#Task').parameters(changes).call()
+                    if (ec.message.hasError()) return
+                    if (next) {
+                        ec.service.sync().name('mantle.work.TaskServices.set#TaskStatus').parameters({workEffortId: existing.workEffortId, statusId: next}).call()
+                        if (ec.message.hasError()) return
+                    }
                 }
                 const after = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 etag = Array.from(after.objectList || []).find((object) => object.name === objectName || (object.uid && object.uid === todo.uid))?.etag ?? null
@@ -314,10 +346,65 @@ along with this software (see the LICENSE.md file). If not, see
             // the name keeps its event: a client that changed the UID at the same name writes over it
             let uid = Array.from(uids)[0]
             if (existing && existing.uid !== uid) { uid = existing.uid; for (const event of events) event.uid = uid }
+            // a new time for an event that holds a meeting room or equipment, checked as a move on the screens is before anything
+            // is stored: a clash with another booking of it refuses the change (409)
+            const moved = []
+            const millis = (value) => value == null || value === '' ? null : (value instanceof Date ? value.getTime() : (/^-?\d+$/.test(String(value)) ? Number(String(value)) : Date.parse(String(value))))
+            const seriesRow = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffortDetail').condition('calendarId', collectionId).condition('universalId', uid).list())
+                    .find((row) => ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', row.workEffortId)
+                        .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').count() === 0) ?? null
+            if (seriesRow != null) {
+                // the series and the instances it changed on their own, by their recurrence start (store#CalendarFeedEvents' keys)
+                const overrideOf = new Map(Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', seriesRow.workEffortId)
+                        .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').list()).map((link) => [millis(link.fromDate), link.toWorkEffortId]))
+                const dayBefore = (text) => {
+                    const [y, m, d] = String(text).substring(0, 10).split('-').map(Number)
+                    return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().substring(0, 10)
+                }
+                // the time fields store#CalendarFeedEvents writes for the event
+                const timeOf = (event) => {
+                    if (event.allDay) {
+                        const startDay = String(event.startDate || '').substring(0, 10)
+                        const endDay = event.endDate ? dayBefore(event.endDate) : null
+                        return {estimatedStartDate: null, estimatedCompletionDate: null, allDayStart: startDay, allDayEnd: endDay && endDay > startDay ? endDay : null}
+                    }
+                    const start = millis(event.start), end = millis(event.end)
+                    return {estimatedStartDate: start == null || Number.isNaN(start) ? null : new Date(start), estimatedCompletionDate: end == null || Number.isNaN(end) ? null : new Date(end),
+                        allDayStart: null, allDayEnd: null}
+                }
+                const spanOf = (workEffort) => ec.service.sync().name('mantle.work.WorkEffortServices.get#WorkEffortStartEnd')
+                        .parameters({workEffortId: workEffort.workEffortId, workEffort: workEffort}).call() || {}
+                for (const event of events) {
+                    if (event.recurrenceId != null && String(event.recurrenceRange || '').toUpperCase() === 'THISANDFUTURE') continue
+                    const workEffortId = event.recurrenceId == null ? seriesRow.workEffortId : overrideOf.get(millis(event.recurrenceId))
+                    if (!workEffortId) continue
+                    const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
+                    if (row == null) continue
+                    const before = spanOf(row.getMap())
+                    const after = spanOf(Object.assign({}, row.getMap(), timeOf(event)))
+                    if (millis(after.startDate) == null) continue
+                    if (millis(before.startDate) === millis(after.startDate) && millis(before.endDate) === millis(after.endDate)) continue
+                    const booked = ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: workEffortId,
+                        startDate: after.startDate, endDate: after.endDate, checkOnly: true}).call()
+                    if (ec.message.hasError()) return
+                    if (Array.from(booked?.bookingList || []).length) moved.push(workEffortId)
+                    const conflicts = Array.from(booked?.conflictList || [])
+                    if (conflicts.length) {
+                        status = 409
+                        ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${workEffortId} not moved, its bookings clash: ${conflicts.map((conflict) => `${conflict.resourceName} with ${conflict.workEffortId}`).join(', ')}`)
+                        return
+                    }
+                }
+            }
             const stored = ec.service.sync().name('mantle.work.CalendarServices.store#CalendarFeedEvents')
                     .parameters({calendarId: collectionId, eventList: events}).call()
             if (ec.message.hasError()) return
             if (stored.failedCount) { status = 400; ec.logger.warn(`CalDAV ${collectionId}/${objectName}: ${stored.failedCount} events not stored`); return }
+            // a booking moved with its event: one of a resource with approvers is asked again, as after a move on the screens
+            for (const workEffortId of moved) {
+                ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: workEffortId, allowConflicts: true}).call()
+                if (ec.message.hasError()) return
+            }
             const after = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
             const object = after.find((candidate) => candidate.uid === uid)
             if (object == null) { status = 409; return }

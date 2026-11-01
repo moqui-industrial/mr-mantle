@@ -14,6 +14,64 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="get" noun="PayRateAccess">
+        <description>Whose pay rate the user may read and set. An employee is a party with a PartyRelationship PrtEmployee from
+            it (read without the user's entity filters, so a filter that hides an employment cannot show a pay rate). An
+            employee's pay rate (the vendor rates and vendorRateAmountId of the person's time entries, the person's own worker
+            pay rates RaprVendor, a staffing candidate's cost rate) is read with PAYROLL_VIEW and set with PAYROLL_EDIT (ADMIN
+            holds both): canViewPay and canEditPay. The rates of the others (contractors) are TIME_ENTRY_RATE's, as the callers
+            check. For the people given (partyIdList), employment is now: employeePartyIds, and hiddenPartyIds and
+            lockedPartyIds the employees whose pay rate the user may not read or set (empty with the permission). For time
+            entries (entryList of {key, partyId, date}: the entry's id, its person and its date, fromDate else thruDate) the
+            worker counts as an employee when employed on the entry's date or now, so an employee's past pay stays hidden after
+            the employment ends: employeeKeys, hiddenKeys and lockedKeys. One query for all the people. Answers only: it adds no
+            error, so a caller asks it in its own transaction.</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="entryList" type="List"><parameter name="entry" type="Map"><description>key, partyId, date</description></parameter></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employeePartyIds" type="List"/>
+            <parameter name="hiddenPartyIds" type="List"/>
+            <parameter name="lockedPartyIds" type="List"/>
+            <parameter name="employeeKeys" type="List"/>
+            <parameter name="hiddenKeys" type="List"/>
+            <parameter name="lockedKeys" type="List"/>
+            <parameter name="canViewPay" type="Boolean"/>
+            <parameter name="canEditPay" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            canViewPay = !!ec.user.userId && ec.user.hasPermission('PAYROLL_VIEW')
+            canEditPay = !!ec.user.userId && ec.user.hasPermission('PAYROLL_EDIT')
+            const millis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const text = String(value)
+                return /^-?\d+$/.test(text) ? Number(text) : Date.parse(text)
+            }
+            const entries = Array.from(entryList || []).filter((entry) => entry && entry.partyId)
+            const people = Array.from(new Set(Array.from(partyIdList || []).filter((id) => id).map(String)
+                    .concat(entries.map((entry) => String(entry.partyId)))))
+            // every employment of the people, ended ones too, in one query
+            const spans = new Map()
+            if (people.length) for (const row of Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtEmployee')
+                    .condition('fromPartyId', 'in', people).selectField('fromPartyId,fromDate,thruDate').disableAuthz().list())) {
+                if (!spans.has(row.fromPartyId)) spans.set(row.fromPartyId, [])
+                spans.get(row.fromPartyId).push([millis(row.fromDate), millis(row.thruDate)])
+            }
+            const nowMs = millis(ec.user.nowTimestamp)
+            const employedOn = (partyId, at) => at != null && (spans.get(partyId) || []).some(([from, thru]) => (from == null || from <= at) && (thru == null || thru > at))
+            employeePartyIds = Array.from(new Set(Array.from(partyIdList || []).filter((id) => id).map(String))).filter((id) => employedOn(id, nowMs))
+            hiddenPartyIds = canViewPay ? [] : employeePartyIds
+            lockedPartyIds = canEditPay ? [] : employeePartyIds
+            employeeKeys = entries.filter((entry) => employedOn(String(entry.partyId), nowMs) || employedOn(String(entry.partyId), millis(entry.date)))
+                    .map((entry) => entry.key)
+            hiddenKeys = canViewPay ? [] : employeeKeys
+            lockedKeys = canEditPay ? [] : employeeKeys
+        ]]></script></actions>
+    </service>
+
     <service verb="create" noun="Employment">
         <in-parameters>
             <auto-parameters entity-name="mantle.party.PartyRelationship" include="nonpk"/>

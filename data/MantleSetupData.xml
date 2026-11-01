@@ -97,6 +97,13 @@ along with this software (see the LICENSE.md file). If not, see
 
     <userPermissions userPermissionId="TIME_ENTRY_RATE" description="Time Entry Rate Override"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIME_ENTRY_RATE" fromDate="0"/>
+    <!-- an employee's pay rate (the worker rate of the time of a person with a current PrtEmployee relationship, a person's worker
+        pay rate) is read with PAYROLL_VIEW and set with PAYROLL_EDIT (mantle.humanres.EmploymentServices.get#PayRateAccess);
+        TIME_ENTRY_RATE alone keeps client rates and the rates of workers who are not employees -->
+    <userPermissions userPermissionId="PAYROLL_VIEW" description="Payroll View (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PAYROLL_EDIT" description="Payroll Edit (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_EDIT" fromDate="0"/>
     <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
     <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>
