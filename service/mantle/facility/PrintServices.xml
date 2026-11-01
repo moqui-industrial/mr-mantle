@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Facility printing (impl-warehouse P13; design-warehouse §12 Printers, §17 WH-LABEL; F15, F16): a document sent to the
+    printer a facility binds for its purpose, over the framework's org.moqui.impl.PrintServices and NetworkPrinter, with the
+    print kept apart from any posting so a failure leaves what was posted and offers a reprint; what each printer can take;
+    and a facility's printer bindings (copies, fromDate, thruDate). The rules are Printing.js's. PDF only; ZPL is later
+    (impl-warehouse §4). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="dispatch" noun="Document" allow-remote="false" transaction="ignore">
+        <description>Print a document at a facility: a shipment's package labels (documentType shipmentLabel or returnLabel,
+            the PDF the gateway gave) or a screen (documentType screen, rendered as PDF by print#ScreenDocument), on the
+            printer the facility binds for printerPurposeEnumId (FacilityPrinter in effect, with its copies) or a printer
+            given that is bound there; or, with printJobId, the same document again (a reprint, send#PrintJob). Each print
+            runs in a transaction of its own and never undoes what was posted before it: the answer says printed, or why not
+            (PRINTER_NOT_BOUND, PRINTING_UNAVAILABLE when this build has no print client, PRINT_FAILED, NO_LABEL,
+            DOCUMENT_UNAVAILABLE) with the print jobs to reprint. Requires a warehouse permission (SHIPMENT_SHIP or
+            SHIPMENT_PACK for labels; for other documents also SHIPMENT_PICK, STOCK_RECEIVE, STOCK_MOVE, STOCK_COUNT,
+            STOCK_ADJUST, QUALITY_INSPECT or FACILITY_EDIT); refuses a facility outside the user's organizations
+            (RECORD_UNAVAILABLE), a shipment of another facility, a printer not bound there (PRINTER_UNAVAILABLE) and an
+            unknown document (DOCUMENT_INVALID).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="printerPurposeEnumId"/>
+            <parameter name="networkPrinterId"/>
+            <parameter name="printJobId"><description>Reprint this job's document</description></parameter>
+            <parameter name="documentType"><description>shipmentLabel, returnLabel or screen</description></parameter>
+            <parameter name="shipmentId"/>
+            <parameter name="shipmentPackageSeqId"/>
+            <parameter name="screenLocation"/>
+            <parameter name="screenParameters" type="Map"/>
+            <parameter name="jobName"/>
+            <parameter name="copies" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="printed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="printJobIds" type="List"/>
+            <parameter name="networkPrinterId"/>
+            <parameter name="copies" type="Integer"/>
+            <parameter name="reprintable" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Printing.js')
+                    .execute('dispatch', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="get" noun="PrinterCapabilities" allow-remote="false">
+        <description>What each printer takes (PDF; no ZPL yet) and what its last print job says about it (used, failing, or
+            unavailable when this build has no print client), for a printer, a facility's bound printers, or every printer.
+            Requires a warehouse permission; refuses a facility outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="networkPrinterId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="printers" type="List"><description>networkPrinterId, description, location, serverHost,
+                printerName, pdf, zpl, formats, lastJobStatusId, lastJobDate, lastJobError, availability</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Printing.js')
+                    .execute('capabilities', context)"/>
+            <set field="printers" from="answer.printers"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityPrinter" allow-remote="false">
+        <description>A facility's printer for a purpose (FacilityDetail's Printers tab): the printer, its copies (1 to 20)
+            and the dates it is in effect, or with endNow the binding ended now. Requires FACILITY_EDIT; refuses a facility
+            outside the user's organizations (RECORD_UNAVAILABLE), an unknown purpose (PURPOSE_INVALID) or printer
+            (PRINTER_INVALID), COPIES_INVALID, DATES_INVALID.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="printerPurposeEnumId" required="true"/>
+            <parameter name="networkPrinterId"/>
+            <parameter name="copies" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="endNow"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="printerPurposeEnumId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Printing.js')
+                    .execute('storeBinding', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+</services>

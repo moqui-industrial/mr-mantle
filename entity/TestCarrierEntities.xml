@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Mantle test carrier (mantle.shipment.carrier.TestGatewayServices; impl-warehouse §4, F14): its own record of the
+    labels it issued, as a carrier keeps one, so a lookup after a timeout and a refund check something real. Specs, demos and
+    Carriers' CarrierTest use it; real carriers are their own gateways. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="TestCarrierLabel" package="mantle.shipment.carrier" cache="never">
+        <description>A label the test carrier issued: written in its own transaction when it issues it, so a label whose
+            answer was lost (a timeout) is still there when the carrier is asked later.</description>
+        <field name="testCarrierLabelId" type="id" is-pk="true"/>
+        <field name="requestReference" type="text-medium"><description>The caller's reference of the request (a
+            ShippingGatewayRequest id): a second request with it answers this label.</description></field>
+        <field name="shippingGatewayConfigId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentRouteSegmentSeqId" type="id"/>
+        <field name="shipmentPackageSeqId" type="id"/>
+        <field name="returnLabel" type="text-indicator"/>
+        <field name="shipmentMethodEnumId" type="id"/>
+        <field name="trackingCode" type="text-medium"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="amountUomId" type="id"/>
+        <field name="zone" type="number-integer"/>
+        <field name="weight" type="number-decimal"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="refundedDate" type="date-time"/>
+        <index name="TEST_CARRIER_LBL_REF"><index-field name="requestReference"/></index>
+        <index name="TEST_CARRIER_LBL_PKG">
+            <index-field name="shipmentId"/><index-field name="shipmentPackageSeqId"/></index>
+    </entity>
+</entities>

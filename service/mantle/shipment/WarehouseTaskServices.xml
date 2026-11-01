@@ -2023,27 +2023,51 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('shipSupplierReturn', context)"/>
         </actions>
     </service>
-    <service verb="request" noun="ReturnLabel" allow-remote="false">
+    <service verb="request" noun="ReturnLabel" allow-remote="false" transaction="ignore">
         <description>Customer Service's "Issue return label" (design-warehouse ReturnReceipt): an approved customer return's
-            open return shipment gets a package and its route segment, and its label is requested through the carrier
-            interface (mantle.shipment.CarrierServices.request#ShipmentLabels) when a shipping gateway applies to the
-            shipment (LABEL_REQUESTED); with none it answers LABEL_NOT_CONFIGURED and the package waits for the carrier; a
-            label already on the package answers LABEL_EXISTS and requests none. The operation key is the request's identity:
-            a retry answers the first and buys no second label. Requires SHIPMENT_SHIP or RETURN_AUTHORIZE; refuses a return
+            open return shipment gets a package (with the weight given) and its route segment, and its label is requested on
+            the shipping gateway path (P13, F331): the request is recorded and committed first (record#ReturnLabelRequest, a
+            ShippingGatewayRequest), then mantle.shipment.CarrierServices.request#ShipmentLabels runs in a transaction of its
+            own, so nothing rolls back after the carrier answered; an earlier request that got no answer is asked about
+            (find#ShippingLabels) before any retry, and buys no second label. LABEL_REQUESTED with the tracking code;
+            LABEL_PENDING when the carrier did not answer (the operation is not stored, so a retry asks again); LABEL_FAILED
+            with the carrier's reason; LABEL_NOT_CONFIGURED when no shipping gateway applies (the package waits for the
+            carrier); LABEL_EXISTS when a label is on the package. Requires SHIPMENT_SHIP or RETURN_AUTHORIZE; refuses a return
             outside the user's organizations (RECORD_UNAVAILABLE), not approved (RETURN_NOT_APPROVED) or with no open return
-            shipment (RETURN_NO_SHIPMENT). P13's durable provider-request records take over the carrier call.</description>
+            shipment (RETURN_NO_SHIPMENT).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="returnId" required="true"/>
+            <parameter name="weight" type="BigDecimal"><description>The package's weight, when known</description></parameter>
+            <parameter name="weightUomId"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="result" type="Map"><description>resultCode (LABEL_REQUESTED, LABEL_EXISTS, LABEL_NOT_CONFIGURED),
-                shipmentId, returnId, shipmentPackageSeqId, shipmentRouteSegmentSeqId, trackingCode, labelUrl, message and the
-                operation fields.</description></parameter>
+            <parameter name="result" type="Map"><description>resultCode (LABEL_REQUESTED, LABEL_PENDING, LABEL_FAILED,
+                LABEL_EXISTS, LABEL_NOT_CONFIGURED), shipmentId, returnId, shipmentPackageSeqId, shipmentRouteSegmentSeqId,
+                trackingCode, labelUrl, shippingGatewayRequestId, reasonCode, message and the operation
+                fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
                     .execute('requestReturnLabel', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ReturnLabelRequest" allow-remote="false">
+        <description>Internal to request#ReturnLabel, in its own transaction: the checks and locks, the package and route
+            segment, and the label's ShippingGatewayRequest, committed before the carrier is called. Requires SHIPMENT_SHIP or
+            RETURN_AUTHORIZE.</description>
+        <in-parameters>
+            <parameter name="operationKey"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="weight" type="BigDecimal"/>
+            <parameter name="weightUomId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recorded" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="recorded" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('recordReturnLabel', context).recorded"/>
         </actions>
     </service>
     <!-- ===== transfers, stock requests and the subcontract dispatch (impl-warehouse P15) ===== -->
@@ -2910,6 +2934,262 @@ along with this software (see the LICENSE.md file). If not, see
                         cancelledInvoiceIds: released.cancelledInvoiceIdList || [],
                         releasedItemCount: released.releasedItemCount || 0, statusId: reopened.statusId,
                         reason: String(reason).trim()})"/>
+        </actions>
+    </service>
+    <!-- ===== shipping, labels and delivery (impl-warehouse P13; design-warehouse §10 Ship, PackageTracking; WH-LABEL) ===== -->
+    <service verb="get" noun="ShipmentRates" allow-remote="false">
+        <description>RateOptions and CarrierTest (design Ship, Carriers): the rates of a shipment's packages from each
+            configured provider, read only. Each shipping gateway that serves the shipment (the one asked, else the store's
+            for each carrier, the route segment's and the shipper's default; Mantle's get#ShipmentGatewayDetails) is called
+            through its get#ShippingRatesBulk implementation with the packages' weights, else its get#ShippingRate per method;
+            the methods with no gateway (the _NA_ carrier, or the segment's carrier when no gateway serves it) are rated by the
+            local-rules provider, an adapter over get#OrderShippingRateLocal with the shipment's order part (the
+            commented-out CarrierServices.get#ShipmentRates stays so). A provider that fails is named in providerErrors and
+            the others go on. Requires SHIPMENT_SHIP, SHIPPING_CARRIER_EDIT or FACILITY_EDIT; refuses a shipment outside the
+            user's facilities (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="shippingGatewayConfigId"><description>Only this gateway (CarrierTest)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shipmentId"/>
+            <parameter name="facilityId"/>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="packageCount" type="Integer"/>
+            <parameter name="weighedCount" type="Integer"/>
+            <parameter name="totalWeight"/>
+            <parameter name="rateRows" type="List"><description>rateSource (gateway or local), shippingGatewayConfigId,
+                gatewayName, testMode, canLabel, carrierPartyId, carrierName, shipmentMethodEnumId, methodName, serviceName,
+                shippingTotal, currency, days, chosen</description></parameter>
+            <parameter name="providerErrors" type="List"><description>provider, reasonCode, message</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('rates', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="request" noun="PackageLabels" allow-remote="false" transaction="ignore">
+        <description>Labels (design Ship): buy a packed shipment's package labels (or one package's; with returnLabels Y
+            the return labels) through its shipping gateway, choosing the carrier and method first when given. Requesting a
+            label ships nothing. Each package's request is recorded and committed first (record#ShippingGatewayRequests: the
+            shipment locked, its checks, a ShippingGatewayRequest), then sent with no transaction of ours open, each package
+            in a transaction of its own (CarrierServices.request#ShipmentLabels with the request id as its reference), so a
+            label one package gets is never rolled back by another's failure. A refusal (LABEL_REFUSED, ADDRESS_INVALID) fails
+            that package; a timeout or an error with no answer leaves it Unknown, and the next request asks the gateway first
+            (its find#ShippingLabels) and buys no second label when the first exists. A package with a label is answered at
+            once (LABEL_EXISTS); a refunded label is replaced. The operation is stored only when every package has an answer.
+            Requires SHIPMENT_SHIP; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE), not packed
+            (SHIPMENT_NOT_PACKED) or shipped (SHIPMENT_SHIPPED), a method the carrier lacks (METHOD_INVALID), a method no
+            gateway buys labels for (NO_GATEWAY: record the tracking by hand), a package with no weight (WEIGHT_REQUIRED) or
+            not on the shipment (PACKAGE_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId"><description>One package; empty is every package</description></parameter>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="shippingGatewayConfigId"/>
+            <parameter name="returnLabels"><description>Y: the packages' return labels</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode (LABELED, PARTIAL, FAILED, PENDING), shipmentId,
+                statusId, packages (shipmentPackageSeqId, requestId, state done, skipped, failed, unknown or pending,
+                trackingCode, recovered, reasonCode, message), doneCount, failedCount, unknownCount and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('requestLabels', context)"/>
+        </actions>
+    </service>
+    <service verb="refund" noun="PackageLabels" allow-remote="false" transaction="ignore">
+        <description>Labels (design Ship): refund (void) a shipment's package labels (or one's) through its gateway, on the
+            same recorded path as request#PackageLabels (the refund's ShippingGatewayRequest committed before the call, a
+            refund that got no answer asked about before a retry). A label refund reverses no shipment: the shipment's status,
+            its packages, issued stock and invoices stay as they are; a packed shipment then needs a new label or a tracking
+            code to ship. Requires SHIPMENT_SHIP; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE), not
+            yet packed (SHIPMENT_NOT_PACKED), or with no gateway that refunds (NO_GATEWAY); a package with no label is
+            answered NO_LABEL.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId"/>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode (REFUNDED, PARTIAL, FAILED, PENDING), shipmentId,
+                statusId (unchanged), packages, doneCount, failedCount, unknownCount and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('refundLabels', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ShippingGatewayRequests" allow-remote="false">
+        <description>Internal to request#PackageLabels and refund#PackageLabels, in its own transaction: the shipment
+            locked, the checks, the carrier and method chosen, and a ShippingGatewayRequest per package that needs the
+            gateway (new, or the earlier one that got no answer, to be asked about first). Requires SHIPMENT_SHIP.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"><description>label, returnLabel or refund</description></parameter>
+            <parameter name="operationKey"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId"/>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="shippingGatewayConfigId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="plan" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="plan" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('recordRequests', context)"/>
+        </actions>
+    </service>
+    <service verb="finish" noun="ShippingGatewayRequests" allow-remote="false">
+        <description>Internal to the gateway entry points, in its own transaction: stores the operation's answer on the
+            CX-POSTING record once every package has an answer. Requires SHIPMENT_SHIP or RETURN_AUTHORIZE.</description>
+        <in-parameters>
+            <parameter name="op" type="Map" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="resultId"/>
+            <parameter name="answer" type="Map" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('finishRequests', context).result"/>
+        </actions>
+    </service>
+    <service verb="track" noun="PackageLabels" allow-remote="false" transaction="ignore">
+        <description>PackageTracking's refresh: each shipment's tracking through its gateway's track#ShippingLabels, each
+            recorded as a ShippingGatewayRequest and run in a transaction of its own, so a shipment that fails is named and
+            the others go on. Tracking ships, reships or delivers nothing by itself; Mantle's
+            ShipmentPackageDeliveredCheckShipment delivers a shipment the carrier reports fully delivered. Requires
+            SHIPMENT_SHIP; a shipment outside the user's facilities is named RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="shipmentId"/>
+            <parameter name="shipmentIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>shipmentId, ok, statusId, packages (shipmentPackageSeqId,
+                trackingStatusEnumId, trackingEta), or reasonCode and message</description></parameter>
+            <parameter name="okCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('track', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="record" noun="ManualTracking" allow-remote="false">
+        <description>ManualCarrier (design Ship): for a method with no gateway that buys labels, the carrier's tracking code
+            on a packed shipment's packages (or one) and the route segment's actual cost and currency
+            (ShipmentServices.update#ShipmentPackageAndRouteSeg; ShipmentRouteSegment.actualCost), choosing the carrier and
+            method when given; ShipConfirm then accepts the code in place of a label. Requires SHIPMENT_SHIP; refuses a
+            shipment outside the user's facilities (RECORD_UNAVAILABLE), not packed (SHIPMENT_NOT_PACKED) or shipped
+            (SHIPMENT_SHIPPED), no or an unknown method (METHOD_REQUIRED, METHOD_INVALID), a method a gateway buys labels for
+            (GATEWAY_LABELS), no tracking code (TRACKING_REQUIRED), a negative cost (COST_INVALID) or a cost with no currency
+            to take (CURRENCY_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId"><description>One package; empty is every package</description></parameter>
+            <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="trackingCode"/>
+            <parameter name="actualCost" type="BigDecimal"/>
+            <parameter name="costUomId"><description>Defaults to the segment's or shipment's, else the facility owner's base
+                currency</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode TRACKING_RECORDED, shipmentId, packages, trackingCode,
+                carrierPartyId, shipmentMethodEnumId, actualCost, costUomId and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('manualTracking', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="PackageDelivery" allow-remote="false">
+        <description>RecordDelivery (design PackageTracking, WH-POST): a shipped package's delivery recorded by hand when no
+            carrier event exists, with who received it or the evidence: its tracking status Delivered (with the date, the
+            recipient, the note and who recorded it) on its route segments through update#ShipmentPackageRouteSeg, so Mantle's
+            ShipmentPackageDeliveredCheckShipment delivers the shipment once every package is (and ShipmentDeliveredSentEmail
+            sends the store's email). Requires SHIPMENT_SHIP; refuses a shipment outside the user's facilities
+            (RECORD_UNAVAILABLE), not shipped (NOT_SHIPPED) or delivered (ALREADY_DELIVERED), no recipient and no note
+            (EVIDENCE_REQUIRED), a date in the future or before the shipment shipped (DATE_INVALID), a package not on it
+            (PACKAGE_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId"><description>One package; empty is every package</description></parameter>
+            <parameter name="deliveredDate" type="Timestamp"/>
+            <parameter name="recipientName"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode DELIVERY_RECORDED, shipmentId, packages, statusId,
+                shipmentDelivered and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('packageDelivery', context)"/>
+        </actions>
+    </service>
+    <service verb="ship" noun="OutgoingShipment" allow-remote="false">
+        <description>ShipConfirm (design Ship, WH-POST): dispatch a packed outgoing shipment through Mantle's
+            ShipmentServices.ship#Shipment only after the final checks, each blocker named: a tracking code on every package
+            (a label not refunded, or one recorded by hand; a customer pick-up needs none: TRACKING_REQUIRED), packages holding
+            exactly what was issued (PACKAGE_TOTALS, EMPTY_PACKAGE, NO_PACKAGES), no issued stock quarantined or held by an
+            open inspection and no open inspection of the shipment (INSPECTION_HOLD), and no expired issued stock where the
+            expiry gate blocks it (ASSET_EXPIRED, P5b's gate, off by default). Shipping finalizes the pack invoice behind D3's
+            flag (ShipShipped SECA), so the fiscal period of the ship date is checked without locking (PERIOD_CLOSED).
+            ShipmentShippedSendEmail sends the store's email. A retry answers the first. Requires SHIPMENT_SHIP; refuses a
+            shipment outside the user's facilities (RECORD_UNAVAILABLE), a transfer or a supplier return
+            (SHIPPED_ELSEWHERE), not packed (SHIPMENT_NOT_PACKED), shipped (SHIPMENT_SHIPPED), a ship date in the future
+            (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="actualStartDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SHIPPED, shipmentId, statusId, facilityId,
+                packageCount, trackingCodes, invoices (invoiceId, statusId) and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('ship', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ShipReadiness" allow-remote="false">
+        <description>ShipConfirm's summary, read only: whether a packed shipment can ship and each blocker
+            ship#OutgoingShipment would name. Requires SHIPMENT_SHIP or SHIPMENT_PACK.</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shipmentId"/>
+            <parameter name="statusId"/>
+            <parameter name="canShip" type="Boolean"/>
+            <parameter name="blockers" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('shipReadiness', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
         </actions>
     </service>
 </services>
