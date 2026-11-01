@@ -2024,7 +2024,8 @@ along with this software (see the LICENSE.md file). If not, see
             owner or its facility's owner is one of the filter's organizations (no entity filter covers Asset), unless it has
             neither or the user has an entity authorization for Asset; a booked fixed asset follows its book's read. A quality
             inspection and its files (QualityInspectionContent): under an organization filter, its organization or its
-            facility's owner is one of the filter's organizations. Any other record type has only its entity filters.
+            facility's owner is one of the filter's organizations. A return's files (ReturnContent) follow the return. Any
+            other record type has only its entity filters.
 
             A client contact (the PROJECT_CLIENT permission) sees only what get#ClientRecordVisibility shows it, with
             authorization disabled too.
@@ -2118,7 +2119,8 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.facility.Facility': content('mantle.facility.FacilityContent', 'facilityId', 'facilityContentTypeEnumId'),
                 'mantle.product.asset.Asset': content('mantle.product.asset.AssetContent', 'assetId', 'contentTypeEnumId'),
                 'mantle.product.quality.QualityInspection': content('mantle.product.quality.QualityInspectionContent',
-                        'qualityInspectionId', 'contentTypeEnumId')}
+                        'qualityInspectionId', 'contentTypeEnumId'),
+                'mantle.order.return.ReturnHeader': content('mantle.order.return.ReturnContent', 'returnId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2474,6 +2476,9 @@ along with this software (see the LICENSE.md file). If not, see
                     return visible('mantle.product.asset.Asset', 'assetId', value.assetId, depth)
                 // an inspection (CX-QUALITY, no entity filter covers it) under an organization filter: its organization or
                 // its facility's owner is one of the filter's organizations; its file follows it
+                // a return's file follows its return (ReturnHeader's own entity filters: its vendor or customer)
+                if (entityName === 'mantle.order.return.ReturnContent')
+                    return visible('mantle.order.return.ReturnHeader', 'returnId', value.returnId, depth)
                 if (entityName === 'mantle.product.quality.QualityInspectionContent')
                     return visible('mantle.product.quality.QualityInspection', 'qualityInspectionId', value.qualityInspectionId, depth)
                 if (entityName === 'mantle.product.quality.QualityInspection') {
@@ -4180,8 +4185,9 @@ along with this software (see the LICENSE.md file). If not, see
             whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
             no record a timeline or the record visibility rules read. Filing it on a record is link#CommunicationEventRecord
             (create#RecordFromChatMessage does it for the record it makes). created is true when this call made the event;
-            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderName, senderPartyId, sentDate, body,
-            bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}.
+            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderActorId, senderName, senderPartyId,
+            senderNetworkName, sentDate, body, bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}: a message
+            of an external actor of a chat bridge has no senderUserId and no party, and its name and network are the actor's.
         </description>
         <in-parameters>
             <parameter name="chatRoomId" required="true"/>
@@ -4213,8 +4219,13 @@ along with this software (see the LICENSE.md file). If not, see
             const room = access.room
             const sender = row.senderUserId ? ec.entity.find('moqui.security.UserAccount').condition('userId', row.senderUserId)
                     .disableAuthz().one() : null
+            // an external actor of a chat bridge (no user, no party): its name on its network
+            const actor = !row.senderUserId && row.senderActorId ? (ec.service.sync().name('org.moqui.impl.ChatServices.get#ActorNames')
+                    .parameter('chatActorIdList', [row.senderActorId]).call()?.actorMap || {})[row.senderActorId] : null
             chatMessage = {chatRoomId: chatRoomId, eventSeq: Number(eventSeq), senderUserId: row.senderUserId ?? null,
-                senderName: sender ? (sender.userFullName || sender.username) : null, senderPartyId: sender?.partyId ?? null,
+                senderActorId: row.senderActorId ?? null,
+                senderName: sender ? (sender.userFullName || sender.username) : (actor ? actor.name : null), senderPartyId: sender?.partyId ?? null,
+                senderNetworkName: actor ? actor.networkName ?? null : null,
                 sentDate: row.sentDate, body: html, bodyText: row.bodyText ?? null,
                 attachmentNames: Array.from(content.attachments ?? []).map((file) => file.fileName).filter((name) => name),
                 roomName: room.roomName ?? null, roomRecordEntityName: room.recordEntityName ?? null, roomRecordId: room.recordId ?? null}

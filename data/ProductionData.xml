@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Production runs (design-manufacturing §12 M4; impl-warehouse P16a): the roles of a run's lines
+    (mantle.work.production.ProductionRunLine). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType description="Production Run Line Role" enumTypeId="ProductionRunLineRole"/>
+    <moqui.basic.Enumeration description="Material" enumId="PrlrMaterial" enumTypeId="ProductionRunLineRole" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output" enumId="PrlrOutput" enumTypeId="ProductionRunLineRole" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="By-product" enumId="PrlrByproduct" enumTypeId="ProductionRunLineRole"
+            sequenceNum="3"/>
+    <!-- No WeApproved to WeInPlanning (unrelease) transition is seeded here (P16 review B4): the framework accepts a
+        transition of any status flow on any WorkEffort, so it would let tasks and projects take it and any path unrelease a
+        run that has stock facts; it comes with Manufacturing's transition#ProductionOrder, whose guard checks those facts. -->
+</entity-facade-xml>

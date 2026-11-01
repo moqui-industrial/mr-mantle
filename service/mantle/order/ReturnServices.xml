@@ -1691,4 +1691,134 @@ along with this software (see the LICENSE.md file). If not, see
             <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
         </actions>
     </service>
+    <!-- ===== supplier returns from receipts (design-purchasing PUR-RETURN, Purchasing's contract built by Warehouse P14;
+        impl-warehouse F32) and a return's files (CX-RECORD-HOSTS) ===== -->
+    <service verb="find" noun="ReturnableReceipts" allow-remote="false">
+        <description>Purchasing's supplier return eligibility (design-purchasing NewSupplierReturn, PUR-RETURN): the purchase
+            receipts of the user's organizations (the order part's buying organization, FacilityScope.js) by supplier, order,
+            product or receipt, narrowed by lot or facility, each with what it accepted (available and quarantined stock
+            alike; units rejected at the dock are no stock), what earlier supplier returns linked to it took (their
+            ReturnItem.assetReceiptId, not cancelled), what the receipt still allows (receiptEligibleQuantity), what may be
+            returned now, no more than its stock on hand (eligibleQuantity, issuableQuantity), and the assets that hold its
+            stock now (its own and those its inspections' dispositions left it in, with what a Return to supplier disposition
+            holds). The shipment type, organization, supplier, lot and facility of the receipt's stock are query conditions;
+            receipts with something to return only unless includeIneligible; at most 200, newest first, of at most 5000 read
+            (receiptRowsTruncated). Mantle's calculate#OrderItemReturnable is not used: it counts billed quantity, and a rejected
+            lot is returned before the supplier bills. Requires PURCHASE_ORDER_EDIT, QUALITY_DISPOSE or STOCK_ISSUE; refuses
+            no filter (FILTER_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="vendorPartyId"/>
+            <parameter name="orderId"/>
+            <parameter name="productId"/>
+            <parameter name="assetReceiptId"/>
+            <parameter name="lotId"/>
+            <parameter name="facilityId"/>
+            <parameter name="includeIneligible" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="receiptRows" type="List"><description>assetReceiptId, shipmentId, orderId, orderItemSeqId,
+                productId, vendorPartyId, organizationPartyId, receivedDate, receivedText, lotId, acceptedQuantity,
+                quarantinedQuantity, onHandQuantity, returnedQuantity, eligibleQuantity, issuableQuantity and assets (assetId,
+                statusId, locationSeqId, lotId, serialNumber, quantityOnHand, returnSupplierQuantity).</description>
+            </parameter>
+            <parameter name="receiptRowsTruncated" type="Boolean"><description>More than 5000 receipts matched; narrow the
+                filters.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('returnableReceipts', context)"/>
+            <set field="receiptRows" from="found.receiptRows"/>
+            <set field="receiptRowsTruncated" from="found.receiptRowsTruncated"/>
+        </actions>
+    </service>
+    <service verb="add" noun="ReceiptToReturn" allow-remote="false">
+        <description>Add part of a purchase receipt to a supplier return (PUR-RETURN): a ReturnItem of the receipt's order
+            line and product linked to the receipt (assetReceiptId) and the stock it sends back (assetId: the one given, which
+            must hold the receipt's stock, else a Return to supplier disposition's or the receipt's own), its price the order
+            line's. The return, then the receipt, then its lot are locked and the eligibility counted again, so two returns
+            at once cannot exceed it. Requires PURCHASE_ORDER_EDIT or QUALITY_DISPOSE; refuses a return outside the user's
+            organizations or a receipt of another (RECORD_UNAVAILABLE), a customer return (NOT_SUPPLIER_RETURN), one no
+            longer created or requested (RETURN_NOT_OPEN), a receipt of another supplier or organization (SUPPLIER_MISMATCH),
+            no quantity (QUANTITY_INVALID), more than may still be returned (QUANTITY_EXCEEDS_ELIGIBLE), an asset that does
+            not hold the receipt's stock (VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="assetReceiptId" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="returnQuantity" type="BigDecimal" required="true"/>
+            <parameter name="returnReasonEnumId"><description>Defaults to RrsnDefective.</description></parameter>
+            <parameter name="returnResponseEnumId"><description>Defaults to RrspCredit.</description></parameter>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="assetId"/>
+            <parameter name="eligibleQuantity" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('addReceiptToReturn', context)"/>
+            <set field="returnItemSeqId" from="added.returnItemSeqId"/>
+            <set field="assetId" from="added.assetId"/>
+            <set field="eligibleQuantity" from="added.eligibleQuantity"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ReturnContent">
+        <description>A file of a return (ReturnContent, the record files of get#RecordLinkInfo): the row, and the uploaded
+            file saved through save#ReturnContentFile. Needs one of the permissions that work a return (STOCK_RECEIVE,
+            QUALITY_DISPOSE, RETURN_AUTHORIZE, PURCHASE_ORDER_EDIT, RECEIVABLE_EDIT, PAYABLE_EDIT; PERMISSION_DENIED) and the
+            return's vendor or customer in the user's organizations (FacilityScope.js; RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.order.return.ReturnContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="returnContentId"/></out-parameters>
+        <actions>
+            <script><![CDATA[
+                const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                const facilityScope = ec.resource.script('component://mr-mantle/service/mantle/facility/FacilityScope.js')
+                const works = ['STOCK_RECEIVE', 'QUALITY_DISPOSE', 'RETURN_AUTHORIZE', 'PURCHASE_ORDER_EDIT', 'RECEIVABLE_EDIT',
+                    'PAYABLE_EDIT']
+                if (!works.some(lib.access.has))
+                    lib.denied('PERMISSION_DENIED', 'A return permission is required to add its files')
+                const header = lib.one('mantle.order.return.ReturnHeader', {returnId})
+                const userScope = facilityScope.scope()
+                const parties = header ? [header.vendorPartyId, header.customerPartyId] : []
+                if (!parties.some(partyId => facilityScope.owns(userScope, partyId)))
+                    lib.denied('RECORD_UNAVAILABLE', 'Return ' + returnId + ' is not available')
+            ]]></script>
+            <service-call name="create#mantle.order.return.ReturnContent" in-map="context" out-map="context"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.order.ReturnServices.save#ReturnContentFile" in-map="context"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="ReturnContentFile" allow-remote="false">
+        <description>Internal to create#ReturnContent, which checks the permission and scope: the file of a ReturnContent
+            row of that return.</description>
+        <in-parameters>
+            <parameter name="returnContentId" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.order.return.ReturnContent" value-field="contentRow"/>
+            <if condition="contentRow == null || contentRow.returnId != returnId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${returnContentId} is not of return ${returnId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/return/${returnId}/content_${returnContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.order.return.ReturnContent"
+                    in-map="{returnContentId:returnContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
 </services>

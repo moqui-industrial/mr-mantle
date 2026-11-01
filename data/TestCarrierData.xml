@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Mantle test carrier's gateway (mantle.shipment.carrier.TestGatewayServices; impl-warehouse §4, F14): the config
+    TEST_SHIPPING in test mode. It serves no carrier here: its carrier TEST_CARRIER, the carrier's methods and the binding are
+    demo data (TestCarrierDemoData.xml), which specs and demos load, and a test gateway buys labels only for an organization
+    whose ShippingTestGatewayAllowed setting is Y (P13 review A2). Reserved postal codes: 99901 times out after issuing the
+    label, 99902 refuses the label, 99903 is an invalid address. -->
+<entity-facade-xml type="install">
+    <moqui.basic.Enumeration description="Test Shipping Gateway" enumId="ShGtwyTest" enumTypeId="ShippingGatewayType"/>
+    <mantle.shipment.carrier.ShippingGatewayConfig shippingGatewayConfigId="TEST_SHIPPING" shippingGatewayTypeEnumId="ShGtwyTest"
+            description="Test carrier (deterministic rates and labels)" testMode="Y"
+            getShippingRatesBulkName="mantle.shipment.carrier.TestGatewayServices.get#ShippingRatesBulk"
+            getRateServiceName="mantle.shipment.carrier.TestGatewayServices.get#ShippingRate"
+            requestLabelsServiceName="mantle.shipment.carrier.TestGatewayServices.request#ShippingLabels"
+            findLabelServiceName="mantle.shipment.carrier.TestGatewayServices.find#ShippingLabels"
+            refundLabelsServiceName="mantle.shipment.carrier.TestGatewayServices.refund#ShippingLabels"
+            trackLabelsServiceName="mantle.shipment.carrier.TestGatewayServices.track#ShippingLabels"
+            validateAddressServiceName="mantle.shipment.carrier.TestGatewayServices.validate#ShippingPostalAddress"/>
+</entity-facade-xml>

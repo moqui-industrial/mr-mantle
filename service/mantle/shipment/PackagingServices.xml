@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Box types (design-warehouse §12 BoxTypes, crosscut §3.10 FacilityPackaging; impl-warehouse P12): the parcels packers
+    choose, their carrier package codes and the box types a facility uses. Box types are shared by every organization (Mantle
+    gives them no owner); a facility's box types are its owner's. Each write checks FACILITY_EDIT, and a facility's the
+    organization through FacilityScope.js. A used box type is retired (thruDate), never deleted. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="store" noun="ShipmentBoxType" allow-remote="false">
+        <description>Create a box type, or change one: its description, dimensions with their unit, empty weight and the most
+            it carries with their unit, and retire it (retire Y sets thruDate now; retire N clears it). Requires
+            FACILITY_EDIT (PERMISSION_DENIED); refuses a change to a type a facility or a package of another organization
+            uses, unless the user has every organization's scope (BOX_TYPE_SHARED, F289), a new type whose id is in use
+            (BOX_TYPE_EXISTS), a missing
+            description (DESCRIPTION_REQUIRED), a dimension or weight below zero (VALUE_INVALID) and a unit of another kind
+            (UOM_INVALID).</description>
+        <in-parameters>
+            <parameter name="shipmentBoxTypeId"/>
+            <parameter name="isNew"/>
+            <parameter name="description"/>
+            <parameter name="dimensionUomId"/>
+            <parameter name="boxLength" type="BigDecimal"/>
+            <parameter name="boxWidth" type="BigDecimal"/>
+            <parameter name="boxHeight" type="BigDecimal"/>
+            <parameter name="weightUomId"/>
+            <parameter name="boxWeight" type="BigDecimal"/>
+            <parameter name="maxWeight" type="BigDecimal"/>
+            <parameter name="retire"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shipmentBoxTypeId"/>
+        </out-parameters>
+        <actions>
+            <set field="lib" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')"/>
+            <if condition="!ec.user.userId || !lib.access.has('FACILITY_EDIT')">
+                <return error="true" message="PERMISSION_DENIED: Facility edit authority is required"/>
+            </if>
+            <set field="existing" from="shipmentBoxTypeId ? ec.entity.find('mantle.shipment.ShipmentBoxType')
+                    .condition('shipmentBoxTypeId', shipmentBoxTypeId).forUpdate(true).disableAuthz().one() : null"/>
+            <if condition="existing &amp;&amp; (isNew == 'Y' || isNew == true)">
+                <return error="true" message="BOX_TYPE_EXISTS: Box type ${shipmentBoxTypeId} already exists"/>
+            </if>
+            <!-- a type another organization uses is changed only with every organization's scope (F289) -->
+            <if condition="existing">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')
+                    .requireBoxTypeOwned(shipmentBoxTypeId)</script>
+            </if>
+            <if condition="!existing &amp;&amp; !(description &amp;&amp; String(description).trim())">
+                <return error="true" message="DESCRIPTION_REQUIRED: Describe the box type"/>
+            </if>
+            <if condition="[boxLength, boxWidth, boxHeight, boxWeight, maxWeight]
+                    .some(value =&gt; value != null &amp;&amp; toDecimal(value).compare(0) &lt; 0)">
+                <return error="true" message="VALUE_INVALID: Dimensions and weights are not below zero"/>
+            </if>
+            <iterate list="[[dimensionUomId, 'UT_LENGTH_MEASURE'], [weightUomId, 'UT_WEIGHT_MEASURE']]" entry="unitCheck">
+                <if condition="unitCheck[0]">
+                    <entity-find-one entity-name="moqui.basic.Uom" value-field="unit" disable-authz="true">
+                        <field-map field-name="uomId" from="unitCheck[0]"/></entity-find-one>
+                    <if condition="unit?.uomTypeEnumId != unitCheck[1]">
+                        <return error="true" message="UOM_INVALID: ${unitCheck[0]} is not a unit of that kind"/>
+                    </if>
+                </if>
+            </iterate>
+            <set field="values" from="Object.fromEntries([['description', description ? String(description).trim() : null],
+                    ['dimensionUomId', dimensionUomId], ['boxLength', boxLength], ['boxWidth', boxWidth],
+                    ['boxHeight', boxHeight], ['weightUomId', weightUomId], ['boxWeight', boxWeight],
+                    ['maxWeight', maxWeight]].filter(entry =&gt; entry[1] != null &amp;&amp; entry[1] !== ''))"/>
+            <if condition="retire == 'Y'"><set field="values.thruDate" from="existing?.thruDate || ec.user.nowTimestamp"/></if>
+            <if condition="retire == 'N'"><set field="values.thruDate" from="null"/></if>
+            <if condition="existing"><then>
+                <service-call name="update#mantle.shipment.ShipmentBoxType" disable-authz="true"
+                        in-map="Object.assign({shipmentBoxTypeId:shipmentBoxTypeId}, values)"/>
+            </then><else>
+                <service-call name="create#mantle.shipment.ShipmentBoxType" disable-authz="true" out-map="created"
+                        in-map="Object.assign({shipmentBoxTypeId:shipmentBoxTypeId || null}, values)"/>
+                <set field="shipmentBoxTypeId" from="created.shipmentBoxTypeId"/>
+            </else></if>
+        </actions>
+    </service>
+    <service verb="store" noun="CarrierShipmentBoxType" allow-remote="false">
+        <description>CarrierBoxCodes: a carrier's package code (and oversize code) for a box type, or with remove Y the
+            binding removed. Requires FACILITY_EDIT; refuses a box type that does not exist (BOX_TYPE_UNAVAILABLE) or that
+            another organization uses (BOX_TYPE_SHARED, F289), a party
+            that is not a carrier (CARRIER_INVALID) and an empty code (CODE_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="shipmentBoxTypeId" required="true"/>
+            <parameter name="packagingTypeCode"/>
+            <parameter name="oversizeCode"/>
+            <parameter name="remove"/>
+        </in-parameters>
+        <actions>
+            <set field="lib" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')"/>
+            <if condition="!ec.user.userId || !lib.access.has('FACILITY_EDIT')">
+                <return error="true" message="PERMISSION_DENIED: Facility edit authority is required"/>
+            </if>
+            <entity-find-one entity-name="mantle.shipment.ShipmentBoxType" value-field="box" disable-authz="true"/>
+            <if condition="box == null">
+                <return error="true" message="BOX_TYPE_UNAVAILABLE: Box type ${shipmentBoxTypeId} does not exist"/>
+            </if>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')
+                .requireBoxTypeOwned(shipmentBoxTypeId)</script>
+            <entity-find-one entity-name="mantle.party.PartyRole" value-field="carrierRole" disable-authz="true">
+                <field-map field-name="partyId" from="carrierPartyId"/>
+                <field-map field-name="roleTypeId" value="Carrier"/>
+            </entity-find-one>
+            <if condition="carrierRole == null">
+                <return error="true" message="CARRIER_INVALID: ${carrierPartyId} is not a carrier"/>
+            </if>
+            <entity-find-one entity-name="mantle.shipment.carrier.CarrierShipmentBoxType" value-field="binding"
+                    for-update="true" disable-authz="true"/>
+            <if condition="remove == 'Y'">
+                <if condition="binding != null">
+                    <entity-delete value-field="binding"/>
+                </if>
+                <return/>
+            </if>
+            <if condition="!(packagingTypeCode &amp;&amp; String(packagingTypeCode).trim())">
+                <return error="true" message="CODE_REQUIRED: Give the carrier's package code"/>
+            </if>
+            <service-call name="store#mantle.shipment.carrier.CarrierShipmentBoxType" disable-authz="true"
+                    in-map="{carrierPartyId:carrierPartyId, shipmentBoxTypeId:shipmentBoxTypeId,
+                        packagingTypeCode:String(packagingTypeCode).trim(), oversizeCode:oversizeCode || null}"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityBoxType" allow-remote="false">
+        <description>FacilityPackaging: a box type the facility uses, or with remove Y no longer. A facility that names box
+            types packs only those (WarehouseTaskServices.edit#ShipmentPackage); one that names none packs any type in use.
+            Requires FACILITY_EDIT and a facility of the user's organizations (FACILITY_UNAVAILABLE); refuses a box type that
+            does not exist or is retired (BOX_TYPE_UNAVAILABLE) when adding.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="shipmentBoxTypeId" required="true"/>
+            <parameter name="remove"/>
+        </in-parameters>
+        <actions>
+            <set field="lib" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')"/>
+            <set field="facilityScope"
+                    from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilityScope.js')"/>
+            <if condition="!ec.user.userId || !lib.access.has('FACILITY_EDIT')">
+                <return error="true" message="PERMISSION_DENIED: Facility edit authority is required"/>
+            </if>
+            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility" for-update="true"
+                    disable-authz="true"/>
+            <if condition="facility == null || !facilityScope.owns(facilityScope.scope(), facility.ownerPartyId)">
+                <return error="true" message="FACILITY_UNAVAILABLE: Facility ${facilityId} is not available"/>
+            </if>
+            <entity-find-one entity-name="mantle.facility.FacilityBoxType" value-field="used" disable-authz="true"/>
+            <if condition="remove == 'Y'">
+                <if condition="used != null">
+                    <entity-delete value-field="used"/>
+                </if>
+                <return/>
+            </if>
+            <entity-find-one entity-name="mantle.shipment.ShipmentBoxType" value-field="box" disable-authz="true"/>
+            <if condition="box == null || (box.thruDate != null
+                    &amp;&amp; lib.ms(box.thruDate) &lt;= lib.ms(ec.user.nowTimestamp))">
+                <return error="true" message="BOX_TYPE_UNAVAILABLE: Box type ${shipmentBoxTypeId} is not in use"/>
+            </if>
+            <if condition="used == null">
+                <service-call name="create#mantle.facility.FacilityBoxType" disable-authz="true"
+                        in-map="{facilityId:facilityId, shipmentBoxTypeId:shipmentBoxTypeId}"/>
+            </if>
+        </actions>
+    </service>
+</services>
