@@ -1691,4 +1691,108 @@ along with this software (see the LICENSE.md file). If not, see
             <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
         </actions>
     </service>
+    <!-- ===== supplier returns from receipts (design-purchasing PUR-RETURN, Purchasing's contract built by Warehouse P14;
+        impl-warehouse F32) and a return's files (CX-RECORD-HOSTS) ===== -->
+    <service verb="find" noun="ReturnableReceipts" allow-remote="false">
+        <description>Purchasing's supplier return eligibility (design-purchasing NewSupplierReturn, PUR-RETURN): the purchase
+            receipts of the user's organizations (the order part's buying organization, FacilityScope.js) by supplier, order,
+            product or receipt, narrowed by lot or facility, each with what it accepted (available and quarantined stock
+            alike; units rejected at the dock are no stock), what earlier supplier returns linked to it took (their
+            ReturnItem.assetReceiptId, not cancelled), what may still be returned (eligibleQuantity), what is on hand to send
+            (issuableQuantity) and the assets that hold its stock now (its own and those its inspections' dispositions left it
+            in, with what a Return to supplier disposition holds). Eligible receipts only unless includeIneligible; at most
+            200, newest first. Mantle's calculate#OrderItemReturnable is not used: it counts billed quantity, and a rejected
+            lot is returned before the supplier bills. Requires PURCHASE_ORDER_EDIT, QUALITY_DISPOSE or STOCK_ISSUE; refuses
+            no filter (FILTER_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="vendorPartyId"/>
+            <parameter name="orderId"/>
+            <parameter name="productId"/>
+            <parameter name="assetReceiptId"/>
+            <parameter name="lotId"/>
+            <parameter name="facilityId"/>
+            <parameter name="includeIneligible" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="receiptRows" type="List"><description>assetReceiptId, shipmentId, orderId, orderItemSeqId,
+                productId, vendorPartyId, organizationPartyId, receivedDate, receivedText, lotId, acceptedQuantity,
+                quarantinedQuantity, onHandQuantity, returnedQuantity, eligibleQuantity, issuableQuantity and assets (assetId,
+                statusId, locationSeqId, lotId, serialNumber, quantityOnHand, returnSupplierQuantity).</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="receiptRows" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('returnableReceipts', context).receiptRows"/>
+        </actions>
+    </service>
+    <service verb="add" noun="ReceiptToReturn" allow-remote="false">
+        <description>Add part of a purchase receipt to a supplier return (PUR-RETURN): a ReturnItem of the receipt's order
+            line and product linked to the receipt (assetReceiptId) and the stock it sends back (assetId: the one given, which
+            must hold the receipt's stock, else a Return to supplier disposition's or the receipt's own), its price the order
+            line's. The return, then the receipt, then its lot are locked and the eligibility counted again, so two returns
+            at once cannot exceed it. Requires PURCHASE_ORDER_EDIT or QUALITY_DISPOSE; refuses a return outside the user's
+            organizations or a receipt of another (RECORD_UNAVAILABLE), a customer return (NOT_SUPPLIER_RETURN), one no
+            longer created or requested (RETURN_NOT_OPEN), a receipt of another supplier or organization (SUPPLIER_MISMATCH),
+            no quantity (QUANTITY_INVALID), more than may still be returned (QUANTITY_EXCEEDS_ELIGIBLE), an asset that does
+            not hold the receipt's stock (VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="assetReceiptId" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="returnQuantity" type="BigDecimal" required="true"/>
+            <parameter name="returnReasonEnumId"><description>Defaults to RrsnDefective.</description></parameter>
+            <parameter name="returnResponseEnumId"><description>Defaults to RrspCredit.</description></parameter>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="assetId"/>
+            <parameter name="eligibleQuantity" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('addReceiptToReturn', context)"/>
+            <set field="returnItemSeqId" from="added.returnItemSeqId"/>
+            <set field="assetId" from="added.assetId"/>
+            <set field="eligibleQuantity" from="added.eligibleQuantity"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ReturnContent">
+        <description>A file of a return (ReturnContent, the record files of get#RecordLinkInfo): the row, and the uploaded
+            file saved through save#ReturnContentFile.</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.order.return.ReturnContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="returnContentId"/></out-parameters>
+        <actions>
+            <service-call name="create#mantle.order.return.ReturnContent" in-map="context" out-map="context"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.order.ReturnServices.save#ReturnContentFile" in-map="context"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="ReturnContentFile">
+        <in-parameters>
+            <parameter name="returnContentId" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/return/${returnId}/content_${returnContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.order.return.ReturnContent"
+                    in-map="{returnContentId:returnContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
 </services>

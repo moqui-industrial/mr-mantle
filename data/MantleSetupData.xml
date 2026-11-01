@@ -76,6 +76,10 @@ along with this software (see the LICENSE.md file). If not, see
         the expected receipt of a purchase order part) -->
     <userPermissions userPermissionId="PURCHASE_ORDER_EDIT" description="Purchase Order Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_EDIT" fromDate="0"/>
+    <!-- A return's authorization, Customer Service's right (crosscut §3.18 Authorize; no Warehouse group holds it):
+        WarehouseTaskServices.request#ReturnLabel admits it beside SHIPMENT_SHIP -->
+    <userPermissions userPermissionId="RETURN_AUTHORIZE" description="Return Authorize"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_AUTHORIZE" fromDate="0"/>
     <userPermissions userPermissionId="CARD_NUMBER_EDIT" description="Credit Card Number Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="CARD_NUMBER_EDIT" fromDate="0"/>
 

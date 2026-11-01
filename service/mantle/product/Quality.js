@@ -652,7 +652,14 @@ function createInspection(userScope, given) {
         )
     const contextEnumId =
         checkEnum(text(p.inspectionContextEnumId), "InspectionContext", "context") ||
-        (receipt || p.shipmentId ? "QicReceipt" : p.returnId ? "QicReturn" : p.workEffortId ? "QicProduction" : "QicReceipt")
+        // a customer return's receipt is inspected as a return (impl-warehouse P14)
+        (receipt?.returnId || (!receipt && p.returnId)
+            ? "QicReturn"
+            : receipt || p.shipmentId
+              ? "QicReceipt"
+              : p.workEffortId
+                ? "QicProduction"
+                : "QicReceipt")
     const organizationPartyId = facility.ownerPartyId
     const asOf = now()
     let template = null
@@ -674,15 +681,17 @@ function createInspection(userScope, given) {
     if (demandOrderId) checkDemand(userScope, demandOrderId, demandOrderItemSeqId, productId, organizationPartyId)
     const sourceTypeEnumId =
         checkEnum(text(p.sourceTypeEnumId), "InspectionSourceType", "source") ||
-        (receipt
-            ? "QisReceipt"
-            : p.returnId
-              ? "QisReturn"
-              : p.workEffortId
-                ? "QisWorkEffort"
-                : p.shipmentId
-                  ? "QisShipment"
-                  : "QisAsset")
+        (receipt?.returnId
+            ? "QisReturn"
+            : receipt
+              ? "QisReceipt"
+              : p.returnId
+                ? "QisReturn"
+                : p.workEffortId
+                  ? "QisWorkEffort"
+                  : p.shipmentId
+                    ? "QisShipment"
+                    : "QisAsset")
     const held = asset?.statusId === "AstQuarantine" ? quantity : toDecimal(0)
     const created = call("create#" + INSPECTION, {
         organizationPartyId,
@@ -694,8 +703,8 @@ function createInspection(userScope, given) {
         assetReceiptId: receipt?.assetReceiptId || null,
         orderId: receipt?.orderId || text(p.orderId),
         orderItemSeqId: receipt?.orderItemSeqId || text(p.orderItemSeqId),
-        returnId: text(p.returnId),
-        returnItemSeqId: text(p.returnItemSeqId),
+        returnId: receipt?.returnId || text(p.returnId),
+        returnItemSeqId: receipt?.returnItemSeqId || text(p.returnItemSeqId),
         workEffortId: text(p.workEffortId),
         productId,
         lotId: asset?.lotId || text(p.lotId),

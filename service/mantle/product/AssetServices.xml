@@ -2502,6 +2502,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
             <parameter name="workEffortOnly" type="Boolean" default="false">
                 <description>Issue only to WorkEffort, not to Order, Shipment, or Invoice</description></parameter>
+            <parameter name="assetId"><description>Issue this asset only, of the source's product at the shipment's origin
+                facility, in any status (a supplier return sends back quarantined stock, which reservation never selects;
+                WarehouseTaskServices.issue#SupplierReturnStock), up to its quantity on hand: its other reservations are
+                displaced for the quantity, as pack#ShipmentItemSource does for an asset it is given. Without it, unchanged.
+            </description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="quantityRemaining" type="BigDecimal"/>
@@ -2558,6 +2563,26 @@ along with this software (see the LICENSE.md file). If not, see
                         orderId:shipmentItemSource.orderId, orderItemSeqId:shipmentItemSource.orderItemSeqId,
                         invoiceId:shipmentItemSource.invoiceId, invoiceItemSeqId:shipmentItemSource.invoiceItemSeqId}"/>
             </else></if>
+
+            <!-- one named asset (impl-warehouse P14): only it is issued, whatever its status -->
+            <if condition="assetId">
+                <entity-find-one entity-name="mantle.product.asset.Asset" value-field="namedAsset" for-update="true"/>
+                <if condition="namedAsset == null || namedAsset.productId != productId || namedAsset.facilityId != facilityId">
+                    <return error="true" message="Asset ${assetId} is not product ${productId} at facility ${facilityId}"/></if>
+                <set field="curQuantity" from="toDecimal(namedAsset.quantityOnHandTotal ?? 0).compare(quantityRemaining) &lt; 0 ?
+                        toDecimal(namedAsset.quantityOnHandTotal ?? 0) : toDecimal(quantityRemaining)"/>
+                <if condition="curQuantity.compare(0) &lt;= 0"><return/></if>
+                <service-call name="mantle.product.AssetServices.displace#AssetReservations"
+                        in-map="{assetId:assetId, quantity:curQuantity}"/>
+                <entity-find-one entity-name="mantle.product.asset.Asset" value-field="namedAsset"/>
+                <if condition="toDecimal(namedAsset.availableToPromiseTotal ?? 0).compare(curQuantity) &lt; 0">
+                    <set field="curQuantity" from="toDecimal(namedAsset.availableToPromiseTotal ?? 0)"/></if>
+                <if condition="curQuantity.compare(0) &lt;= 0"><return/></if>
+                <service-call name="mantle.product.AssetServices.issue#Asset"
+                        in-map="Object.assign({}, baseMap, {quantity:curQuantity, issuedDate:issuedDate, assetId:assetId})"/>
+                <set field="quantityRemaining" from="toDecimal(quantityRemaining).subtract(curQuantity)"/>
+                <return/>
+            </if>
 
             <!-- start with available inventory -->
             <entity-find entity-name="mantle.product.asset.Asset" list="assetList">
