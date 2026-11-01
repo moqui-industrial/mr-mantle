@@ -76,7 +76,26 @@ function capabilities(p) {
     else if (!blank(p.facilityId)) {
         facilityOf(userScope, p.facilityId)
         printerIds = rows(BINDING, {facilityId: p.facilityId}).map(row => row.networkPrinterId)
-    } else printerIds = rows(PRINTER, {}).map(row => row.networkPrinterId)
+    } else {
+        // the printers bound at the user's facilities only (P13 review C)
+        let facilities = find("mantle.facility.Facility").selectField("facilityId")
+        if (userScope.organizationPartyIds)
+            facilities = facilities.condition("ownerPartyId", "in", userScope.organizationPartyIds)
+        const facilityIds = Array.from(facilities.list()).map(row => row.facilityId)
+        printerIds = facilityIds.length
+            ? Array.from(find(BINDING).condition("facilityId", "in", facilityIds).list()).map(row => row.networkPrinterId)
+            : []
+    }
+    if (!blank(p.networkPrinterId)) {
+        let facilities = find("mantle.facility.Facility").selectField("facilityId")
+        if (userScope.organizationPartyIds)
+            facilities = facilities.condition("ownerPartyId", "in", userScope.organizationPartyIds)
+        const facilityIds = Array.from(facilities.list()).map(row => row.facilityId)
+        const bound = facilityIds.length
+            ? find(BINDING, {networkPrinterId: p.networkPrinterId}).condition("facilityId", "in", facilityIds).count()
+            : 0
+        if (!bound) printerIds = []
+    }
     const printers = Array.from(
         find(PRINTER)
             .condition("networkPrinterId", "in", [...new Set(printerIds.filter(Boolean))])
@@ -107,6 +126,9 @@ function storeBinding(p) {
     if (!Number.isInteger(copies) || copies < 1 || copies > 20) denied("COPIES_INVALID", "Copies are 1 to 20")
     if (p.fromDate && p.thruDate && lib.ms(p.thruDate) <= lib.ms(p.fromDate))
         denied("DATES_INVALID", "The binding must end after it starts")
+    // one binding per purpose: a future start would leave the purpose with no printer until then (P13 review C)
+    if (existing && inEffect(existing) && p.fromDate && lib.ms(p.fromDate) > lib.ms(ec.user.nowTimestamp))
+        denied("BINDING_IN_EFFECT", "A " + purpose.description + " printer is in effect here; change it now, or end it first")
     const values = {
         facilityId: facility.facilityId,
         printerPurposeEnumId: purpose.enumId,
@@ -196,13 +218,19 @@ function dispatch(p) {
         )
             denied("RECORD_UNAVAILABLE", "Shipment " + (p.shipmentId || "") + " is not of facility " + facility.facilityId)
         const r = p.documentType === "returnLabel"
-        const routeSegs = rows(ROUTE_SEG, {shipmentId: p.shipmentId}).filter(
-            row => blank(p.shipmentPackageSeqId) || row.shipmentPackageSeqId === p.shipmentPackageSeqId
-        )
+        // the shipment's first route segment (its labels), each package's label not refunded (P13 review B3)
+        const firstSegment = segments.sort((a, b) =>
+            String(a.shipmentRouteSegmentSeqId).localeCompare(String(b.shipmentRouteSegmentSeqId))
+        )[0]
+        const routeSegs = rows(ROUTE_SEG, {
+            shipmentId: p.shipmentId,
+            shipmentRouteSegmentSeqId: firstSegment?.shipmentRouteSegmentSeqId
+        }).filter(row => blank(p.shipmentPackageSeqId) || row.shipmentPackageSeqId === p.shipmentPackageSeqId)
         for (const routeSeg of routeSegs) {
             const image = r ? routeSeg.returnLabelImage : routeSeg.labelImage
-            if (image == null) continue
+            if (image == null || (!r && !blank(routeSeg.gatewayRefundStatus))) continue
             documents.push({
+                routeSeg,
                 jobName: (r ? "ReturnLabel" : "ShipmentLabel") + p.shipmentId + "-" + routeSeg.shipmentPackageSeqId + "-" + token,
                 bytes: image
             })
@@ -214,7 +242,9 @@ function dispatch(p) {
         documents.push({jobName: (p.jobName || "Document") + "-" + token, screen: true})
     } else denied("DOCUMENT_INVALID", "Unknown document type " + p.documentType)
 
-    const printJobIds = []
+    // each document printed in turn: a failure is named and the others still print (failure tolerance, B3)
+    const printJobIds = [],
+        results = []
     for (const document of documents) {
         try {
             const out = document.screen
@@ -233,24 +263,47 @@ function dispatch(p) {
                       serialBlob: document.bytes
                   })
             if (out.printJobId) printJobIds.push(out.printJobId)
+            results.push({
+                shipmentPackageSeqId: document.routeSeg?.shipmentPackageSeqId || null,
+                printed: true,
+                printJobId: out.printJobId || null
+            })
+            if (document.routeSeg)
+                probe("update#" + ROUTE_SEG, {
+                    shipmentId: document.routeSeg.shipmentId,
+                    shipmentPackageSeqId: document.routeSeg.shipmentPackageSeqId,
+                    shipmentRouteSegmentSeqId: document.routeSeg.shipmentRouteSegmentSeqId,
+                    labelPrinted: "Y"
+                })
         } catch (error) {
             const message = String(error?.message || error).replace(/^(Error: )+/, "")
             ec.logger.warn("Print " + document.jobName + " on " + networkPrinterId + " failed: " + message)
             const job = jobOf(networkPrinterId, document.jobName)
             if (job) printJobIds.push(job.printJobId)
-            return failure(reasonOfPrint(message), message, {printJobIds, networkPrinterId, reprintable: printJobIds.length > 0})
+            results.push({
+                shipmentPackageSeqId: document.routeSeg?.shipmentPackageSeqId || null,
+                printed: false,
+                reasonCode: reasonOfPrint(message),
+                message,
+                printJobId: job?.printJobId || null
+            })
         }
     }
-    if (labels)
-        for (const routeSeg of rows(ROUTE_SEG, {shipmentId: p.shipmentId}))
-            if (blank(p.shipmentPackageSeqId) || routeSeg.shipmentPackageSeqId === p.shipmentPackageSeqId)
-                probe("update#" + ROUTE_SEG, {
-                    shipmentId: routeSeg.shipmentId,
-                    shipmentPackageSeqId: routeSeg.shipmentPackageSeqId,
-                    shipmentRouteSegmentSeqId: routeSeg.shipmentRouteSegmentSeqId,
-                    labelPrinted: "Y"
-                })
-    return {printed: true, reasonCode: null, message: null, printJobIds, networkPrinterId, copies, reprintable: true}
+    const failed = results.filter(row => !row.printed)
+    return {
+        printed: !failed.length,
+        reasonCode: failed[0]?.reasonCode || null,
+        message: failed.length
+            ? failed
+                  .map(row => (row.shipmentPackageSeqId ? "package " + row.shipmentPackageSeqId + ": " : "") + row.message)
+                  .join("; ")
+            : null,
+        printJobIds,
+        results,
+        networkPrinterId,
+        copies,
+        reprintable: printJobIds.length > 0
+    }
 }
 
 const operations = {dispatch, capabilities, storeBinding}

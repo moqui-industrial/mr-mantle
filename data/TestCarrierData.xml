@@ -12,22 +12,12 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- The Mantle test carrier (mantle.shipment.carrier.TestGatewayServices; impl-warehouse §4, F14): the gateway TEST_SHIPPING
-    in test mode, serving the carrier TEST_CARRIER with three services. Specs, demos and Carriers' CarrierTest bind it; real
-    carriers are their own gateways. Reserved postal codes: 99901 times out after issuing the label, 99902 refuses the
-    label, 99903 is an invalid address. -->
+<!-- The Mantle test carrier's gateway (mantle.shipment.carrier.TestGatewayServices; impl-warehouse §4, F14): the config
+    TEST_SHIPPING in test mode. It serves no carrier here: its carrier TEST_CARRIER, the carrier's methods and the binding are
+    demo data (TestCarrierDemoData.xml), which specs and demos load, and a test gateway buys labels only for an organization
+    whose ShippingTestGatewayAllowed setting is Y (P13 review A2). Reserved postal codes: 99901 times out after issuing the
+    label, 99902 refuses the label, 99903 is an invalid address. -->
 <entity-facade-xml type="install">
-    <mantle.party.Party partyId="TEST_CARRIER" partyTypeEnumId="PtyOrganization">
-        <organization organizationName="Test Carrier"/>
-        <roles roleTypeId="Carrier"/>
-    </mantle.party.Party>
-    <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="TEST_CARRIER" shipmentMethodEnumId="ShMthGround"
-            sequenceNum="1" description="Test Ground" gatewayServiceCode="test_ground"/>
-    <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="TEST_CARRIER" shipmentMethodEnumId="ShMthSecondDay"
-            sequenceNum="2" description="Test Second Day" gatewayServiceCode="test_second_day"/>
-    <mantle.shipment.carrier.CarrierShipmentMethod carrierPartyId="TEST_CARRIER" shipmentMethodEnumId="ShMthNextDay"
-            sequenceNum="3" description="Test Next Day" gatewayServiceCode="test_next_day"/>
-
     <moqui.basic.Enumeration description="Test Shipping Gateway" enumId="ShGtwyTest" enumTypeId="ShippingGatewayType"/>
     <mantle.shipment.carrier.ShippingGatewayConfig shippingGatewayConfigId="TEST_SHIPPING" shippingGatewayTypeEnumId="ShGtwyTest"
             description="Test carrier (deterministic rates and labels)" testMode="Y"
@@ -38,6 +28,4 @@ along with this software (see the LICENSE.md file). If not, see
             refundLabelsServiceName="mantle.shipment.carrier.TestGatewayServices.refund#ShippingLabels"
             trackLabelsServiceName="mantle.shipment.carrier.TestGatewayServices.track#ShippingLabels"
             validateAddressServiceName="mantle.shipment.carrier.TestGatewayServices.validate#ShippingPostalAddress"/>
-    <mantle.shipment.carrier.ShippingGatewayCarrier shippingGatewayConfigId="TEST_SHIPPING" carrierPartyId="TEST_CARRIER"
-            gatewayAccountId="TEST-ACCOUNT-0001"/>
 </entity-facade-xml>

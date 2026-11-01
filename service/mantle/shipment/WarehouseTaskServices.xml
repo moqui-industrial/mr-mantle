@@ -2995,6 +2995,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentMethodEnumId"/>
             <parameter name="shippingGatewayConfigId"/>
             <parameter name="returnLabels"><description>Y: the packages' return labels</description></parameter>
+            <parameter name="sendAgain"><description>Y: a person sends again a request that got no answer from a gateway that
+                cannot be asked what it did (no find#ShippingLabels); without it such a package answers
+                SEND_AGAIN_REQUIRED</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (LABELED, PARTIAL, FAILED, PENDING), shipmentId,
@@ -3010,9 +3013,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="refund" noun="PackageLabels" allow-remote="false" transaction="ignore">
         <description>Labels (design Ship): refund (void) a shipment's package labels (or one's) through its gateway, on the
             same recorded path as request#PackageLabels (the refund's ShippingGatewayRequest committed before the call, a
-            refund that got no answer asked about before a retry). A label refund reverses no shipment: the shipment's status,
-            its packages, issued stock and invoices stay as they are; a packed shipment then needs a new label or a tracking
-            code to ship. Requires SHIPMENT_SHIP; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE), not
+            refund that got no answer asked about before a retry), only before the shipment ships (SHIPMENT_SHIPPED: a shipped
+            label was used). A label refund reverses no shipment: the shipment's status, its packages, issued stock and invoices
+            stay as they are; it then needs a new label or a tracking code to ship. NOTHING_TO_REFUND when no package had a
+            label. Requires SHIPMENT_SHIP; refuses a shipment outside the user's facilities (RECORD_UNAVAILABLE), not
             yet packed (SHIPMENT_NOT_PACKED), or with no gateway that refunds (NO_GATEWAY); a package with no label is
             answered NO_LABEL.</description>
         <in-parameters>
@@ -3037,6 +3041,7 @@ along with this software (see the LICENSE.md file). If not, see
             gateway (new, or the earlier one that got no answer, to be asked about first). Requires SHIPMENT_SHIP.</description>
         <in-parameters>
             <parameter name="kind" required="true"><description>label, returnLabel or refund</description></parameter>
+            <parameter name="sendAgain"/>
             <parameter name="operationKey"/>
             <parameter name="shipmentId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>
@@ -3051,6 +3056,23 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="plan" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
                     .execute('recordRequests', context)"/>
+        </actions>
+    </service>
+    <service verb="claim" noun="ShippingGatewayRequest" allow-remote="false">
+        <description>Internal to the gateway entry points, in its own transaction: the request row locked and claimed for
+            sending only while it is Requested at the attempt the plan recorded and not yet sent (a compare and set), then
+            stamped with its sentDate; a parallel retry that claimed it first leaves claimed false. Requires SHIPMENT_SHIP or
+            RETURN_AUTHORIZE.</description>
+        <in-parameters>
+            <parameter name="shippingGatewayRequestId" required="true"/>
+            <parameter name="attemptCount" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="claimed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="claimed" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('claimRequest', context).claimed"/>
         </actions>
     </service>
     <service verb="finish" noun="ShippingGatewayRequests" allow-remote="false">
@@ -3099,7 +3121,8 @@ along with this software (see the LICENSE.md file). If not, see
             method when given; ShipConfirm then accepts the code in place of a label. Requires SHIPMENT_SHIP; refuses a
             shipment outside the user's facilities (RECORD_UNAVAILABLE), not packed (SHIPMENT_NOT_PACKED) or shipped
             (SHIPMENT_SHIPPED), no or an unknown method (METHOD_REQUIRED, METHOD_INVALID), a method a gateway buys labels for
-            (GATEWAY_LABELS), no tracking code (TRACKING_REQUIRED), a negative cost (COST_INVALID) or a cost with no currency
+            (GATEWAY_LABELS), a package with a gateway's label (LABEL_EXISTS: refund it first), no tracking code
+            (TRACKING_REQUIRED), a negative cost (COST_INVALID) or a cost with no currency
             to take (CURRENCY_REQUIRED).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>

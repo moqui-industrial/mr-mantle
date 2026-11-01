@@ -47,6 +47,9 @@ along with this software (see the LICENSE.md file). If not, see
             it.</description></field>
         <field name="userId" type="id"/>
         <field name="requestDate" type="date-time"/>
+        <field name="sentDate" type="date-time"><description>When the gateway was called for this attempt; set when the
+            row is claimed for sending (claim#ShippingGatewayRequest), so a parallel retry cannot send it too.</description>
+        </field>
         <field name="responseDate" type="date-time"/>
         <field name="attemptCount" type="number-integer"><description>How many times the gateway was called or asked for
             this request.</description></field>

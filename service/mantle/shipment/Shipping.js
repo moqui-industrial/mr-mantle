@@ -107,15 +107,65 @@ function activeLabel(routeSeg, returnLabels = false) {
         !blank(routeSeg.labelUrl)
     return has && blank(routeSeg.gatewayRefundStatus)
 }
-// The gateway that serves the shipment's segment (Mantle's get#ShipmentGatewayDetails: the store's for the carrier, the
-// segment's, the shipper's setting, the preference), or null.
+// The gateway that serves the shipment's segment, in Mantle's lookup order (get#ShipmentGatewayDetails: the store's for the
+// segment's carrier, the segment's, the shipper's DefaultShipmentGatewayConfigId setting, the preference), worked out from the
+// segment as the caller holds it, in the caller's transaction (P13 review A1: a lookup in a transaction of its own read the
+// committed segment, not the carrier just chosen), and writing nothing; or null.
+function gatewayFor(shipment, segment) {
+    if (!segment) return null
+    let gatewayId = null
+    if (shipment?.productStoreId && segment.carrierPartyId)
+        gatewayId = one("mantle.product.store.ProductStoreShippingGateway", {
+            productStoreId: shipment.productStoreId,
+            carrierPartyId: segment.carrierPartyId
+        })?.shippingGatewayConfigId
+    if (!gatewayId) gatewayId = segment.shippingGatewayConfigId
+    if (!gatewayId && shipment?.fromPartyId)
+        gatewayId = call("mantle.party.PartyServices.get#PartySettingValue", {
+            partyId: shipment.fromPartyId,
+            partySettingTypeId: "DefaultShipmentGatewayConfigId"
+        }).settingValue
+    if (!gatewayId) gatewayId = ec.user.getPreference("DefaultShipmentGatewayConfigId")
+    return gatewayId ? one(GATEWAY, {shippingGatewayConfigId: gatewayId}) : null
+}
 function gatewayOf(shipmentId, shipmentRouteSegmentSeqId) {
-    try {
-        const out = probe("mantle.shipment.CarrierServices.get#ShipmentGatewayDetails", {shipmentId, shipmentRouteSegmentSeqId})
-        return out.shippingGatewayConfigId ? one(GATEWAY, {shippingGatewayConfigId: out.shippingGatewayConfigId}) : null
-    } catch (error) {
-        return null
-    }
+    const shipment = one(SHIPMENT, {shipmentId})
+    const segment = shipmentRouteSegmentSeqId
+        ? one(SEGMENT, {shipmentId, shipmentRouteSegmentSeqId})
+        : rows(SEGMENT, {shipmentId}).sort(bySeq("shipmentRouteSegmentSeqId"))[0]
+    return gatewayFor(shipment, segment)
+}
+// Whether the gateway serves the carrier: its ShippingGatewayCarrier row, or the store's binding of the carrier to it.
+function servesCarrier(gateway, shipment, carrierPartyId) {
+    if (!gateway || !carrierPartyId) return false
+    if (
+        one("mantle.shipment.carrier.ShippingGatewayCarrier", {
+            shippingGatewayConfigId: gateway.shippingGatewayConfigId,
+            carrierPartyId
+        })
+    )
+        return true
+    return (
+        !!shipment?.productStoreId &&
+        one("mantle.product.store.ProductStoreShippingGateway", {productStoreId: shipment.productStoreId, carrierPartyId})
+            ?.shippingGatewayConfigId === gateway.shippingGatewayConfigId
+    )
+}
+// A test gateway buys labels only for an organization that allows it (its ShippingTestGatewayAllowed party setting, off
+// by default; P13 review A2).
+function testGatewayAllowed(organizationPartyId) {
+    return (
+        call("mantle.party.PartyServices.get#PartySettingValue", {
+            partyId: organizationPartyId,
+            partySettingTypeId: "ShippingTestGatewayAllowed"
+        }).settingValue === "Y"
+    )
+}
+// A label on any package of the segment that a gateway sold and was not refunded (B5).
+function segmentLabelled(shipmentId, shipmentRouteSegmentSeqId) {
+    return rows(ROUTE_SEG, {shipmentId, shipmentRouteSegmentSeqId}).some(
+        row => (!blank(row.gatewayLabelId) || row.labelImage != null || !blank(row.labelUrl)) && blank(row.gatewayRefundStatus)
+    )
 }
 function gatewayView(gateway) {
     return gateway
@@ -349,7 +399,13 @@ function recordRequests(p) {
             status === "ShipShipped" || status === "ShipDelivered" ? "SHIPMENT_SHIPPED" : "SHIPMENT_NOT_PACKED",
             "Shipment " + sh.shipmentId + " is " + status + ": labels are bought for a packed shipment that has not shipped"
         )
-    if (p.kind !== "label" && !["ShipPacked", "ShipShipped", "ShipDelivered"].includes(status))
+    // a refund voids an unused label: once the shipment has shipped the label was used (B6)
+    if (p.kind === "refund" && status !== "ShipPacked")
+        denied(
+            status === "ShipShipped" || status === "ShipDelivered" ? "SHIPMENT_SHIPPED" : "SHIPMENT_NOT_PACKED",
+            "Shipment " + sh.shipmentId + " is " + status + ": a label is refunded before the shipment ships"
+        )
+    if (p.kind === "returnLabel" && !["ShipPacked", "ShipShipped", "ShipDelivered"].includes(status))
         denied("SHIPMENT_NOT_PACKED", "Shipment " + sh.shipmentId + " is " + status)
     let segment = segmentOf(sh, p.shipmentRouteSegmentSeqId)
     if (p.kind === "label" && (!blank(p.carrierPartyId) || !blank(p.shipmentMethodEnumId))) {
@@ -359,6 +415,15 @@ function recordRequests(p) {
             denied("METHOD_INVALID", "Carrier " + carrierPartyId + " has no method " + shipmentMethodEnumId)
         if (!blank(p.shippingGatewayConfigId) && !one(GATEWAY, {shippingGatewayConfigId: p.shippingGatewayConfigId}))
             denied("GATEWAY_INVALID", "There is no shipping gateway " + p.shippingGatewayConfigId)
+        const changed =
+            carrierPartyId !== segment.carrierPartyId ||
+            shipmentMethodEnumId !== segment.shipmentMethodEnumId ||
+            (!blank(p.shippingGatewayConfigId) && p.shippingGatewayConfigId !== segment.shippingGatewayConfigId)
+        if (changed && segmentLabelled(sh.shipmentId, segment.shipmentRouteSegmentSeqId))
+            denied(
+                "LABEL_EXISTS",
+                "A package of shipment " + sh.shipmentId + " has a label: refund it before changing the carrier"
+            )
         call("update#" + SEGMENT, {
             shipmentId: sh.shipmentId,
             shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId,
@@ -370,7 +435,7 @@ function recordRequests(p) {
         })
         segment = one(SEGMENT, {shipmentId: sh.shipmentId, shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId})
     }
-    const gateway = gatewayOf(sh.shipmentId, segment.shipmentRouteSegmentSeqId)
+    const gateway = gatewayFor(sh.shipment, segment)
     const serviceField = p.kind === "refund" ? "refundLabelsServiceName" : "requestLabelsServiceName"
     if (!gateway || !gateway[serviceField])
         denied(
@@ -379,12 +444,31 @@ function recordRequests(p) {
                 ? "No shipping gateway refunds labels for this shipment"
                 : "No shipping gateway buys labels for this method; record the tracking code and cost by hand"
         )
+    // the gateway must serve the carrier, and a test gateway buys only where the organization allows it (A2)
+    if (p.kind !== "refund" && !servesCarrier(gateway, sh.shipment, segment.carrierPartyId))
+        denied(
+            "GATEWAY_NOT_FOR_CARRIER",
+            "Gateway " +
+                (gateway.description || gateway.shippingGatewayConfigId) +
+                " does not serve carrier " +
+                (segment.carrierPartyId || "(none)")
+        )
+    if (p.kind !== "refund" && gateway.testMode === "Y" && !testGatewayAllowed(sh.facility.ownerPartyId))
+        denied(
+            "TEST_GATEWAY",
+            "Gateway " +
+                (gateway.description || gateway.shippingGatewayConfigId) +
+                " is a test gateway, not allowed for " +
+                sh.facility.ownerPartyId
+        )
     const packages = packagesAsked(sh, p.shipmentPackageSeqId)
     if (p.kind !== "refund") {
         const unweighed = packages.filter(row => !(number(row.weight) > 0)).map(row => row.shipmentPackageSeqId)
         if (unweighed.length) denied("WEIGHT_REQUIRED", "Weigh package " + unweighed.join(", ") + " before buying its label")
     }
-    const plan = packages.map(packageRow => planPackage(p.kind, sh.shipmentId, segment, gateway, packageRow, p.operationKey))
+    const plan = packages.map(packageRow =>
+        planPackage(p.kind, sh.shipmentId, segment, gateway, packageRow, p.operationKey, truthy(p.sendAgain))
+    )
     return {
         kind: p.kind,
         shipmentId: sh.shipmentId,
@@ -392,6 +476,7 @@ function recordRequests(p) {
         organizationPartyId: sh.facility.ownerPartyId,
         shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId,
         shippingGatewayConfigId: gateway.shippingGatewayConfigId,
+        shipmentMethodEnumId: segment.shipmentMethodEnumId || null,
         statusId: status,
         packages: plan
     }
@@ -399,7 +484,7 @@ function recordRequests(p) {
 // One package's place in a request: answered at once (its label is there, or for a refund is not; a call under way), the
 // earlier request that got no answer to ask about first ('ask'), or a new request row ('send'). Inside the recording
 // transaction, under the shipment's lock.
-function planPackage(kindName, shipmentId, segment, gateway, packageRow, operationKey) {
+function planPackage(kindName, shipmentId, segment, gateway, packageRow, operationKey, sendAgain = false) {
     const kind = kinds[kindName]
     const routeSeg = routeSegOf(shipmentId, packageRow.shipmentPackageSeqId, segment.shipmentRouteSegmentSeqId)
     const item = {shipmentPackageSeqId: packageRow.shipmentPackageSeqId, requestId: null, mode: null, skipCode: null}
@@ -414,21 +499,36 @@ function planPackage(kindName, shipmentId, segment, gateway, packageRow, operati
             .limit(1)
             .list()
     )[0]
-    const age = last ? lib.ms(ec.user.nowTimestamp) - lib.ms(last.requestDate) : 0
+    // a request recorded or sent within the last two minutes is a call still under way (another session's)
+    const age = last ? lib.ms(ec.user.nowTimestamp) - lib.ms(last.sentDate || last.requestDate) : 0
     if (last?.statusId === "SgrqRequested" && age < inFlightMs) {
         item.skipCode = "REQUEST_IN_PROGRESS"
         return item
     }
     if (last && (last.statusId === "SgrqUnknown" || last.statusId === "SgrqRequested")) {
-        // the earlier request got no answer: the gateway is asked about it first
+        // the earlier request got no answer: the gateway is asked about it first; a gateway that cannot be asked is sent
+        // the same request again only when a person says so (sendAgain, B1)
+        const askable = !blank(gateway.findLabelServiceName)
+        if (!askable && !sendAgain) {
+            if (last.statusId === "SgrqRequested")
+                call("update#" + REQUEST, {shippingGatewayRequestId: last.shippingGatewayRequestId, statusId: "SgrqUnknown"})
+            item.requestId = last.shippingGatewayRequestId
+            item.skipCode = "SEND_AGAIN_REQUIRED"
+            return item
+        }
         call("update#" + REQUEST, {
             shippingGatewayRequestId: last.shippingGatewayRequestId,
             statusId: "SgrqRequested",
             requestDate: ec.user.nowTimestamp,
+            sentDate: null,
             attemptCount: number(last.attemptCount) + 1,
             operationKey: operationKey || last.operationKey
         })
-        return Object.assign(item, {requestId: last.shippingGatewayRequestId, mode: "ask"})
+        return Object.assign(item, {
+            requestId: last.shippingGatewayRequestId,
+            mode: askable ? "ask" : "send",
+            attemptCount: number(last.attemptCount) + 1
+        })
     }
     // a refunded label is replaced: its fields leave the package before the new one is bought
     if (kindName === "label" && !blank(routeSeg.gatewayRefundStatus))
@@ -451,7 +551,7 @@ function planPackage(kindName, shipmentId, segment, gateway, packageRow, operati
         requestDate: ec.user.nowTimestamp,
         attemptCount: 1
     })
-    return Object.assign(item, {requestId: made.shippingGatewayRequestId, mode: "send"})
+    return Object.assign(item, {requestId: made.shippingGatewayRequestId, mode: "send", attemptCount: 1})
 }
 // The answer of a request written to its row, in its own transaction.
 function settleRequest(requestId, statusId, fields = {}) {
@@ -472,10 +572,17 @@ function sendOne(plan, item) {
     const out = {shipmentPackageSeqId: item.shipmentPackageSeqId, requestId: item.requestId}
     if (item.skipCode)
         return Object.assign(out, {
-            state: item.skipCode === "REQUEST_IN_PROGRESS" ? "pending" : "skipped",
+            state: ["REQUEST_IN_PROGRESS", "SEND_AGAIN_REQUIRED"].includes(item.skipCode) ? "pending" : "skipped",
             reasonCode: item.skipCode
         })
+    // the gateway the request was recorded against, used for the call and any lookup (A1)
     const gateway = one(GATEWAY, {shippingGatewayConfigId: plan.shippingGatewayConfigId})
+    // claim the row (compare and set on its status and attempt), stamping when it is actually sent (B1)
+    const claimed = probe(T + "claim#ShippingGatewayRequest", {
+        shippingGatewayRequestId: item.requestId,
+        attemptCount: item.attemptCount || 1
+    }).claimed
+    if (!claimed) return Object.assign(out, {state: "pending", reasonCode: "REQUEST_IN_PROGRESS"})
     const done = () => {
         const routeSeg = one(ROUTE_SEG, key)
         if (plan.kind === "refund") return routeSeg && !blank(routeSeg.gatewayRefundStatus)
@@ -509,6 +616,12 @@ function sendOne(plan, item) {
                 if (plan.kind === "refund")
                     probe("update#" + ROUTE_SEG, Object.assign({}, key, {gatewayRefundStatus: "refunded"}))
                 if (done()) return succeed(true)
+                // the gateway has it but did not fill it in: buying again could buy twice, so it stays without an answer
+                settleRequest(item.requestId, "SgrqUnknown", {
+                    reasonCode: "FOUND_NOT_FILLED",
+                    resultMessage: "The gateway reports the label but did not give it"
+                })
+                return Object.assign(out, {state: "unknown", reasonCode: "FOUND_NOT_FILLED"})
             }
         } catch (error) {
             const message = String(error?.message || error).replace(/^(Error: )+/, "")
@@ -520,15 +633,16 @@ function sendOne(plan, item) {
         }
     }
     try {
-        if (plan.kind === "refund")
-            probe(
-                "mantle.shipment.CarrierServices.refund#ShipmentLabels",
-                Object.assign({}, key, {requestReference: item.requestId})
-            )
+        // the recorded gateway's own service, so the call goes where the request was recorded (A1)
+        const base = Object.assign({}, key, {
+            shippingGatewayConfigId: gateway.shippingGatewayConfigId,
+            requestReference: item.requestId
+        })
+        if (plan.kind === "refund") probe(gateway.refundLabelsServiceName, base)
         else
             probe(
-                "mantle.shipment.CarrierServices.request#ShipmentLabels",
-                Object.assign({}, key, {getReturnLabels: kind.returnLabels, requestReference: item.requestId})
+                gateway.requestLabelsServiceName,
+                Object.assign(base, {getReturnLabels: kind.returnLabels, shipmentMethodEnumId: plan.shipmentMethodEnumId})
             )
     } catch (error) {
         const message = String(error?.message || error).replace(/^(Error: )+/, "")
@@ -547,8 +661,17 @@ function summary(plan, results) {
     const unknownCount = count("unknown") + count("pending")
     const failedCount = count("failed")
     const word = plan.kind === "refund" ? "REFUNDED" : "LABELED"
+    const nothing = plan.kind === "refund" && !count("done") && results.every(row => row.reasonCode === "NO_LABEL")
     return {
-        resultCode: unknownCount ? "PENDING" : failedCount ? (doneCount ? "PARTIAL" : "FAILED") : word,
+        resultCode: unknownCount
+            ? "PENDING"
+            : failedCount
+              ? doneCount
+                  ? "PARTIAL"
+                  : "FAILED"
+              : nothing
+                ? "NOTHING_TO_REFUND"
+                : word,
         shipmentId: plan.shipmentId,
         shipmentRouteSegmentSeqId: plan.shipmentRouteSegmentSeqId,
         shippingGatewayConfigId: plan.shippingGatewayConfigId,
@@ -568,7 +691,9 @@ function gatewayRequest(p, kindName, operationType) {
         "shipmentRouteSegmentSeqId",
         "carrierPartyId",
         "shipmentMethodEnumId",
-        "shippingGatewayConfigId"
+        "shippingGatewayConfigId",
+        "returnLabels",
+        "sendAgain"
     ])
     if (begun.previous) return begun.previous
     const plan = probe(T + "record#ShippingGatewayRequests", Object.assign({}, p, {kind: kindName})).plan
@@ -606,6 +731,16 @@ function finish(op, plan, answer) {
         ec.logger.warn("Shipping operation " + op.clientKey + " was not stored: " + error.message)
         return Object.assign({operationKey: op.clientKey, operationType: op.operationType, alreadyApplied: false}, answer)
     }
+}
+// claim#ShippingGatewayRequest, in its own transaction: the row locked, claimed only while Requested at the attempt the
+// plan recorded and not yet sent, then stamped sent; a parallel retry that got there first leaves this one unclaimed.
+function claimRequest(p) {
+    posting.requirePermission(["SHIPMENT_SHIP", "RETURN_AUTHORIZE"])
+    const row = find(REQUEST, {shippingGatewayRequestId: p.shippingGatewayRequestId}).forUpdate(true).one()
+    if (!row || row.statusId !== "SgrqRequested" || row.sentDate != null || number(row.attemptCount) !== number(p.attemptCount))
+        return {claimed: false}
+    call("update#" + REQUEST, {shippingGatewayRequestId: row.shippingGatewayRequestId, sentDate: ec.user.nowTimestamp})
+    return {claimed: true}
 }
 function finishRequests(p) {
     posting.requirePermission(["SHIPMENT_SHIP", "RETURN_AUTHORIZE"])
@@ -692,27 +827,35 @@ function manualTracking(p) {
     ])
     if (begun.previous) return begun.previous
     const sh = shipmentOf(posting.scope(), p.shipmentId, true)
+    const settledAnswer = posting.settled(begun.op)
+    if (settledAnswer) return settledAnswer
     if (sh.shipment.statusId !== "ShipPacked")
         denied(
             finalStatuses.includes(sh.shipment.statusId) ? "SHIPMENT_SHIPPED" : "SHIPMENT_NOT_PACKED",
             "Shipment " + sh.shipmentId + " is " + sh.shipment.statusId + ": tracking is recorded on a packed shipment"
         )
-    const settledAnswer = posting.settled(begun.op)
-    if (settledAnswer) return settledAnswer
     let segment = segmentOf(sh, p.shipmentRouteSegmentSeqId)
     const carrierPartyId = p.carrierPartyId || segment.carrierPartyId,
         shipmentMethodEnumId = p.shipmentMethodEnumId || segment.shipmentMethodEnumId
     if (!carrierPartyId || !shipmentMethodEnumId) denied("METHOD_REQUIRED", "Choose the carrier and its method")
     if (!one(METHOD, {carrierPartyId, shipmentMethodEnumId}))
         denied("METHOD_INVALID", "Carrier " + carrierPartyId + " has no method " + shipmentMethodEnumId)
-    if (carrierPartyId !== segment.carrierPartyId || shipmentMethodEnumId !== segment.shipmentMethodEnumId)
+    // a package with a gateway's label keeps it: refund it before recording another carrier's code (B5)
+    if (segmentLabelled(sh.shipmentId, segment.shipmentRouteSegmentSeqId))
+        denied(
+            "LABEL_EXISTS",
+            "A package of shipment " + sh.shipmentId + " has a label: refund it before recording tracking by hand"
+        )
+    if (carrierPartyId !== segment.carrierPartyId || shipmentMethodEnumId !== segment.shipmentMethodEnumId) {
         call("update#" + SEGMENT, {
             shipmentId: sh.shipmentId,
             shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId,
             carrierPartyId,
             shipmentMethodEnumId
         })
-    const gateway = gatewayOf(sh.shipmentId, segment.shipmentRouteSegmentSeqId)
+        segment = one(SEGMENT, {shipmentId: sh.shipmentId, shipmentRouteSegmentSeqId: segment.shipmentRouteSegmentSeqId})
+    }
+    const gateway = gatewayFor(sh.shipment, segment)
     const gatewayCarriers = gateway
         ? rows("mantle.shipment.carrier.ShippingGatewayCarrier", {shippingGatewayConfigId: gateway.shippingGatewayConfigId}).map(
               row => row.carrierPartyId
@@ -776,13 +919,13 @@ function packageDelivery(p) {
     ])
     if (begun.previous) return begun.previous
     const sh = shipmentOf(posting.scope(), p.shipmentId, true)
+    const settledAnswer = posting.settled(begun.op)
+    if (settledAnswer) return settledAnswer
     if (sh.shipment.statusId !== "ShipShipped")
         denied(
             sh.shipment.statusId === "ShipDelivered" ? "ALREADY_DELIVERED" : "NOT_SHIPPED",
             "Shipment " + sh.shipmentId + " is " + sh.shipment.statusId + ": delivery is recorded on a shipped shipment"
         )
-    const settledAnswer = posting.settled(begun.op)
-    if (settledAnswer) return settledAnswer
     if (blank(p.recipientName) && blank(p.note))
         denied("EVIDENCE_REQUIRED", "Name who received the package, or say what shows it was delivered")
     const delivered = p.deliveredDate ? lib.ms(p.deliveredDate) : lib.ms(ec.user.nowTimestamp)
@@ -926,6 +1069,8 @@ function ship(p) {
     if (begun.previous) return begun.previous
     const userScope = posting.scope()
     const sh = shipmentOf(userScope, p.shipmentId, true)
+    const settledAnswer = posting.settled(begun.op)
+    if (settledAnswer) return settledAnswer
     if (shippedElsewhere[sh.shipment.shipmentTypeEnumId])
         denied(
             "SHIPPED_ELSEWHERE",
@@ -936,8 +1081,6 @@ function ship(p) {
             finalStatuses.includes(sh.shipment.statusId) ? "SHIPMENT_SHIPPED" : "SHIPMENT_NOT_PACKED",
             "Shipment " + sh.shipmentId + " is " + sh.shipment.statusId + ": complete pack first"
         )
-    const settledAnswer = posting.settled(begun.op)
-    if (settledAnswer) return settledAnswer
     const blockers = shipBlockers(sh)
     if (blockers.length)
         denied(
@@ -981,11 +1124,24 @@ function shipReadiness(p) {
     }
 }
 
-const operations = {rates, recordRequests, finishRequests, track, manualTracking, packageDelivery, ship, shipReadiness}
+const operations = {
+    rates,
+    recordRequests,
+    claimRequest,
+    finishRequests,
+    track,
+    manualTracking,
+    packageDelivery,
+    ship,
+    shipReadiness
+}
 ;({
     activeLabel,
     planPackage,
+    gatewayFor,
     gatewayOf,
+    servesCarrier,
+    testGatewayAllowed,
     gatewayView,
     routeSegOf,
     sendOne,

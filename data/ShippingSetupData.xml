@@ -18,4 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
 <entity-facade-xml type="seed-initial">
     <moqui.security.UserPermission userPermissionId="SHIPPING_CARRIER_EDIT" description="Shipping Carrier Edit"/>
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="SHIPPING_CARRIER_EDIT" fromDate="0"/>
+    <!-- a test shipping gateway (ShippingGatewayConfig.testMode) buys labels only for an organization that says Y here
+        (P13 review A2); off by default -->
+    <mantle.party.PartySettingType partySettingTypeId="ShippingTestGatewayAllowed" defaultValue="N"
+            description="Shipping test gateways may buy labels"/>
 </entity-facade-xml>

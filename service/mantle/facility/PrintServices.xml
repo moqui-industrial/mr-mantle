@@ -49,6 +49,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="reasonCode"/>
             <parameter name="message"/>
             <parameter name="printJobIds" type="List"/>
+            <parameter name="results" type="List"><description>Each document: shipmentPackageSeqId, printed, printJobId, and when
+                it failed reasonCode and message; the others still print</description></parameter>
             <parameter name="networkPrinterId"/>
             <parameter name="copies" type="Integer"/>
             <parameter name="reprintable" type="Boolean"/>

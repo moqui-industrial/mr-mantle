@@ -673,10 +673,6 @@ function shipSupplierReturn(p) {
 }
 
 // ===== the return label =====
-// request#ReturnLabel: Customer Service's "Issue return label": the approved customer return's shipment, a package and its
-// route segment ensured, then the label through the carrier interface (CarrierServices.request#ShipmentLabels) when a
-// shipping gateway applies to the shipment, else LABEL_NOT_CONFIGURED with the package ready for the carrier; a label already
-// bought answers LABEL_EXISTS and buys no second one. P13's provider-request records take over the carrier call.
 // Customer Service's return label (request#ReturnLabel) on the shipping gateway path (P13, F331): the request is recorded
 // and committed first (recordReturnLabel, record#ReturnLabelRequest: the return, its open return shipment's package and
 // route segment, and a ShippingGatewayRequest), then the carrier is called outside any transaction that could roll back,
@@ -778,7 +774,18 @@ function recordReturnLabel(p) {
                 })
             }
         }
-    const gateway = shipping.gatewayOf(shipmentId, segment.shipmentRouteSegmentSeqId)
+    // the gateway worked out in this transaction from the segment as it is now, so a segment made here counts (P13 review A1)
+    const gateway = shipping.gatewayFor(one(SHIPMENT, {shipmentId}), segment)
+    if (
+        gateway?.requestLabelsServiceName &&
+        !shipping.servesCarrier(gateway, one(SHIPMENT, {shipmentId}), segment.carrierPartyId)
+    )
+        denied("GATEWAY_NOT_FOR_CARRIER", "Gateway " + gateway.shippingGatewayConfigId + " does not serve the segment's carrier")
+    if (gateway?.requestLabelsServiceName && gateway.testMode === "Y" && !shipping.testGatewayAllowed(header.vendorPartyId))
+        denied(
+            "TEST_GATEWAY",
+            "Gateway " + gateway.shippingGatewayConfigId + " is a test gateway, not allowed for " + header.vendorPartyId
+        )
     if (!gateway?.requestLabelsServiceName)
         return {
             recorded: {
@@ -794,6 +801,7 @@ function recordReturnLabel(p) {
             }
         }
     plan.shippingGatewayConfigId = gateway.shippingGatewayConfigId
+    plan.shipmentMethodEnumId = segment.shipmentMethodEnumId || null
     const packageRow = one("mantle.shipment.ShipmentPackage", {shipmentId, shipmentPackageSeqId: packageSeqId})
     plan.packages.push(shipping.planPackage("label", shipmentId, segment, gateway, packageRow, p.operationKey))
     return {recorded: {plan, base, answer: null}}

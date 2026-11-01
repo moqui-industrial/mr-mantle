@@ -229,6 +229,23 @@ spec({
             acquireCost: 4,
             acquireCostUomId: "USD"
         })
+        // this organization lets the test carrier buy its labels (off by default, P13 review A2)
+        call("create#mantle.party.PartySetting", {
+            partyId: org,
+            partySettingTypeId: "ShippingTestGatewayAllowed",
+            settingValue: "Y"
+        })
+        // a gateway that cannot be asked what it did after a timeout (no find#ShippingLabels), serving the test carrier
+        call("create#mantle.shipment.carrier.ShippingGatewayConfig", {
+            shippingGatewayConfigId: "WSH_NOFIND",
+            description: "No lookup gateway",
+            requestLabelsServiceName: "mantle.shipment.carrier.TestGatewayServices.request#ShippingLabels",
+            refundLabelsServiceName: "mantle.shipment.carrier.TestGatewayServices.refund#ShippingLabels"
+        })
+        call("create#mantle.shipment.carrier.ShippingGatewayCarrier", {
+            shippingGatewayConfigId: "WSH_NOFIND",
+            carrierPartyId: carrier
+        })
         call("create#moqui.basic.print.NetworkPrinter", {
             networkPrinterId: "WSH_PRINTER",
             serverHost: "127.0.0.1",
@@ -281,11 +298,26 @@ feature("both packages' labels are bought once through the test carrier; a retry
         const shipmentId = state.two.shipmentId
         const request = labelRequest(shipmentId)
         const packer = run("wsh_packer", T + "request#PackageLabels", labelRequest(shipmentId))
+        // a gateway that does not serve the carrier, and the test gateway for an organization that does not allow it (A2)
+        const unbound = run("wsh_shipper", T + "request#PackageLabels", labelRequest(shipmentId, {carrierPartyId: "UPS"}))
+        call("update#mantle.party.PartySetting", {
+            partyId: org,
+            partySettingTypeId: "ShippingTestGatewayAllowed",
+            settingValue: "N"
+        })
+        const notAllowed = run("wsh_shipper", T + "request#PackageLabels", labelRequest(shipmentId))
+        call("update#mantle.party.PartySetting", {
+            partyId: org,
+            partySettingTypeId: "ShippingTestGatewayAllowed",
+            settingValue: "Y"
+        })
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const retry = run("wsh_shipper", T + "request#PackageLabels", request)
         const again = run("wsh_shipper", T + "request#PackageLabels", labelRequest(shipmentId))
         return {
             packer,
+            unbound,
+            notAllowed,
             first,
             retry,
             again,
@@ -294,8 +326,10 @@ feature("both packages' labels are bought once through the test carrier; a retry
             requests: gatewayRequests(shipmentId)
         }
     },
-    then({packer, first, retry, again, labels, segs, requests}) {
+    then({packer, unbound, notAllowed, first, retry, again, labels, segs, requests}) {
         packer.error.includes("PERMISSION_DENIED")
+        unbound.error.includes("GATEWAY_NOT_FOR_CARRIER")
+        notAllowed.error.includes("TEST_GATEWAY")
         first.error == ""
         first.result.resultCode == "LABELED"
         first.result.doneCount == 2
@@ -314,9 +348,11 @@ feature("both packages' labels are bought once through the test carrier; a retry
 
 feature("a label timeout asks the carrier before retrying and buys no second label", {
     when() {
-        const sh = packedShipment("WSH_TIMEOUT", [1, 1], {shippingGatewayConfigId: gateway})
+        // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and its gateway,
+        // which is the gateway recorded, called and asked after the timeout (P13 review A1)
+        const sh = packedShipment("WSH_TIMEOUT", [1, 1])
         state.timeout = sh
-        const request = labelRequest(sh.shipmentId)
+        const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const afterFirst = {
             labels: carrierLabels(sh.shipmentId).length,
@@ -343,7 +379,10 @@ feature("a label timeout asks the carrier before retrying and buys no second lab
         // still two labels: nothing bought twice
         labels.length == 2
         requests.length == 2
-        requests.every(row => row.statusId == "SgrqSucceeded" && n(row.attemptCount) == 2)
+        requests.every(
+            row => row.statusId == "SgrqSucceeded" && n(row.attemptCount) == 2 && row.shippingGatewayConfigId == gateway
+        )
+        requests.every(row => row.sentDate != null)
     }
 })
 
@@ -364,10 +403,12 @@ feature("a refused label and an invalid address fail without shipping", {
             trust: one("mantle.party.contact.ContactMech", {contactMechId: "WSH_INVALID"}),
             ship: run("wsh_shipper", T + "ship#OutgoingShipment", {operationKey: key(), shipmentId: refused.shipmentId}),
             readiness: run("wsh_shipper", T + "get#ShipReadiness", {shipmentId: refused.shipmentId}),
+            nothing: run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId: refused.shipmentId}),
             status: shipmentOf(refused.shipmentId).statusId
         }
     },
-    then({refused, refusedRequests, invalid, trust, ship, readiness, status}) {
+    then({refused, refusedRequests, invalid, trust, ship, readiness, nothing, status}) {
+        nothing.result.resultCode == "NOTHING_TO_REFUND"
         refused.result.resultCode == "FAILED"
         refused.result.packages[0].reasonCode == "LABEL_REFUSED"
         refusedRequests[0].statusId == "SgrqFailed"
@@ -458,7 +499,8 @@ feature("a method with no gateway ships with a manual tracking code and cost, an
         tracked.error == ""
         tracked.result.resultCode == "TRACKING_RECORDED"
         tracked.result.costUomId == "USD"
-        viaGateway.error.includes("GATEWAY_LABELS")
+        // the test carrier's labels are on that shipment: refund them before recording tracking by hand (B5)
+        viaGateway.error.includes("LABEL_EXISTS")
         shipped.error == ""
         shipped.result.resultCode == "SHIPPED"
         shipped.result.trackingCodes.length == 2
@@ -473,9 +515,25 @@ feature("a method with no gateway ships with a manual tracking code and cost, an
     }
 })
 
-feature("an open inspection holds dispatch; a label refund reverses no shipment", {
+feature("an open inspection holds dispatch; a label refund before ship reverses nothing, and after ship is refused", {
     when() {
         const shipmentId = state.two.shipmentId
+        const issuedBefore = issuedTotal(shipmentId)
+        // a refund before ship voids the labels and leaves the shipment, its stock and packages as they are
+        const changeCarrier = run(
+            "wsh_shipper",
+            T + "request#PackageLabels",
+            labelRequest(shipmentId, {shipmentMethodEnumId: "ShMthNextDay"})
+        )
+        const refund = run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId})
+        const afterRefund = {
+            status: shipmentOf(shipmentId).statusId,
+            issued: issuedTotal(shipmentId),
+            segs: routeSegs(shipmentId)
+        }
+        const again = run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId})
+        const shipUnlabelled = run("wsh_shipper", T + "ship#OutgoingShipment", {operationKey: key(), shipmentId})
+        const relabel = run("wsh_shipper", T + "request#PackageLabels", labelRequest(shipmentId))
         const inspection = call("create#mantle.product.quality.QualityInspection", {
             organizationPartyId: org,
             facilityId: facility,
@@ -489,38 +547,90 @@ feature("an open inspection holds dispatch; a label refund reverses no shipment"
             qualityInspectionId: inspection.qualityInspectionId,
             statusId: "QiCancelled"
         })
-        const issuedBefore = issuedTotal(shipmentId)
         const shipped = run("wsh_shipper", T + "ship#OutgoingShipment", {operationKey: key(), shipmentId})
         const tracked = run("wsh_shipper", T + "track#PackageLabels", {shipmentIds: [shipmentId, state.manual.shipmentId]})
-        const refund = run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId})
-        const again = run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId})
+        const refundShipped = run("wsh_shipper", T + "refund#PackageLabels", {operationKey: key(), shipmentId})
         return {
+            changeCarrier,
+            refund,
+            afterRefund,
+            again,
+            shipUnlabelled,
+            relabel,
             held,
             issuedBefore,
             shipped,
             tracked,
-            refund,
-            again,
-            status: shipmentOf(shipmentId).statusId,
-            issuedAfter: issuedTotal(shipmentId),
-            labels: carrierLabels(shipmentId),
-            segs: routeSegs(shipmentId)
+            refundShipped,
+            labels: carrierLabels(shipmentId)
         }
     },
-    then({held, issuedBefore, shipped, tracked, refund, again, status, issuedAfter, labels, segs}) {
+    then({
+        changeCarrier,
+        refund,
+        afterRefund,
+        again,
+        shipUnlabelled,
+        relabel,
+        held,
+        issuedBefore,
+        shipped,
+        tracked,
+        refundShipped,
+        labels
+    }) {
+        // another method while labels are on the packages: refund first (B5)
+        changeCarrier.error.includes("LABEL_EXISTS")
+        refund.result.resultCode == "REFUNDED"
+        refund.result.statusId == "ShipPacked"
+        afterRefund.status == "ShipPacked"
+        afterRefund.issued == issuedBefore
+        afterRefund.segs.every(row => row.gatewayRefundStatus == "refunded")
+        again.result.packages.every(row => row.reasonCode == "ALREADY_REFUNDED")
+        shipUnlabelled.error.includes("TRACKING_REQUIRED")
+        relabel.result.resultCode == "LABELED"
         held.error.includes("INSPECTION_HOLD")
         shipped.result.resultCode == "SHIPPED"
         // tracking: the test carrier's shipment refreshes; the manual one has no gateway and is named
         tracked.okCount == 1
         tracked.results.find(row => row.shipmentId == state.manual.shipmentId).reasonCode == "NO_GATEWAY"
-        segs.every(row => row.gatewayRefundStatus == "refunded")
-        refund.result.resultCode == "REFUNDED"
-        refund.result.statusId == "ShipShipped"
-        again.result.packages.every(row => row.reasonCode == "ALREADY_REFUNDED")
-        // the shipment stays shipped and its issued stock stays issued
-        status == "ShipShipped"
-        issuedAfter == issuedBefore
-        labels.every(row => row.refundedDate != null)
+        // a used label is not refunded (B6)
+        refundShipped.error.includes("SHIPMENT_SHIPPED")
+        labels.length == 4
+        labels.filter(row => row.refundedDate != null).length == 2
+    }
+})
+
+feature("a gateway that cannot be asked after a timeout is sent again only when a person says so", {
+    when() {
+        const sh = packedShipment("WSH_TIMEOUT", [1])
+        const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})
+        const first = run("wsh_shipper", T + "request#PackageLabels", request)
+        const retry = run("wsh_shipper", T + "request#PackageLabels", request)
+        const afterRetry = carrierLabels(sh.shipmentId).length
+        const sendAgain = run(
+            "wsh_shipper",
+            T + "request#PackageLabels",
+            Object.assign({}, request, {operationKey: key(), sendAgain: "Y"})
+        )
+        return {
+            first,
+            retry,
+            afterRetry,
+            sendAgain,
+            labels: carrierLabels(sh.shipmentId),
+            requests: gatewayRequests(sh.shipmentId)
+        }
+    },
+    then({first, retry, afterRetry, sendAgain, labels, requests}) {
+        first.result.resultCode == "PENDING"
+        retry.result.packages[0].reasonCode == "SEND_AGAIN_REQUIRED"
+        afterRetry == 1
+        // the same reference sent again: the test carrier answers the label it issued, so still one label
+        sendAgain.result.resultCode == "LABELED"
+        labels.length == 1
+        requests.length == 1
+        requests[0].statusId == "SgrqSucceeded"
     }
 })
 
@@ -572,13 +682,18 @@ feature("a print failure leaves the posted result and offers a reprint; the prin
         unbound.printed == false
         unbound.reasonCode == "PRINTER_NOT_BOUND"
         printed.error == ""
-        printed.printed == false[("PRINTING_UNAVAILABLE", "PRINT_FAILED")].includes(printed.reasonCode)
+        printed.printed == false
+        printed.reasonCode == "PRINTING_UNAVAILABLE" || printed.reasonCode == "PRINT_FAILED"
         printed.reprintable == true
         printed.printJobIds.length >= 1
+        // each package's label tried and named, not stopped at the first failure (B3)
+        printed.results.length == 2
+        printed.results.every(row => !row.printed && row.printJobId)
         reprint.printed == false
         reprint.printJobIds[0] == printed.printJobIds[0]
         capabilities.printers[0].pdf == true
-        capabilities.printers[0].zpl == false[("unavailable", "failing")].includes(capabilities.printers[0].availability)
+        capabilities.printers[0].zpl == false
+        capabilities.printers[0].availability == "unavailable" || capabilities.printers[0].availability == "failing"
         // what was posted stays: the labels and the shipment
         status == "ShipPacked"
         segs.every(row => row.trackingCode)
