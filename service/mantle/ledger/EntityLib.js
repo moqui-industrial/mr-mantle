@@ -163,6 +163,26 @@ function page(query, p, field = "records", recordCount, options = {}) {
         result[field + key] = result[key[0].toLowerCase() + key.slice(1)]
     return result
 }
+// One page of a list built in memory, with the same page fields as page; with options.noLimitCap, a request with
+// pageNoLimit (an export) gets every row on one page, up to that cap. options.pageIndex names another page parameter.
+function pageList(list, p, field, options = {}) {
+    const noLimit = options.noLimitCap && (p.pageNoLimit === true || p.pageNoLimit === "true")
+    const pageSize = noLimit
+        ? Math.max(1, Math.min(list.length, options.noLimitCap))
+        : Math.min(100, Math.max(1, Number(p.pageSize) || 20))
+    const pageMaxIndex = Math.max(0, Math.ceil(list.length / pageSize) - 1)
+    const requested = options.pageIndex != null ? options.pageIndex : p.pageIndex
+    const pageIndex = Math.min(pageMaxIndex, Math.max(0, Number(requested) || 0))
+    return {
+        [field]: list.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize),
+        [field + "Count"]: list.length,
+        [field + "PageIndex"]: pageIndex,
+        [field + "PageSize"]: pageSize,
+        [field + "PageMaxIndex"]: pageMaxIndex,
+        [field + "PageRangeLow"]: list.length ? pageIndex * pageSize + 1 : 0,
+        [field + "PageRangeHigh"]: Math.min(list.length, (pageIndex + 1) * pageSize)
+    }
+}
 // Operation keys (PostingOperation): begin checks the key is the caller's for the same request, finish records the
 // result, and previous answers a retry with the first result.
 const operationEntity = "mantle.ledger.transaction.PostingOperation"
@@ -224,6 +244,7 @@ function previous(op) {
     display,
     partyNames,
     page,
+    pageList,
     operationEntity,
     operation,
     complete,

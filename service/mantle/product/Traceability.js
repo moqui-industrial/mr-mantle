@@ -91,8 +91,8 @@ const sourceConditions = {
 function movementQuery(userScope, p) {
     const factory = ec.entity.conditionFactory
     let query = find(DETAIL_VIEW)
-    for (const field of ["assetId", "productId", "lotId", "facilityId", "varianceReasonEnumId", "assetReceiptId"])
-        if (p[field]) query = query.condition(field, p[field])
+    const fields = ["assetId", "productId", "lotId", "facilityId", "varianceReasonEnumId", "assetReceiptId", "shipmentId"]
+    for (const field of fields) if (p[field]) query = query.condition(field, p[field])
     if (p.fromDate) query = query.condition("effectiveDate", "greater-equals", p.fromDate)
     if (p.thruDate) query = query.condition("effectiveDate", "less", p.thruDate)
     if (p.sourceType) {
@@ -787,5 +787,7 @@ const operations = {movements, traceability}
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown traceability operation " + op)
         return operations[op](parameters)
-    }
+    },
+    // the revaluation-split rule (F121), which get#InventoryAtDate reads too
+    revaluationPairs
 })

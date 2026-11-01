@@ -32,6 +32,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="facilityIds" type="List"><description>The caller's facilities: rows of assets elsewhere are left
                 out. Null for no narrowing; an empty list is no row.</description></parameter>
             <parameter name="assetReceiptId"/>
+            <parameter name="shipmentId"><description>The rows of one shipment's receipts and issues (OperationsHistory's
+                drill)</description></parameter>
             <parameter name="sourceType"><description>receipt, issuance, adjustment, split (revaluation splits and partial
                 moves) or other</description></parameter>
             <parameter name="varianceReasonEnumId"/>
