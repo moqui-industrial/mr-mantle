@@ -21,7 +21,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="ShipmentBoxType" allow-remote="false">
         <description>Create a box type, or change one: its description, dimensions with their unit, empty weight and the most
             it carries with their unit, and retire it (retire Y sets thruDate now; retire N clears it). Requires
-            FACILITY_EDIT (PERMISSION_DENIED); refuses a new type whose id is in use (BOX_TYPE_EXISTS), a missing
+            FACILITY_EDIT (PERMISSION_DENIED); refuses a change to a type a facility or a package of another organization
+            uses, unless the user has every organization's scope (BOX_TYPE_SHARED, F289), a new type whose id is in use
+            (BOX_TYPE_EXISTS), a missing
             description (DESCRIPTION_REQUIRED), a dimension or weight below zero (VALUE_INVALID) and a unit of another kind
             (UOM_INVALID).</description>
         <in-parameters>
@@ -49,6 +51,11 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition('shipmentBoxTypeId', shipmentBoxTypeId).forUpdate(true).disableAuthz().one() : null"/>
             <if condition="existing &amp;&amp; (isNew == 'Y' || isNew == true)">
                 <return error="true" message="BOX_TYPE_EXISTS: Box type ${shipmentBoxTypeId} already exists"/>
+            </if>
+            <!-- a type another organization uses is changed only with every organization's scope (F289) -->
+            <if condition="existing">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')
+                    .requireBoxTypeOwned(shipmentBoxTypeId)</script>
             </if>
             <if condition="!existing &amp;&amp; !(description &amp;&amp; String(description).trim())">
                 <return error="true" message="DESCRIPTION_REQUIRED: Describe the box type"/>
@@ -84,7 +91,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="CarrierShipmentBoxType" allow-remote="false">
         <description>CarrierBoxCodes: a carrier's package code (and oversize code) for a box type, or with remove Y the
-            binding removed. Requires FACILITY_EDIT; refuses a box type that does not exist (BOX_TYPE_UNAVAILABLE), a party
+            binding removed. Requires FACILITY_EDIT; refuses a box type that does not exist (BOX_TYPE_UNAVAILABLE) or that
+            another organization uses (BOX_TYPE_SHARED, F289), a party
             that is not a carrier (CARRIER_INVALID) and an empty code (CODE_REQUIRED).</description>
         <in-parameters>
             <parameter name="carrierPartyId" required="true"/>
@@ -102,6 +110,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="box == null">
                 <return error="true" message="BOX_TYPE_UNAVAILABLE: Box type ${shipmentBoxTypeId} does not exist"/>
             </if>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')
+                .requireBoxTypeOwned(shipmentBoxTypeId)</script>
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="carrierRole" disable-authz="true">
                 <field-map field-name="partyId" from="carrierPartyId"/>
                 <field-map field-name="roleTypeId" value="Carrier"/>

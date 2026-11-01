@@ -338,6 +338,8 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="shipmentId"><description>If specified will issue to this Shipment</description></parameter>
+            <parameter name="shipmentPackageSeqId"><description>The package the kits are packed into; empty puts each pack in a
+                new package, as before (impl-warehouse P12, F286).</description></parameter>
             <parameter name="receivedDate" type="Timestamp" default="ec.user.nowTimestamp"/>
         </in-parameters>
         <actions>
@@ -388,7 +390,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <if condition="shipmentId">
                             <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentProduct"
                                     in-map="{productId:assemblyProductId, shipmentId:shipmentId,
-                                        quantity:kitLine.quantity, assetId:packAssetId}"/>
+                                        quantity:kitLine.quantity, assetId:packAssetId,
+                                        shipmentPackageSeqId:shipmentPackageSeqId || null}"/>
                         </if>
                     </iterate>
                 </then><else-if condition="assemblyProduceQty != null &amp;&amp; !toDecimal(assemblyProduceQty).isZero()">
@@ -420,7 +423,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="shipmentId">
                         <service-call name="mantle.shipment.ShipmentServices.pack#ShipmentProduct"
                                 in-map="{productId:assemblyProductId, shipmentId:shipmentId,
-                                    quantity:assemblyProduceQty, assetId:packAssetId}"/>
+                                    quantity:assemblyProduceQty, assetId:packAssetId,
+                                    shipmentPackageSeqId:shipmentPackageSeqId || null}"/>
                     </if>
                 </else-if></if>
 

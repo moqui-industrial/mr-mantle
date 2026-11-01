@@ -77,7 +77,8 @@ function receiptLines(p) {
         if (componentValue == null) return null
         value = value.add(componentValue)
     }
-    const unit = value.divide(quantity, 4, "HALF_UP")
+    // rounded down, so the remainder unit is never below the unit cost (F292)
+    const unit = value.divide(quantity, 4, "DOWN")
     const acquireCostUomId = currency.uomId
     if (quantity.compare(1) <= 0 || quantity.multiply(unit).eq(value)) return [{quantity, acquireCost: unit, acquireCostUomId}]
     const most = quantity.subtract(1)

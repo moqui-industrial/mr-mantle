@@ -10,6 +10,7 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const picking = ec.resource.script("component://mr-mantle/service/mantle/shipment/Picking.js")
 const posting = ec.resource.script("component://mr-mantle/service/mantle/shipment/StockPosting.js")
+const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, rows, denied, call} = lib
 
 const SOURCE = "mantle.shipment.ShipmentItemSource",
@@ -84,16 +85,72 @@ function quantityToPack(left, quantity, label) {
     if (wanted > left) denied("QUANTITY_EXCEEDS_REMAINING", "Only " + text(left) + " of " + label + " is left to pack")
     return wanted
 }
-// Quarantined stock is not packed: the order item's reservations on held stock are refused (HELD_STOCK), since only an
-// inspection's disposition releases it (F8).
-function requireNotHeld(source) {
+// The stock a pack issues by the order item's reservations: available stock of the shipment's facility. Held stock is
+// refused (HELD_STOCK: only an inspection's disposition releases quarantine, F8), and so is a reservation on another
+// facility's stock (OTHER_FACILITY), which Mantle's pack would otherwise issue (F285).
+function requireNotHeld(source, sh) {
     if (!source?.orderId) return
     for (const reservation of rows(RESERVATION, {orderId: source.orderId, orderItemSeqId: source.orderItemSeqId}))
         if (number(reservation.quantityNotIssued) > 0) {
             const asset = one("mantle.product.asset.Asset", {assetId: reservation.assetId})
-            if (posting.heldStatuses.includes(asset?.statusId))
-                denied("HELD_STOCK", "Asset " + asset.assetId + " is " + asset.statusId + "; held stock is not packed")
+            if (posting.heldStatuses.includes(asset?.statusId) || (asset?.statusId && asset.statusId !== "AstAvailable"))
+                denied("HELD_STOCK", "Asset " + asset.assetId + " is " + asset.statusId + "; only available stock is packed")
+            if (sh && asset?.facilityId !== sh.facilityId)
+                denied(
+                    "OTHER_FACILITY",
+                    "Asset " + reservation.assetId + " is in another facility than shipment " + sh.shipmentId
+                )
         }
+}
+// A named asset (the form's or the scan's): locked and scoped by the posting guard (posting.stock: the user's
+// organizations, stock, on hand, the quantity), in the shipment's facility (OTHER_FACILITY), available (HELD_STOCK) and of the
+// line's product (PRODUCT_MISMATCH). Mantle's pack is given only this asset (F285).
+function packAsset(userScope, sh, assetId, quantity, productIds) {
+    if (blank(assetId)) return null
+    const asset = posting.stock(userScope, assetId, quantity)
+    if (asset.facilityId !== sh.facilityId)
+        denied("OTHER_FACILITY", "Asset " + assetId + " is not in facility " + sh.facilityId + " of shipment " + sh.shipmentId)
+    if (asset.statusId !== "AstAvailable")
+        denied("HELD_STOCK", "Asset " + assetId + " is " + asset.statusId + "; only available stock is packed")
+    if (productIds && !productIds.includes(asset.productId))
+        denied("PRODUCT_MISMATCH", "Asset " + assetId + " is " + asset.productId + ", not " + productIds.join(" or "))
+    return asset
+}
+// A scan: a product (or its asset or serial) on the shipment (Mantle's get#ShipmentProductByScan), else a component of a pick
+// assembly on the shipment by its id, pseudo id, identification, or asset id or serial in the shipment's facility. Answers
+// {productId, assetId, component} or null; the asset is checked by packAsset.
+function resolveScan(sh, scanInput) {
+    const direct = call("mantle.shipment.ShipmentServices.get#ShipmentProductByScan", {shipmentId: sh.shipmentId, scanInput})
+    if (direct?.productId) return {productId: direct.productId, assetId: direct.assetId || null, component: false}
+    const items = rows("mantle.shipment.ShipmentItem", {shipmentId: sh.shipmentId})
+    const assemblies = items
+        .map(row => row.productId)
+        .filter(productId => one("mantle.product.Product", {productId})?.productTypeEnumId === "PtPickAssembly")
+    if (!assemblies.length) return null
+    const components = [
+        ...new Set(
+            Array.from(
+                find("mantle.product.ProductAssoc", {productAssocTypeEnumId: "PatMfgBom"})
+                    .condition("productId", "in", assemblies)
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .list()
+            ).map(row => row.toProductId)
+        )
+    ]
+    const scan = String(scanInput).trim()
+    if (components.includes(scan)) return {productId: scan, assetId: null, component: true}
+    const byPseudo = Array.from(find("mantle.product.Product", {pseudoId: scan}).condition("productId", "in", components).list())
+    if (byPseudo.length) return {productId: byPseudo[0].productId, assetId: null, component: true}
+    const asset =
+        one("mantle.product.asset.Asset", {assetId: scan}) ||
+        Array.from(find("mantle.product.asset.Asset", {serialNumber: scan, facilityId: sh.facilityId}).list())[0]
+    if (asset && components.includes(asset.productId))
+        return {productId: asset.productId, assetId: asset.assetId, component: true}
+    const ident = Array.from(
+        find("mantle.product.ProductIdentification", {idValue: scan}).condition("productId", "in", components).list()
+    )
+    if (ident.length) return {productId: ident[0].productId, assetId: null, component: true}
+    return null
 }
 // What the shipment has issued so far, directly and into its assembly work effort: a scan that packed nothing changed neither.
 function issuedTotal(sh) {
@@ -170,23 +227,41 @@ function invoicesOf(shipmentId) {
 // (NOTHING_TO_REOPEN) and more than it holds (QUANTITY_EXCEEDS_PACKED).
 function reopenPlan(sh, pkg, p) {
     let contents = contentsOf(sh.shipmentId, pkg.shipmentPackageSeqId).filter(row => number(row.quantity) > 0)
+    const named = blank(p.assetId) ? null : one("mantle.product.asset.Asset", {assetId: p.assetId})
+    if (!blank(p.assetId) && !named) denied("RECORD_UNAVAILABLE", "Asset " + p.assetId + " is not available")
+    if (named) contents = contents.filter(row => row.productId === named.productId)
     if (!blank(p.productId)) contents = contents.filter(row => row.productId === p.productId)
     if (!contents.length) denied("NOTHING_TO_REOPEN", "Package " + pkg.shipmentPackageSeqId + " has nothing to take out")
     const takes = contents.map(content => {
         const held = number(content.quantity)
-        const quantity = blank(p.quantity) || blank(p.productId) ? held : number(p.quantity)
+        const issued = Array.from(
+            find(ISSUANCE, {shipmentId: sh.shipmentId, productId: content.productId})
+                .condition("quantity", "greater", 0)
+                .orderBy("-assetIssuanceId")
+                .list()
+        )
+        // the books must take back the units that leave the box: with the product issued from more than one asset (lots,
+        // serials, several locations) the packer names the asset (F287); from one asset the newest issuance is that asset's
+        if (!named && new Set(issued.map(row => row.assetId)).size > 1)
+            denied(
+                "ASSET_REQUIRED",
+                content.productId +
+                    " was packed from " +
+                    [...new Set(issued.map(row => row.assetId))].join(", ") +
+                    "; name the asset that comes out of package " +
+                    pkg.shipmentPackageSeqId
+            )
+        const issuances = named ? issued.filter(row => row.assetId === named.assetId) : issued
+        // by default all the package holds, or with a named asset what the package holds of it
+        const namedIssued = issuances.reduce((sum, row) => sum + number(row.quantity), 0)
+        const quantity =
+            !blank(p.quantity) && (!blank(p.productId) || named) ? number(p.quantity) : named ? Math.min(held, namedIssued) : held
         if (!(quantity > 0)) denied("QUANTITY_INVALID", "Give a quantity above zero")
         if (quantity > held)
             denied(
                 "QUANTITY_EXCEEDS_PACKED",
                 "Package " + pkg.shipmentPackageSeqId + " holds only " + text(held) + " of " + content.productId
             )
-        const issuances = Array.from(
-            find(ISSUANCE, {shipmentId: sh.shipmentId, productId: content.productId})
-                .condition("quantity", "greater", 0)
-                .orderBy("-assetIssuanceId")
-                .list()
-        )
         let left = quantity
         const parts = []
         for (const issuance of issuances) {
@@ -208,7 +283,7 @@ function reopenPlan(sh, pkg, p) {
 // and Mantle reserves nothing for a completed order, so a part (then its header) goes back to Approved by its status flow
 // before the unpack, which then restores the reservation on the same asset (F281). Order part, then header (the one lock
 // order); a later Complete pack completes them again.
-function reopenOrders(plan) {
+function lockOrders(plan) {
     const parts = new Map()
     for (const take of plan.takes)
         for (const part of take.parts) {
@@ -219,24 +294,35 @@ function reopenOrders(plan) {
             if (item)
                 parts.set(item.orderId + "|" + item.orderPartSeqId, {orderId: item.orderId, orderPartSeqId: item.orderPartSeqId})
         }
+    const ordered = [...parts.values()].sort((a, b) => (a.orderId + a.orderPartSeqId).localeCompare(b.orderId + b.orderPartSeqId))
+    // the one lock order after the shipment: order parts, then order headers (then the invoices the release locks, then the
+    // lines and assets the unpack locks)
+    for (const {orderId, orderPartSeqId} of ordered)
+        find("mantle.order.OrderPart", {orderId, orderPartSeqId}).forUpdate(true).one()
+    for (const orderId of [...new Set(ordered.map(row => row.orderId))])
+        find("mantle.order.OrderHeader", {orderId}).forUpdate(true).one()
+    return ordered
+}
+// Back to Approved by the status flows (F281). Re-approving runs Mantle's OrderApproved rules again: the part's
+// OrderApprovedNotify, and on the header OrderApprovedReserveAssets (nothing left to reserve while the stock is issued),
+// OrderApprovedSendEmail (the store's approval email is sent again) and OrderApprovedFulfillSubscriptions (F290).
+function reopenOrders(ordered) {
     const reopened = []
-    for (const {orderId, orderPartSeqId} of [...parts.values()].sort((a, b) =>
-        (a.orderId + a.orderPartSeqId).localeCompare(b.orderId + b.orderPartSeqId)
-    )) {
-        const part = find("mantle.order.OrderPart", {orderId, orderPartSeqId}).forUpdate(true).one()
-        const header = find("mantle.order.OrderHeader", {orderId}).forUpdate(true).one()
-        if (part?.statusId === "OrderCompleted") {
+    for (const {orderId, orderPartSeqId} of ordered) {
+        if (one("mantle.order.OrderPart", {orderId, orderPartSeqId})?.statusId === "OrderCompleted") {
             call("update#mantle.order.OrderPart", {orderId, orderPartSeqId, statusId: "OrderApproved"})
             reopened.push(orderId + ":" + orderPartSeqId)
         }
-        if (header?.statusId === "OrderCompleted") call("update#mantle.order.OrderHeader", {orderId, statusId: "OrderApproved"})
     }
+    for (const orderId of [...new Set(ordered.map(row => row.orderId))])
+        if (one("mantle.order.OrderHeader", {orderId})?.statusId === "OrderCompleted")
+            call("update#mantle.order.OrderHeader", {orderId, statusId: "OrderApproved"})
     return reopened
 }
 // The unpack: each part through unpack#ShipmentItemIssuance (which cancels that much of the issuance, its reservation
 // restored on the same asset, and gives the line its quantity back), then the package's content lowered.
-function unpack(sh, pkg, plan) {
-    reopenOrders(plan)
+function unpack(sh, pkg, plan, ordered) {
+    reopenOrders(ordered)
     const done = []
     for (const take of plan.takes) {
         for (const part of take.parts)
@@ -259,6 +345,31 @@ function unpack(sh, pkg, plan) {
     return done
 }
 
+// A box type used outside the user's organizations (a facility's box type, or a package of a shipment from a facility of
+// another organization) is shared: only a user with every organization's scope changes it (BOX_TYPE_SHARED, F289).
+function requireBoxTypeOwned(shipmentBoxTypeId) {
+    const userScope = posting.scope()
+    if (userScope.allOrganizations || blank(shipmentBoxTypeId)) return
+    const foreign = facilityId => {
+        const facility = facilityId ? one("mantle.facility.Facility", {facilityId}) : null
+        return !facility || !facilityScope.owns(userScope, facility.ownerPartyId)
+    }
+    if (rows("mantle.facility.FacilityBoxType", {shipmentBoxTypeId}).some(row => foreign(row.facilityId)))
+        denied("BOX_TYPE_SHARED", "Box type " + shipmentBoxTypeId + " is used by another organization's facility")
+    const shipmentIds = [
+        ...new Set(
+            Array.from(find(PACKAGE, {shipmentBoxTypeId}).selectField("shipmentId").limit(2000).list()).map(row => row.shipmentId)
+        )
+    ]
+    for (const shipmentId of shipmentIds) {
+        const segment = Array.from(
+            find("mantle.shipment.ShipmentRouteSegment", {shipmentId}).orderBy("shipmentRouteSegmentSeqId").limit(1).list()
+        )[0]
+        if (foreign(segment?.originFacilityId))
+            denied("BOX_TYPE_SHARED", "Box type " + shipmentBoxTypeId + " is on another organization's packages")
+    }
+}
+
 ;({
     packable,
     number,
@@ -272,6 +383,10 @@ function unpack(sh, pkg, plan) {
     linesOf,
     quantityToPack,
     requireNotHeld,
+    packAsset,
+    resolveScan,
+    lockOrders,
+    requireBoxTypeOwned,
     issuedTotal,
     completePlan,
     invoicesOf,

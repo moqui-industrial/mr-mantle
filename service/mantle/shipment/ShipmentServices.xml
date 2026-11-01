@@ -1584,7 +1584,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if PA WorkEffort has enough inventory to produce any quantity of any Product to Produce that has not already been produced, produce some or update prior produce -->
             <service-call name="mantle.work.ManufacturingServices.produce#AvailableAssemblies"
-                    in-map="{workEffortId:assemblyWorkEffortId, shipmentId:shipmentId, receivedDate:packDate}"/>
+                    in-map="{workEffortId:assemblyWorkEffortId, shipmentId:shipmentId, receivedDate:packDate,
+                        shipmentPackageSeqId:shipmentPackageSeqId}"/>
 
             <!-- if PA WorkEffort has all inventory complete it, set actualCompletionDate -->
             <service-call name="mantle.work.ManufacturingServices.get#ProducedProductComplete"
@@ -1615,7 +1616,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <return message="No quantity to unpack for issuance ${assetIssuanceId} of asset ${assetIssuance.assetId} in shipment ${shipmentId}"/></if>
             <if condition="quantity != null">
                 <if condition="toDecimal(quantity).compare(0) &lt;= 0 || toDecimal(quantity).compare(originalQuantity) &gt; 0">
-                    <return error="true" message="Cannot unpack ${quantity} of issuance ${assetIssuanceId}, it has ${originalQuantity}"/>
+                    <return error="true"
+                            message="Cannot unpack ${quantity} of issuance ${assetIssuanceId}, it has ${originalQuantity}"/>
                 </if>
                 <set field="originalQuantity" from="toDecimal(quantity)"/>
             </if>

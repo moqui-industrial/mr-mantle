@@ -66,15 +66,15 @@ function user(partyId, permissions, organizationPartyId = org) {
         fromDate: since
     })
 }
-function receive(productId, quantity, locationSeqId, acquireCost = 2) {
+function receive(productId, quantity, locationSeqId, acquireCost = 2, options = {}) {
     return call("mantle.product.AssetServices.receive#Asset", {
         productId,
         quantity,
-        facilityId: facility,
+        facilityId: options.facilityId || facility,
         locationSeqId,
-        ownerPartyId: org,
+        ownerPartyId: options.ownerPartyId || org,
         assetTypeEnumId: "AstTpInventory",
-        statusId: "AstAvailable",
+        statusId: options.statusId || "AstAvailable",
         acquireCost,
         acquireCostUomId: "USD"
     }).assetId
@@ -196,6 +196,18 @@ spec({
         state.kitOne = receive("DEMO_1_1", 10, "PICK3", 2)
         state.kitTwoA = receive("DEMO_2_1", 5, "PICK3", 1)
         state.kitTwoB = receive("DEMO_2_1", 5, "PICK3", 1.01)
+        state.kitTwoC = receive("DEMO_2_1", 6, "PICK3", 1.02)
+        // stock a pack must refuse (F285): another organization's, another facility's, quarantined; and a second WPN_A asset
+        call("create#mantle.facility.Facility", {facilityId: "WPN_FAC2", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.facility.Facility", {
+            facilityId: "WPN_OFAC",
+            facilityTypeEnumId: "FcTpWarehouse",
+            ownerPartyId: "WPN_OTHER"
+        })
+        state.foreignA = receive("WPN_A", 3, null, 2, {facilityId: "WPN_OFAC", ownerPartyId: "WPN_OTHER"})
+        state.elsewhereA = receive("WPN_A", 3, null, 2, {facilityId: "WPN_FAC2"})
+        state.heldA = receive("WPN_A", 2, "PICK1", 2, {statusId: "AstQuarantine"})
+        state.secondA = receive("WPN_A", 5, "PICK2")
         for (const [id, description, weight] of [
             ["WPN_BOX_S", "Small box", 0.25],
             ["WPN_BOX_M", "Medium box", 0.5]
@@ -243,6 +255,27 @@ feature("a picked shipment packs into two boxes with their weights; Complete pac
             shipmentItemSourceId: lineA,
             quantity: 2
         })
+        // the named or scanned stock is checked before Mantle sees it (F285)
+        const assetRefusal = assetId =>
+            run("wpn_packer", T + "pack#ShipmentStock", {
+                operationKey: key(),
+                shipmentId,
+                shipmentItemSourceId: lineA,
+                quantity: 1,
+                assetId
+            }).error
+        const stockRefusals = {
+            foreign: assetRefusal(state.foreignA),
+            elsewhere: assetRefusal(state.elsewhereA),
+            held: assetRefusal(state.heldA),
+            otherProduct: assetRefusal(state.kitOne),
+            heldScan: run("wpn_packer", T + "pack#ShipmentStock", {
+                operationKey: key(),
+                shipmentId,
+                scanInput: state.heldA,
+                quantity: 1
+            }).error
+        }
         const outsider = run("wpn_outsider", T + "pack#ShipmentStock", {
             operationKey: key(),
             shipmentId,
@@ -324,6 +357,7 @@ feature("a picked shipment packs into two boxes with their weights; Complete pac
         state.box1 = box1.result?.shipmentPackageSeqId
         state.box2 = box2.result?.shipmentPackageSeqId
         return {
+            stockRefusals,
             pickedA,
             pickedB,
             reader,
@@ -349,6 +383,7 @@ feature("a picked shipment packs into two boxes with their weights; Complete pac
         }
     },
     then({
+        stockRefusals,
         pickedA,
         pickedB,
         reader,
@@ -374,6 +409,11 @@ feature("a picked shipment packs into two boxes with their weights; Complete pac
     }) {
         pickedA.error === ""
         pickedB.error === ""
+        stockRefusals.foreign.includes("RECORD_UNAVAILABLE")
+        stockRefusals.elsewhere.includes("OTHER_FACILITY")
+        stockRefusals.held.includes("HELD_STOCK")
+        stockRefusals.otherProduct.includes("PRODUCT_MISMATCH")
+        stockRefusals.heldScan.includes("HELD_STOCK")
         reader.error.includes("PERMISSION_DENIED")
         outsider.error.includes("RECORD_UNAVAILABLE")
         box1.result.resultCode === "CREATED"
@@ -442,7 +482,8 @@ feature("a package reopened while its invoice is in process leaves the invoice, 
                 orderId: lineB.orderId,
                 orderItemSeqId: lineB.orderItemSeqId
             }),
-            contents2: contentOf(shipmentId, state.box2)
+            contents2: contentOf(shipmentId, state.box2),
+            box2: packagesOf(shipmentId).find(row => row.shipmentPackageSeqId === state.box2)
         }
         // the order drops one of the three: the line is flagged, and Pick's put back returns it to the shelf
         call("mantle.order.OrderServices.cancel#OrderItem", {
@@ -516,6 +557,8 @@ feature("a package reopened while its invoice is in process leaves the invoice, 
         afterReopen.billings === 0
         afterReopen.invoice.statusId === "InvoiceCancelled"
         afterReopen.contents2.length === 0
+        // the lowered package has no weight until it is weighed again (F288)
+        afterReopen.box2.weight == null
         // the reservation is back on the picked stock in the cart, never reset
         afterReopen.reservations.length === 1
         n(afterReopen.reservations[0].quantityNotIssued) === 3
@@ -626,7 +669,20 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
                 wip[entry.debitCreditFlag === "D" ? "debit" : "credit"] += n(entry.amount)
             }
         const kitIssued = rows("mantle.product.issuance.AssetIssuance", {shipmentId, productId: "DEMO_PA"})
+        // the kits go into the one package the packer packs into, and the kit-only shipment completes (F286)
+        const kitPackages = packagesOf(shipmentId)
+        run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "update",
+            shipmentPackageSeqId: kitPackages[0]?.shipmentPackageSeqId,
+            weight: 3,
+            weightUomId: "WT_lb"
+        })
+        const kitComplete = run("wpn_packer", T + "complete#Pack", {operationKey: key(), shipmentId})
         return {
+            kitPackages,
+            kitComplete,
             one1,
             two,
             issuances,
@@ -638,7 +694,10 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
             kitAssets: receipts.map(row => one("mantle.product.asset.Asset", {assetId: row.assetId}))
         }
     },
-    then({one1, two, receipts, issuedValue, receivedValue, wip, kitIssued, kitAssets}) {
+    then({kitPackages, kitComplete, one1, two, receipts, issuedValue, receivedValue, wip, kitIssued, kitAssets}) {
+        kitPackages.length === 1
+        kitComplete.error === ""
+        kitComplete.result.packageCount === 1
         one1.error === ""
         two.error === ""
         two.result.kits.length === 2
@@ -655,6 +714,110 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
         Math.round(wip.debit * 100) === 1201
         Math.round((wip.debit - wip.credit) * 10000) === 0
         kitIssued.reduce((sum, row) => sum + n(row.quantity), 0) === 3
+    }
+})
+
+feature("a later pack of the same kit at another unit cost is received on its own asset, and WIP still nets to zero", {
+    when() {
+        preference({kitCostFromComponents: "Y"})
+        const {shipmentId} = salesShipment([["DEMO_PA", 3]])
+        const pack = (productId, quantity, assetId) =>
+            run("wpn_packer", T + "pack#ShipmentAssembly", {
+                operationKey: key(),
+                shipmentId,
+                productId,
+                assemblyProductId: "DEMO_PA",
+                quantity,
+                assetId
+            })
+        const screws = pack("DEMO_2_1", 6)
+        const firstTwo = pack("DEMO_1_1", 2)
+        // the third kit's plate is a dearer one, named by the packer
+        const dearPlate = receive("DEMO_1_1", 1, "PICK3", 2.5)
+        const third = pack("DEMO_1_1", 1, dearPlate)
+        preference({kitCostFromComponents: "N"})
+        const workEffortId = one("mantle.shipment.Shipment", {shipmentId}).assemblyWorkEffortId
+        const issuances = rows("mantle.product.issuance.AssetIssuance", {workEffortId})
+        const receipts = rows("mantle.product.receipt.AssetReceipt", {workEffortId})
+        const cost = row => n(one("mantle.product.asset.Asset", {assetId: row.assetId}).acquireCost)
+        return {
+            screws,
+            firstTwo,
+            third,
+            receipts,
+            costs: receipts.map(cost),
+            issuedValue: issuances.reduce((sum, row) => sum + n(row.quantity) * cost(row), 0),
+            receivedValue: receipts.reduce((sum, row) => sum + n(row.quantityAccepted) * cost(row), 0),
+            packages: packagesOf(shipmentId)
+        }
+    },
+    then({screws, firstTwo, third, receipts, costs, issuedValue, receivedValue, packages}) {
+        screws.error === ""
+        firstTwo.error === ""
+        third.error === ""
+        receipts.length === 2
+        new Set(costs).size === 2
+        receipts.reduce((sum, row) => sum + n(row.quantityAccepted), 0) === 3
+        Math.round(issuedValue * 10000) === Math.round(receivedValue * 10000)
+        packages.length === 1
+    }
+})
+
+feature("a package holding one product from two assets is reopened only for a named asset (F287)", {
+    when() {
+        const {shipmentId} = salesShipment([["WPN_A", 2]])
+        const line = sourceOf(shipmentId, "WPN_A").shipmentItemSourceId
+        const box = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create"}).result
+            .shipmentPackageSeqId
+        const first = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: line,
+            quantity: 1,
+            shipmentPackageSeqId: box,
+            assetId: state.secondA
+        })
+        const issuedFirst = rows("mantle.product.issuance.AssetIssuance", {shipmentId}).map(row => row.assetId)
+        const second = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: line,
+            quantity: 1,
+            shipmentPackageSeqId: box
+        })
+        const unnamed = run("wpn_packer", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: box,
+            reason: "Wrong unit",
+            confirmed: "Y"
+        })
+        const named = run("wpn_packer", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: box,
+            assetId: state.secondA,
+            reason: "Wrong unit",
+            confirmed: "Y"
+        })
+        return {
+            first,
+            second,
+            issuedFirst,
+            unnamed,
+            named,
+            left: rows("mantle.product.issuance.AssetIssuance", {shipmentId}).filter(row => n(row.quantity) > 0)
+        }
+    },
+    then({first, second, issuedFirst, unnamed, named, left}) {
+        first.error === ""
+        second.error === ""
+        issuedFirst.includes(state.secondA)
+        unnamed.error.includes("ASSET_REQUIRED")
+        named.error === ""
+        named.result.unpacked[0].quantity === "1"
+        left.length === 1
+        left[0].assetId !== state.secondA
     }
 })
 
@@ -721,6 +884,14 @@ feature("box types, carrier codes and a facility's box types are kept by the fac
             packagingTypeCode: "02"
         })
         const used = run("wpn_admin", PK + "store#FacilityBoxType", {facilityId: facility, shipmentBoxTypeId: "WPN_BOX_L"})
+        // another organization's facility administrator changes no box type WPN_ORG uses (F289)
+        const sharedFacility = run("wpn_outsider", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", maxWeight: 10})
+        const sharedPackage = run("wpn_outsider", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_S", retire: "Y"})
+        const sharedCode = run("wpn_outsider", PK + "store#CarrierShipmentBoxType", {
+            carrierPartyId: "WPN_CARRIER",
+            shipmentBoxTypeId: "WPN_BOX_M",
+            packagingTypeCode: "09"
+        })
         const outsider = run("wpn_outsider", PK + "store#FacilityBoxType", {facilityId: facility, shipmentBoxTypeId: "WPN_BOX_S"})
         const {shipmentId} = salesShipment([["WPN_A", 1]])
         const notUsedHere = run("wpn_packer", T + "edit#ShipmentPackage", {
@@ -761,6 +932,9 @@ feature("box types, carrier codes and a facility's box types are kept by the fac
             code,
             notCarrier,
             used,
+            sharedFacility,
+            sharedPackage,
+            sharedCode,
             outsider,
             notUsedHere,
             usedHere,
@@ -777,6 +951,9 @@ feature("box types, carrier codes and a facility's box types are kept by the fac
         }
     },
     then({
+        sharedFacility,
+        sharedPackage,
+        sharedCode,
         reader,
         created,
         again,
@@ -803,6 +980,9 @@ feature("box types, carrier codes and a facility's box types are kept by the fac
         binding.packagingTypeCode === "02"
         notCarrier.error.includes("CARRIER_INVALID")
         used.error === ""
+        sharedFacility.error.includes("BOX_TYPE_SHARED")
+        sharedPackage.error.includes("BOX_TYPE_SHARED")
+        sharedCode.error.includes("BOX_TYPE_SHARED")
         outsider.error.includes("FACILITY_UNAVAILABLE")
         notUsedHere.error.includes("BOX_TYPE_UNAVAILABLE")
         usedHere.error === ""
