@@ -4180,8 +4180,9 @@ along with this software (see the LICENSE.md file). If not, see
             whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
             no record a timeline or the record visibility rules read. Filing it on a record is link#CommunicationEventRecord
             (create#RecordFromChatMessage does it for the record it makes). created is true when this call made the event;
-            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderName, senderPartyId, sentDate, body,
-            bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}.
+            chatMessage is the message: {chatRoomId, eventSeq, senderUserId, senderActorId, senderName, senderPartyId,
+            senderNetworkName, sentDate, body, bodyText, attachmentNames, roomName, roomRecordEntityName, roomRecordId}: a message
+            of an external actor of a chat bridge has no senderUserId and no party, and its name and network are the actor's.
         </description>
         <in-parameters>
             <parameter name="chatRoomId" required="true"/>
@@ -4213,8 +4214,13 @@ along with this software (see the LICENSE.md file). If not, see
             const room = access.room
             const sender = row.senderUserId ? ec.entity.find('moqui.security.UserAccount').condition('userId', row.senderUserId)
                     .disableAuthz().one() : null
+            // an external actor of a chat bridge (no user, no party): its name on its network
+            const actor = !row.senderUserId && row.senderActorId ? (ec.service.sync().name('org.moqui.impl.ChatServices.get#ActorNames')
+                    .parameter('chatActorIdList', [row.senderActorId]).call()?.actorMap || {})[row.senderActorId] : null
             chatMessage = {chatRoomId: chatRoomId, eventSeq: Number(eventSeq), senderUserId: row.senderUserId ?? null,
-                senderName: sender ? (sender.userFullName || sender.username) : null, senderPartyId: sender?.partyId ?? null,
+                senderActorId: row.senderActorId ?? null,
+                senderName: sender ? (sender.userFullName || sender.username) : (actor ? actor.name : null), senderPartyId: sender?.partyId ?? null,
+                senderNetworkName: actor ? actor.networkName ?? null : null,
                 sentDate: row.sentDate, body: html, bodyText: row.bodyText ?? null,
                 attachmentNames: Array.from(content.attachments ?? []).map((file) => file.fileName).filter((name) => name),
                 roomName: room.roomName ?? null, roomRecordEntityName: room.recordEntityName ?? null, roomRecordId: room.recordId ?? null}
