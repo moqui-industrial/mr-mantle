@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Shipping, labels and printers (design-warehouse §10 Ship and PackageTracking, §12 Carriers and Printers, §17 WH-LABEL;
+    impl-warehouse P13): the durable record of each request to a shipping gateway (a label, a return label, a refund, a
+    tracking refresh), written and committed before the gateway is called, so after a timeout the gateway is asked what it did
+    before any retry; the gateway's lookup service and its test or live mode; a package's manual delivery proof; and a
+    facility printer binding's copies and dates. The Mantle test carrier's own record of the labels it issued is
+    TestCarrierEntities.xml. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="ShippingGatewayConfig" package="mantle.shipment.carrier">
+        <field name="findLabelServiceName" type="text-medium"><description>Service implementing
+            mantle.shipment.CarrierServices.find#ShippingLabels: asked, after a request got no answer, whether the gateway
+            issued (or refunded) the label of a request reference, before any retry.</description></field>
+        <field name="testMode" type="text-indicator"><description>Y: a test or sandbox gateway; its labels are not
+            bought.</description></field>
+    </extend-entity>
+    <entity entity-name="ShippingGatewayRequest" package="mantle.shipment.carrier" cache="never">
+        <description>One request to a shipping gateway for a package of a shipment's route segment, recorded and committed
+            before the gateway is called (WarehouseTaskServices request#PackageLabels, refund#PackageLabels,
+            track#PackageLabels, request#ReturnLabel). Requested: sent, no answer yet (or the call never came back);
+            Succeeded and Failed: the gateway's answer; Unknown: the call timed out or failed with no answer, so the
+            gateway (find#ShippingLabels) is asked before any retry. The request id is the reference sent to the gateway,
+            so a gateway that keeps it answers a retry with the first label.</description>
+        <field name="shippingGatewayRequestId" type="id" is-pk="true"/>
+        <field name="requestTypeEnumId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="shippingGatewayConfigId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="shipmentRouteSegmentSeqId" type="id"/>
+        <field name="shipmentPackageSeqId" type="id"/>
+        <field name="carrierPartyId" type="id"/>
+        <field name="shipmentMethodEnumId" type="id"/>
+        <field name="operationKey" type="text-medium"><description>The client's operation key of the request that sent
+            it.</description></field>
+        <field name="userId" type="id"/>
+        <field name="requestDate" type="date-time"/>
+        <field name="sentDate" type="date-time"><description>When the gateway was called for this attempt; set when the
+            row is claimed for sending (claim#ShippingGatewayRequest), so a parallel retry cannot send it too.</description>
+        </field>
+        <field name="responseDate" type="date-time"/>
+        <field name="attemptCount" type="number-integer"><description>How many times the gateway was called or asked for
+            this request.</description></field>
+        <field name="trackingCode" type="text-medium"/>
+        <field name="gatewayLabelId" type="text-short"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="amountUomId" type="id"/>
+        <field name="reasonCode" type="text-short"><description>A refusal's code (LABEL_REFUSED, ADDRESS_INVALID,
+            CARRIER_TIMEOUT, ...).</description></field>
+        <field name="resultMessage" type="text-medium"/>
+        <relationship type="one" title="ShippingGatewayRequestType" related="moqui.basic.Enumeration"
+                short-alias="requestType">
+            <key-map field-name="requestTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ShippingGatewayRequest" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one" related="mantle.shipment.carrier.ShippingGatewayConfig"/>
+        <relationship type="one-nofk" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentPackageRouteSeg" short-alias="packageRouteSeg">
+            <key-map field-name="shipmentId"/><key-map field-name="shipmentPackageSeqId"/>
+            <key-map field-name="shipmentRouteSegmentSeqId"/></relationship>
+        <index name="SHP_GTW_REQ_PKG">
+            <index-field name="shipmentId"/><index-field name="shipmentPackageSeqId"/>
+            <index-field name="requestTypeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Shipping Gateway Request Type" enumTypeId="ShippingGatewayRequestType"/>
+            <moqui.basic.Enumeration description="Label" enumId="SgrLabel" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Return label" enumId="SgrReturnLabel"
+                    enumTypeId="ShippingGatewayRequestType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Refund" enumId="SgrRefund" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Tracking" enumId="SgrTrack" enumTypeId="ShippingGatewayRequestType"
+                    sequenceNum="4"/>
+            <moqui.basic.StatusType description="Shipping Gateway Request" statusTypeId="ShippingGatewayRequest"/>
+            <moqui.basic.StatusItem statusId="SgrqRequested" statusTypeId="ShippingGatewayRequest" sequenceNum="1"
+                    description="Requested"/>
+            <moqui.basic.StatusItem statusId="SgrqUnknown" statusTypeId="ShippingGatewayRequest" sequenceNum="2"
+                    description="No answer"/>
+            <moqui.basic.StatusItem statusId="SgrqSucceeded" statusTypeId="ShippingGatewayRequest" sequenceNum="5"
+                    description="Succeeded"/>
+            <moqui.basic.StatusItem statusId="SgrqFailed" statusTypeId="ShippingGatewayRequest" sequenceNum="6"
+                    description="Failed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqUnknown"
+                    transitionName="No answer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqSucceeded"
+                    transitionName="Succeed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqRequested" toStatusId="SgrqFailed"
+                    transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqRequested"
+                    transitionName="Ask again"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqSucceeded"
+                    transitionName="Succeed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SgrqUnknown" toStatusId="SgrqFailed"
+                    transitionName="Fail"/>
+        </seed-data>
+    </entity>
+    <extend-entity entity-name="ShipmentPackageRouteSeg" package="mantle.shipment">
+        <field name="deliveryRecipientName" type="text-medium"><description>Who received the package, when its delivery
+            was recorded by hand (record#PackageDelivery).</description></field>
+        <field name="deliveryNote" type="text-medium"><description>The evidence or reason of a delivery recorded by
+            hand.</description></field>
+        <field name="deliveryRecordedByUserId" type="id"/>
+        <field name="deliveryRecordedDate" type="date-time"/>
+    </extend-entity>
+    <extend-entity entity-name="FacilityPrinter" package="mantle.facility">
+        <field name="copies" type="number-integer"><description>The copies a document of this purpose prints here;
+            empty is one.</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="update"><description>From when the binding is in
+            effect; empty is always.</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>When the binding ended; a
+            document of the purpose then has no printer here.</description></field>
+        <seed-data>
+            <moqui.basic.Enumeration description="Lot Label" enumId="PtpLotLabel" enumTypeId="PrinterPurpose"/>
+            <moqui.basic.Enumeration description="Location Label" enumId="PtpLocationLabel" enumTypeId="PrinterPurpose"/>
+            <moqui.basic.Enumeration description="Count Documents" enumId="PtpCountDocuments" enumTypeId="PrinterPurpose"/>
+        </seed-data>
+    </extend-entity>
+    <view-entity entity-name="ShipmentPackageTracking" package="mantle.shipment">
+        <description>Each package's route segment with its shipment and segment (PackageTracking): the tracking, label and
+            delivery fields with the shipment's type, status and parties and the segment's facilities, carrier and method,
+            so a tracking list filters by facility, carrier, code and status in one query.</description>
+        <member-entity entity-alias="SPRS" entity-name="mantle.shipment.ShipmentPackageRouteSeg"/>
+        <member-entity entity-alias="SHMT" entity-name="mantle.shipment.Shipment" join-from-alias="SPRS">
+            <key-map field-name="shipmentId"/></member-entity>
+        <member-entity entity-alias="SHRS" entity-name="mantle.shipment.ShipmentRouteSegment" join-from-alias="SPRS">
+            <key-map field-name="shipmentId"/><key-map field-name="shipmentRouteSegmentSeqId"/></member-entity>
+        <alias entity-alias="SPRS" name="shipmentId"/>
+        <alias entity-alias="SPRS" name="shipmentPackageSeqId"/>
+        <alias entity-alias="SPRS" name="shipmentRouteSegmentSeqId"/>
+        <alias entity-alias="SPRS" name="trackingCode"/>
+        <alias entity-alias="SPRS" name="trackingUrl"/>
+        <alias entity-alias="SPRS" name="trackingStatusEnumId"/>
+        <alias entity-alias="SPRS" name="trackingSubStatus"/>
+        <alias entity-alias="SPRS" name="trackingStatusDate"/>
+        <alias entity-alias="SPRS" name="trackingEta"/>
+        <alias entity-alias="SPRS" name="labelDate"/>
+        <alias entity-alias="SPRS" name="gatewayLabelId"/>
+        <alias entity-alias="SPRS" name="gatewayRefundStatus"/>
+        <alias entity-alias="SPRS" name="deliveryRecipientName"/>
+        <alias entity-alias="SPRS" name="deliveryNote"/>
+        <alias entity-alias="SHMT" name="shipmentTypeEnumId"/>
+        <alias entity-alias="SHMT" name="statusId"/>
+        <alias entity-alias="SHMT" name="fromPartyId"/>
+        <alias entity-alias="SHMT" name="toPartyId"/>
+        <alias entity-alias="SHMT" name="estimatedShipDate"/>
+        <alias entity-alias="SHRS" name="originFacilityId"/>
+        <alias entity-alias="SHRS" name="destinationFacilityId"/>
+        <alias entity-alias="SHRS" name="carrierPartyId"/>
+        <alias entity-alias="SHRS" name="shipmentMethodEnumId"/>
+        <alias entity-alias="SHRS" name="shippingGatewayConfigId"/>
+        <alias entity-alias="SHRS" name="actualStartDate"/>
+        <alias entity-alias="SHRS" name="estimatedArrivalDate"/>
+    </view-entity>
+</entities>

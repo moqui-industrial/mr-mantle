@@ -1571,7 +1571,8 @@ along with this software (see the LICENSE.md file). If not, see
 
                         <service-call name="mantle.product.AssetServices.issue#AnyAssetForShipmentItemSource" out-map="issueAnyOut"
                                 in-map="{shipmentItemSourceId:shipmentItemSource.shipmentItemSourceId, quantity:quantityRemaining,
-                                    issuedDate:packDate, workEffortId:assemblyWorkEffortId, workEffortOnly:true, forceIssueOther:forceIssueOther}"/>
+                                    issuedDate:packDate, workEffortId:assemblyWorkEffortId, workEffortOnly:true,
+                                    forceIssueOther:forceIssueOther, componentProductId:productId}"/>
                         <set field="quantityRemaining" from="toDecimal(issueAnyOut.quantityRemaining ?? 0)"/>
                     </iterate>
                 </if>
@@ -1583,7 +1584,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- if PA WorkEffort has enough inventory to produce any quantity of any Product to Produce that has not already been produced, produce some or update prior produce -->
             <service-call name="mantle.work.ManufacturingServices.produce#AvailableAssemblies"
-                    in-map="{workEffortId:assemblyWorkEffortId, shipmentId:shipmentId, receivedDate:packDate}"/>
+                    in-map="{workEffortId:assemblyWorkEffortId, shipmentId:shipmentId, receivedDate:packDate,
+                        shipmentPackageSeqId:shipmentPackageSeqId}"/>
 
             <!-- if PA WorkEffort has all inventory complete it, set actualCompletionDate -->
             <service-call name="mantle.work.ManufacturingServices.get#ProducedProductComplete"
@@ -1599,6 +1601,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="unpack" noun="ShipmentItemIssuance">
         <in-parameters>
             <parameter name="assetIssuanceId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"><description>Part of the issuance to unpack (impl-warehouse P12,
+                reopen#ShipmentPackage); defaults to all of it.</description></parameter>
             <parameter name="unpackDate" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="unpackAssemblyComponents" type="Boolean" default="true"/>
         </in-parameters>
@@ -1610,6 +1614,13 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="originalQuantity" from="assetIssuance.quantity"/>
             <if condition="originalQuantity == null || toDecimal(originalQuantity).isZero()">
                 <return message="No quantity to unpack for issuance ${assetIssuanceId} of asset ${assetIssuance.assetId} in shipment ${shipmentId}"/></if>
+            <if condition="quantity != null">
+                <if condition="toDecimal(quantity).compare(0) &lt;= 0 || toDecimal(quantity).compare(originalQuantity) &gt; 0">
+                    <return error="true"
+                            message="Cannot unpack ${quantity} of issuance ${assetIssuanceId}, it has ${originalQuantity}"/>
+                </if>
+                <set field="originalQuantity" from="toDecimal(quantity)"/>
+            </if>
             <if condition="!assetIssuance.shipmentItemSourceId">
                 <return error="true" message="Cannot unpack issuance ${assetIssuanceId}, has no shipment item source"/></if>
 
@@ -1624,7 +1635,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-update value-field="shipmentItemSource"/>
 
             <service-call name="mantle.product.AssetServices.cancel#AssetIssuance" out-map="context"
-                    in-map="{assetIssuanceId:assetIssuanceId, cancelDate:unpackDate}"/>
+                    in-map="{assetIssuanceId:assetIssuanceId, cancelDate:unpackDate, quantityToCancel:originalQuantity}"/>
 
             <!-- if product unpacked is a PtPickAssembly and was produced by the Shipment's Assembly Task then
                 also un-produce so component quantities are not used, and if unpackAssemblyComponents unpack/unissue the components as well -->

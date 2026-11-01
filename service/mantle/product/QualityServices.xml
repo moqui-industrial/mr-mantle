@@ -438,8 +438,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>For bill matching and planning (D21): each receipt of a receipt id, an order line or a shipment, with its
             accepted and dock-rejected quantity, its held quantity (the heldQuantity of its inspections, a re-inspection
             holding what it took from the earlier one; a receipt with no inspection whose stock is quarantined is held
-            whole), what its inspections rejected (scrapped or returned to the supplier), match-eligible (accepted less held
-            and less inspection-rejected), and the totals. An internal read: the caller checks
+            whole), what its inspections rejected (scrapped or returned to the supplier), what of that has left the stock
+            (inspectionRemovedQuantity: the scrapped quantity and what Return to supplier dispositions sent back; the rest
+            is still held), match-eligible (accepted less held and less inspection-removed, P14 review B1), and the
+            totals. An internal read: the caller checks
             its own permission (as InvoiceMatch.js does). Refuses no source (SOURCE_REQUIRED).</description>
         <in-parameters>
             <parameter name="assetReceiptId"/>
@@ -454,6 +456,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="heldQuantity" type="BigDecimal"/>
             <parameter name="matchEligibleQuantity" type="BigDecimal"/>
             <parameter name="inspectionRejectedQuantity" type="BigDecimal"/>
+            <parameter name="inspectionRemovedQuantity" type="BigDecimal"/>
         </out-parameters>
         <actions>
             <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
@@ -464,6 +467,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="heldQuantity" from="answer.heldQuantity"/>
             <set field="matchEligibleQuantity" from="answer.matchEligibleQuantity"/>
             <set field="inspectionRejectedQuantity" from="answer.inspectionRejectedQuantity"/>
+            <set field="inspectionRemovedQuantity" from="answer.inspectionRemovedQuantity"/>
         </actions>
     </service>
 

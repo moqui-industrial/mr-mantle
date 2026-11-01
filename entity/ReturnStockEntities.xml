@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Returns in the warehouse (design-warehouse WH-RETURN and WH-RECORD-HOSTS, design-purchasing PUR-RETURN; impl-warehouse
+    P14): the link from a supplier return's item to the receipt and the stock it sends back (F32), what a quality disposition
+    sent back to the supplier has shipped, and a return's files. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="ReturnItem" package="mantle.order.return">
+        <field name="assetReceiptId" type="id" enable-audit-log="update"><description>A supplier return's source receipt
+            (PUR-RETURN): the purchase receipt whose accepted stock this item sends back, so eligibility is counted per
+            receipt (mantle.order.ReturnServices.find#ReturnableReceipts, add#ReceiptToReturn).</description></field>
+        <field name="assetId" type="id" enable-audit-log="update"><description>The stock this item sends back: the receipt's
+            asset, or the asset an inspection's disposition left the stock in; WarehouseTaskServices.issue#SupplierReturnStock
+            issues this asset.</description></field>
+        <relationship type="one-nofk" related="mantle.product.receipt.AssetReceipt"/>
+        <relationship type="one-nofk" related="mantle.product.asset.Asset"/>
+        <index name="RETURN_ITEM_RECEIPT"><index-field name="assetReceiptId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="QualityInspectionDisposition" package="mantle.product.quality">
+        <field name="returnedQuantity" type="number-decimal"><description>Of a Return to supplier disposition, the quantity
+            issued to a supplier return shipment so far (issue#SupplierReturnStock); the inspection's heldQuantity falls by
+            the same.</description></field>
+    </extend-entity>
+    <view-entity entity-name="ReturnableReceiptView" package="mantle.order.return">
+        <description>A purchase receipt with its order part and stock, for find#ReturnableReceipts' query: the shipment type,
+            the buying organization, the supplier, the receipt asset's lot and facility filtered in the database (P14 review
+            B3).</description>
+        <member-entity entity-alias="ARCT" entity-name="mantle.product.receipt.AssetReceipt"/>
+        <member-entity entity-alias="SHPM" entity-name="mantle.shipment.Shipment" join-from-alias="ARCT">
+            <key-map field-name="shipmentId"/></member-entity>
+        <member-entity entity-alias="OITM" entity-name="mantle.order.OrderItem" join-from-alias="ARCT">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></member-entity>
+        <member-entity entity-alias="OPRT" entity-name="mantle.order.OrderPart" join-from-alias="OITM">
+            <key-map field-name="orderId"/><key-map field-name="orderPartSeqId"/></member-entity>
+        <member-entity entity-alias="ASST" entity-name="mantle.product.asset.Asset" join-from-alias="ARCT" join-optional="true">
+            <key-map field-name="assetId"/></member-entity>
+        <alias name="assetReceiptId" entity-alias="ARCT"/>
+        <alias name="assetId" entity-alias="ARCT"/>
+        <alias name="productId" entity-alias="ARCT"/>
+        <alias name="orderId" entity-alias="ARCT"/>
+        <alias name="orderItemSeqId" entity-alias="ARCT"/>
+        <alias name="shipmentId" entity-alias="ARCT"/>
+        <alias name="quantityAccepted" entity-alias="ARCT"/>
+        <alias name="receivedDate" entity-alias="ARCT"/>
+        <alias name="shipmentTypeEnumId" entity-alias="SHPM"/>
+        <alias name="vendorPartyId" entity-alias="OPRT"/>
+        <alias name="customerPartyId" entity-alias="OPRT"/>
+        <alias name="lotId" entity-alias="ASST"/>
+        <alias name="facilityId" entity-alias="ASST"/>
+    </view-entity>
+    <entity entity-name="ReturnContent" package="mantle.order.return" cache="never">
+        <description>A file of a return: a photo of the goods, the customer's or supplier's authorization, a packing list
+            (crosscut CX-RECORD-HOSTS, the record files of get#RecordLinkInfo). Written through
+            mantle.order.ReturnServices.create#ReturnContent.</description>
+        <field name="returnContentId" type="id" is-pk="true"/>
+        <field name="returnId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.order.return.ReturnHeader"/>
+        <relationship type="one" title="ReturnContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Return Content Type" enumTypeId="ReturnContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="RtcntDocument" enumTypeId="ReturnContentType"
+                    sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Photo" enumId="RtcntPhoto" enumTypeId="ReturnContentType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Authorization" enumId="RtcntAuthorization" enumTypeId="ReturnContentType"
+                    sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Packing list" enumId="RtcntPackingList" enumTypeId="ReturnContentType"
+                    sequenceNum="4"/>
+        </seed-data>
+    </entity>
+</entities>

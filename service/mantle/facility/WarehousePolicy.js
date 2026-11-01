@@ -35,7 +35,8 @@ const operationFields = [
     "overShipmentPercent",
     "backorderEnumId",
     "blindCount",
-    "autoPrint"
+    "autoPrint",
+    "inventoryRequestCheck"
 ]
 const reservationFields = ["reservationOrderEnumId", "reservationAutoEnumId"]
 // Each family: its fields, its built-in defaults (Mantle's behavior with no row) and its label in messages.
@@ -68,7 +69,8 @@ const families = {
             overShipmentPercent: 0,
             backorderEnumId: "WhBoBackorder",
             blindCount: "N",
-            autoPrint: "N"
+            autoPrint: "N",
+            inventoryRequestCheck: "N"
         }
     },
     reservation: {
@@ -316,6 +318,7 @@ const validators = {
         checkEnum(data, "backorderEnumId", "WarehouseBackorder")
         checkIndicator(data, "blindCount")
         checkIndicator(data, "autoPrint")
+        checkIndicator(data, "inventoryRequestCheck")
         for (const [field, locationTypeEnumId] of Object.entries(locationTypes)) {
             if (data[field] == null) continue
             if (g.facilityId === "_NA_") denied("POLICY_INVALID", "Default locations are set for a facility")

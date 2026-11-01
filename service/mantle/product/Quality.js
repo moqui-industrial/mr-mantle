@@ -652,7 +652,14 @@ function createInspection(userScope, given) {
         )
     const contextEnumId =
         checkEnum(text(p.inspectionContextEnumId), "InspectionContext", "context") ||
-        (receipt || p.shipmentId ? "QicReceipt" : p.returnId ? "QicReturn" : p.workEffortId ? "QicProduction" : "QicReceipt")
+        // a customer return's receipt is inspected as a return (impl-warehouse P14)
+        (receipt?.returnId || (!receipt && p.returnId)
+            ? "QicReturn"
+            : receipt || p.shipmentId
+              ? "QicReceipt"
+              : p.workEffortId
+                ? "QicProduction"
+                : "QicReceipt")
     const organizationPartyId = facility.ownerPartyId
     const asOf = now()
     let template = null
@@ -674,15 +681,17 @@ function createInspection(userScope, given) {
     if (demandOrderId) checkDemand(userScope, demandOrderId, demandOrderItemSeqId, productId, organizationPartyId)
     const sourceTypeEnumId =
         checkEnum(text(p.sourceTypeEnumId), "InspectionSourceType", "source") ||
-        (receipt
-            ? "QisReceipt"
-            : p.returnId
-              ? "QisReturn"
-              : p.workEffortId
-                ? "QisWorkEffort"
-                : p.shipmentId
-                  ? "QisShipment"
-                  : "QisAsset")
+        (receipt?.returnId
+            ? "QisReturn"
+            : receipt
+              ? "QisReceipt"
+              : p.returnId
+                ? "QisReturn"
+                : p.workEffortId
+                  ? "QisWorkEffort"
+                  : p.shipmentId
+                    ? "QisShipment"
+                    : "QisAsset")
     const held = asset?.statusId === "AstQuarantine" ? quantity : toDecimal(0)
     const created = call("create#" + INSPECTION, {
         organizationPartyId,
@@ -694,8 +703,8 @@ function createInspection(userScope, given) {
         assetReceiptId: receipt?.assetReceiptId || null,
         orderId: receipt?.orderId || text(p.orderId),
         orderItemSeqId: receipt?.orderItemSeqId || text(p.orderItemSeqId),
-        returnId: text(p.returnId),
-        returnItemSeqId: text(p.returnItemSeqId),
+        returnId: receipt?.returnId || text(p.returnId),
+        returnItemSeqId: receipt?.returnItemSeqId || text(p.returnItemSeqId),
         workEffortId: text(p.workEffortId),
         productId,
         lotId: asset?.lotId || text(p.lotId),
@@ -749,6 +758,30 @@ function receiptInspections(userScope, assetReceiptIds) {
         const receipt = one(RECEIPT, {assetReceiptId})
         if (!receipt?.assetId || dec(receipt.quantityAccepted).compare(0) <= 0) continue
         ids.push(createInspection(userScope, {assetReceiptId}).qualityInspectionId)
+    }
+    return ids
+}
+
+// Whether a production run's output at a facility needs inspection (impl-warehouse P16): the tracking policy's
+// inspectionRequired, or a published production template that applies.
+function outputNeedsInspection(facility, productId, policy) {
+    if (policy.tracking?.inspectionRequired === "Y") return true
+    return !!applicableTemplate(facility.ownerPartyId, productId, facility.facilityId, "QicProduction")
+}
+// The inspections of a run's output just received into quarantine: one per receipt with accepted stock, of the run
+// (QisWorkEffort, QicProduction), in the output guard's own operation (its STOCK_ISSUE check). Answers their ids.
+function outputInspections(userScope, assetReceiptIds, workEffortId) {
+    const ids = []
+    for (const assetReceiptId of Array.from(assetReceiptIds || [])) {
+        const receipt = one(RECEIPT, {assetReceiptId})
+        if (!receipt?.assetId || dec(receipt.quantityAccepted).compare(0) <= 0) continue
+        const created = createInspection(userScope, {
+            assetReceiptId,
+            workEffortId,
+            sourceTypeEnumId: "QisWorkEffort",
+            inspectionContextEnumId: "QicProduction"
+        })
+        ids.push(created.qualityInspectionId)
     }
     return ids
 }
@@ -1539,11 +1572,15 @@ function sourceStatus(p) {
               ? accepted
               : zero
         const ownIds = new Set(own.map(row => row.qualityInspectionId))
-        const inspectionRejected = dispositions
-            .filter(row => ownIds.has(row.qualityInspectionId))
-            .reduce((sum, row) => sum.add(dec(row.quantity)), zero)
-        // what the inspection scrapped or returned to the supplier leaves the match too (P8 review B2)
-        const eligible = accepted.subtract(held).subtract(inspectionRejected)
+        const ownDispositions = dispositions.filter(row => ownIds.has(row.qualityInspectionId))
+        const inspectionRejected = ownDispositions.reduce((sum, row) => sum.add(dec(row.quantity)), zero)
+        // what the inspection scrapped or returned to the supplier leaves the match too (P8 review B2); Return to supplier
+        // stock not yet sent back is still in held, so only its returnedQuantity counts here (P14 review B1, F318)
+        const inspectionRemoved = ownDispositions.reduce(
+            (sum, row) => sum.add(row.dispositionEnumId === "QdReturnSupplier" ? dec(row.returnedQuantity) : dec(row.quantity)),
+            zero
+        )
+        const eligible = accepted.subtract(held).subtract(inspectionRemoved)
         return {
             assetReceiptId: receipt.assetReceiptId,
             shipmentId: receipt.shipmentId,
@@ -1555,6 +1592,7 @@ function sourceStatus(p) {
             heldQuantity: held,
             matchEligibleQuantity: eligible.compare(0) > 0 ? eligible : zero,
             inspectionRejectedQuantity: inspectionRejected,
+            inspectionRemovedQuantity: inspectionRemoved,
             openInspectionIds: own.filter(row => openStatuses.includes(row.statusId)).map(row => row.qualityInspectionId)
         }
     })
@@ -1565,7 +1603,8 @@ function sourceStatus(p) {
         rejectedQuantity: total("rejectedQuantity"),
         heldQuantity: total("heldQuantity"),
         matchEligibleQuantity: total("matchEligibleQuantity"),
-        inspectionRejectedQuantity: total("inspectionRejectedQuantity")
+        inspectionRejectedQuantity: total("inspectionRejectedQuantity"),
+        inspectionRemovedQuantity: total("inspectionRemovedQuantity")
     }
 }
 
@@ -1598,6 +1637,9 @@ const operations = {
     // for the receipt guard (Receiving.js), dispose#Inspection and scrap#Asset
     receiptNeedsInspection,
     receiptInspections,
+    // for the production output guard (Production.js)
+    outputNeedsInspection,
+    outputInspections,
     applicableTemplate,
     itemsAsOf,
     lockInspection,

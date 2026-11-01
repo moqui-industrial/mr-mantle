@@ -153,8 +153,9 @@ function receiptsOf(orderId, orderItemSeqId) {
         receivedDate: row.receivedDate,
         accepted: dec(row.quantityAccepted),
         held: quantityOf(row, "heldQuantity"),
-        // scrapped or returned to the supplier at inspection: no longer match-eligible (P8 review B2)
-        inspectionRejected: quantityOf(row, "inspectionRejectedQuantity")
+        // scrapped or sent back to the supplier at inspection: no longer match-eligible (P8 review B2); Return to supplier
+        // stock not yet sent back is in held, so it is not subtracted twice (P14 review B1)
+        inspectionRejected: quantityOf(row, "inspectionRemovedQuantity")
     }))
 }
 // What other bills have billed of an order line, or of one receipt (billing links of other invoices; a cancelled bill's

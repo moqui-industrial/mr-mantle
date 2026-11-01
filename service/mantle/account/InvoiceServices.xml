@@ -4648,11 +4648,11 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Take a packed shipment's lines off its sales invoice before it ships, for a reopened package or an
             order change (D3): the invoice lines billed for the shipment and their billing links (OrderItemBilling) are
             removed, the shipment's sources and issuances no longer name the invoice, and an invoice left with no line is
-            cancelled, so packing again bills the shipment again. Captured payments stay unapplied
-            (PaymentServices.refund#OrderPayment refunds one when the change reduces the order). Refuses a shipment that
-            shipped (SHIPMENT_SHIPPED: after ship a change is a return or a credit memo) and an invoice no longer in
-            process (INVOICE_FINALIZED). Needs RECEIVABLE_EDIT in the shipping organization. The same operationKey and
-            request answers the first result.</description>
+            cancelled, so packing again bills the shipment again (release#ShipmentInvoiceLines). Captured payments stay
+            unapplied (PaymentServices.refund#OrderPayment refunds one when the change reduces the order). Refuses a
+            shipment that shipped (SHIPMENT_SHIPPED: after ship a change is a return or a credit memo) and an invoice no
+            longer in process (INVOICE_FINALIZED). Needs RECEIVABLE_EDIT in the shipping organization. The same
+            operationKey and request answers the first result.</description>
         <in-parameters>
             <parameter name="shipmentId" required="true"/>
             <parameter name="reason" required="true"/>
@@ -4681,6 +4681,36 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="alreadyApplied" from="true"/>
                 <return/>
             </if>
+            <service-call name="mantle.account.InvoiceServices.release#ShipmentInvoiceLines" disable-authz="true"
+                    in-map="{shipmentId:shipmentId, reason:reason}" out-map="released"/>
+            <set field="invoiceIdList" from="released.invoiceIdList"/>
+            <set field="cancelledInvoiceIdList" from="released.cancelledInvoiceIdList"/>
+            <set field="releasedItemCount" from="released.releasedItemCount"/>
+            <set field="alreadyApplied" from="false"/>
+            <if condition="releaseOperation">
+                <script>invoiceLib.complete(releaseOperation, 'mantle.shipment.Shipment', shipmentId,
+                    {invoiceIdList:invoiceIdList, cancelledInvoiceIdList:cancelledInvoiceIdList,
+                        releasedItemCount:releasedItemCount, reason:reason})</script>
+            </if>
+        </actions>
+    </service>
+    <service verb="release" noun="ShipmentInvoiceLines" allow-remote="false">
+        <description>Internal, no permission of its own (as reverse#InvoiceActuals): the release itself, which
+            release#ShipmentDraftInvoice runs after its RECEIVABLE_EDIT check and Warehouse's
+            WarehouseTaskServices.reopen#ShipmentPackage after its SHIPMENT_PACK check (impl-warehouse P12, F275). Locks the
+            shipment and its invoices; refuses a shipment that shipped (SHIPMENT_SHIPPED) and an invoice no longer in
+            process (INVOICE_FINALIZED); takes the shipment's lines and billing links off its in-process invoices, clears
+            the sources' and issuances' invoice, and cancels an invoice left with no line.</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="reason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceIdList" type="List"/>
+            <parameter name="cancelledInvoiceIdList" type="List"/>
+            <parameter name="releasedItemCount" type="Integer"/>
+        </out-parameters>
+        <actions>
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment" for-update="true"
                     disable-authz="true"/>
             <if condition="['ShipShipped', 'ShipDelivered'].includes(shipment.statusId)">
@@ -4759,14 +4789,8 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </iterate>
             <set field="releasedItemCount" from="releasedLines.length"/>
-            <set field="alreadyApplied" from="false"/>
             <log level="info"
                     message="Released ${releasedItemCount} lines of shipment ${shipmentId} from ${invoiceIdList}: ${reason}"/>
-            <if condition="releaseOperation">
-                <script>invoiceLib.complete(releaseOperation, 'mantle.shipment.Shipment', shipmentId,
-                    {invoiceIdList:invoiceIdList, cancelledInvoiceIdList:cancelledInvoiceIdList,
-                        releasedItemCount:releasedItemCount, reason:reason})</script>
-            </if>
         </actions>
     </service>
 

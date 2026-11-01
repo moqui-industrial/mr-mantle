@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Packing (design-warehouse §10 Pack, §12 BoxTypes; impl-warehouse P12): the organization's kit cost flag (F41), read by
+    mantle.work.ManufacturingServices.produce#AvailableAssemblies, and what a box type needs beyond Mantle's: a retire date
+    (a used type is retired, never removed from the packages it is on) and the most weight it carries. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="kitCostFromComponents" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: a pick-assembly kit made at pack (produce#AvailableAssemblies, for every caller) is received
+                at the cost of the component issuances it uses (each issuance's quantity times its asset's acquireCost),
+                divided by the kit quantity at the four decimals acquireCost keeps, a remainder received apart on its own
+                unit, so the components leave work in process exactly and the kit's issue posts its cost of goods sold.
+                N, the default: the kit is received with no cost, as before (AtrNoAcquireCost).</description>
+        </field>
+    </extend-entity>
+    <extend-entity entity-name="ShipmentBoxType" package="mantle.shipment">
+        <field name="maxWeight" type="number-decimal"><description>The most a package of this type carries, in its
+            weightUomId; packing above it warns.</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>When the type was retired: no new
+            package takes it, and the packages that have it keep it.</description></field>
+    </extend-entity>
+</entities>

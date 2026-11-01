@@ -150,6 +150,145 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <!-- Stock at a date and operations history (impl-warehouse P17, WH-REPORT; InventoryAtDate.js, OperationsHistory.js).
+        Both read the user's organizations only (StockScope.js), narrowed to the caller's facilities, and answer no cost;
+        no stock read permission exists in Mantle: an app's own access check decides who may call them. -->
+    <service verb="get" noun="InventoryAtDate" allow-remote="false">
+        <description>Stock on hand at the end of a day (asOfDate, a calendar day in the user's zone; today by default) from
+            the AssetDetail ledger by effective date, by product, facility, location, lot and owner, each row with its
+            opening quantity at the start of fromDate (the first of the cut-off's month by default), its receipts, issues,
+            adjustments (counts, scrap and other variances) and moves in the period, and its closing quantity; and the
+            history of the period, oldest first, each row with its effective and recorded dates, source document and the
+            row's balance after it. An asset's facility, location, lot and owner at a time come from its audit log, so a
+            whole asset moved or relabelled moves its stock between rows. A revaluation split's pair of rows (F34) and a
+            partial move within one row read as one history row with no change. The opening is one summed query per page of
+            assets; the rows read are the period's. History from before a facility's first
+            ledger row is incomplete: those quantities are null (unknown), never zero, and complete is false; so is it when
+            more assets or history rows match than one report reads (truncated). Totals by unit, never across units.
+            Refuses a future day, a first day after the cut-off and a facility outside the scope.</description>
+        <in-parameters>
+            <parameter name="asOfDate" type="Date"/>
+            <parameter name="fromDate" type="Date"/>
+            <parameter name="productId"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityIds" type="List"><description>The caller's facilities; null for no
+                narrowing, an empty list for none.</description></parameter>
+            <parameter name="locationSeqId"/>
+            <parameter name="lotId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="historyPageIndex" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"><description>Every row of both lists on one page, up to 5000 (an
+                export)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="asOfDay"/>
+            <parameter name="fromDay"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="historyIncomplete" type="Boolean"><description>Some quantity is from before a facility's first
+                ledger row</description></parameter>
+            <parameter name="historyStartText"><description>The first ledger row of the facilities read</description></parameter>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="stockRows" type="List"/>
+            <parameter name="stockRowsCount" type="Integer"/>
+            <parameter name="stockRowsPageIndex" type="Integer"/>
+            <parameter name="stockRowsPageSize" type="Integer"/>
+            <parameter name="stockRowsPageMaxIndex" type="Integer"/>
+            <parameter name="stockRowsPageRangeLow" type="Integer"/>
+            <parameter name="stockRowsPageRangeHigh" type="Integer"/>
+            <parameter name="historyRows" type="List"/>
+            <parameter name="historyRowsCount" type="Integer"/>
+            <parameter name="historyRowsPageIndex" type="Integer"/>
+            <parameter name="historyRowsPageSize" type="Integer"/>
+            <parameter name="historyRowsPageMaxIndex" type="Integer"/>
+            <parameter name="historyRowsPageRangeLow" type="Integer"/>
+            <parameter name="historyRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/InventoryAtDate.js')
+                    .execute('inventoryAtDate', context)"/>
+            <set field="asOfDay" from="out.asOfDay"/>
+            <set field="fromDay" from="out.fromDay"/>
+            <set field="complete" from="out.complete"/>
+            <set field="truncated" from="out.truncated"/>
+            <set field="historyIncomplete" from="out.historyIncomplete"/>
+            <set field="historyStartText" from="out.historyStartText"/>
+            <set field="totalRows" from="out.totalRows"/>
+            <set field="stockRows" from="out.stockRows"/>
+            <set field="stockRowsCount" from="out.stockRowsCount"/>
+            <set field="stockRowsPageIndex" from="out.stockRowsPageIndex"/>
+            <set field="stockRowsPageSize" from="out.stockRowsPageSize"/>
+            <set field="stockRowsPageMaxIndex" from="out.stockRowsPageMaxIndex"/>
+            <set field="stockRowsPageRangeLow" from="out.stockRowsPageRangeLow"/>
+            <set field="stockRowsPageRangeHigh" from="out.stockRowsPageRangeHigh"/>
+            <set field="historyRows" from="out.historyRows"/>
+            <set field="historyRowsCount" from="out.historyRowsCount"/>
+            <set field="historyRowsPageIndex" from="out.historyRowsPageIndex"/>
+            <set field="historyRowsPageSize" from="out.historyRowsPageSize"/>
+            <set field="historyRowsPageMaxIndex" from="out.historyRowsPageMaxIndex"/>
+            <set field="historyRowsPageRangeLow" from="out.historyRowsPageRangeLow"/>
+            <set field="historyRowsPageRangeHigh" from="out.historyRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OperationsHistory" allow-remote="false">
+        <description>The receipts, shipments, returns and transfers of a period (fromDate through thruDate, calendar days
+            in the user's zone; the 30 days to today by default), one row per document and product: its operation, status,
+            other party, facilities, carrier, expected and actual dates and the days between them, and its expected,
+            accepted, rejected, picked, shipped and delivered quantities in the product's unit (each the whole document's;
+            delivered empty until the shipment is delivered). dateBasis movement (the
+            default) reads the documents with a receipt or issue in the period, document those expected in it (arrival for
+            incoming, ship for outgoing). Totals of each unit over every row of the period, never across units. complete is
+            false when more documents match than one report reads. Refuses a facility outside the scope and an unknown
+            operation.</description>
+        <in-parameters>
+            <parameter name="operation"><description>receipt, shipment, return or transfer; all when
+                empty</description></parameter>
+            <parameter name="dateBasis"><description>movement or document</description></parameter>
+            <parameter name="fromDate" type="Date"/>
+            <parameter name="thruDate" type="Date"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="partyId"/>
+            <parameter name="productId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fromDay"/>
+            <parameter name="thruDay"/>
+            <parameter name="dateBasis"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="historyRows" type="List"/>
+            <parameter name="historyRowsCount" type="Integer"/>
+            <parameter name="historyRowsPageIndex" type="Integer"/>
+            <parameter name="historyRowsPageSize" type="Integer"/>
+            <parameter name="historyRowsPageMaxIndex" type="Integer"/>
+            <parameter name="historyRowsPageRangeLow" type="Integer"/>
+            <parameter name="historyRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/OperationsHistory.js')
+                    .execute('operationsHistory', context)"/>
+            <set field="fromDay" from="out.fromDay"/>
+            <set field="thruDay" from="out.thruDay"/>
+            <set field="dateBasis" from="out.dateBasis"/>
+            <set field="complete" from="out.complete"/>
+            <set field="totalRows" from="out.totalRows"/>
+            <set field="historyRows" from="out.historyRows"/>
+            <set field="historyRowsCount" from="out.historyRowsCount"/>
+            <set field="historyRowsPageIndex" from="out.historyRowsPageIndex"/>
+            <set field="historyRowsPageSize" from="out.historyRowsPageSize"/>
+            <set field="historyRowsPageMaxIndex" from="out.historyRowsPageMaxIndex"/>
+            <set field="historyRowsPageRangeLow" from="out.historyRowsPageRangeLow"/>
+            <set field="historyRowsPageRangeHigh" from="out.historyRowsPageRangeHigh"/>
+        </actions>
+    </service>
+
     <service verb="get" noun="PriceHistoryInfo">
         <in-parameters>
             <parameter name="productIdList" type="List" required="true"/>
