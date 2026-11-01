@@ -1907,12 +1907,19 @@ along with this software (see the LICENSE.md file). If not, see
             conflictList. By book#Resource's booking policy, with reapprove (the default) a booking that was assigned for a
             resource with approvers the user is not one of is requested again (WefRequested, WeaaRequested): the approval
             was for the old time. bookingList has each booking {facilityId or assetId, resourceName, statusId,
-            previousStatusId, conflictList}. Edit access to the event.
+            previousStatusId, conflictList}. Edit access to the event (an error without it).
+
+            For a time not stored yet (a calendar program's change, CalendarDavServices.put#DavObject), startDate and endDate
+            give the time to check instead of the event's own; with checkOnly the service only answers: a clash is in
+            conflictList and adds no error, and no booking is asked again.
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="allowConflicts" type="Boolean" default="false"/>
             <parameter name="reapprove" type="Boolean" default="true"/>
+            <parameter name="startDate" type="Timestamp"><description>The time to check, when it is not the event's own yet</description></parameter>
+            <parameter name="endDate" type="Timestamp"/>
+            <parameter name="checkOnly" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="bookingList" type="List"><parameter name="booking" type="Map"/></parameter>
@@ -1936,7 +1943,8 @@ along with this software (see the LICENSE.md file). If not, see
             const assets = Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssetAssign').condition('workEffortId', workEffortId).list())
                     .filter((row) => row.statusId !== 'WeaaRequestDenied' && (row.thruDate == null || toMillis(row.thruDate) > nowMs))
             if (!rooms.length && !assets.length) return
-            const span = ec.service.sync().name('mantle.work.WorkEffortServices.get#WorkEffortStartEnd').parameters({workEffortId: workEffortId}).call()
+            const span = startDate != null ? {startDate: startDate, endDate: endDate}
+                    : ec.service.sync().name('mantle.work.WorkEffortServices.get#WorkEffortStartEnd').parameters({workEffortId: workEffortId}).call()
             const startMs = toMillis(span?.startDate)
             if (startMs == null) return
             const endMs = toMillis(span?.endDate) ?? startMs + 3600000
@@ -1982,6 +1990,7 @@ along with this software (see the LICENSE.md file). If not, see
             }
             for (const row of rooms) { check('facility', row); if (ec.message.hasError()) return }
             for (const row of assets) { check('asset', row); if (ec.message.hasError()) return }
+            if (checkOnly) return
             if (conflictList.length && !allowConflicts) {
                 const byResource = new Map()
                 for (const conflict of conflictList) {
