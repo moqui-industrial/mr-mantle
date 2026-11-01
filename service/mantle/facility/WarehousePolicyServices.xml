@@ -119,6 +119,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="backorderEnumId"/>
             <parameter name="blindCount"/>
             <parameter name="autoPrint"/>
+            <parameter name="inventoryRequestCheck"><description>Y: a stock request (RqtInventory) must name a facility
+                of the user's organizations (create#Request, update#Request; impl-warehouse P15)</description></parameter>
             <parameter name="changeReason" required="true"/>
         </in-parameters>
         <out-parameters>
