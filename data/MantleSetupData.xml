@@ -281,10 +281,11 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- a mention in a chat room, as org.moqui.impl.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
         eventSeq, authorUserId, authorName and summary in the message, reason NrMention, the room (moqui.chat.ChatRoom) as
         its record, the actor the author, and the caller's roomUrl as its link; in the Notifications inbox (it asks for the
-        user, so it is in the badge) -->
+        user, so it is in the badge). No summary (a user who turned previews off, an end-to-end encrypted room, which has
+        no text on the server): the title is who mentioned the user where. -->
     <moqui.security.user.NotificationTopic topic="ChatMention" inboxEnumId="NinNotifications" description="Mentioned in a Chat Room" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
-            titleTemplate="${authorName} mentioned you in ${roomName}: ${summary}" linkTemplate=""/>
+            titleTemplate="${authorName} mentioned you in ${roomName}${summary ? ': ' + summary : ''}" linkTemplate=""/>
     <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
         the user's words, such as "due today" or "at 2:30 PM") -->
     <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"

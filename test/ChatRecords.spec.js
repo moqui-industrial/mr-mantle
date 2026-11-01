@@ -2,7 +2,8 @@
 // over org.moqui.impl.ChatServices.get#UnreadCounts) and their publishing by the framework's chat services, the ChatMention
 // topic as the framework sends it, a record room's messages in the record's timeline
 // (mantle.party.CommunicationServices.get#RecordTimeline, kind chat), and a task, request or event made from a chat message
-// (findOrCreate#ChatCommunicationEvent, create#RecordFromChatMessage). New spec, no Groovy original.
+// (findOrCreate#ChatCommunicationEvent, create#RecordFromChatMessage), and what an end-to-end encrypted room gives up.
+// New spec, no Groovy original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -365,6 +366,66 @@ feature("the same message is one communication event; a room the user may not re
         chatEvents == 1
         notMember.includes(`Chat room ${room.direct} not found`)
         kind.includes("task, request or event")
+    },
+})
+
+// An end-to-end encrypted room (C7) has no text on the server: its messages stay out of the record's history, filing one or
+// making a record from one is refused, and its mentions carry no summary. The room is flagged on its row (with a message
+// sent before, whose text the server would still have) so the refusal can come only from the flag; the same calls on a
+// plain room bound to another record succeed.
+feature("an encrypted room: no messages in the record's timeline, filing and making a record refused, a mention without text", {
+    when() {
+        at(40)
+        for (const requestId of ["CH-REQ-PLAIN", "CH-REQ-E2EE"]) {
+            call("create#mantle.request.Request", { requestId, requestName: "Chat request " + requestId, requestTypeEnumId: "RqtSupport",
+                    statusId: "ReqSubmitted", requestDate: ec.user.nowTimestamp })
+            call("create#mantle.request.RequestParty", { requestId, partyId: party.Tia, roleTypeId: "Customer", fromDate: ec.user.nowTimestamp })
+        }
+        const makeRoom = (requestId) => as("Tia", () => call(`${CHAT}.create#Room`, { roomTypeEnumId: "CrtRecord", recordEntityName: REQUEST,
+                recordId: requestId, memberUserIdList: [user.Uri] })).chatRoomId
+        room.plain = makeRoom("CH-REQ-PLAIN")
+        room.e2ee = makeRoom("CH-REQ-E2EE")
+        at(41)
+        seq.plain = send("Uri", room.plain, "<p>Ship it Friday</p>").eventSeq
+        seq.e2ee = send("Uri", room.e2ee, "<p>Ship it Friday</p>").eventSeq
+        call("update#moqui.chat.ChatRoom", { chatRoomId: room.e2ee, encrypted: "Y" })
+        at(42)
+        const chatOf = (requestId) => timeline("Tia", { recordId: requestId, kinds: "chat" })
+        // the errors the call adds (its message alone, not the "service ... failed" wrapping), empty when it succeeds
+        const errorsOf = (name, params) => {
+            ec.service.sync().name(name).parameters(params).call()
+            const errors = ec.message.hasError() ? String(ec.message.getErrorsString()).trim() : ""
+            ec.message.clearErrors()
+            return errors
+        }
+        const make = (chatRoomId, eventSeq) => as("Uri", () => errorsOf(`${COMM}.create#RecordFromChatMessage`, { chatRoomId, eventSeq, recordKind: "task" }))
+        const file = (chatRoomId, eventSeq) => as("Uri", () => errorsOf(`${COMM}.findOrCreate#ChatCommunicationEvent`, { chatRoomId, eventSeq }))
+        const mentionTitle = (message) => {
+            const nm = ec.makeNotificationMessage().topic("ChatMention").message(message).userIds([user.Tia])
+            nm.send()
+            return ec.entity.find("moqui.security.user.NotificationMessage").condition("notificationMessageId", nm.getNotificationMessageId()).one().titleText
+        }
+        return {
+            plainTimeline: chatOf("CH-REQ-PLAIN"), e2eeTimeline: chatOf("CH-REQ-E2EE"),
+            plainMake: make(room.plain, seq.plain), e2eeMake: make(room.e2ee, seq.e2ee),
+            plainFile: file(room.plain, seq.plain), e2eeFile: file(room.e2ee, seq.e2ee),
+            e2eeEvents: ec.entity.find("mantle.party.communication.CommunicationEventRecord").condition("recordEntityName", "moqui.chat.ChatEvent")
+                    .condition("recordId", `${room.e2ee}::${seq.e2ee}`).count(),
+            withSummary: mentionTitle({ authorName: "Uri Chatspec", roomName: "Plain room", summary: "Ship it Friday", chatRoomId: room.plain }),
+            withoutSummary: mentionTitle({ authorName: "Uri Chatspec", roomName: "Secret room", chatRoomId: room.e2ee }),
+        }
+    },
+    then({ plainTimeline, e2eeTimeline, plainMake, e2eeMake, plainFile, e2eeFile, e2eeEvents, withSummary, withoutSummary }) {
+        plainTimeline.entryList.map((entry) => entry.eventSeq) == [seq.plain]
+        e2eeTimeline.entryList.length == 0
+        e2eeTimeline.failedSources == []
+        plainMake == ""
+        e2eeMake == "A message of an end-to-end encrypted room cannot be filed on a record or made into one: the server does not have its text"
+        plainFile == ""
+        e2eeFile == "A message of an end-to-end encrypted room cannot be filed on a record or made into one: the server does not have its text"
+        e2eeEvents == 0
+        withSummary == "Uri Chatspec mentioned you in Plain room: Ship it Friday"
+        withoutSummary == "Uri Chatspec mentioned you in Secret room"
     },
 })
 

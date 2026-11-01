@@ -3253,8 +3253,8 @@ along with this software (see the LICENSE.md file). If not, see
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
             or WorkEffortRecord); its changes from the entity audit log; its files (the *Content rows); and the messages of
-            the chat room bound to it (org.moqui.impl.ChatServices.get#Timeline by the record: none when there is no room or
-            the user may not read it). The open activities come apart in plannedActivities, soonest due first, with the
+            the chat room bound to it (org.moqui.impl.ChatServices.get#Timeline by the record: none when there is no room,
+            the user may not read it or the room is end-to-end encrypted, as the server has no text for it). The open activities come apart in plannedActivities, soonest due first, with the
             assignee.
 
             kinds limits the entries to messages, notes, activities, changes, files and chat (a list or comma-separated
@@ -3550,6 +3550,9 @@ along with this software (see the LICENSE.md file). If not, see
                     const out = callSource('org.moqui.impl.ChatServices.get#Timeline', parameters)
                     if (ec.message.hasError() || !out?.room) return
                     const room = out.room
+                    // an end-to-end encrypted room (C7) has no text on the server: its messages stay out of the record's history
+                    if (pages === 0 && ec.entity.find('moqui.chat.ChatRoom').condition('chatRoomId', room.chatRoomId).disableAuthz().one()
+                            ?.encrypted === 'Y') return
                     const events = Array.from(out.eventList ?? [])
                     for (const event of events) {
                         if (event.type !== 'message' || event.redacted) continue
@@ -4181,7 +4184,8 @@ along with this software (see the LICENSE.md file). If not, see
             A chat message as a communication event, made once per message: type Chat, from the sender's party, its date
             the message's, the room's name as its subject and the message's HTML (its last edit) as its body. The user must
             be able to read the room (org.moqui.impl.ChatServices.get#RoomAccess), and the message is one of the room's
-            messages that is not removed. The event names its message by a CommunicationEventRecord of moqui.chat.ChatEvent
+            messages that is not removed. A message of an end-to-end encrypted room is refused: the server has only its
+            ciphertext, and its text does not leave the browser. The event names its message by a CommunicationEventRecord of moqui.chat.ChatEvent
             whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
             no record a timeline or the record visibility rules read. Filing it on a record is link#CommunicationEventRecord
             (create#RecordFromChatMessage does it for the record it makes). created is true when this call made the event;
@@ -4206,6 +4210,10 @@ along with this software (see the LICENSE.md file). If not, see
             const access = ec.service.sync().name('org.moqui.impl.ChatServices.get#RoomAccess').parameter('chatRoomId', chatRoomId).call()
             if (ec.message.hasError()) return
             if (!access?.canRead) { ec.message.addError(`Chat room ${chatRoomId} not found`); return }
+            if (ec.entity.find('moqui.chat.ChatRoom').condition('chatRoomId', chatRoomId).disableAuthz().one()?.encrypted === 'Y') {
+                ec.message.addError(ec.l10n.localize('A message of an end-to-end encrypted room cannot be filed on a record or made into one: the server does not have its text'))
+                return
+            }
             const row = ec.entity.find('moqui.chat.ChatEvent').condition('chatRoomId', chatRoomId).condition('eventSeq', eventSeq).one()
             if (row == null || row.eventTypeEnumId !== 'CetMessage' || row.redactedDate) {
                 ec.message.addError(`Message ${eventSeq} not found in the room`); return }
