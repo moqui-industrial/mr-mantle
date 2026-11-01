@@ -13,15 +13,14 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Production runs (design-manufacturing §12 M4; impl-warehouse P16a): the roles of a run's lines
-    (mantle.work.production.ProductionRunLine) and the seeded unrelease transition. -->
+    (mantle.work.production.ProductionRunLine). -->
 <entity-facade-xml type="seed">
     <moqui.basic.EnumerationType description="Production Run Line Role" enumTypeId="ProductionRunLineRole"/>
     <moqui.basic.Enumeration description="Material" enumId="PrlrMaterial" enumTypeId="ProductionRunLineRole" sequenceNum="1"/>
     <moqui.basic.Enumeration description="Output" enumId="PrlrOutput" enumTypeId="ProductionRunLineRole" sequenceNum="2"/>
     <moqui.basic.Enumeration description="By-product" enumId="PrlrByproduct" enumTypeId="ProductionRunLineRole"
             sequenceNum="3"/>
-    <!-- a released run goes back to draft (unrelease) while no stock, time or quantity fact exists; the guard that checks
-        that is Manufacturing's transition#ProductionOrder (design-manufacturing WorkOrderDetail) -->
-    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="WeApproved" toStatusId="WeInPlanning"
-            transitionName="Unrelease"/>
+    <!-- No WeApproved to WeInPlanning (unrelease) transition is seeded here (P16 review B4): the framework accepts a
+        transition of any status flow on any WorkEffort, so it would let tasks and projects take it and any path unrelease a
+        run that has stock facts; it comes with Manufacturing's transition#ProductionOrder, whose guard checks those facts. -->
 </entity-facade-xml>

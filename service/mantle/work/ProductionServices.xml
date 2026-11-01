@@ -88,7 +88,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Release a draft run (design-manufacturing WorkOrderDetail, §12.1): the product checked usable again; a
             release of the run's BOM, a phantom's BOM or its routings since the run's method date and in effect now is refused
             (METHOD_CHANGED) unless reexplode, which rewrites the draft lines and the WeptConsume/WeptProduce rows as of now
-            (R-SA-12); with no later release the lines are kept. Then the operation children (WetTask, WeApproved, the run's
+            and answers the draft for review (resultCode REEXPLODED, still WeInPlanning, at the next revision), to be
+            released with that revision (R-SA-12); with no later release the lines are kept. The routings and BOMs checked
+            are those the run was read from (productionMethodRefs: a phantom's routing whether or not a line names its
+            operation). Then the operation children (WetTask, WeApproved, the run's
             owner, each with its routing operation, sequence and work center, audit-logged) from the routings as of the method
             date, the lines frozen (frozenDate) on their operations, the WorkEffortProduct rows rewritten from the lines, the
             frozen standard (the approved ProductStandardCost in effect now for the organization and facility, Products P9)
@@ -103,7 +106,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="reexplode" type="Boolean" default-value="false"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="result" type="Map"><description>resultCode RELEASED, workEffortId, statusId, releaseDate,
+            <parameter name="result" type="Map"><description>resultCode RELEASED (or REEXPLODED with findings), workEffortId,
+                statusId, releaseDate,
                 methodDate, reexploded, revision, productStandardCostId, operationWorkEffortIds, lines, and the operation
                 fields.</description></parameter>
         </out-parameters>
@@ -122,7 +126,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <set field="released" from="production.release(userScope, run, context)"/>
             <set field="result" from="posting.complete(begun.op, run.ownerPartyId, 'mantle.work.effort.WorkEffort',
-                    workEffortId, Object.assign({resultCode: 'RELEASED'}, released))"/>
+                    workEffortId, released)"/>
         </actions>
     </service>
     <service verb="get" noun="ProductionOrder" allow-remote="false">
@@ -222,6 +226,9 @@ along with this software (see the LICENSE.md file). If not, see
             asset at the chosen location with the original acquireCost, lot and owner, with the run's workEffortId,
             AssetReceipt.sourceAssetIssuanceId and the issuance's operation, so AssetReceiptGlPost posts Dr inventory, Cr WIP
             at the original cost in the open period (D13, R-SA-02). Never cancel#AssetIssuance or an update of the issuance.
+            After a provisional output receipt the return lowers the WIP the rest of the output takes (warning
+            PROVISIONAL_TRUE_UP naming the receipts the cost close trues up); once all the output was received at a
+            provisional cost it is refused (PROVISIONAL_CLOSED).
             A retry with the same operation key answers the first. Requires STOCK_ISSUE; refuses an issuance that is not a
             work effort's or a run outside the user's organizations (RECORD_UNAVAILABLE), a closed or cancelled run
             (RUN_CLOSED), no quantity (QUANTITY_INVALID), more than is left of the issuance (QUANTITY_EXCEEDS_ISSUED), a
@@ -263,6 +270,12 @@ along with this software (see the LICENSE.md file). If not, see
                             facilityId:plan.source.facilityId, locationSeqId:plan.source.locationSeqId,
                             ownerPartyId:plan.source.ownerPartyId, workEffortId:plan.run.workEffortId,
                             noProduceProduct:'ignore'}"/>
+                <!-- receive#Asset makes the run the asset's acquiring work effort when it had none: a return is not where the
+                    stock was acquired (P16 review C) -->
+                <if condition="!plan.source.acquireWorkEffortId">
+                    <service-call name="update#mantle.product.asset.Asset" disable-authz="true"
+                            in-map="{assetId:plan.source.assetId, acquireWorkEffortId:null}"/>
+                </if>
                 <else>
                     <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
                             in-map="{productId:plan.source.productId, quantity:plan.quantity,
@@ -290,25 +303,26 @@ along with this software (see the LICENSE.md file). If not, see
                         assetIssuanceId: plan.issuance.assetIssuanceId, assetId: received.assetId || plan.source.assetId,
                         intoOriginal: plan.intoOriginal, productId: plan.source.productId,
                         quantity: production.text(plan.quantity), facilityId: plan.target.facilityId,
-                        locationSeqId: plan.target.locationSeqId || null, assetReceiptId: received.assetReceiptId})"/>
+                        locationSeqId: plan.target.locationSeqId || null, assetReceiptId: received.assetReceiptId,
+                        warnings: plan.warnings})"/>
         </actions>
     </service>
     <service verb="receive" noun="ProductionOutput" allow-remote="false">
-        <description>Receive a released run's output (design-manufacturing MaterialIssueReceipt Receive output, M2):
-            through mantle.product.AssetServices.receive#Asset with the run's workEffortId and owner, at the run's frozen
-            standard unit cost (its productStandardCostId, R-PRD-29); with no approved standard at the issued cost to date
-            (WIP) over the quantity, costProvisional; never without a cost (D12, R-SA-01, COST_UNAVAILABLE). The unit cost is
-            kept at four decimals and the last unit received apart at the remainder's cost, so the receipts carry the value
-            exactly (P6, F166). Output that needs inspection (the tracking policy's inspectionRequired or a published
-            production template, P8) is received AstQuarantine into quarantine with an inspection of each receipt
-            (QisWorkEffort); otherwise to the location given or the putaway resolver's. Serials one per unit (given, or
-            generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each receipt
-            carries the output line, the operation and the quantity as entered. A retry with the same operation key answers
-            the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
-            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID, LINE_REQUIRED), more than the line has
-            left (OVER_RECEIPT), a facility of another owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH,
-            SERIAL_DUPLICATE, LOT_REQUIRED), the destination's refusals and a closed fiscal period today (PERIOD_CLOSED, read
-            without locking).</description>
+        <description>Receive a released run's output (design-manufacturing MaterialIssueReceipt Receive output, M2): through
+            mantle.product.AssetServices.receive#Asset with the run's workEffortId and owner, at the run's frozen standard unit
+            cost (its productStandardCostId, R-PRD-29); with no approved standard at the run's net WIP times the quantity over
+            what is left to receive (the last receipt takes the rest), costProvisional; never without a cost (D12, R-SA-01,
+            COST_UNAVAILABLE). The unit cost is kept at four decimals rounded down and the last unit received apart at the
+            remainder's cost, so the receipts carry the value exactly (P6, F166). Output that needs inspection (the tracking
+            policy's inspectionRequired or a published production template, P8) is received AstQuarantine into quarantine with an
+            inspection of each receipt (QisWorkEffort); otherwise to the location given or the putaway resolver's. Serials one per
+            unit (given, or generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each
+            receipt carries the output line, the operation and the quantity as entered. A retry with the same operation key
+            answers the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
+            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID, LINE_REQUIRED), a by-product, whose cost
+            allocation is not built (BYPRODUCT_NOT_COSTED), more than the line has left (OVER_RECEIPT), a facility of another
+            owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE, LOT_REQUIRED), the destination's
+            refusals and a closed fiscal period today (PERIOD_CLOSED, read without locking).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -389,8 +403,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="serialNumbers" type="List"/>
             <parameter name="firstSerialNumber"/>
             <parameter name="lotNumber"/>
-            <parameter name="acceptedQuantity" type="BigDecimal"><description>The service quantity accepted; the output
-                quantity when empty.</description></parameter>
+            <parameter name="acceptedQuantity" type="BigDecimal"><description>The service quantity accepted, in the order
+                item's unit; empty takes the item's quantity in the output's proportion (all that is left with the last of
+                the output), at most what is left to accept.</description></parameter>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>
@@ -436,7 +451,7 @@ along with this software (see the LICENSE.md file). If not, see
                         firstSerialNumber:firstSerialNumber || null, lotNumber:lotNumber || null}"/>
             <set field="accepted" from="ec.resource.script('component://mr-mantle/service/mantle/order/ServiceAcceptance.js')
                     .accept(userScope, {orderId: plan.orderId, orderItemSeqId: plan.orderItemSeqId,
-                        acceptedQuantity: acceptedQuantity ?? plan.quantity,
+                        acceptedQuantity: plan.acceptQuantity,
                         workEffortId: plan.operationWorkEffortId || plan.run.workEffortId,
                         assetReceiptId: received.result.assetReceiptIds[0] || null,
                         qualityInspectionId: received.result.qualityInspectionIds[0] || null, comments: comments})"/>

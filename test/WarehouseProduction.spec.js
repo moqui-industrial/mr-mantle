@@ -185,7 +185,12 @@ spec({
             "WPD_RM_C",
             "WPD_RM_D",
             "WPD_CF",
-            "WPD_NOBOM"
+            "WPD_NOBOM",
+            "WPD_PV",
+            "WPD_BY",
+            "WPD_PH2",
+            "WPD_RM_E",
+            "WPD_RM_F"
         ])
             call("create#mantle.product.Product", {
                 productId,
@@ -264,6 +269,19 @@ spec({
             bom("WPD_CF", [{productId: "WPD_RM_A", quantity: 1, operationWorkEffortId: state.coatRoute.ids[0]}], {
                 routingWorkEffortId: state.coatRoute.routeId
             })
+            // WPD_PV has no standard (provisional output) and a by-product; its phantom has a routing but no line names
+            // an operation of it (P16 review B3)
+            state.ph2Route = routing("Second phantom routing", ["Kit the second phantom"])
+            bom("WPD_PH2", [{productId: "WPD_RM_F", quantity: 1}], {isPhantom: "Y", routingWorkEffortId: state.ph2Route.routeId})
+            bom(
+                "WPD_PV",
+                [
+                    {productId: "WPD_RM_E", quantity: 1, operationWorkEffortId: state.coatRoute.ids[0]},
+                    {productId: "WPD_PH2", quantity: 1},
+                    {productId: "WPD_BY", quantity: 1, roleEnumId: "BmirByproduct", allocationShare: 0.1}
+                ],
+                {routingWorkEffortId: state.coatRoute.routeId}
+            )
         })
         login("john.doe")
         ec.artifactExecution.disableAuthz()
@@ -273,6 +291,8 @@ spec({
         state.foreignOwned = receive("WPD_RM_B", 5, 3, facility, "PICK2", {ownerPartyId: "WPD_OTHER"})
         state.vendorCheap = receive("WPD_RM_A", 2, 2, vendor, "CAGE")
         state.vendorDear = receive("WPD_RM_A", 5, 3, vendor, "CAGE")
+        state.stockE1 = receive("WPD_RM_E", 3, 1)
+        state.stockE2 = receive("WPD_RM_E", 7, 2)
         ec.artifactExecution.enableAuthz()
     },
     setup() {
@@ -373,9 +393,20 @@ feature("release freezes the lines on their operations with the standard; a late
             workEffortId: state.run2,
             reexplode: true
         })
-        return {released, again, stale, reexploded}
+        const draftState = one("mantle.work.effort.WorkEffort", {workEffortId: state.run2}).statusId
+        const staleRevision = run("wpd_planner", P + "release#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: state.run2,
+            expectedRevision: 1
+        })
+        const reviewed = run("wpd_planner", P + "release#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: state.run2,
+            expectedRevision: 2
+        })
+        return {released, again, stale, reexploded, draftState, staleRevision, reviewed}
     },
-    then({released, again, stale, reexploded}) {
+    then({released, again, stale, reexploded, draftState, staleRevision, reviewed}) {
         released.error == ""
         released.result.resultCode == "RELEASED"
         released.result.productStandardCostId == "WPD_STD"
@@ -399,12 +430,18 @@ feature("release freezes the lines on their operations with the standard; a late
         n(lineOf(state.run1, "WPD_RM_A").stockQuantity) == 4
         // the draft read before it is refused, then re-exploded as of now
         stale.error.includes("METHOD_CHANGED")
+        // the re-explosion rewrites the draft for review (still a draft at the next revision); a release of it follows
         reexploded.error == ""
-        reexploded.result.reexploded == true
+        reexploded.result.resultCode == "REEXPLODED"
+        reexploded.result.revision == 2
+        draftState == "WeInPlanning"
+        staleRevision.error.includes("REVISION_CHANGED")
+        reviewed.error == ""
+        reviewed.result.resultCode == "RELEASED"
         n(lineOf(state.run2, "WPD_RM_A").stockQuantity) == 3
         n(one("mantle.work.effort.WorkEffort", {workEffortId: state.run2}).productionRevision) == 3
-        // unrelease is a seeded transition (its guard is Manufacturing's)
-        !!one("moqui.basic.StatusFlowTransition", {statusFlowId: "Default", statusId: "WeApproved", toStatusId: "WeInPlanning"})
+        // no unrelease transition is seeded until Manufacturing's guard (P16 review B4)
+        !one("moqui.basic.StatusFlowTransition", {statusFlowId: "Default", statusId: "WeApproved", toStatusId: "WeInPlanning"})
     }
 })
 
@@ -508,6 +545,7 @@ feature("an unused component returns as a new receipt at its cost, into its asse
         back.error == ""
         back.result.intoOriginal == true
         back.result.assetId == state.stockA
+        asset(state.stockA).acquireWorkEffortId == null
         n(asset(state.stockA).quantityOnHandTotal) == 7
         const receipt = one("mantle.product.receipt.AssetReceipt", {assetReceiptId: back.result.assetReceiptId})
         receipt.sourceAssetIssuanceId == state.issueA
@@ -631,6 +669,21 @@ feature("subcontract output is received from the vendor facility: components iss
             originFacilityId: facility,
             destinationFacilityId: vendor
         })
+        const lineId = lineOf(runId, "WPD_RM_A").productionRunLineId
+        const unknownLine = run("wpd_issuer", "mantle.work.ProductionServices.receive#SubcontractOutput", {
+            operationKey: key(),
+            shipmentId: "WPD_SHIP",
+            quantity: 1,
+            toLocationSeqId: "PICK1",
+            materialQuantities: {WPD_NO_LINE: 1}
+        })
+        const tooMuch = run("wpd_issuer", "mantle.work.ProductionServices.receive#SubcontractOutput", {
+            operationKey: key(),
+            shipmentId: "WPD_SHIP",
+            quantity: 1,
+            toLocationSeqId: "PICK1",
+            materialQuantities: {[lineId]: 4}
+        })
         const operationKey = key()
         const parameters = {operationKey, shipmentId: "WPD_SHIP", quantity: 3, toLocationSeqId: "PICK1"}
         const received = run("wpd_issuer", "mantle.work.ProductionServices.receive#SubcontractOutput", parameters)
@@ -652,9 +705,11 @@ feature("subcontract output is received from the vendor facility: components iss
             orderItemSeqId: "01",
             acceptedQuantity: 1
         })
-        return {runId, opId, received, retry, more, extra, issuerAccept}
+        return {runId, opId, received, retry, more, extra, issuerAccept, unknownLine, tooMuch}
     },
-    then({runId, opId, received, retry, more, extra, issuerAccept}) {
+    then({runId, opId, received, retry, more, extra, issuerAccept, unknownLine, tooMuch}) {
+        unknownLine.error.includes("LINE_INVALID")
+        tooMuch.error.includes("QUANTITY_EXCEEDS_REMAINING")
         received.error == ""
         received.result.vendorFacilityId == vendor
         received.result.operationWorkEffortId == opId
@@ -683,5 +738,106 @@ feature("subcontract output is received from the vendor facility: components iss
         extra.error.includes("QUANTITY_EXCEEDS_ORDERED")
         issuerAccept.error.includes("PERMISSION_DENIED")
         rows("mantle.order.purchase.ServiceAcceptance", {orderId: "WPD_PO"}).length == 1
+    }
+})
+
+feature("with no standard, output in parts takes its share of the net WIP and the last the rest; a return after it is trued up", {
+    when() {
+        const created = run("wpd_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "WPD_PV",
+            quantity: 10,
+            facilityId: facility
+        })
+        const runId = created.workEffortId
+        const released = run("wpd_planner", P + "release#ProductionOrder", {operationKey: key(), workEffortId: runId})
+        const lineE = lineOf(runId, "WPD_RM_E")
+        const issue = (assetId, quantity) =>
+            run("wpd_issuer", P + "issue#ProductionMaterial", {
+                operationKey: key(),
+                workEffortId: runId,
+                productionRunLineId: lineE.productionRunLineId,
+                assetId,
+                quantity
+            })
+        const cheap = issue(state.stockE1, 3)
+        const dear = issue(state.stockE2, 7)
+        const receive = quantity =>
+            run("wpd_issuer", P + "receive#ProductionOutput", {
+                operationKey: key(),
+                workEffortId: runId,
+                quantity,
+                toLocationSeqId: "PICK1"
+            })
+        const byproduct = run("wpd_issuer", P + "receive#ProductionOutput", {
+            operationKey: key(),
+            workEffortId: runId,
+            productionRunLineId: lineOf(runId, "WPD_BY").productionRunLineId,
+            quantity: 1,
+            toLocationSeqId: "PICK1"
+        })
+        const first = receive(4)
+        const returned = run("wpd_issuer", P + "return#UnusedMaterial", {
+            operationKey: key(),
+            assetIssuanceId: dear.result.assetIssuanceId,
+            quantity: 1
+        })
+        const last = receive(6)
+        const late = run("wpd_issuer", P + "return#UnusedMaterial", {
+            operationKey: key(),
+            assetIssuanceId: dear.result.assetIssuanceId,
+            quantity: 1
+        })
+        return {runId, released, cheap, dear, byproduct, first, returned, last, late}
+    },
+    then({runId, released, cheap, dear, byproduct, first, returned, last, late}) {
+        released.error == ""
+        // the phantom's routing makes an operation though no line names it (B3)
+        released.result.operationWorkEffortIds.length == 2
+        cheap.error == ""
+        dear.error == ""
+        byproduct.error.includes("BYPRODUCT_NOT_COSTED")
+        // issued 3 at 1 and 7 at 2 = 17: four take 4/10 of it, 6.8
+        first.error == ""
+        first.result.costProvisional == true
+        const value = result =>
+            result.assetIds.map(asset).reduce((sum, row) => sum + n(row.quantityOnHandTotal) * n(row.acquireCost), 0)
+        Math.abs(value(first.result) - 6.8) < 0.000001
+        returned.error == ""
+        returned.result.warnings[0].code == "PROVISIONAL_TRUE_UP"
+        // the last six take the rest: 17 - 2 returned - 6.8 = 8.2, the unit rounded down and the remainder on the last
+        last.error == ""
+        Math.abs(value(last.result) - 8.2) < 0.000001
+        last.result.assetIds.map(asset).every(row => n(row.acquireCost) >= 1.3666)
+        late.error.includes("PROVISIONAL_CLOSED")
+        // the run's WIP nets to zero
+        const valueOf = (quantity, assetId) => n(quantity) * n(asset(assetId).acquireCost)
+        const issued = rows("mantle.product.issuance.AssetIssuance", {workEffortId: runId}).reduce(
+            (sum, row) => sum + valueOf(row.quantity, row.assetId),
+            0
+        )
+        const back = rows("mantle.product.receipt.AssetReceipt", {workEffortId: runId}).reduce(
+            (sum, row) => sum + valueOf(row.quantityAccepted, row.assetId),
+            0
+        )
+        Math.abs(issued - back) < 0.000001
+    }
+})
+
+feature("cost lines round the unit cost down so the last unit's remainder is never negative, serials and parts alike", {
+    expect() {
+        const production = ec.resource.script("component://mr-mantle/service/mantle/work/Production.js")
+        const bulk = production.costLines(toDecimal("12.36"), toDecimal(1000), [])
+        bulk.length == 2
+        String(bulk[0].cost) == "0.0123"
+        bulk[1].cost.compare(0) > 0
+        bulk[0].quantity.multiply(bulk[0].cost).add(bulk[1].cost).compare(toDecimal("12.36")) == 0
+        const serials = production.costLines(toDecimal("10"), toDecimal(3), ["S1", "S2", "S3"])
+        serials.map(row => String(row.cost)).join(",") == "3.3333,3.3333,3.3334"
+        const part = production.costLines(toDecimal("5"), toDecimal("0.5"), [])
+        part.length == 1
+        String(part[0].cost) == "10.0000"
+        production.costLines(toDecimal("6"), toDecimal(3), []).length == 1
     }
 })

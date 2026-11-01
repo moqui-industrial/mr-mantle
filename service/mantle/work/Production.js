@@ -235,7 +235,11 @@ function method(organizationPartyId, product, quantity, quantityUomId, date, pro
         ...materials.map(row => lineFrom(row, "PrlrMaterial")),
         ...byproducts.map(row => lineFrom(row, "PrlrByproduct"))
     ]
-    return {bom, header, routingWorkEffortId, routingIds, operations, lines}
+    // the methods the run was read from: its BOM and the phantoms' (each checked for a later release), and its routings in
+    // order, the phantoms' first (the operation children come from these, whether or not a line names an operation)
+    const bomIds = [bom.productBomId, ...phantoms.map(row => row.componentProductBomId).filter(Boolean)]
+    const refs = JSON.stringify({bomIds: [...new Set(bomIds)], routingIds})
+    return {bom, header, routingWorkEffortId, routingIds, operations, lines, refs}
 }
 // The run's lines written (draft): a stable id each, in sequence.
 function writeLines(workEffortId, lines) {
@@ -280,7 +284,8 @@ function writeProducts(workEffortId, lines) {
 // The releases of the run's methods (its BOM, a phantom's BOM, its routings) made after its method date and in effect by
 // now: a release since the draft was read (R-SA-12).
 function laterReleases(run, lines, now) {
-    const bomIds = new Set([run.productBomId, ...lines.map(line => line.productBomId)].filter(Boolean))
+    const refs = refsOf(run)
+    const bomIds = new Set([run.productBomId, ...(refs?.bomIds || []), ...lines.map(line => line.productBomId)].filter(Boolean))
     const routingIds = new Set(
         [
             run.productionRoutingId,
@@ -290,7 +295,8 @@ function laterReleases(run, lines, now) {
                     one(WORK, {
                         workEffortId: line.routingOperationWorkEffortId
                     })?.parentWorkEffortId
-            )
+            ),
+            ...(refs?.routingIds || [])
         ].filter(Boolean)
     )
     const since = lib.ms(run.productionMethodDate),
@@ -306,8 +312,15 @@ function laterReleases(run, lines, now) {
                     later.push({methodEntityName: entity, methodId, fromDate: row.fromDate})
     return later
 }
-// The routings of a run's lines, the phantoms' first and the run's own last.
+// The methods a run was read from (create#ProductionOrder or a re-explosion): {bomIds, routingIds}, else null.
+function refsOf(run) {
+    return run.productionMethodRefs ? lib.json(run.productionMethodRefs, null) : null
+}
+// The routings of a run, the phantoms' first and the run's own last: those it was read from (P16 review B3: a phantom's
+// routing counts though no line names its operation), else, for a run made before that, its lines' and its own.
 function routingsOfRun(run, lines) {
+    const refs = refsOf(run)
+    if (refs?.routingIds) return Array.from(refs.routingIds)
     const ids = []
     for (const line of lines) {
         const op = line.routingOperationWorkEffortId ? one(WORK, {workEffortId: line.routingOperationWorkEffortId}) : null
@@ -351,6 +364,7 @@ function create(userScope, p) {
         productionMethodDate: date,
         productBomId: plan.bom.productBomId,
         productionRoutingId: plan.routingWorkEffortId,
+        productionMethodRefs: plan.refs,
         demandOrderId: str(p.sourceOrderId),
         demandOrderItemSeqId: str(p.orderItemSeqId),
         demandRequirementId: str(p.requirementId)
@@ -400,7 +414,7 @@ function release(userScope, run, p) {
         revision = Number(run.productionRevision || 0),
         routingId = run.productionRoutingId
     const later = laterReleases(run, lines, now)
-    let reexploded = false
+    const reexploded = false
     if (later.length) {
         if (p.reexplode !== true && p.reexplode !== "true")
             denied(
@@ -424,12 +438,30 @@ function release(userScope, run, p) {
         )
         for (const line of lines) call("delete#" + LINE, {productionRunLineId: line.productionRunLineId})
         writeLines(run.workEffortId, plan.lines)
-        methodDate = now
-        routingId = plan.routingWorkEffortId
-        revision += 1
-        reexploded = true
-        call("update#" + WORK, {workEffortId: run.workEffortId, productionMethodDate: now, productionRoutingId: routingId})
-        lines = linesOf(run.workEffortId)
+        writeProducts(run.workEffortId, plan.lines)
+        // the rewritten draft goes back for review: it stays WeInPlanning at the next revision, and a release follows with
+        // that revision (P16 review B7; design WorkOrderDetail "returns a finding and offers a re-explosion")
+        call("update#" + WORK, {
+            workEffortId: run.workEffortId,
+            productionMethodDate: now,
+            productionRoutingId: plan.routingWorkEffortId,
+            productionMethodRefs: plan.refs,
+            productionRevision: revision + 1
+        })
+        return {
+            resultCode: "REEXPLODED",
+            workEffortId: run.workEffortId,
+            statusId: run.statusId,
+            methodDate: now,
+            reexploded: true,
+            revision: revision + 1,
+            findings: later.map(row => ({
+                methodEntityName: row.methodEntityName,
+                methodId: row.methodId,
+                fromDate: row.fromDate
+            })),
+            lines: linesOf(run.workEffortId).map(lineAnswer)
+        }
     }
     // the operation children, from the routings as of the method date, each with its owner (R-SA-03)
     const operations = operationsOf(routingsOfRun(Object.assign({}, run, {productionRoutingId: routingId}), lines), methodDate)
@@ -472,6 +504,7 @@ function release(userScope, run, p) {
         productionRevision: revision + 1
     })
     return {
+        resultCode: "RELEASED",
         workEffortId: run.workEffortId,
         statusId: "WeApproved",
         releaseDate: now,
@@ -708,17 +741,40 @@ function returnPlan(userScope, p) {
     } else {
         const facilityId = str(p.toFacilityId) || source.facilityId
         const facility = posting.facility(userScope, facilityId)
-        if (facility.ownerPartyId !== source.ownerPartyId && source.ownerPartyId !== run.ownerPartyId)
+        if (facility.ownerPartyId !== run.ownerPartyId)
             denied("OWNER_MISMATCH", "Facility " + facilityId + " is not the run owner's")
         target = posting.destination(userScope, facilityId, {toLocationSeqId: p.toLocationSeqId})
         intoOriginal = false
     }
-    return {issuance, run, source, quantity, target, intoOriginal}
+    // after a provisional output receipt (no approved standard), what comes back lowers the WIP the rest of the output takes;
+    // the earlier receipts stay flagged costProvisional for the cost close's true-up. Once all the output is received at a
+    // provisional cost nothing is left to take it, so a return is refused (P16 review A1)
+    const provisional = rows(RECEIPT, {workEffortId: run.workEffortId, costProvisional: "Y"})
+    const warnings = []
+    if (provisional.length) {
+        const outputs = linesOf(run.workEffortId).filter(line => line.lineRoleEnumId === "PrlrOutput")
+        if (outputs.every(line => receivedOf(line).compare(dec(line.stockQuantity)) >= 0))
+            denied(
+                "PROVISIONAL_CLOSED",
+                "All of run " +
+                    run.workEffortId +
+                    "'s output was received at its issued cost; a return now would leave WIP below zero"
+            )
+        warnings.push({
+            code: "PROVISIONAL_TRUE_UP",
+            assetReceiptIds: provisional.map(row => row.assetReceiptId),
+            message: "Output already received at a provisional cost carries this material; the cost close trues it up"
+        })
+    }
+    return {issuance, run, source, quantity, target, intoOriginal, warnings}
 }
-// The receipt lines that carry a value exactly: the unit cost at the four decimals acquireCost keeps, the last unit apart at
-// the remainder's cost when that leaves one (P6/P12, F166); serials are one unit a line.
+// The receipt lines that carry a value exactly: the unit cost at the four decimals acquireCost keeps, rounded down, the last
+// unit apart at the remainder's cost when that leaves one, so the remainder is never below the unit cost (P6/P12, F166; P16
+// review A2); serials are one unit a line; a quantity of one or less is one line at its value over the quantity.
 function costLines(total, quantity, serials) {
-    const unitCost = total.divide(quantity, 4, "HALF_UP")
+    if (!serials.length && quantity.compare(1) <= 0)
+        return [{quantity, cost: total.divide(quantity, 4, "HALF_UP"), serialNumber: null}]
+    const unitCost = total.divide(quantity, 4, "DOWN")
     const exact = quantity.multiply(unitCost).eq(total)
     if (serials.length) {
         const last = total.subtract(unitCost.multiply(toDecimal(serials.length - 1)))
@@ -728,7 +784,7 @@ function costLines(total, quantity, serials) {
             serialNumber
         }))
     }
-    if (exact || quantity.compare(1) <= 0) return [{quantity, cost: unitCost, serialNumber: null}]
+    if (exact) return [{quantity, cost: unitCost, serialNumber: null}]
     const rest = quantity.subtract(1)
     return [
         {quantity: rest, cost: unitCost, serialNumber: null},
@@ -753,7 +809,7 @@ function wipValue(run) {
 }
 // The output's cost (D12, R-SA-01): the run's frozen standard unit cost; with no approved standard, the issued cost to date
 // over the quantity, provisional. Output is never received without a cost.
-function outputCost(run, quantity) {
+function outputCost(run, line, quantity) {
     const standard = run.productStandardCostId ? one(STANDARD, {productStandardCostId: run.productStandardCostId}) : null
     if (standard?.unitCost != null)
         return {
@@ -770,7 +826,10 @@ function outputCost(run, quantity) {
         )
     const issued = rows(ISSUANCE, {workEffortId: run.workEffortId})
     const currency = issued.length ? one(ASSET, {assetId: issued[0].assetId})?.acquireCostUomId || null : null
-    return {total: wip, currencyUomId: currency, provisional: true, costSource: "issued"}
+    // a part of the output takes its share of the net WIP (what is left to receive), the last receipt the rest (P16 review A1)
+    const left = dec(line.stockQuantity).subtract(receivedOf(line))
+    const total = quantity.compare(left) >= 0 ? wip : wip.multiply(quantity).divide(left, 6, "DOWN")
+    return {total, currencyUomId: currency, provisional: true, costSource: "issued"}
 }
 // receive#ProductionOutput's checks and plan, before anything posts: the released run, the output line (locked), no more
 // than it has left, the tracking (serials given or generated from a first value, P7's rules), the cost, the destination by
@@ -782,6 +841,9 @@ function outputPlan(userScope, p) {
     const run = runOf(userScope, p.workEffortId)
     requireReleased(run)
     const line = outputLineOf(run, p.productionRunLineId, true)
+    // a by-product's cost is Accounting's allocation (design ByProducts, D12), which is not built: it is not received here
+    if (line.lineRoleEnumId === "PrlrByproduct")
+        denied("BYPRODUCT_NOT_COSTED", "By-product " + line.productId + " is received once its cost allocation exists")
     const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
     const unit = unitOf(line, p.quantity, p.quantityUomId)
     const left = dec(line.stockQuantity).subtract(receivedOf(line))
@@ -831,7 +893,7 @@ function outputPlan(userScope, p) {
     )
     if (!target.locationSeqId && facility.assetInventoryLocRequire === "Y")
         denied("LOCATION_REQUIRED", "Choose where the output goes")
-    const cost = outputCost(run, unit.stockQuantity)
+    const cost = outputCost(run, line, unit.stockQuantity)
     return {
         run,
         line,
@@ -904,6 +966,8 @@ function subcontractPlan(userScope, p) {
     if (!shipment) denied("RECORD_UNAVAILABLE", "Shipment " + (p.shipmentId || "") + " is not available")
     if (!shipment.subcontractWorkEffortId)
         denied("NOT_SUBCONTRACT", "Shipment " + shipment.shipmentId + " is not a subcontract dispatch")
+    if (shipment.statusId === "ShipCancelled")
+        denied("SHIPMENT_CANCELLED", "Subcontract dispatch " + shipment.shipmentId + " is cancelled")
     const segments = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: shipment.shipmentId}).sort((a, b) =>
         String(a.shipmentRouteSegmentSeqId).localeCompare(String(b.shipmentRouteSegmentSeqId))
     )
@@ -916,13 +980,14 @@ function subcontractPlan(userScope, p) {
     const run = runOf(userScope, runId)
     requireReleased(run)
     const operationWorkEffortId = work.workEffortId === run.workEffortId ? null : work.workEffortId
-    const part = one("mantle.order.OrderPart", {
+    const item = one("mantle.order.OrderItem", {
         orderId: shipment.subcontractOrderId,
-        orderPartSeqId: one("mantle.order.OrderItem", {
-            orderId: shipment.subcontractOrderId,
-            orderItemSeqId: shipment.subcontractOrderItemSeqId
-        })?.orderPartSeqId
+        orderItemSeqId: shipment.subcontractOrderItemSeqId
     })
+    const part = item ? one("mantle.order.OrderPart", {orderId: item.orderId, orderPartSeqId: item.orderPartSeqId}) : null
+    // the service is bought by the run's owner (P16 review C)
+    if (!part || part.customerPartyId !== run.ownerPartyId)
+        denied("RECORD_UNAVAILABLE", "Order " + shipment.subcontractOrderId + " is not a purchase of " + run.ownerPartyId)
     if (part?.vendorPartyId !== custodian)
         denied(
             "CUSTODIAN_MISMATCH",
@@ -937,14 +1002,26 @@ function subcontractPlan(userScope, p) {
             line.lineRoleEnumId === "PrlrMaterial" &&
             (!operationWorkEffortId || line.operationWorkEffortId === operationWorkEffortId)
     )
+    // reviewed actuals name only the dispatch's material lines (P16 review B6)
+    if (actuals)
+        for (const lineId of Object.keys(actuals))
+            if (!materials.some(line => line.productionRunLineId === lineId))
+                denied("LINE_INVALID", "Line " + lineId + " is not a material line of this subcontract's work")
+    // the last of the output takes what is left of each line, so no rounding residue stays on it (P16 review C)
+    const outputLeft = dec(output.stockQuantity).subtract(receivedOf(output))
+    const final = quantity.compare(outputLeft) >= 0
     const issues = []
     for (const line of materials) {
         const given = actuals ? actuals[line.productionRunLineId] : null
+        const left = materialTotals(line).remaining
         const share =
             given != null && given !== ""
                 ? dec(given)
-                : dec(line.stockQuantity).multiply(quantity).divide(dec(output.stockQuantity), 6, "HALF_UP")
-        const left = materialTotals(line).remaining
+                : final
+                  ? left
+                  : dec(line.stockQuantity).multiply(quantity).divide(dec(output.stockQuantity), 6, "HALF_UP")
+        if (given != null && given !== "" && share.compare(left) > 0)
+            denied("QUANTITY_EXCEEDS_REMAINING", "Line " + line.productionRunLineId + " has " + text(left) + " left to issue")
         let need = share.compare(left) > 0 ? left : share
         if (need.compare(0) <= 0) continue
         const stock = Array.from(
@@ -955,7 +1032,8 @@ function subcontractPlan(userScope, p) {
                 statusId: "AstAvailable"
             })
                 .condition("availableToPromiseTotal", "greater", 0)
-                .orderBy("receivedDate").orderBy("assetId")
+                .orderBy("receivedDate")
+                .orderBy("assetId")
                 .list()
         )
         for (const asset of stock) {
@@ -985,7 +1063,22 @@ function subcontractPlan(userScope, p) {
                     " are used"
             )
     }
+    // the service accepted: the order item's quantity in the output's proportion, all that is left with the last output,
+    // capped at what is left to accept (P16 review B5)
+    const ordered = dec(item.quantity).subtract(dec(item.quantityCancelled))
+    const acceptedBefore = rows("mantle.order.purchase.ServiceAcceptance", {
+        orderId: item.orderId,
+        orderItemSeqId: item.orderItemSeqId
+    }).reduce((sum, row) => sum.add(dec(row.acceptedQuantity)), zero())
+    const acceptLeft = ordered.subtract(acceptedBefore)
+    const proportional = final ? acceptLeft : ordered.multiply(quantity).divide(dec(output.stockQuantity), 6, "HALF_UP")
+    const acceptQuantity = blank(p.acceptedQuantity)
+        ? proportional.compare(acceptLeft) > 0
+            ? acceptLeft
+            : proportional
+        : dec(p.acceptedQuantity)
     return {
+        acceptQuantity,
         shipment,
         vendorFacility,
         custodian,
@@ -1011,5 +1104,6 @@ function subcontractPlan(userScope, p) {
     postOutput,
     subcontractPlan,
     materialTotals,
+    costLines,
     text
 })

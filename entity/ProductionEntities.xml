@@ -28,6 +28,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="productionReleaseDate" type="date-time" enable-audit-log="true"/>
         <field name="productBomId" type="id" enable-audit-log="true"/>
         <field name="productionRoutingId" type="id" enable-audit-log="true"/>
+        <field name="productionMethodRefs" type="text-long" enable-audit-log="true"><description>The BOMs (the run's and its
+            phantoms') and routings (the phantoms' first) the lines were read from, as JSON {bomIds, routingIds}.</description>
+        </field>
         <field name="productStandardCostId" type="id" enable-audit-log="true"/>
         <field name="demandOrderId" type="id" enable-audit-log="true"/>
         <field name="demandOrderItemSeqId" type="id" enable-audit-log="true"/>

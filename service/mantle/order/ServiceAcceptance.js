@@ -36,6 +36,20 @@ function accept(userScope, p) {
             "NOT_SERVICE",
             "Order item " + item.orderId + ":" + item.orderItemSeqId + " is not a service line; receive it as stock"
         )
+    // the order item's unit only: an acceptance in another unit is not converted (P16 review B5)
+    if (!blank(p.quantityUomId) && item.quantityUomId && p.quantityUomId !== item.quantityUomId)
+        denied("UNIT_MISMATCH", "Accept order item " + item.orderId + ":" + item.orderItemSeqId + " in " + item.quantityUomId)
+    // the acceptor: the user, or a person of the buying organization (P16 review C)
+    const userPartyId = ec.user.userAccount?.partyId || null
+    const acceptorPartyId = str(p.acceptorPartyId) || userPartyId
+    if (
+        acceptorPartyId &&
+        acceptorPartyId !== userPartyId &&
+        !rows("mantle.party.PartyRelationship", {fromPartyId: acceptorPartyId, toPartyId: part.customerPartyId}).some(row =>
+            lib.active(row)
+        )
+    )
+        denied("ACCEPTOR_INVALID", "Party " + acceptorPartyId + " is not a person of " + part.customerPartyId)
     const quantity = blank(p.acceptedQuantity) ? zero() : dec(p.acceptedQuantity)
     if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give the quantity accepted")
     const ordered = dec(item.quantity).subtract(dec(item.quantityCancelled))
@@ -62,7 +76,7 @@ function accept(userScope, p) {
         quantityUomId: str(p.quantityUomId) || item.quantityUomId || null,
         acceptedDate: p.acceptedDate || ec.user.nowTimestamp,
         acceptedByUserId: ec.user.userId,
-        acceptorPartyId: str(p.acceptorPartyId) || ec.user.userAccount?.partyId || null,
+        acceptorPartyId,
         workEffortId: str(p.workEffortId),
         assetReceiptId: str(p.assetReceiptId),
         qualityInspectionId: str(p.qualityInspectionId),
