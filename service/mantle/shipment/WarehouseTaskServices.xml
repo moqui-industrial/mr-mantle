@@ -961,7 +961,9 @@ along with this software (see the LICENSE.md file). If not, see
             nothing on hand, a quantity above on hand; a reason that is not a scrap reason (REASON_INVALID); quarantined
             stock (HELD_STOCK: its inspection's disposition scraps it); reserved stock beyond what is free
             (RESERVED_STOCK); a location that is not a morgue (LOCATION_NOT_MORGUE), closed or missing; a closed fiscal
-            period today (PERIOD_CLOSED).</description>
+            period today (PERIOD_CLOSED). With qualityInspectionId (P8, F163: mantle.product.QualityServices.dispose#Inspection
+            moves the stock to the morgue status and then scraps it here) QUALITY_DISPOSE also admits, and the asset must be
+            the result of that inspection's scrap disposition not yet scrapped (PERMISSION_DENIED otherwise).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="assetId" required="true"/>
@@ -970,6 +972,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toLocationSeqId"><description>A morgue location (FltMorgue) of the facility to move the stock to
                 first.</description></parameter>
             <parameter name="comments"/>
+            <parameter name="qualityInspectionId"><description>The inspection whose scrap disposition this is.</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode SCRAPPED, assetId, scrappedAssetId, productId, lotId,
@@ -978,8 +982,9 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
-            <set field="begun" from="posting.begin(context, 'StockScrap', 'STOCK_ADJUST', ['assetId', 'quantity',
-                    'varianceReasonEnumId', 'toLocationSeqId', 'comments'])"/>
+            <set field="begun" from="posting.begin(context, 'StockScrap',
+                    qualityInspectionId ? ['STOCK_ADJUST', 'QUALITY_DISPOSE'] : 'STOCK_ADJUST', ['assetId', 'quantity',
+                    'varianceReasonEnumId', 'toLocationSeqId', 'comments', 'qualityInspectionId'])"/>
             <if condition="begun.previous">
                 <set field="result" from="begun.previous"/>
                 <return/>
@@ -989,6 +994,15 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="home" from="posting.facility(userScope, asset.facilityId)"/>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
+            <!-- a quality disposition's scrap: only the result asset of that inspection's scrap disposition (P8) -->
+            <if condition="qualityInspectionId">
+                <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+                <if condition="!quality.scrapDisposition(qualityInspectionId, assetId)">
+                    <set field="notDisposed" from="'Asset ' + assetId + ' is not a scrap disposition of inspection ' +
+                            qualityInspectionId"/>
+                    <return error="true" message="PERMISSION_DENIED: ${notDisposed}"/>
+                </if>
+            </if>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="reason" cache="true">
                 <field-map field-name="enumId" from="varianceReasonEnumId"/>
             </entity-find-one>
@@ -1503,7 +1517,9 @@ along with this software (see the LICENSE.md file). If not, see
             appliedConversionFactor); a lot, its expiry (the tracking policy's shelf life when none is given) and, for serialized
             stock, one unique serial per accepted unit; to the operation policy's receipt step at posting
             (resolve#WarehousePolicy): 1 the putaway destination (PutawayServices.resolve#Destination, else the receiving location
-            with the reason) or the receiver's, 2 the receiving location, 3 a quarantine location; a rejected quantity becomes no
+            with the reason) or the receiver's, 2 the receiving location, 3 a quarantine location (P8: also when the tracking policy's inspectionRequired or a published receipt template
+            applies, and the receipt then creates the inspection of each accepted receipt in this operation,
+            mantle.product.QualityServices; result qualityInspectionIds); a rejected quantity becomes no
             stock (with nothing accepted, the guard writes the rejection as an AssetReceipt with no stock on the sources in order,
             since receive#Asset receives nothing for a zero quantity: F177). A retry with the same operation key answers the first
             receipt. Requires STOCK_RECEIVE (PERMISSION_DENIED); refuses a receipt outside the user's facilities
@@ -1565,9 +1581,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <script>receiving.notifyException(recv, 'REJECTED', {productId: ln.product.productId,
                     quantityRejected: receiving.text(pl.rejected), rejectionReasonEnumId: rejectionReasonEnumId})</script>
             </if>
+            <!-- P8: a receipt that needs inspection posted into quarantine; its inspections, in this operation -->
+            <set field="qualityInspectionIds" from="pl.inspect ? ec.resource
+                    .script('component://mr-mantle/service/mantle/product/Quality.js')
+                    .receiptInspections(userScope, posted.assetReceiptIds) : []"/>
             <!-- 6. the answer -->
             <set field="result" from="posting.complete(begun.op, recv.facility.ownerPartyId, 'mantle.shipment.Shipment',
-                    shipmentId, receiving.lineAnswer(recv, ln, pl, posted, context))"/>
+                    shipmentId, Object.assign(receiving.lineAnswer(recv, ln, pl, posted, context),
+                        {qualityInspectionIds: qualityInspectionIds}))"/>
         </actions>
     </service>
     <service verb="receive" noun="ExpectedShipment" allow-remote="false">

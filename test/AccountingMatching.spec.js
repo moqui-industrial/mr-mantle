@@ -253,7 +253,7 @@ feature("a bill against a partial accepted receipt matches; excess and already-b
         proposal.sourceRows.length == 1
         proposal.sourceRows[0].assetReceiptId == ids.receipt1.assetReceiptId
         proposal.sourceRows[0].quantity == 6
-        proposal.inspectionCheck == "unavailable"
+        proposal.inspectionCheck == "available"
         proposal.matchCapabilities.canApply == false
         readerApply.includes("PERMISSION_DENIED")
         applied.resultEnumId == "ImrMatched"

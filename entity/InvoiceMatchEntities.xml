@@ -143,9 +143,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="orderQuantity" type="number-decimal"/>
         <field name="orderUnitAmount" type="currency-precise"/>
         <field name="acceptedQuantity" type="number-decimal"/>
-        <field name="heldQuantity" type="number-decimal"><description>Accepted quantity still in quarantine, left out of
-            the match. There is no inspection record yet (CX-QUALITY), so the inspection check itself is
-            unavailable.</description></field>
+        <field name="heldQuantity" type="number-decimal"><description>Accepted quantity still held for inspection, left out
+            of the match (CX-QUALITY's get#SourceInspectionStatus).</description></field>
         <field name="priorBilledQuantity" type="number-decimal"/>
         <field name="priceVariance" type="currency-precise"/>
         <field name="currencyUomId" type="id"/>

@@ -448,9 +448,16 @@ function plan(userScope, recv, ln, p) {
     const policy = policyOf(recv.facilityId, ln.product.productId)
     const track = tracking(policy.tracking, ln.product, accepted.quantity, p)
     const over = checkOverReceipt(recv.shipmentId, ln.sources, total, policy.operation, ln.product.productId)
+    // P8: when the operation policy's step 3, the tracking policy or a published receipt template asks for inspection, the
+    // accepted stock goes to quarantine (step 3's destination) and the receipt creates its inspection (receive#ShipmentStock)
+    const inspect = ec.resource
+        .script("component://mr-mantle/service/mantle/product/Quality.js")
+        .receiptNeedsInspection(recv.facility, ln.product.productId, policy)
+    const operation = inspect ? Object.assign({}, policy.operation, {receiptSteps: 3}) : policy.operation
     const productId = ln.product.productId
-    const target = destination(userScope, recv.facilityId, productId, policy.operation, p.locationSeqId, accepted.quantity)
+    const target = destination(userScope, recv.facilityId, productId, operation, p.locationSeqId, accepted.quantity)
     return {
+        inspect,
         accepted: accepted.quantity,
         rejected: rejected.quantity,
         total,

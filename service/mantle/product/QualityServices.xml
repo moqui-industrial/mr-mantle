@@ -1,0 +1,502 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Shared quality inspection (design-crosscut §3.19 CX-QUALITY, design-warehouse WH-QUALITY; impl-warehouse P8): templates
+    with effective-dated characteristics, inspections, readings, verification and dispositions through the Warehouse posting
+    guard, and the source status bill matching and planning read. The logic is Quality.js; each service checks its Moqui
+    permission (QUALITY_TEMPLATE_EDIT, QUALITY_INSPECT, QUALITY_VERIFY, QUALITY_DISPOSE) and the organization scope
+    (FacilityScope.js); reads take the organization scope and an app's facilityIds. Refusals are "CODE: message". -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== templates ===== -->
+    <service verb="store" noun="InspectionTemplate" allow-remote="false">
+        <description>Create a draft template, or change one of the user's organizations' templates: the header when
+            templateName is given (each header field takes the value given, an empty one clearing it: context, product,
+            category and facility applicability, sample policy), itemList's characteristic changes (a draft item edited or
+            removed in place; a published item is never edited in place: a change ends it and starts a new row now, a
+            removal ends it), then action publish (stamps the draft items' from date) or retire. Refuses without
+            QUALITY_TEMPLATE_EDIT (PERMISSION_DENIED); another organization's template (RECORD_UNAVAILABLE); a retired one
+            (TEMPLATE_RETIRED); no name (NAME_REQUIRED); invalid values (VALUE_INVALID, LIMITS_INVALID, SAMPLE_INVALID); an
+            item of another template (ITEM_INVALID) or one already ended (ITEM_ENDED); a change of a published template or a
+            retirement without a reason (REASON_REQUIRED); publishing with no item (NO_ITEMS) or twice
+            (TEMPLATE_PUBLISHED).</description>
+        <in-parameters>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="organizationPartyId"><description>For a new template; the user's active organization by
+                default.</description></parameter>
+            <parameter name="templateName"/>
+            <parameter name="description"/>
+            <parameter name="inspectionContextEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="facilityId"/>
+            <parameter name="samplePolicyEnumId"/>
+            <parameter name="sampleSize"/>
+            <parameter name="samplePercent"/>
+            <parameter name="itemList" type="List"><description>Maps: inspectionTemplateItemId (empty adds one),
+                characteristicName, readingTypeEnumId, uomId, lowerLimit, upperLimit, targetValue, mandatory, sequenceNum,
+                description, remove.</description></parameter>
+            <parameter name="action"><description>publish or retire</description></parameter>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="statusId"/>
+            <parameter name="changedItemIds" type="List"/>
+            <parameter name="endedItemIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('storeTemplate', context)"/>
+            <set field="inspectionTemplateId" from="answer.inspectionTemplateId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="changedItemIds" from="answer.changedItemIds"/>
+            <set field="endedItemIds" from="answer.endedItemIds"/>
+        </actions>
+    </service>
+    <service verb="get" noun="InspectionTemplate" allow-remote="false">
+        <description>A template of the user's organizations with its characteristics as of asOfDate (now by default), its
+            draft characteristics, and its revision history: every characteristic row with its dates and the header's
+            audit-logged changes. Refuses another organization's template (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="inspectionTemplateId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="template" type="Map"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="items" type="List"/>
+            <parameter name="draftItems" type="List"/>
+            <parameter name="revisionRows" type="List"/>
+            <parameter name="changeRows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('getTemplate', context)"/>
+            <set field="template" from="answer.template"/>
+            <set field="asOfDate" from="answer.asOfDate"/>
+            <set field="asOfText" from="answer.asOfText"/>
+            <set field="items" from="answer.items"/>
+            <set field="draftItems" from="answer.draftItems"/>
+            <set field="revisionRows" from="answer.revisionRows"/>
+            <set field="changeRows" from="answer.changeRows"/>
+        </actions>
+    </service>
+    <service verb="find" noun="InspectionTemplates" allow-remote="false">
+        <description>The templates of the user's organizations by state, context, product and name, a page at a
+            time.</description>
+        <in-parameters>
+            <parameter name="statusId"/>
+            <parameter name="inspectionContextEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="templateName"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="templates" type="List"/>
+            <parameter name="templatesCount" type="Integer"/>
+            <parameter name="templatesPageIndex" type="Integer"/>
+            <parameter name="templatesPageSize" type="Integer"/>
+            <parameter name="templatesPageMaxIndex" type="Integer"/>
+            <parameter name="templatesPageRangeLow" type="Integer"/>
+            <parameter name="templatesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('findTemplates', context)"/>
+            <set field="templates" from="answer.templates"/>
+            <set field="templatesCount" from="answer.templatesCount"/>
+            <set field="templatesPageIndex" from="answer.templatesPageIndex"/>
+            <set field="templatesPageSize" from="answer.templatesPageSize"/>
+            <set field="templatesPageMaxIndex" from="answer.templatesPageMaxIndex"/>
+            <set field="templatesPageRangeLow" from="answer.templatesPageRangeLow"/>
+            <set field="templatesPageRangeHigh" from="answer.templatesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <!-- ===== inspections ===== -->
+    <service verb="create" noun="Inspection" allow-remote="false">
+        <description>A draft inspection of a source: an asset (its facility, product, lot and on-hand quantity), a receipt
+            (its asset, shipment and order line; one open inspection per receipt), or a facility and product; the template
+            given (published, of the facility's owner) or the published one that applies (product, category, any; facility
+            first), whose items it reads as of now; its sample by the template's policy; the stock held when the asset is
+            quarantined; the customer demand of a run's OrderItemWorkEffort when none is given. A receipt that needs
+            inspection creates it in the receipt's own operation (receive#ShipmentStock). Refuses without QUALITY_INSPECT
+            (PERMISSION_DENIED); a record outside the user's organizations (RECORD_UNAVAILABLE); no product
+            (PRODUCT_REQUIRED); a quantity not above zero (QUANTITY_INVALID) or above on hand (QUANTITY_EXCEEDS_ON_HAND); a
+            template not published for the organization (TEMPLATE_UNAVAILABLE); an inspector who is not one of the
+            organization's (INSPECTOR_INVALID); a sample outside 1 to the quantity (SAMPLE_INVALID); a second open inspection
+            of a receipt or an asset (INSPECTION_EXISTS); an asset that is not the receipt's (VALUE_INVALID); a demand order
+            item that is not the facility owner's sale of the product, in the user's organizations, given or from the run
+            (DEMAND_INVALID).</description>
+        <in-parameters>
+            <parameter name="reinspectQualityInspectionId"><description>A disposed inspection whose stock is still held
+                (Quarantine, Rework, a return): the new inspection takes its receipt and held asset, and the held quantity
+                moves to it (NOT_HELD otherwise).</description></parameter>
+            <parameter name="assetId"/>
+            <parameter name="assetReceiptId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="lotId"/>
+            <parameter name="quantity"/>
+            <parameter name="shipmentId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="returnId"/>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="sourceTypeEnumId"/>
+            <parameter name="inspectionContextEnumId"/>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="sampleSize"/>
+            <parameter name="inspectorPartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="demandOrderId"/>
+            <parameter name="demandOrderItemSeqId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="qualityInspectionId"/>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="quantity"/>
+            <parameter name="heldQuantity"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('create', context)"/>
+            <set field="qualityInspectionId" from="answer.qualityInspectionId"/>
+            <set field="inspectionTemplateId" from="answer.inspectionTemplateId"/>
+            <set field="quantity" from="answer.quantity"/>
+            <set field="heldQuantity" from="answer.heldQuantity"/>
+        </actions>
+    </service>
+    <service verb="assign" noun="Inspection" allow-remote="false">
+        <description>Assign work on an open inspection: its inspector (empty unassigns) and due date, and while it is a draft
+            with no readings its template (read as of now). Never changes its status or result. Refuses without
+            QUALITY_INSPECT, QUALITY_VERIFY or QUALITY_DISPOSE (PERMISSION_DENIED); an inspection outside the user's
+            organizations or facilityIds (RECORD_UNAVAILABLE); a closed one (INSPECTION_CLOSED); an inspector who is not
+            one of the organization's (INSPECTOR_INVALID); a new template once there are readings (TEMPLATE_FIXED) or one not
+            published (TEMPLATE_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="inspectorPartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="qualityInspectionId"/>
+            <parameter name="inspectorPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('assignInspection', context)"/>
+            <set field="inspectorPartyId" from="answer.inspectorPartyId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="InspectionReading" allow-remote="false">
+        <description>A reading of a draft inspection: a characteristic its template had when it was created, a sample from 1
+            to the sample size, and the value (a measured value, whose pass is computed from the characteristic's limits;
+            pass or fail; an observation). A reading saved again replaces its value (audit-logged). Refuses without
+            QUALITY_INSPECT (PERMISSION_DENIED); an inspection outside the user's organizations or facilityIds
+            (RECORD_UNAVAILABLE); one that is not a draft (INSPECTION_NOT_DRAFT); a characteristic not of it (ITEM_INVALID);
+            another sample (SAMPLE_INVALID); no value (VALUE_REQUIRED) or a wrong one (VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="inspectionTemplateItemId" required="true"/>
+            <parameter name="sampleNumber"/>
+            <parameter name="numericValue"/>
+            <parameter name="passIndicator"/>
+            <parameter name="textValue"/>
+            <parameter name="comments"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="inspectionReadingId"/>
+            <parameter name="passIndicator"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('saveReading', context)"/>
+            <set field="inspectionReadingId" from="answer.inspectionReadingId"/>
+            <set field="passIndicator" from="answer.passIndicator"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="Inspection" allow-remote="false">
+        <description>Submit a draft inspection's result once each mandatory characteristic has a reading: the accepted and
+            rejected quantities, adding up to the quantity inspected, and the reason for a rejection; the result (accepted,
+            partly accepted, rejected) follows; the organization's verifiers are notified (QualityInspectionDecision).
+            Refuses without QUALITY_INSPECT (PERMISSION_DENIED); an inspection outside the user's organizations or
+            facilityIds (RECORD_UNAVAILABLE); one that is not a draft (INSPECTION_NOT_DRAFT); missing readings
+            (READINGS_REQUIRED); quantities that do not add up (QUANTITY_MISMATCH); a rejection without a reason
+            (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="quantityAccepted" type="BigDecimal"/>
+            <parameter name="quantityRejected" type="BigDecimal"/>
+            <parameter name="resultReason"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="resultEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('submitInspection', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resultEnumId" from="answer.resultEnumId"/>
+        </actions>
+    </service>
+    <service verb="verify" noun="Inspection" allow-remote="false">
+        <description>Verify a submitted inspection (Verified: ready for disposition; verification alone releases no stock),
+            or with approve false return it to its inspector with the reason (Draft, readings kept); its inspector is
+            notified. A separate permission from inspecting, and never by the user who submitted it. Refuses without
+            QUALITY_VERIFY (PERMISSION_DENIED); an inspection outside the user's organizations or facilityIds
+            (RECORD_UNAVAILABLE); one not waiting for verification (INSPECTION_NOT_SUBMITTED); the submitter
+            (SELF_VERIFY); a return without a reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="approve" default-value="true"/>
+            <parameter name="verificationComments"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('verifyInspection', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Inspection" allow-remote="false">
+        <description>Cancel a draft or submitted inspection with the reason; its stock stays where it is (a quarantined
+            receipt with no other inspection counts as held and may be inspected again). Refuses without QUALITY_INSPECT or
+            QUALITY_VERIFY (PERMISSION_DENIED); an inspection outside the user's organizations or facilityIds
+            (RECORD_UNAVAILABLE); a verified or closed one (INSPECTION_CLOSED); no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('cancelInspection', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="dispose" noun="Inspection" allow-remote="false">
+        <description>A disposition of part of a verified inspection, through the Warehouse posting guard
+            (StockPosting.js): Release takes the accepted quantity, the others (Quarantine, Rework or repair, Return to
+            customer, Return to supplier, Scrap, Use as is) the rejected. Release and Use as is first reserve the
+            inspection's pegged customer demand (checked again: DEMAND_INVALID) on the released stock, keeping the order
+            item's reservations (only its not-available quantity is reduced, then reserve#AssetForOrderItem with the asset)
+            and then set AstAvailable
+            through update#Asset, the only path out of quarantine (its AssetStatusAvailableReservations SECA gives the rest to
+            waiting reservations), then move it to toLocationSeqId when given; Scrap sets AstMorgue (moving it to a morgue
+            location when given) and calls WarehouseTaskServices.scrap#Asset with this disposition, in the one transaction;
+            the others keep it quarantined, moved within quarantine when given. Each disposition is a record, queues the
+            bill matches of the inspection's receipt (InvoiceMatchServices.queue#MatchReevaluation) and notifies the
+            inspector; the inspection is Disposed once nothing is left. A retry with the same operation key answers the
+            first disposition. Lock order: the inspection, its asset, the location. Refuses without QUALITY_DISPOSE
+            (PERMISSION_DENIED); an inspection outside the user's organizations or facilityIds (RECORD_UNAVAILABLE); one
+            not verified (VERIFICATION_REQUIRED); no disposition (DISPOSITION_INVALID, VALUE_INVALID); a quantity not above
+            zero (QUANTITY_INVALID), beyond what is left of its kind (QUANTITY_EXCEEDS_RESULT) or on hand
+            (QUANTITY_EXCEEDS_ON_HAND); a scrap of stock not held (NOT_HELD) or with a reason that is not a scrap reason
+            (REASON_INVALID); a destination of the wrong type (LOCATION_NOT_MORGUE, LOCATION_NOT_QUARANTINE,
+            LOCATION_INVALID), closed or missing; a closed fiscal period for the scrap (PERIOD_CLOSED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="dispositionEnumId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="varianceReasonEnumId"><description>Scrap: InVrScrap by default.</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode DISPOSED, qualityInspectionId, dispositionSeqId,
+                dispositionEnumId, quantity, assetId, resultAssetId, statusId, locationSeqId, reservedOrderId,
+                reservedOrderItemSeqId, physicalInventoryId, heldQuantity, inspectionStatusId, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <!-- 1. permission and operation key: a retry answers the first disposition -->
+            <set field="begun" from="posting.begin(context, 'QualityDispose', 'QUALITY_DISPOSE', ['qualityInspectionId',
+                    'dispositionEnumId', 'quantity', 'toLocationSeqId', 'varianceReasonEnumId', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the inspection, then its asset, locked and scoped; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="inspection" from="quality.lockInspection(userScope, qualityInspectionId, facilityIds)"/>
+            <set field="asset" from="inspection.assetId ? posting.stock(userScope, inspection.assetId, quantity) : null"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3-4. the status, the quantity left of its kind, the reason and the destination, before anything posts -->
+            <set field="plan" from="quality.dispositionPlan(userScope, inspection, asset, context)"/>
+            <!-- 5. the stock postings, the disposition record, the inspection, the matches queued -->
+            <set field="answer" from="quality.disposeStock(inspection, asset, plan, context)"/>
+            <!-- 6. the answer -->
+            <set field="result" from="posting.complete(begun.op, inspection.organizationPartyId,
+                    'mantle.product.quality.QualityInspection', qualityInspectionId, answer)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Inspection" allow-remote="false">
+        <description>One inspection of the user's organizations (in facilityIds when given): its header with names, its
+            template's characteristics as of its creation with their readings, the readings, dispositions, what is left to
+            dispose (accepted and rejected), the mandatory characteristics still without a reading, its history (audit-logged
+            changes, readings, dispositions) and what the user may do now. Refuses another (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="facilityIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="inspection" type="Map"/>
+            <parameter name="items" type="List"/>
+            <parameter name="readings" type="List"/>
+            <parameter name="dispositions" type="List"/>
+            <parameter name="history" type="List"/>
+            <parameter name="acceptedLeft"/>
+            <parameter name="rejectedLeft"/>
+            <parameter name="missingReadings" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('getInspection', context)"/>
+            <set field="inspection" from="answer.inspection"/>
+            <set field="items" from="answer.items"/>
+            <set field="readings" from="answer.readings"/>
+            <set field="dispositions" from="answer.dispositions"/>
+            <set field="history" from="answer.history"/>
+            <set field="acceptedLeft" from="answer.acceptedLeft"/>
+            <set field="rejectedLeft" from="answer.rejectedLeft"/>
+            <set field="missingReadings" from="answer.missingReadings"/>
+            <set field="capabilities" from="answer.capabilities"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Inspections" allow-remote="false">
+        <description>The inspections of the user's organizations, in facilityIds when given, by status (or open ones),
+            product, lot, inspector, source type, shipment, receipt and due date, a page at a time, the nearest due
+            first.</description>
+        <in-parameters>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="qualityInspectionId"/>
+            <parameter name="statusId"/>
+            <parameter name="openOnly"/>
+            <parameter name="productId"/>
+            <parameter name="lotId"/>
+            <parameter name="inspectorPartyId"/>
+            <parameter name="sourceTypeEnumId"/>
+            <parameter name="shipmentId"/>
+            <parameter name="assetReceiptId"/>
+            <parameter name="dueBefore" type="Timestamp"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="inspections" type="List"/>
+            <parameter name="inspectionsCount" type="Integer"/>
+            <parameter name="inspectionsPageIndex" type="Integer"/>
+            <parameter name="inspectionsPageSize" type="Integer"/>
+            <parameter name="inspectionsPageMaxIndex" type="Integer"/>
+            <parameter name="inspectionsPageRangeLow" type="Integer"/>
+            <parameter name="inspectionsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('findInspections', context)"/>
+            <set field="inspections" from="answer.inspections"/>
+            <set field="inspectionsCount" from="answer.inspectionsCount"/>
+            <set field="inspectionsPageIndex" from="answer.inspectionsPageIndex"/>
+            <set field="inspectionsPageSize" from="answer.inspectionsPageSize"/>
+            <set field="inspectionsPageMaxIndex" from="answer.inspectionsPageMaxIndex"/>
+            <set field="inspectionsPageRangeLow" from="answer.inspectionsPageRangeLow"/>
+            <set field="inspectionsPageRangeHigh" from="answer.inspectionsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SourceInspectionStatus" allow-remote="false">
+        <description>For bill matching and planning (D21): each receipt of a receipt id, an order line or a shipment, with its
+            accepted and dock-rejected quantity, its held quantity (the heldQuantity of its inspections, a re-inspection
+            holding what it took from the earlier one; a receipt with no inspection whose stock is quarantined is held
+            whole), what its inspections rejected (scrapped or returned to the supplier), match-eligible (accepted less held
+            and less inspection-rejected), and the totals. An internal read: the caller checks
+            its own permission (as InvoiceMatch.js does). Refuses no source (SOURCE_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="assetReceiptId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="shipmentId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="receiptRows" type="List"/>
+            <parameter name="acceptedQuantity" type="BigDecimal"/>
+            <parameter name="rejectedQuantity" type="BigDecimal"/>
+            <parameter name="heldQuantity" type="BigDecimal"/>
+            <parameter name="matchEligibleQuantity" type="BigDecimal"/>
+            <parameter name="inspectionRejectedQuantity" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="answer" from="quality.execute('sourceStatus', context)"/>
+            <set field="receiptRows" from="answer.receiptRows"/>
+            <set field="acceptedQuantity" from="answer.acceptedQuantity"/>
+            <set field="rejectedQuantity" from="answer.rejectedQuantity"/>
+            <set field="heldQuantity" from="answer.heldQuantity"/>
+            <set field="matchEligibleQuantity" from="answer.matchEligibleQuantity"/>
+            <set field="inspectionRejectedQuantity" from="answer.inspectionRejectedQuantity"/>
+        </actions>
+    </service>
+
+    <!-- an inspection's files (record files; get#RecordLinkInfo's QualityInspectionContent) -->
+    <service verb="create" noun="InspectionContent" allow-remote="false">
+        <description>A file of an inspection of the user's organizations, for a user who inspects, verifies or disposes
+            (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.product.quality.QualityInspectionContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="qualityInspectionId" required="true"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="qualityInspectionContentId"/></out-parameters>
+        <actions>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <script>quality.execute('contentAccess', context)</script>
+            <service-call name="create#mantle.product.quality.QualityInspectionContent" in-map="context" out-map="context"
+                    disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <set field="filename" from="contentFile.getName()"/>
+                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') ||
+                        'dbresource://mantle/content'"/>
+                <set field="contentLocation"
+                        value="${contentRoot}/inspection/${qualityInspectionId}/${qualityInspectionContentId}/${filename}"/>
+                <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+                <script>
+                    const fileStream = contentFile.getInputStream()
+                    try { docRr.putStream(fileStream) } finally { fileStream.close() }
+                </script>
+                <service-call name="update#mantle.product.quality.QualityInspectionContent" disable-authz="true"
+                        in-map="{qualityInspectionContentId:qualityInspectionContentId, contentLocation:contentLocation}"/>
+            </if>
+        </actions>
+    </service>
+</services>
