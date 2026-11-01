@@ -186,6 +186,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fromDay"/>
             <parameter name="complete" type="Boolean"/>
             <parameter name="truncated" type="Boolean"/>
+            <parameter name="historyIncomplete" type="Boolean"><description>Some quantity is from before a facility's first
+                ledger row</description></parameter>
             <parameter name="historyStartText"><description>The first ledger row of the facilities read</description></parameter>
             <parameter name="totalRows" type="List"/>
             <parameter name="stockRows" type="List"/>
@@ -210,6 +212,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="fromDay" from="out.fromDay"/>
             <set field="complete" from="out.complete"/>
             <set field="truncated" from="out.truncated"/>
+            <set field="historyIncomplete" from="out.historyIncomplete"/>
             <set field="historyStartText" from="out.historyStartText"/>
             <set field="totalRows" from="out.totalRows"/>
             <set field="stockRows" from="out.stockRows"/>

@@ -19,6 +19,10 @@ const shipmentLimit = 1000
 const noLimitCap = 5000
 const chunkSize = 500
 const DAY = 86400000
+// a product's stock unit; one with none counts in each, as Mantle's stock factor does (OrderServices.get#OrderItemStockFactor),
+// so its totals are each's and not a unit of their own
+const EACH = "OTH_ea"
+const stockUnit = product => product?.amountUomId || EACH
 const QUANTITIES = [
     "expectedQuantity",
     "acceptedQuantity",
@@ -211,12 +215,7 @@ function operationsHistory(p) {
             entries.map(entry => entry.productId)
         ).map(row => [row.productId, row])
     )
-    const units = names(
-        "moqui.basic.Uom",
-        "uomId",
-        "description",
-        Array.from(products.values()).map(row => row.amountUomId)
-    )
+    const units = names("moqui.basic.Uom", "uomId", "description", Array.from(products.values()).map(stockUnit).concat([EACH]))
     const facilityNames = names(
         "mantle.facility.Facility",
         "facilityId",
@@ -273,8 +272,8 @@ function operationsHistory(p) {
             carrierName: segment.carrierPartyId ? parties[segment.carrierPartyId] || segment.carrierPartyId : "",
             productId: entry.productId,
             productName: product?.productName || entry.productId,
-            quantityUomId: product?.amountUomId || null,
-            unitText: units.get(product?.amountUomId) || product?.amountUomId || "each",
+            quantityUomId: stockUnit(product),
+            unitText: units.get(stockUnit(product)) || stockUnit(product),
             expectedQuantity: number(entry.expected),
             acceptedQuantity: inbound || transfer ? number(entry.accepted) : null,
             rejectedQuantity: inbound || transfer ? number(entry.rejected) : null,

@@ -24,6 +24,10 @@ const noLimitCap = 5000
 const chunkSize = 500
 const facilityStartLimit = 100
 const DAY = 86400000
+// a product's stock unit; one with none counts in each, as Mantle's stock factor does (OrderServices.get#OrderItemStockFactor),
+// so its totals are each's and not a unit of their own
+const EACH = "OTH_ea"
+const stockUnit = product => product?.amountUomId || EACH
 
 const dayAfter = day => lib.calendarDateText(Date.parse(day) + DAY)
 const midnight = day => ec.l10n.parseTimestamp(day, "yyyy-MM-dd")
@@ -327,12 +331,7 @@ function inventoryAtDate(p) {
         places.map(place => place.lotId)
     )
     const owners = lib.partyNames(places.map(place => place.ownerPartyId))
-    const units = names(
-        "moqui.basic.Uom",
-        "uomId",
-        "description",
-        Array.from(products.values()).map(row => row.amountUomId)
-    )
+    const units = names("moqui.basic.Uom", "uomId", "description", Array.from(products.values()).map(stockUnit).concat([EACH]))
     const reasons = names(
         "moqui.basic.Enumeration",
         "enumId",
@@ -354,8 +353,8 @@ function inventoryAtDate(p) {
             lotNumber: lotNumbers.get(place.lotId) || place.lotId || "",
             ownerPartyId: place.ownerPartyId,
             ownerName: owners[place.ownerPartyId] || place.ownerPartyId || "",
-            quantityUomId: product?.amountUomId || null,
-            unitText: units.get(product?.amountUomId) || product?.amountUomId || "each"
+            quantityUomId: stockUnit(product),
+            unitText: units.get(stockUnit(product)) || stockUnit(product)
         }
     }
     function placeText(place) {
@@ -467,6 +466,7 @@ function inventoryAtDate(p) {
             fromDay,
             complete,
             truncated: candidates.truncated || historyTruncated,
+            historyIncomplete: !historyKnown || stockRows.some(row => !row.complete),
             historyStartText: overall == null ? "" : dateText(new Date(overall)),
             totalRows
         },
