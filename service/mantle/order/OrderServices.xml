@@ -3101,4 +3101,57 @@ General Order Placement and eCommerce Usage
             <set field="releasedCommitments" from="closed.releasedCommitments"/>
         </actions>
     </service>
+
+    <!-- ===== Purchasing's service acceptance (design-purchasing PUR-RECEIPT; Warehouse P16b) ===== -->
+    <service verb="accept" noun="ServiceItem" allow-remote="false">
+        <description>Record the acceptance of a service or non-stock purchase line (design-purchasing RecordServiceAcceptance,
+            R-PUR-09): the accepted quantity and unit, date, acceptor and evidence (an order file, the receipt and inspection
+            it rests on) as mantle.order.purchase.ServiceAcceptance (ServiceAcceptance.js), which InvoiceMatch reads under
+            the match policy's service-acceptance rule. A line is accepted at most as ordered (net of what was cancelled). A
+            retry with the same operation key answers the first. A subcontract line's acceptance is written by
+            Manufacturing's mantle.work.ProductionServices.receive#SubcontractOutput under its own check (§2). Requires
+            PURCHASE_ORDER_EDIT or STOCK_RECEIVE (PERMISSION_DENIED); refuses an order item not bought by the user's
+            organizations (RECORD_UNAVAILABLE), a cancelled order (ORDER_CANCELLED), a stock product's line (NOT_SERVICE),
+            no quantity (QUANTITY_INVALID) and more than is left to accept (QUANTITY_EXCEEDS_ORDERED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+            <parameter name="acceptedQuantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"><description>The order item's unit when empty.</description></parameter>
+            <parameter name="acceptedDate" type="Timestamp"/>
+            <parameter name="acceptorPartyId"><description>The user's party when empty.</description></parameter>
+            <parameter name="workEffortId"/>
+            <parameter name="assetReceiptId"/>
+            <parameter name="qualityInspectionId"/>
+            <parameter name="orderContentId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ACCEPTED, serviceAcceptanceId, orderId,
+                orderItemSeqId, acceptedQuantity, totalAccepted, orderedQuantity, and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'ServiceAccept', ['PURCHASE_ORDER_EDIT', 'STOCK_RECEIVE'],
+                    ['orderId', 'orderItemSeqId', 'acceptedQuantity', 'quantityUomId', 'acceptedDate', 'acceptorPartyId',
+                    'workEffortId', 'assetReceiptId', 'qualityInspectionId', 'orderContentId', 'comments'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- the line locked, so two acceptances of it queue; then the operation once more -->
+            <entity-find-one entity-name="mantle.order.OrderItem" value-field="lockedItem" for-update="true"
+                    disable-authz="true"><field-map field-name="orderId"/><field-map field-name="orderItemSeqId"/>
+            </entity-find-one>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="accepted" from="ec.resource.script('component://mr-mantle/service/mantle/order/ServiceAcceptance.js')
+                    .accept(posting.scope(), context)"/>
+            <set field="result" from="posting.complete(begun.op, accepted.organizationPartyId,
+                    'mantle.order.purchase.ServiceAcceptance', accepted.serviceAcceptanceId,
+                    Object.assign({resultCode: 'ACCEPTED'}, accepted))"/>
+        </actions>
+    </service>
 </services>

@@ -2365,7 +2365,12 @@ along with this software (see the LICENSE.md file). If not, see
                 not one of the WorkEffort consume products, "add" it, "ignore" it, or return an "error"?</description></parameter>
             <parameter name="noOriginFacility" default-value="error"><description>If the asset has a originFacilityId that is
                 not one of the WorkEffort origin facilities, "add" it, "ignore" it, or return an "error"?</description></parameter>
+            <parameter name="issuanceFields" type="Map"><description>A production issue (design-manufacturing M2, D13): fields
+                of the issuance written with it (productionMaterialLineId, operationWorkEffortId and the entered quantity
+                fields), and the issuance is always a new one, never added to an earlier issuance of the asset to the work
+                effort, since an update of a posted issuance re-posts it (AssetIssuanceGlRePost).</description></parameter>
         </in-parameters>
+        <out-parameters><parameter name="assetIssuanceId"/></out-parameters>
         <actions>
             <if condition="asset == null">
                 <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true">
@@ -2436,9 +2441,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="baseMap" from="{workEffortId:workEffortId, assetId:asset.assetId, productId:asset.productId}"/>
 
-            <!-- look for existing AssetIssuance to add to -->
+            <!-- look for existing AssetIssuance to add to (a production issue never adds to one) -->
             <entity-find entity-name="mantle.product.issuance.AssetIssuance" list="existingIssuanceList">
-                <econdition field-name="assetId"/>
+                <econdition field-name="assetId" from="issuanceFields ? '_NA_' : assetId"/>
                 <econdition field-name="workEffortId"/>
                 <econdition field-name="shipmentId" ignore-if-empty="true"/>
                 <econdition field-name="shipmentItemSourceId" ignore-if-empty="true"/>
@@ -2452,11 +2457,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="existingIssuance" from="existingIssuanceList[0]"/>
                 <service-call name="update#mantle.product.issuance.AssetIssuance" in-map="Object.assign({}, baseMap, {assetIssuanceId:existingIssuance.assetIssuanceId, quantity:toDecimal(existingIssuance.quantity).add(quantity)})"/>
                 <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="Object.assign({}, baseMap, {effectiveDate:issuedDate, quantityDiff:toDecimal(quantity).negate(), assetIssuanceId:existingIssuance.assetIssuanceId})"/>
+                <set field="assetIssuanceId" from="existingIssuance.assetIssuanceId"/>
             </then><else>
                 <!-- create an issuance -->
                 <service-call name="create#mantle.product.issuance.AssetIssuance" out-map="issueOut"
-                        in-map="Object.assign({}, baseMap, {issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity})"/>
+                        in-map="Object.assign({}, issuanceFields || {}, baseMap, {issuedDate:issuedDate, issuedByUserId:ec.user.userId, quantity:quantity})"/>
                 <service-call name="mantle.product.AssetServices.change#AssetQuantity" in-map="Object.assign({}, baseMap, {effectiveDate:issuedDate, quantityDiff:toDecimal(quantity).negate(), assetIssuanceId:issueOut.assetIssuanceId})"/>
+                <set field="assetIssuanceId" from="issueOut.assetIssuanceId"/>
             </else></if>
         </actions>
     </service>

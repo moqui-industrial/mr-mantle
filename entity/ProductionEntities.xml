@@ -86,4 +86,57 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="PRODRUNLINE_RUN"><index-field name="workEffortId"/></index>
     </entity>
 
+    <!-- CX-PRODUCTION (impl-warehouse F7): the run line and operation of a production movement. The movement's workEffortId
+        is always the run (operation children never carry stock); a production output receipt with no approved standard
+        cost is costProvisional (its cost the issued cost to date over the quantity). -->
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="productionMaterialLineId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <relationship type="one" title="ProductionMaterial" related="mantle.work.production.ProductionRunLine"
+                short-alias="productionMaterialLine">
+            <key-map field-name="productionMaterialLineId" related="productionRunLineId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="AssetReceipt" package="mantle.product.receipt">
+        <field name="productionOutputLineId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="costProvisional" type="text-indicator"/>
+        <relationship type="one" title="ProductionOutput" related="mantle.work.production.ProductionRunLine"
+                short-alias="productionOutputLine">
+            <key-map field-name="productionOutputLineId" related="productionRunLineId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <!-- Purchasing's service acceptance (design-purchasing PUR-RECEIPT, R-PUR-09): a service or non-stock purchase line's
+        accepted quantity and unit, date, acceptor and evidence (the output receipt and its inspection for a subcontract
+        line; an order file), written by mantle.order.OrderServices.accept#ServiceItem, which InvoiceMatch reads under the
+        match policy's service-acceptance rule. -->
+    <entity entity-name="ServiceAcceptance" package="mantle.order.purchase" cache="never">
+        <field name="serviceAcceptanceId" type="id" is-pk="true"/>
+        <field name="orderId" type="id" enable-audit-log="true"/>
+        <field name="orderItemSeqId" type="id" enable-audit-log="true"/>
+        <field name="acceptedQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="acceptedDate" type="date-time" enable-audit-log="true"/>
+        <field name="acceptedByUserId" type="id"/>
+        <field name="acceptorPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="qualityInspectionId" type="id"/>
+        <field name="orderContentId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one" related="mantle.order.OrderItem" short-alias="orderItem"/>
+        <relationship type="one" related="moqui.security.UserAccount" title="AcceptedBy" short-alias="acceptedByUser">
+            <key-map field-name="acceptedByUserId" related="userId"/></relationship>
+        <relationship type="one" related="mantle.party.Party" title="Acceptor" short-alias="acceptorParty">
+            <key-map field-name="acceptorPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" related="mantle.product.quality.QualityInspection" short-alias="qualityInspection"/>
+        <relationship type="one" related="mantle.order.OrderContent" short-alias="orderContent"/>
+        <index name="SERVACCEPT_ITEM"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+    </entity>
 </entities>

@@ -762,6 +762,30 @@ function receiptInspections(userScope, assetReceiptIds) {
     return ids
 }
 
+// Whether a production run's output at a facility needs inspection (impl-warehouse P16): the tracking policy's
+// inspectionRequired, or a published production template that applies.
+function outputNeedsInspection(facility, productId, policy) {
+    if (policy.tracking?.inspectionRequired === "Y") return true
+    return !!applicableTemplate(facility.ownerPartyId, productId, facility.facilityId, "QicProduction")
+}
+// The inspections of a run's output just received into quarantine: one per receipt with accepted stock, of the run
+// (QisWorkEffort, QicProduction), in the output guard's own operation (its STOCK_ISSUE check). Answers their ids.
+function outputInspections(userScope, assetReceiptIds, workEffortId) {
+    const ids = []
+    for (const assetReceiptId of Array.from(assetReceiptIds || [])) {
+        const receipt = one(RECEIPT, {assetReceiptId})
+        if (!receipt?.assetId || dec(receipt.quantityAccepted).compare(0) <= 0) continue
+        const created = createInspection(userScope, {
+            assetReceiptId,
+            workEffortId,
+            sourceTypeEnumId: "QisWorkEffort",
+            inspectionContextEnumId: "QicProduction"
+        })
+        ids.push(created.qualityInspectionId)
+    }
+    return ids
+}
+
 // assign#Inspection: the inspector and due date of an open inspection (assigning work only: never its status), and while it
 // is a draft with no readings its template.
 function assignInspection(p) {
@@ -1613,6 +1637,9 @@ const operations = {
     // for the receipt guard (Receiving.js), dispose#Inspection and scrap#Asset
     receiptNeedsInspection,
     receiptInspections,
+    // for the production output guard (Production.js)
+    outputNeedsInspection,
+    outputInspections,
     applicableTemplate,
     itemsAsOf,
     lockInspection,

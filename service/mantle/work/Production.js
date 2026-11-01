@@ -611,12 +611,405 @@ function read(userScope, workEffortId) {
     }
 }
 
+// ===== the stock guards =====
+// The quantity in the stock unit: given in the stock unit, or in the line's unit through the line's exact conversion.
+function unitOf(line, quantity, quantityUomId) {
+    const entered = blank(quantity) ? zero() : dec(quantity)
+    if (entered.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
+    if (blank(quantityUomId) || quantityUomId === line.stockUomId)
+        return {stockQuantity: entered, enteredQuantity: entered, enteredUomId: line.stockUomId || null, factor: toDecimal(1)}
+    if (quantityUomId === line.quantityUomId) {
+        const factor = dec(line.conversionFactor ?? 1)
+        return {stockQuantity: entered.multiply(factor), enteredQuantity: entered, enteredUomId: quantityUomId, factor}
+    }
+    denied(
+        "UNIT_CONVERSION",
+        "Unit " + quantityUomId + " is neither line " + line.productionRunLineId + "'s unit nor its stock unit"
+    )
+}
+// issue#ProductionMaterial's checks, before anything posts: the released run, its material line (locked), the operation,
+// the stock (locked; the user's facilities, on hand), its product, AstAvailable (a quarantined or other held component is
+// refused, R-SA-03: issue#AssetToWorkEffort does not check the status), owned by the run's owner, free to issue, and no more
+// than the line has left.
+function issuePlan(userScope, p) {
+    const run = runOf(userScope, p.workEffortId)
+    requireReleased(run)
+    const line = lineOf(run, p.productionRunLineId, ["PrlrMaterial"], true)
+    const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
+    const unit = unitOf(line, p.quantity, p.quantityUomId)
+    const asset = posting.stock(userScope, p.assetId, unit.stockQuantity)
+    if (asset.productId !== line.productId)
+        denied(
+            "PRODUCT_MISMATCH",
+            "Asset " +
+                asset.assetId +
+                " is " +
+                asset.productId +
+                ", not line " +
+                line.productionRunLineId +
+                "'s " +
+                line.productId
+        )
+    if (asset.statusId !== "AstAvailable")
+        denied(
+            "HELD_STOCK",
+            "Asset " + asset.assetId + " is " + asset.statusId + "; only available stock is issued to production"
+        )
+    if (asset.ownerPartyId !== run.ownerPartyId)
+        denied(
+            "OWNER_MISMATCH",
+            "Asset " +
+                asset.assetId +
+                " is owned by " +
+                (asset.ownerPartyId || "nobody") +
+                ", not the run's owner " +
+                run.ownerPartyId
+        )
+    if (unit.stockQuantity.compare(dec(asset.availableToPromiseTotal)) > 0)
+        denied(
+            "QUANTITY_EXCEEDS_AVAILABLE",
+            "Only " + text(asset.availableToPromiseTotal) + " of asset " + asset.assetId + " is free to issue"
+        )
+    const totals = materialTotals(line)
+    if (unit.stockQuantity.compare(totals.remaining) > 0)
+        denied(
+            "QUANTITY_EXCEEDS_REMAINING",
+            "Line " + line.productionRunLineId + " has " + text(totals.remaining) + " left to issue"
+        )
+    return {run, line, operationWorkEffortId, unit, asset}
+}
+// return#UnusedMaterial's checks: the issuance (locked) of a run of the user's, not closed, with what has not come back of
+// it; the destination: the original asset (locked, its location open) or a location of a facility of the same owner.
+function returnPlan(userScope, p) {
+    const issuance = blank(p.assetIssuanceId) ? null : find(ISSUANCE, {assetIssuanceId: p.assetIssuanceId}).forUpdate(true).one()
+    if (!issuance?.workEffortId) denied("RECORD_UNAVAILABLE", "Issuance " + (p.assetIssuanceId || "") + " is not available")
+    const run = runOf(userScope, issuance.workEffortId)
+    if (closedStatuses.includes(run.statusId)) denied("RUN_CLOSED", "Production run " + run.workEffortId + " is " + run.statusId)
+    const quantity = blank(p.quantity) ? zero() : dec(p.quantity)
+    if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
+    const returnable = dec(issuance.quantity).subtract(returnedOf(issuance.assetIssuanceId))
+    if (quantity.compare(returnable) > 0)
+        denied(
+            "QUANTITY_EXCEEDS_ISSUED",
+            "Only " + text(returnable) + " of issuance " + issuance.assetIssuanceId + " is left to return"
+        )
+    const source = find(ASSET, {assetId: issuance.assetId}).forUpdate(true).one()
+    if (!source) denied("RECORD_UNAVAILABLE", "Asset " + issuance.assetId + " is not available")
+    let target, intoOriginal
+    if (blank(p.toLocationSeqId)) {
+        // back into the original asset where it is
+        const home = posting.facility(userScope, source.facilityId)
+        if (!source.locationSeqId && home.assetInventoryLocRequire === "Y")
+            denied("LOCATION_REQUIRED", "Choose a location to return to")
+        target = source.locationSeqId
+            ? posting.destination(userScope, source.facilityId, {toLocationSeqId: source.locationSeqId})
+            : {facilityId: source.facilityId, locationSeqId: null, autoStatusId: null}
+        intoOriginal = true
+    } else {
+        const facilityId = str(p.toFacilityId) || source.facilityId
+        const facility = posting.facility(userScope, facilityId)
+        if (facility.ownerPartyId !== source.ownerPartyId && source.ownerPartyId !== run.ownerPartyId)
+            denied("OWNER_MISMATCH", "Facility " + facilityId + " is not the run owner's")
+        target = posting.destination(userScope, facilityId, {toLocationSeqId: p.toLocationSeqId})
+        intoOriginal = false
+    }
+    return {issuance, run, source, quantity, target, intoOriginal}
+}
+// The receipt lines that carry a value exactly: the unit cost at the four decimals acquireCost keeps, the last unit apart at
+// the remainder's cost when that leaves one (P6/P12, F166); serials are one unit a line.
+function costLines(total, quantity, serials) {
+    const unitCost = total.divide(quantity, 4, "HALF_UP")
+    const exact = quantity.multiply(unitCost).eq(total)
+    if (serials.length) {
+        const last = total.subtract(unitCost.multiply(toDecimal(serials.length - 1)))
+        return serials.map((serialNumber, index) => ({
+            quantity: toDecimal(1),
+            cost: index === serials.length - 1 && !exact ? last : unitCost,
+            serialNumber
+        }))
+    }
+    if (exact || quantity.compare(1) <= 0) return [{quantity, cost: unitCost, serialNumber: null}]
+    const rest = quantity.subtract(1)
+    return [
+        {quantity: rest, cost: unitCost, serialNumber: null},
+        {quantity: toDecimal(1), cost: total.subtract(rest.multiply(unitCost)), serialNumber: null}
+    ]
+}
+// The value the run still holds in WIP: what was issued to it at each asset's cost, less returns and output received.
+function wipValue(run) {
+    const valueOf = (quantity, assetId) => {
+        const asset = assetId ? one(ASSET, {assetId}) : null
+        return asset?.acquireCost == null ? zero() : dec(quantity).multiply(dec(asset.acquireCost))
+    }
+    const issued = rows(ISSUANCE, {workEffortId: run.workEffortId}).reduce(
+        (sum, row) => sum.add(valueOf(row.quantity, row.assetId)),
+        zero()
+    )
+    const back = rows(RECEIPT, {workEffortId: run.workEffortId}).reduce(
+        (sum, row) => sum.add(valueOf(row.quantityAccepted, row.assetId)),
+        zero()
+    )
+    return issued.subtract(back)
+}
+// The output's cost (D12, R-SA-01): the run's frozen standard unit cost; with no approved standard, the issued cost to date
+// over the quantity, provisional. Output is never received without a cost.
+function outputCost(run, quantity) {
+    const standard = run.productStandardCostId ? one(STANDARD, {productStandardCostId: run.productStandardCostId}) : null
+    if (standard?.unitCost != null)
+        return {
+            total: dec(standard.unitCost).multiply(quantity),
+            currencyUomId: standard.priceUomId || null,
+            provisional: false,
+            costSource: "standard"
+        }
+    const wip = wipValue(run)
+    if (wip.compare(0) <= 0)
+        denied(
+            "COST_UNAVAILABLE",
+            "Run " + run.workEffortId + " has no approved standard cost and no issued cost to receive its output at"
+        )
+    const issued = rows(ISSUANCE, {workEffortId: run.workEffortId})
+    const currency = issued.length ? one(ASSET, {assetId: issued[0].assetId})?.acquireCostUomId || null : null
+    return {total: wip, currencyUomId: currency, provisional: true, costSource: "issued"}
+}
+// receive#ProductionOutput's checks and plan, before anything posts: the released run, the output line (locked), no more
+// than it has left, the tracking (serials given or generated from a first value, P7's rules), the cost, the destination by
+// the receipt steps (into quarantine when an inspection applies, P8's rule; otherwise the putaway resolver or the given
+// location, the facility the run's or another of its owner's).
+function outputPlan(userScope, p) {
+    const receiving = ec.resource.script("component://mr-mantle/service/mantle/shipment/Receiving.js")
+    const quality = ec.resource.script("component://mr-mantle/service/mantle/product/Quality.js")
+    const run = runOf(userScope, p.workEffortId)
+    requireReleased(run)
+    const line = outputLineOf(run, p.productionRunLineId, true)
+    const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
+    const unit = unitOf(line, p.quantity, p.quantityUomId)
+    const left = dec(line.stockQuantity).subtract(receivedOf(line))
+    if (unit.stockQuantity.compare(left) > 0)
+        denied(
+            "OVER_RECEIPT",
+            "Line " + line.productionRunLineId + " has " + text(left.compare(0) > 0 ? left : zero()) + " left to receive"
+        )
+    const facility = posting.facility(userScope, str(p.facilityId) || run.facilityId)
+    if (facility.ownerPartyId !== run.ownerPartyId)
+        denied("OWNER_MISMATCH", "Facility " + facility.facilityId + " is not the run owner's")
+    const product = one(PRODUCT, {productId: line.productId})
+    const policy = receiving.policyOf(facility.facilityId, product.productId)
+    let serialNumbers = p.serialNumbers
+    if (blank(serialNumbers) && !blank(p.firstSerialNumber)) {
+        if (unit.stockQuantity.compare(Math.floor(unit.stockQuantity.toNumber())) !== 0)
+            denied("SERIAL_COUNT_MISMATCH", "Serial-tracked output is received in whole units")
+        const generated = receiving.generate({
+            trackingKind: "serial",
+            productId: product.productId,
+            count: unit.stockQuantity.toNumber(),
+            firstValue: p.firstSerialNumber
+        })
+        const taken = generated.identityRows.filter(row => row.duplicate).map(row => row.value)
+        if (taken.length) denied("SERIAL_DUPLICATE", "Serial numbers already in stock: " + taken.join(", "))
+        serialNumbers = generated.identityRows.map(row => row.value)
+    }
+    const track = receiving.tracking(policy.tracking, product, unit.stockQuantity, {
+        serialNumbers,
+        lotNumber: p.lotNumber,
+        lotId: p.lotId,
+        expirationDate: p.expirationDate,
+        mfgPartyId: run.ownerPartyId
+    })
+    const inspect = quality.outputNeedsInspection(facility, product.productId, policy)
+    const operation = inspect
+        ? Object.assign({}, policy.operation, {receiptSteps: 3})
+        : Object.assign({}, policy.operation, {receiptSteps: 1})
+    const target = receiving.destination(
+        userScope,
+        facility.facilityId,
+        product.productId,
+        operation,
+        str(p.toLocationSeqId),
+        unit.stockQuantity,
+        run.ownerPartyId
+    )
+    if (!target.locationSeqId && facility.assetInventoryLocRequire === "Y")
+        denied("LOCATION_REQUIRED", "Choose where the output goes")
+    const cost = outputCost(run, unit.stockQuantity)
+    return {
+        run,
+        line,
+        operationWorkEffortId,
+        unit,
+        facility,
+        product,
+        track,
+        inspect,
+        target,
+        cost,
+        lines: costLines(cost.total, unit.stockQuantity, track.serialized ? track.serials : [])
+    }
+}
+// The output received: each cost line through receive#Asset with the run's workEffortId, the owner, lot and serial, at
+// its cost (AssetReceiptGlPost relieves WIP), each receipt carrying its line, operation, entered quantity and whether its
+// cost is provisional; then the inspection of each receipt when one applies.
+function postOutput(userScope, plan, p) {
+    const quality = ec.resource.script("component://mr-mantle/service/mantle/product/Quality.js")
+    const assetIds = [],
+        assetReceiptIds = []
+    for (const costLine of plan.lines) {
+        const out = call("mantle.product.AssetServices.receive#Asset", {
+            productId: plan.product.productId,
+            quantity: costLine.quantity,
+            facilityId: plan.facility.facilityId,
+            locationSeqId: plan.target.locationSeqId || null,
+            statusId: plan.target.statusId || null,
+            ownerPartyId: plan.run.ownerPartyId,
+            acquireCost: costLine.cost,
+            acquireCostUomId: plan.cost.currencyUomId,
+            serialNumber: costLine.serialNumber,
+            lotId: str(p.lotId),
+            lotNumber: str(p.lotNumber),
+            mfgPartyId: blank(p.lotNumber) ? null : plan.run.ownerPartyId,
+            expirationDate: plan.track.expirationDate || null,
+            manufacturedDate: ec.user.nowTimestamp,
+            workEffortId: plan.run.workEffortId
+        })
+        if (out.assetId) {
+            assetIds.push(out.assetId)
+            // receive#Asset takes the cost's currency from an order only
+            if (plan.cost.currencyUomId)
+                call("update#" + ASSET, {assetId: out.assetId, acquireCostUomId: plan.cost.currencyUomId})
+        }
+        call("update#" + RECEIPT, {
+            assetReceiptId: out.assetReceiptId,
+            productionOutputLineId: plan.line.productionRunLineId,
+            operationWorkEffortId: plan.operationWorkEffortId,
+            costProvisional: plan.cost.provisional ? "Y" : null,
+            enteredQuantity: costLine.quantity.divide(plan.unit.factor, 6, "HALF_UP"),
+            enteredQuantityUomId: plan.unit.enteredUomId,
+            appliedConversionFactor: plan.unit.factor
+        })
+        assetReceiptIds.push(out.assetReceiptId)
+    }
+    const qualityInspectionIds = plan.inspect ? quality.outputInspections(userScope, assetReceiptIds, plan.run.workEffortId) : []
+    return {assetIds, assetReceiptIds, qualityInspectionIds}
+}
+
+// ===== receive#SubcontractOutput =====
+// The subcontract dispatch's work and service order item (P15's Shipment.subcontract* keys), its vendor-custody facility
+// (the custodian is the order's supplier), the run and operation, the output line, and the material lines the vendor used:
+// each line of the operation (or of the run) at the output's share of its quantity, or the supplier-reported actuals
+// after review, taken from the run owner's available stock at the vendor facility, oldest first (MATERIAL_SHORT when it
+// is not there).
+function subcontractPlan(userScope, p) {
+    const transfers = ec.resource.script("component://mr-mantle/service/mantle/shipment/Transfers.js")
+    const shipment = blank(p.shipmentId) ? null : one("mantle.shipment.Shipment", {shipmentId: p.shipmentId})
+    if (!shipment) denied("RECORD_UNAVAILABLE", "Shipment " + (p.shipmentId || "") + " is not available")
+    if (!shipment.subcontractWorkEffortId)
+        denied("NOT_SUBCONTRACT", "Shipment " + shipment.shipmentId + " is not a subcontract dispatch")
+    const segments = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: shipment.shipmentId}).sort((a, b) =>
+        String(a.shipmentRouteSegmentSeqId).localeCompare(String(b.shipmentRouteSegmentSeqId))
+    )
+    const vendorFacilityId = segments.length ? segments[segments.length - 1].destinationFacilityId : null
+    const vendorFacility = posting.facility(userScope, vendorFacilityId)
+    const custodian = transfers.custodianOf(vendorFacility.facilityId)
+    if (!custodian) denied("NOT_CUSTODY", "Facility " + vendorFacility.facilityId + " is not a vendor-custody facility")
+    const work = one(WORK, {workEffortId: shipment.subcontractWorkEffortId})
+    const runId = work?.purposeEnumId === "WepProductionRun" ? work.workEffortId : work?.parentWorkEffortId
+    const run = runOf(userScope, runId)
+    requireReleased(run)
+    const operationWorkEffortId = work.workEffortId === run.workEffortId ? null : work.workEffortId
+    const part = one("mantle.order.OrderPart", {
+        orderId: shipment.subcontractOrderId,
+        orderPartSeqId: one("mantle.order.OrderItem", {
+            orderId: shipment.subcontractOrderId,
+            orderItemSeqId: shipment.subcontractOrderItemSeqId
+        })?.orderPartSeqId
+    })
+    if (part?.vendorPartyId !== custodian)
+        denied(
+            "CUSTODIAN_MISMATCH",
+            "Order " + shipment.subcontractOrderId + " is not with the facility's custodian " + custodian
+        )
+    const output = outputLineOf(run, p.productionRunLineId)
+    const quantity = blank(p.quantity) ? zero() : dec(p.quantity)
+    if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give the quantity of output received")
+    const actuals = p.materialQuantities && typeof p.materialQuantities === "object" ? p.materialQuantities : null
+    const materials = linesOf(run.workEffortId).filter(
+        line =>
+            line.lineRoleEnumId === "PrlrMaterial" &&
+            (!operationWorkEffortId || line.operationWorkEffortId === operationWorkEffortId)
+    )
+    const issues = []
+    for (const line of materials) {
+        const given = actuals ? actuals[line.productionRunLineId] : null
+        const share =
+            given != null && given !== ""
+                ? dec(given)
+                : dec(line.stockQuantity).multiply(quantity).divide(dec(output.stockQuantity), 6, "HALF_UP")
+        const left = materialTotals(line).remaining
+        let need = share.compare(left) > 0 ? left : share
+        if (need.compare(0) <= 0) continue
+        const stock = Array.from(
+            find(ASSET, {
+                facilityId: vendorFacility.facilityId,
+                productId: line.productId,
+                ownerPartyId: run.ownerPartyId,
+                statusId: "AstAvailable"
+            })
+                .condition("availableToPromiseTotal", "greater", 0)
+                .orderBy("receivedDate").orderBy("assetId")
+                .list()
+        )
+        for (const asset of stock) {
+            if (need.compare(0) <= 0) break
+            const take = dec(asset.availableToPromiseTotal).compare(need) < 0 ? dec(asset.availableToPromiseTotal) : need
+            issues.push({
+                productionRunLineId: line.productionRunLineId,
+                assetId: asset.assetId,
+                quantity: take,
+                operationWorkEffortId: line.operationWorkEffortId || operationWorkEffortId
+            })
+            need = need.subtract(take)
+        }
+        if (need.compare(0) > 0)
+            denied(
+                "MATERIAL_SHORT",
+                "The vendor facility " +
+                    vendorFacility.facilityId +
+                    " holds " +
+                    text(share.subtract(need)) +
+                    " of " +
+                    line.productId +
+                    " for line " +
+                    line.productionRunLineId +
+                    "; " +
+                    text(share) +
+                    " are used"
+            )
+    }
+    return {
+        shipment,
+        vendorFacility,
+        custodian,
+        run,
+        operationWorkEffortId,
+        output,
+        quantity,
+        issues,
+        orderId: shipment.subcontractOrderId,
+        orderItemSeqId: shipment.subcontractOrderItemSeqId
+    }
+}
+
 ;({
     runOf,
     linesOf,
     create,
     release,
     read,
+    issuePlan,
+    returnPlan,
+    outputPlan,
+    postOutput,
+    subcontractPlan,
     materialTotals,
     text
 })

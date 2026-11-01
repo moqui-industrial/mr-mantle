@@ -407,3 +407,281 @@ feature("release freezes the lines on their operations with the standard; a late
         !!one("moqui.basic.StatusFlowTransition", {statusFlowId: "Default", statusId: "WeApproved", toStatusId: "WeInPlanning"})
     }
 })
+
+feature("two components issue in two operations as two issuances; a retry answers the first; held and foreign stock refused", {
+    when() {
+        const lineA = lineOf(state.run1, "WPD_RM_A"),
+            lineB = lineOf(state.run1, "WPD_RM_B")
+        const issue = (assetId, line, quantity, operationKey = key()) =>
+            run("wpd_issuer", P + "issue#ProductionMaterial", {
+                operationKey,
+                workEffortId: state.run1,
+                productionRunLineId: line.productionRunLineId,
+                assetId,
+                quantity
+            })
+        const firstKey = key()
+        const first = issue(state.stockA, lineA, 2, firstKey)
+        const second = issue(state.stockB, lineB, 1)
+        const retry = issue(state.stockA, lineA, 2, firstKey)
+        const more = issue(state.stockA, lineA, 2)
+        const held = issue(state.held, lineA, 1)
+        const foreign = issue(state.foreignOwned, lineB, 1)
+        const wrongProduct = issue(state.stockB, lineA, 1)
+        const tooMuch = issue(state.stockA, lineA, 1)
+        const drafted = run("wpd_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "WPD_FIN",
+            quantity: 1,
+            facilityId: facility
+        })
+        const draft = run("wpd_issuer", P + "issue#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId: drafted.workEffortId,
+            productionRunLineId: lineOf(drafted.workEffortId, "WPD_RM_A").productionRunLineId,
+            assetId: state.stockA,
+            quantity: 1
+        })
+        const planner = run("wpd_planner", P + "issue#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId: state.run1,
+            productionRunLineId: lineB.productionRunLineId,
+            assetId: state.stockB,
+            quantity: 1
+        })
+        state.issueA = first.result?.assetIssuanceId
+        state.issueA2 = more.result?.assetIssuanceId
+        return {lineA, lineB, first, second, retry, more, held, foreign, wrongProduct, tooMuch, draft, planner}
+    },
+    then({lineA, lineB, first, second, retry, more, held, foreign, wrongProduct, tooMuch, draft, planner}) {
+        first.error == ""
+        second.error == ""
+        retry.result.alreadyApplied == true
+        retry.result.assetIssuanceId == first.result.assetIssuanceId
+        more.error == ""
+        more.result.assetIssuanceId != first.result.assetIssuanceId
+        const issuances = rows("mantle.product.issuance.AssetIssuance", {workEffortId: state.run1})
+        issuances.length == 3
+        const one1 = issuances.find(row => row.assetIssuanceId === first.result.assetIssuanceId)
+        one1.productionMaterialLineId == lineA.productionRunLineId
+        one1.operationWorkEffortId == lineA.operationWorkEffortId
+        n(one1.quantity) == 2
+        const one2 = issuances.find(row => row.assetIssuanceId === second.result.assetIssuanceId)
+        one2.operationWorkEffortId == lineB.operationWorkEffortId
+        one2.operationWorkEffortId != one1.operationWorkEffortId
+        n(asset(state.stockA).quantityOnHandTotal) == 6
+        held.error.includes("HELD_STOCK")
+        foreign.error.includes("OWNER_MISMATCH")
+        wrongProduct.error.includes("PRODUCT_MISMATCH")
+        tooMuch.error.includes("QUANTITY_EXCEEDS_REMAINING")
+        draft.error.includes("RUN_NOT_RELEASED")
+        planner.error.includes("PERMISSION_DENIED")
+        // each issue posted once to WIP (the run owned by the organization)
+        rows("mantle.ledger.transaction.AcctgTrans", {assetIssuanceId: first.result.assetIssuanceId}).length == 1
+    }
+})
+
+feature("an unused component returns as a new receipt at its cost, into its asset or a new one; the issuance is unchanged", {
+    when() {
+        const back = run("wpd_issuer", P + "return#UnusedMaterial", {
+            operationKey: key(),
+            assetIssuanceId: state.issueA,
+            quantity: 1,
+            reason: "Left over"
+        })
+        const moved = run("wpd_issuer", P + "return#UnusedMaterial", {
+            operationKey: key(),
+            assetIssuanceId: state.issueA2,
+            quantity: 1,
+            toLocationSeqId: "PICK2"
+        })
+        const tooMuch = run("wpd_issuer", P + "return#UnusedMaterial", {
+            operationKey: key(),
+            assetIssuanceId: state.issueA,
+            quantity: 2
+        })
+        const read = run("wpd_reader", P + "get#ProductionOrder", {workEffortId: state.run1})
+        return {back, moved, tooMuch, read}
+    },
+    then({back, moved, tooMuch, read}) {
+        back.error == ""
+        back.result.intoOriginal == true
+        back.result.assetId == state.stockA
+        n(asset(state.stockA).quantityOnHandTotal) == 7
+        const receipt = one("mantle.product.receipt.AssetReceipt", {assetReceiptId: back.result.assetReceiptId})
+        receipt.sourceAssetIssuanceId == state.issueA
+        receipt.workEffortId == state.run1
+        n(one("mantle.product.issuance.AssetIssuance", {assetIssuanceId: state.issueA}).quantity) == 2
+        moved.error == ""
+        moved.result.intoOriginal == false
+        n(asset(moved.result.assetId).acquireCost) == 2
+        asset(moved.result.assetId).locationSeqId == "PICK2"
+        tooMuch.error.includes("QUANTITY_EXCEEDS_ISSUED")
+        // the reader sees the line's issued and returned quantities, and no value without financial read
+        read.error == ""
+        const lineA = read.lines.find(line => line.productId === "WPD_RM_A")
+        lineA.issued == "4"
+        lineA.returned == "2"
+        lineA.remaining == "2"
+        read.issuances.every(row => row.value == null)
+        read.run.standardUnitCost == null
+        read.run.productStandardCostId == "WPD_STD"
+    }
+})
+
+feature("output is received into quarantine with generated serials at the run's frozen standard cost, inspected", {
+    when() {
+        const operationKey = key()
+        const parameters = {operationKey, workEffortId: state.run1, quantity: 2, firstSerialNumber: "WPD-SN-001"}
+        const received = run("wpd_issuer", P + "receive#ProductionOutput", parameters)
+        const retry = run("wpd_issuer", P + "receive#ProductionOutput", parameters)
+        const over = run("wpd_issuer", P + "receive#ProductionOutput", {
+            operationKey: key(),
+            workEffortId: state.run1,
+            quantity: 1,
+            serialNumbers: ["WPD-SN-009"]
+        })
+        const outsider = run("wpd_outsider", P + "get#ProductionOrder", {workEffortId: state.run1})
+        const nobody = run("wpd_buyer", P + "get#ProductionOrder", {workEffortId: state.run1})
+        return {received, retry, over, outsider, nobody}
+    },
+    then({received, retry, over, outsider, nobody}) {
+        received.error == ""
+        received.result.costSource == "standard"
+        received.result.costProvisional == false
+        received.result.unitCost == "10.5"
+        received.result.statusId == "AstQuarantine"
+        received.result.inspected == true
+        received.result.qualityInspectionIds.length == 2
+        received.result.serialNumbers.join(",") == "WPD-SN-001,WPD-SN-002"
+        const assets = received.result.assetIds.map(asset)
+        assets.every(row => row.statusId === "AstQuarantine" && row.locationSeqId === "QUAR1" && n(row.acquireCost) === 10.5)
+        assets.every(row => row.ownerPartyId === org)
+        const receipts = received.result.assetReceiptIds.map(id =>
+            one("mantle.product.receipt.AssetReceipt", {assetReceiptId: id})
+        )
+        receipts.every(
+            row =>
+                row.workEffortId === state.run1 &&
+                row.productionOutputLineId === lineOf(state.run1, "WPD_FIN").productionRunLineId
+        )
+        const inspection = one("mantle.product.quality.QualityInspection", {
+            qualityInspectionId: received.result.qualityInspectionIds[0]
+        })
+        inspection.sourceTypeEnumId == "QisWorkEffort"
+        inspection.workEffortId == state.run1
+        retry.result.alreadyApplied == true
+        rows("mantle.product.receipt.AssetReceipt", {productionOutputLineId: lineOf(state.run1, "WPD_FIN").productionRunLineId})
+            .length == 2
+        over.error.includes("OVER_RECEIPT")
+        outsider.error.includes("RECORD_UNAVAILABLE")
+        nobody.error.includes("PERMISSION_DENIED")
+    }
+})
+
+feature("subcontract output is received from the vendor facility: components issued there, the service line accepted once", {
+    when() {
+        const created = run("wpd_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "WPD_CF",
+            quantity: 3,
+            facilityId: facility
+        })
+        const released = run("wpd_planner", P + "release#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: created.workEffortId
+        })
+        const runId = created.workEffortId
+        const opId = released.result.operationWorkEffortIds[0]
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        call("create#mantle.order.OrderHeader", {orderId: "WPD_PO", statusId: "OrderApproved", currencyUomId: "USD"})
+        call("create#mantle.order.OrderPart", {
+            orderId: "WPD_PO",
+            orderPartSeqId: "01",
+            vendorPartyId: supplier,
+            customerPartyId: org,
+            statusId: "OrderApproved"
+        })
+        call("create#mantle.order.OrderItem", {
+            orderId: "WPD_PO",
+            orderItemSeqId: "01",
+            orderPartSeqId: "01",
+            productId: "WPD_COAT",
+            quantity: 3,
+            unitAmount: 4,
+            itemTypeEnumId: "ItemProduct"
+        })
+        call("create#mantle.order.OrderItemWorkEffort", {orderId: "WPD_PO", orderItemSeqId: "01", workEffortId: opId})
+        call("create#mantle.shipment.Shipment", {
+            shipmentId: "WPD_SHIP",
+            shipmentTypeEnumId: "ShpTpTransfer",
+            statusId: "ShipDelivered",
+            fromPartyId: org,
+            toPartyId: org,
+            subcontractWorkEffortId: opId,
+            subcontractOrderId: "WPD_PO",
+            subcontractOrderItemSeqId: "01"
+        })
+        call("create#mantle.shipment.ShipmentRouteSegment", {
+            shipmentId: "WPD_SHIP",
+            shipmentRouteSegmentSeqId: "01",
+            originFacilityId: facility,
+            destinationFacilityId: vendor
+        })
+        const operationKey = key()
+        const parameters = {operationKey, shipmentId: "WPD_SHIP", quantity: 3, toLocationSeqId: "PICK1"}
+        const received = run("wpd_issuer", "mantle.work.ProductionServices.receive#SubcontractOutput", parameters)
+        const retry = run("wpd_issuer", "mantle.work.ProductionServices.receive#SubcontractOutput", parameters)
+        const more = run(
+            "wpd_issuer",
+            "mantle.work.ProductionServices.receive#SubcontractOutput",
+            Object.assign({}, parameters, {operationKey: key(), quantity: 1})
+        )
+        const extra = run("wpd_buyer", "mantle.order.OrderServices.accept#ServiceItem", {
+            operationKey: key(),
+            orderId: "WPD_PO",
+            orderItemSeqId: "01",
+            acceptedQuantity: 1
+        })
+        const issuerAccept = run("wpd_issuer", "mantle.order.OrderServices.accept#ServiceItem", {
+            operationKey: key(),
+            orderId: "WPD_PO",
+            orderItemSeqId: "01",
+            acceptedQuantity: 1
+        })
+        return {runId, opId, received, retry, more, extra, issuerAccept}
+    },
+    then({runId, opId, received, retry, more, extra, issuerAccept}) {
+        received.error == ""
+        received.result.vendorFacilityId == vendor
+        received.result.operationWorkEffortId == opId
+        // the components issued at the vendor facility, oldest first: 2 at 2 and 1 at 3
+        received.result.issues.length == 2
+        n(asset(state.vendorCheap).quantityOnHandTotal) == 0
+        n(asset(state.vendorDear).quantityOnHandTotal) == 4
+        rows("mantle.product.issuance.AssetIssuance", {workEffortId: runId}).every(row => row.operationWorkEffortId === opId)
+        // the output at the issued cost to date (no standard): 7 over 3, the last unit carrying the remainder; provisional
+        const output = received.result.output
+        output.costSource == "issued"
+        output.costProvisional == true
+        output.facilityId == facility
+        const outputReceipts = output.assetReceiptIds.map(id => one("mantle.product.receipt.AssetReceipt", {assetReceiptId: id}))
+        outputReceipts.every(row => row.costProvisional === "Y" && row.workEffortId === runId && !row.shipmentId)
+        const value = output.assetIds.map(asset).reduce((sum, row) => sum + n(row.quantityOnHandTotal) * n(row.acquireCost), 0)
+        Math.abs(value - 7) < 0.00001
+        // the service line accepted once, with the output receipt as its evidence
+        const acceptances = rows("mantle.order.purchase.ServiceAcceptance", {orderId: "WPD_PO", orderItemSeqId: "01"})
+        acceptances.length == 1
+        n(acceptances[0].acceptedQuantity) == 3
+        acceptances[0].assetReceiptId == output.assetReceiptIds[0]
+        acceptances[0].workEffortId == opId
+        retry.result.alreadyApplied == true
+        more.error.includes("OVER_RECEIPT")
+        extra.error.includes("QUANTITY_EXCEEDS_ORDERED")
+        issuerAccept.error.includes("PERMISSION_DENIED")
+        rows("mantle.order.purchase.ServiceAcceptance", {orderId: "WPD_PO"}).length == 1
+    }
+})

@@ -155,4 +155,297 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <!-- ===== the production stock guards (P16b, M2) ===== -->
+    <service verb="issue" noun="ProductionMaterial" allow-remote="false">
+        <description>Issue a component to a released run's material line (design-manufacturing MaterialIssueReceipt Issue,
+            M2): a new AssetIssuance per operation key and line, never added to an earlier one (D13), through
+            mantle.product.AssetServices.issue#AssetToWorkEffort with the run's workEffortId (AssetIssuanceGlPost moves the
+            cost to WIP, the run owning it), the line and operation and the quantity as entered on the issuance; the expiry
+            gate (WarehousePolicy.expiryBlock) refuses an expired asset inside the issue (ASSET_EXPIRED). The quantity is in
+            the stock unit, or in the line's unit through its exact conversion. A retry with the same operation key answers
+            the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
+            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID), an operation of another run
+            (OPERATION_INVALID), another unit (UNIT_CONVERSION), stock outside the user's facilities, not stock, or short
+            (posting.stock's refusals), another product (PRODUCT_MISMATCH), stock that is not available, a quarantined one
+            among them (HELD_STOCK), another owner's (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), more
+            than the line has left (QUANTITY_EXCEEDS_REMAINING) and a closed fiscal period today (PERIOD_CLOSED, read
+            without locking).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="productionRunLineId" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"><description>The stock unit when empty.</description></parameter>
+            <parameter name="operationWorkEffortId"><description>The line's operation when empty.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ISSUED, workEffortId, productionRunLineId,
+                operationWorkEffortId, assetId, productId, lotId, quantity, assetIssuanceId, remaining (the line's, after),
+                warnings, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionIssue', 'STOCK_ISSUE', ['workEffortId',
+                    'productionRunLineId', 'assetId', 'quantity', 'quantityUomId', 'operationWorkEffortId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2-4. the run, its line (locked), the stock (locked) and every check, in the guard -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="plan" from="production.issuePlan(userScope, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="warnings" from="posting.expiryWarnings(plan.asset.assetId)"/>
+            <script>posting.period([plan.run.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- 5. Mantle's issue, a new issuance carrying the line, the operation and the entered quantity -->
+            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort" disable-authz="true" out-map="issued"
+                    in-map="{assetId:plan.asset.assetId, workEffortId:plan.run.workEffortId, quantity:plan.unit.stockQuantity,
+                        noConsumeProduct:'add', noOriginFacility:'ignore',
+                        issuanceFields:{productionMaterialLineId:plan.line.productionRunLineId,
+                            operationWorkEffortId:plan.operationWorkEffortId, enteredQuantity:plan.unit.enteredQuantity,
+                            enteredQuantityUomId:plan.unit.enteredUomId, appliedConversionFactor:plan.unit.factor}}"/>
+            <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId,
+                    'mantle.product.issuance.AssetIssuance', issued.assetIssuanceId, {resultCode: 'ISSUED',
+                        workEffortId: plan.run.workEffortId, productionRunLineId: plan.line.productionRunLineId,
+                        operationWorkEffortId: plan.operationWorkEffortId, assetId: plan.asset.assetId,
+                        productId: plan.asset.productId, lotId: plan.asset.lotId || null,
+                        quantity: production.text(plan.unit.stockQuantity), assetIssuanceId: issued.assetIssuanceId,
+                        remaining: production.text(production.materialTotals(plan.line).remaining), warnings: warnings})"/>
+        </actions>
+    </service>
+    <service verb="return" noun="UnusedMaterial" allow-remote="false">
+        <description>Return unused material from a run (design-manufacturing MaterialIssueReceipt Return unused, M2): a new
+            receipt fact through mantle.product.AssetServices.receive#Asset, into the original asset where it is or into a new
+            asset at the chosen location with the original acquireCost, lot and owner, with the run's workEffortId,
+            AssetReceipt.sourceAssetIssuanceId and the issuance's operation, so AssetReceiptGlPost posts Dr inventory, Cr WIP
+            at the original cost in the open period (D13, R-SA-02). Never cancel#AssetIssuance or an update of the issuance.
+            A retry with the same operation key answers the first. Requires STOCK_ISSUE; refuses an issuance that is not a
+            work effort's or a run outside the user's organizations (RECORD_UNAVAILABLE), a closed or cancelled run
+            (RUN_CLOSED), no quantity (QUANTITY_INVALID), more than is left of the issuance (QUANTITY_EXCEEDS_ISSUED), a
+            facility of another owner (OWNER_MISMATCH), a closed or missing location (LOCATION_CLOSED, LOCATION_UNAVAILABLE,
+            LOCATION_REQUIRED) and a closed fiscal period today (PERIOD_CLOSED, read without locking).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetIssuanceId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="toFacilityId"><description>With toLocationSeqId; the original asset's facility when
+                empty.</description></parameter>
+            <parameter name="toLocationSeqId"><description>Empty returns into the original asset.</description></parameter>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RETURNED, workEffortId, assetIssuanceId, assetId
+                (the stock returned to), intoOriginal, productId, quantity, facilityId, locationSeqId, assetReceiptId, and
+                the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionReturn', 'STOCK_ISSUE', ['assetIssuanceId', 'quantity',
+                    'toFacilityId', 'toLocationSeqId', 'reason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2-3. the issuance, the original asset (locked), then the destination (locked last) -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="plan" from="production.returnPlan(userScope, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <script>posting.period([plan.run.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- 5. the new receipt fact at the original cost -->
+            <if condition="plan.intoOriginal">
+                <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
+                        in-map="{assetId:plan.source.assetId, productId:plan.source.productId, quantity:plan.quantity,
+                            facilityId:plan.source.facilityId, locationSeqId:plan.source.locationSeqId,
+                            ownerPartyId:plan.source.ownerPartyId, workEffortId:plan.run.workEffortId,
+                            noProduceProduct:'ignore'}"/>
+                <else>
+                    <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
+                            in-map="{productId:plan.source.productId, quantity:plan.quantity,
+                                facilityId:plan.target.facilityId, locationSeqId:plan.target.locationSeqId,
+                                statusId:plan.target.autoStatusId || 'AstAvailable', ownerPartyId:plan.source.ownerPartyId,
+                                acquireCost:plan.source.acquireCost, acquireCostUomId:plan.source.acquireCostUomId,
+                                assetTypeEnumId:plan.source.assetTypeEnumId, classEnumId:plan.source.classEnumId,
+                                lotId:plan.source.lotId, serialNumber:plan.source.serialNumber,
+                                expectedEndOfLife:plan.source.expectedEndOfLife, manufacturedDate:plan.source.manufacturedDate,
+                                assetPoolId:plan.source.assetPoolId, workEffortId:plan.run.workEffortId,
+                                noProduceProduct:'ignore'}"/>
+                    <if condition="plan.source.acquireCostUomId">
+                        <service-call name="update#mantle.product.asset.Asset" disable-authz="true"
+                                in-map="{assetId:received.assetId, acquireCostUomId:plan.source.acquireCostUomId}"/>
+                    </if>
+                </else>
+            </if>
+            <service-call name="update#mantle.product.receipt.AssetReceipt" disable-authz="true"
+                    in-map="{assetReceiptId:received.assetReceiptId, sourceAssetIssuanceId:plan.issuance.assetIssuanceId,
+                        operationWorkEffortId:plan.issuance.operationWorkEffortId, enteredQuantity:plan.quantity,
+                        enteredQuantityUomId:plan.issuance.enteredQuantityUomId, appliedConversionFactor:1,
+                        itemDescription:reason || null}"/>
+            <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
+                    received.assetReceiptId, {resultCode: 'RETURNED', workEffortId: plan.run.workEffortId,
+                        assetIssuanceId: plan.issuance.assetIssuanceId, assetId: received.assetId || plan.source.assetId,
+                        intoOriginal: plan.intoOriginal, productId: plan.source.productId,
+                        quantity: production.text(plan.quantity), facilityId: plan.target.facilityId,
+                        locationSeqId: plan.target.locationSeqId || null, assetReceiptId: received.assetReceiptId})"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="ProductionOutput" allow-remote="false">
+        <description>Receive a released run's output (design-manufacturing MaterialIssueReceipt Receive output, M2):
+            through mantle.product.AssetServices.receive#Asset with the run's workEffortId and owner, at the run's frozen
+            standard unit cost (its productStandardCostId, R-PRD-29); with no approved standard at the issued cost to date
+            (WIP) over the quantity, costProvisional; never without a cost (D12, R-SA-01, COST_UNAVAILABLE). The unit cost is
+            kept at four decimals and the last unit received apart at the remainder's cost, so the receipts carry the value
+            exactly (P6, F166). Output that needs inspection (the tracking policy's inspectionRequired or a published
+            production template, P8) is received AstQuarantine into quarantine with an inspection of each receipt
+            (QisWorkEffort); otherwise to the location given or the putaway resolver's. Serials one per unit (given, or
+            generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each receipt
+            carries the output line, the operation and the quantity as entered. A retry with the same operation key answers
+            the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
+            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID, LINE_REQUIRED), more than the line has
+            left (OVER_RECEIPT), a facility of another owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH,
+            SERIAL_DUPLICATE, LOT_REQUIRED), the destination's refusals and a closed fiscal period today (PERIOD_CLOSED, read
+            without locking).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="productionRunLineId"><description>The run's output line when empty.</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="facilityId"><description>The run's facility when empty.</description></parameter>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="serialNumbers" type="List"/>
+            <parameter name="firstSerialNumber"/>
+            <parameter name="lotNumber"/>
+            <parameter name="lotId"/>
+            <parameter name="expirationDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED, workEffortId, productionRunLineId,
+                operationWorkEffortId, productId, quantity, facilityId, locationSeqId, statusId, inspected, serialNumbers,
+                costSource (standard or issued), costProvisional, assetIds, assetReceiptIds, qualityInspectionIds, and the
+                operation fields; unitCost only with ACCOUNTING_VIEW.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionReceive', 'STOCK_ISSUE', ['workEffortId',
+                    'productionRunLineId', 'quantity', 'quantityUomId', 'operationWorkEffortId', 'facilityId',
+                    'toLocationSeqId', 'serialNumbers', 'firstSerialNumber', 'lotNumber', 'lotId', 'expirationDate'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2-4. the run, its output line (locked), the tracking, the cost and the receipt step's open destination
+                (locked last), all before anything posts -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="plan" from="production.outputPlan(userScope, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <script>posting.period([plan.run.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <set field="posted" from="production.postOutput(userScope, plan, context)"/>
+            <set field="financialRead" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
+                    .has('ACCOUNTING_VIEW')"/>
+            <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
+                    posted.assetReceiptIds[0], {resultCode: 'RECEIVED', workEffortId: plan.run.workEffortId,
+                        productionRunLineId: plan.line.productionRunLineId, operationWorkEffortId: plan.operationWorkEffortId,
+                        productId: plan.product.productId, quantity: production.text(plan.unit.stockQuantity),
+                        facilityId: plan.facility.facilityId, locationSeqId: plan.target.locationSeqId || null,
+                        statusId: plan.target.statusId || 'AstAvailable', inspected: plan.inspect,
+                        serialNumbers: plan.lines.map(line =&gt; line.serialNumber).filter(Boolean),
+                        costSource: plan.cost.costSource, costProvisional: plan.cost.provisional,
+                        unitCost: financialRead ? production.text(plan.lines[0].cost) : null, assetIds: posted.assetIds,
+                        assetReceiptIds: posted.assetReceiptIds, qualityInspectionIds: posted.qualityInspectionIds})"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="SubcontractOutput" allow-remote="false">
+        <description>Receive a subcontract's finished work (design-manufacturing SubcontractDetail, M2; Warehouse runs it from
+            SubcontractShipmentDetail), in one transaction: the run's material lines (of the dispatch's operation, else of
+            the run) issued from the vendor-custody facility the dispatch went to (P15) at the output's share of each line
+            (backflush) or the supplier-reported actuals after review (materialQuantities by line), each through
+            issue#ProductionMaterial under this operation's key; the output received through receive#ProductionOutput with
+            the run's workEffortId and no transfer shipment, never on the service purchase line (which would value it at the
+            PO price); then Purchasing's service acceptance (mantle.order.purchase.ServiceAcceptance, the accept#ServiceItem
+            contract) of the dispatch's service order item with the output receipt and its inspection as evidence, under this
+            entry point's check (§2). A retry with the same operation key answers the first, so the line is accepted once.
+            Requires STOCK_ISSUE; refuses a shipment that is not a subcontract dispatch (NOT_SUBCONTRACT), a facility that is
+            not in custody (NOT_CUSTODY), an order not with its custodian (CUSTODIAN_MISMATCH), stock missing at the vendor
+            facility (MATERIAL_SHORT), and the refusals of the issue, the output receipt and the acceptance
+            (QUANTITY_EXCEEDS_ORDERED, ORDER_CANCELLED, NOT_SERVICE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="productionRunLineId"><description>The run's output line when empty.</description></parameter>
+            <parameter name="materialQuantities" type="Map"><description>Reviewed actuals in stock units by material line;
+                the output's share of each line when empty.</description></parameter>
+            <parameter name="toFacilityId"><description>Where the output goes; the run's facility when empty.</description>
+            </parameter>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="serialNumbers" type="List"/>
+            <parameter name="firstSerialNumber"/>
+            <parameter name="lotNumber"/>
+            <parameter name="acceptedQuantity" type="BigDecimal"><description>The service quantity accepted; the output
+                quantity when empty.</description></parameter>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, workEffortId,
+                operationWorkEffortId, vendorFacilityId, issues (line, asset, quantity, assetIssuanceId), output (the
+                output receipt's result), serviceAcceptanceId, orderId, orderItemSeqId, acceptedQuantity, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractOutput', 'STOCK_ISSUE', ['shipmentId', 'quantity',
+                    'productionRunLineId', 'materialQuantities', 'toFacilityId', 'toLocationSeqId', 'serialNumbers',
+                    'firstSerialNumber', 'lotNumber', 'acceptedQuantity', 'comments'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the dispatch locked, so two receipts of one subcontract queue; then the plan and the operation again -->
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="lockedShipment" for-update="true"
+                    disable-authz="true"><field-map field-name="shipmentId"/></entity-find-one>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="plan" from="production.subcontractPlan(userScope, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3-5. each material issue and the output receipt as operations of their own under this key, then the
+                acceptance -->
+            <set field="issues" from="[]"/>
+            <iterate list="plan.issues" entry="issue">
+                <set field="issueIndex" from="issues.length"/>
+                <service-call name="mantle.work.ProductionServices.issue#ProductionMaterial" out-map="issued"
+                        in-map="{operationKey:operationKey + '/issue/' + issueIndex, workEffortId:plan.run.workEffortId,
+                            productionRunLineId:issue.productionRunLineId, assetId:issue.assetId, quantity:issue.quantity,
+                            operationWorkEffortId:issue.operationWorkEffortId}"/>
+                <script>issues.push({productionRunLineId: issue.productionRunLineId, assetId: issue.assetId,
+                    quantity: production.text(issue.quantity), assetIssuanceId: issued.result.assetIssuanceId})</script>
+            </iterate>
+            <service-call name="mantle.work.ProductionServices.receive#ProductionOutput" out-map="received"
+                    in-map="{operationKey:operationKey + '/output', workEffortId:plan.run.workEffortId,
+                        productionRunLineId:plan.output.productionRunLineId, quantity:plan.quantity,
+                        operationWorkEffortId:plan.operationWorkEffortId, facilityId:toFacilityId || null,
+                        toLocationSeqId:toLocationSeqId || null, serialNumbers:serialNumbers || null,
+                        firstSerialNumber:firstSerialNumber || null, lotNumber:lotNumber || null}"/>
+            <set field="accepted" from="ec.resource.script('component://mr-mantle/service/mantle/order/ServiceAcceptance.js')
+                    .accept(userScope, {orderId: plan.orderId, orderItemSeqId: plan.orderItemSeqId,
+                        acceptedQuantity: acceptedQuantity ?? plan.quantity,
+                        workEffortId: plan.operationWorkEffortId || plan.run.workEffortId,
+                        assetReceiptId: received.result.assetReceiptIds[0] || null,
+                        qualityInspectionId: received.result.qualityInspectionIds[0] || null, comments: comments})"/>
+            <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.order.purchase.ServiceAcceptance',
+                    accepted.serviceAcceptanceId, {resultCode: 'RECEIVED', shipmentId: shipmentId,
+                        workEffortId: plan.run.workEffortId, operationWorkEffortId: plan.operationWorkEffortId,
+                        vendorFacilityId: plan.vendorFacility.facilityId, issues: issues, output: received.result,
+                        serviceAcceptanceId: accepted.serviceAcceptanceId, orderId: plan.orderId,
+                        orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity})"/>
+        </actions>
+    </service>
 </services>
