@@ -522,7 +522,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="pickQuantity" from="picking.quantityToPick(src, quantity)"/>
             <set field="containerId" from="toContainerId || sh.shipment.pickContainerId || null"/>
             <if condition="containerId"><script>posting.container(userScope, containerId)</script></if>
-            <set field="pickAssets" from="picking.reservedAt(userScope, sh, src, context, pickQuantity, containerId)"/>
+            <!-- a transfer line (P15) has no order and no reservation: the scanned stock's available quantity -->
+            <set field="pickAssets" from="src.orderId ? picking.reservedAt(userScope, sh, src, context, pickQuantity, containerId)
+                    : picking.transferStockAt(userScope, sh, src, context, pickQuantity, containerId)"/>
             <!-- 3-4. after the assets, the container's open location (the one lock order), and the status it gives them -->
             <set field="target" from="containerId ? posting.destination(userScope, sh.facilityId,
                     {toContainerId: containerId}) : null"/>
@@ -533,11 +535,14 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <set field="warnings" from="picking.expiryWarnings(pickAssets)"/>
             <!-- 5. Mantle's pick of this line, and what was entered -->
-            <service-call name="mantle.shipment.ShipmentServices.pickMove#ShipmentProduct" disable-authz="true"
-                    out-map="picked" in-map="{shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
-                        pickAssetId:assetId || null, scanProduct:src.productId, locationSeqId:locationSeqId || null,
-                        toContainerId:containerId,
-                        quantity:pickQuantity, insufficientQtyWarn:false}"/>
+            <if condition="src.orderId">
+                <service-call name="mantle.shipment.ShipmentServices.pickMove#ShipmentProduct" disable-authz="true"
+                        out-map="picked" in-map="{shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
+                            pickAssetId:assetId || null, scanProduct:src.productId, locationSeqId:locationSeqId || null,
+                            toContainerId:containerId,
+                            quantity:pickQuantity, insufficientQtyWarn:false}"/>
+                <else><set field="picked" from="picking.pickTransfer(sh, src, pickAssets, pickQuantity, containerId)"/></else>
+            </if>
             <if condition="picking.number(picked.quantityPicked) != pickQuantity">
                 <return error="true" message="NOT_RESERVED_HERE: Only ${picked.quantityPicked} of ${pickQuantity} could be
                         picked on line ${shipmentItemSourceId}"/>
@@ -2039,6 +2044,421 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
                     .execute('requestReturnLabel', context)"/>
+        </actions>
+    </service>
+    <!-- ===== transfers, stock requests and the subcontract dispatch (impl-warehouse P15) ===== -->
+    <service verb="create" noun="Transfer" allow-remote="false">
+        <description>Create a transfer (design-warehouse §8 NewTransfer): a ShpTpTransfer shipment through
+            mantle.shipment.ShipmentServices.create#Shipment from the owner to itself, its route from the origin facility to
+            the destination, and a source line per product and quantity through create#ShipmentItem. With the production work
+            and service order item (subcontractWorkEffortId, subcontractOrderId, subcontractOrderItemSeqId) it is a
+            subcontract dispatch, or the return of unused components, to or from an organization-owned vendor-custody facility
+            (a Custodian facility party). A retry with the same operation key answers the first. Requires STOCK_MOVE
+            (PERMISSION_DENIED); refuses a facility outside the user's organizations (RECORD_UNAVAILABLE), a closed one
+            (FACILITY_CLOSED), the same facility at both ends (SAME_FACILITY: a move), two owners (OWNER_MISMATCH), no lines
+            (LINES_REQUIRED), a product that is not stocked (NOT_STOCK) or a quantity not above zero (QUANTITY_INVALID); for a
+            subcontract dispatch no vendor-custody facility at either end (NOT_CUSTODY), a missing key (SUBCONTRACT_KEYS),
+            work that is not a production run or its operation (RUN_REQUIRED), a run of another owner or outside the user's
+            facilities, or an order not bought by the facilities' owner (RECORD_UNAVAILABLE), an order item not linked to the
+            work (SUBCONTRACT_LINK, OrderItemWorkEffort), whose supplier is not the custodian (CUSTODIAN_MISMATCH), on a
+            cancelled order (ORDER_CANCELLED) or not a service (NOT_SERVICE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="originFacilityId" required="true"/>
+            <parameter name="destinationFacilityId" required="true"/>
+            <parameter name="lines" type="List" required="true"><description>Maps of productId and quantity (stock
+                units).</description></parameter>
+            <parameter name="estimatedShipDate" type="Timestamp"/>
+            <parameter name="estimatedArrivalDate" type="Timestamp"/>
+            <parameter name="reference"/>
+            <parameter name="subcontractWorkEffortId"/>
+            <parameter name="subcontractOrderId"/>
+            <parameter name="subcontractOrderItemSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CREATED, shipmentId, originFacilityId,
+                destinationFacilityId, ownerPartyId, custodianPartyId, subcontract, lines (shipmentItemSourceId, productId,
+                quantity), and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="begun" from="posting.begin(context, 'TransferCreate', 'STOCK_MOVE', ['originFacilityId',
+                    'destinationFacilityId', 'lines', 'estimatedShipDate', 'estimatedArrivalDate', 'reference',
+                    'subcontractWorkEffortId', 'subcontractOrderId', 'subcontractOrderItemSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="created" from="transfers.create(userScope, context)"/>
+            <set field="result" from="posting.complete(begun.op, created.ownerPartyId, 'mantle.shipment.Shipment',
+                    created.shipmentId, Object.assign({resultCode: 'CREATED'}, created))"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="TransferStock" allow-remote="false">
+        <description>Send stock on a transfer line at its origin: the named asset (else the stock the line's guarded picks
+            took, across as many of those assets as the quantity needs) issued to the line through
+            mantle.product.AssetServices.issue#Asset, which posts the issue to the inventory type's transferGlAccountId; the
+            issuance's entered quantity (F7) and the line's not-handled quantity written. The
+            stock keeps its owner and cost for the receipt at the destination (receive#TransferStock). A retry with the same
+            operation key answers the first. Requires STOCK_ISSUE (PERMISSION_DENIED); refuses a transfer or line outside the
+            user's facilities (RECORD_UNAVAILABLE), one that has shipped (TRANSFER_SHIPPED), a cancelled line
+            (SOURCE_CANCELLED), more than is left to send (QUANTITY_EXCEEDS_REMAINING), no stock named or picked
+            (ASSET_REQUIRED), stock of another facility (OTHER_FACILITY), product (PRODUCT_MISMATCH) or owner
+            (OWNER_MISMATCH), quarantined
+            (HELD_STOCK) or otherwise unusable (STATUS_NOT_USABLE) stock, more than its available to promise
+            (QUANTITY_EXCEEDS_AVAILABLE: reserved for orders), and a closed fiscal period today (PERIOD_CLOSED, read without
+            locking the periods). Expired and near-expiry stock is sent with a warning naming its date.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="quantity" type="BigDecimal"><description>Empty sends what is left on the line.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ISSUED, shipmentId, shipmentItemSourceId, productId,
+                assetId (the first) and assetIds, facilityId, quantity, issuedQuantity, remainingQuantity, assetIssuanceId and
+                assetIssuanceIds, warnings, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="begun" from="posting.begin(context, 'TransferIssue', 'STOCK_ISSUE', ['shipmentId',
+                    'shipmentItemSourceId', 'assetId', 'quantity'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the transfer, its line, then the stock by id; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="tr" from="transfers.transferOf(userScope, shipmentId, 'origin')"/>
+            <script>transfers.requireOpen(tr)</script>
+            <set field="src" from="transfers.sourceOf(tr, shipmentItemSourceId)"/>
+            <set field="line" from="transfers.lineOf(src)"/>
+            <set field="sendQuantity" from="transfers.quantityToSend(line, quantity)"/>
+            <set field="sendPieces" from="transfers.piecesToSend(userScope, tr, src, assetId, sendQuantity)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 4. expiry warnings; the issue posts value, so the period of today (not locking the periods) -->
+            <set field="warnings" from="sendPieces.flatMap(piece =&gt; posting.expiryWarnings(piece.asset.assetId))"/>
+            <script>posting.period([tr.origin.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- 5. Mantle's issue of each asset to the line -->
+            <set field="assetIssuanceIds" from="sendPieces.map(piece =&gt; transfers.postIssue(tr, src, piece.asset,
+                    piece.quantity))"/>
+            <set field="after" from="transfers.lineOf(src)"/>
+            <set field="result" from="posting.complete(begun.op, tr.origin.ownerPartyId, 'mantle.shipment.ShipmentItemSource',
+                    shipmentItemSourceId, {resultCode: 'ISSUED', shipmentId: shipmentId,
+                        shipmentItemSourceId: shipmentItemSourceId, productId: src.productId,
+                        assetId: sendPieces[0].asset.assetId, assetIds: sendPieces.map(piece =&gt; piece.asset.assetId),
+                        facilityId: tr.originFacilityId, quantity: transfers.text(sendQuantity),
+                        issuedQuantity: transfers.text(after.issued), remainingQuantity: transfers.text(after.toSend),
+                        assetIssuanceId: assetIssuanceIds[0], assetIssuanceIds: assetIssuanceIds, warnings: warnings})"/>
+        </actions>
+    </service>
+    <service verb="ship" noun="Transfer" allow-remote="false">
+        <description>Ship a transfer from its origin: every line sent in full, or with shipShort each line lowered to what was
+            sent (a line with nothing sent cancelled, its ShipmentItem quantity kept equal to its lines'); then
+            mantle.shipment.ShipmentServices.ship#Shipment (a picked transfer through Packed). The stock is then in transit:
+            on the owner's books at the transfer account and not usable at the destination until it is received. A retry with
+            the same operation key answers the first. Requires SHIPMENT_SHIP or STOCK_ISSUE (PERMISSION_DENIED); refuses a
+            transfer outside the user's facilities (RECORD_UNAVAILABLE), one already shipped (TRANSFER_SHIPPED), nothing sent
+            (NOTHING_SENT) and lines not sent in full without shipShort (OUTSTANDING, naming them).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipShort" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SHIPPED, shipmentId, delivered (a subcontract dispatch
+                whose lines all went by moves is delivered at once), shortLines (shipmentItemSourceId, productId, sent, of), and
+                the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="begun" from="posting.begin(context, 'TransferShip', ['SHIPMENT_SHIP', 'STOCK_ISSUE'], ['shipmentId',
+                    'shipShort'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="tr" from="transfers.transferOf(userScope, shipmentId, 'origin')"/>
+            <script>transfers.requireOpen(tr)</script>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="plan" from="transfers.shipPlan(tr, context)"/>
+            <if condition="plan.outstanding.length"><script>transfers.shipShortLines(tr, plan.outstanding)</script></if>
+            <set field="delivered" from="transfers.shipShipment(tr)"/>
+            <set field="result" from="posting.complete(begun.op, tr.origin.ownerPartyId, 'mantle.shipment.Shipment', shipmentId,
+                    {resultCode: 'SHIPPED', shipmentId: shipmentId, delivered: delivered,
+                        shortLines: plan.outstanding.map(row =&gt;
+                        ({shipmentItemSourceId: row.source.shipmentItemSourceId, productId: row.source.productId,
+                            sent: transfers.text(row.issued.add(row.moved)), of: transfers.text(row.quantity)}))})"/>
+        </actions>
+    </service>
+    <service verb="receive" noun="TransferStock" allow-remote="false">
+        <description>Receive part or all of a shipped transfer at its destination, as the receive guard receives a purchase
+            line (receive#ShipmentStock): the operation policy's receipt step at posting (1 the putaway destination, else the
+            receiving location with the reason, or the receiver's location; 2 the receiving location; 3 quarantine) and, when
+            a step 3, the tracking policy or a published receipt template asks for it, quarantine and the inspection of each
+            accepted receipt (mantle.product.QualityServices). The accepted, then the rejected, quantity is taken from the
+            line's issuances still in transit in order, each piece received through
+            mantle.product.AssetServices.receive#Asset with its issuance's stock: its acquireCost, owner, lot, serial and
+            expiry, the receipt linked to the issuance (AssetReceipt.sourceAssetIssuanceId), so the receipt posts to the
+            transfer account at the origin's cost. A line's quantity in transit is its issuances less its receipts, each summed
+            on its own (F37; never ShipmentItemDetail or receive#EntireShipment). The transfer is delivered when nothing is
+            left in transit. A retry with the same operation key answers the first. Requires STOCK_RECEIVE
+            (PERMISSION_DENIED); refuses a transfer outside the user's facilities (RECORD_UNAVAILABLE), one not shipped yet
+            (TRANSFER_NOT_SHIPPED) or already delivered (RECEIPT_CLOSED), a product not on it (PRODUCT_NOT_ON_RECEIPT), no
+            quantity (QUANTITY_INVALID), more than is in transit (OVER_RECEIPT), a rejection without a reason
+            (REASON_REQUIRED), a closed or missing destination (LOCATION_CLOSED, LOCATION_UNAVAILABLE, LOCATION_REQUIRED) and
+            a closed fiscal period today for the owner (PERIOD_CLOSED, read without locking the periods).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="shipmentItemSourceId"><description>One line, instead of every line of the product.</description>
+            </parameter>
+            <parameter name="quantityAccepted" type="BigDecimal"/>
+            <parameter name="quantityRejected" type="BigDecimal"/>
+            <parameter name="rejectionReasonEnumId"/>
+            <parameter name="locationSeqId"><description>The receiver's destination, within the receipt step.</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, facilityId, productId,
+                quantityAccepted, quantityRejected, receiptSteps, locationSeqId, statusId, putawayExplanation, ownerPartyIds,
+                costCarried, assetIds, assetReceiptIds, qualityInspectionIds, inTransitQuantity (left after), delivered, and
+                the operation fields; acquireCosts only with ACCOUNTING_VIEW.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="receiving" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Receiving.js')"/>
+            <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
+            <set field="begun" from="posting.begin(context, 'TransferReceive', 'STOCK_RECEIVE', ['shipmentId', 'productId',
+                    'shipmentItemSourceId', 'quantityAccepted', 'quantityRejected', 'rejectionReasonEnumId',
+                    'locationSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the transfer, then its lines by id; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="tr" from="transfers.receivingTransfer(userScope, shipmentId)"/>
+            <set field="lines" from="transfers.receiveLines(tr, context)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 3-4. the quantities against what is in transit, the pieces by issuance, the policy, the receipt step's
+                open destination (locked last) and whether the receipt is inspected, all before anything posts -->
+            <set field="quantities" from="transfers.receiveQuantities(lines, context)"/>
+            <set field="receiveProductId" from="lines[0].source.productId"/>
+            <set field="policy" from="receiving.policyOf(tr.destinationFacilityId, receiveProductId)"/>
+            <set field="inspect" from="quality.receiptNeedsInspection(tr.destination, receiveProductId, policy)"/>
+            <set field="operation" from="inspect ? Object.assign({}, policy.operation, {receiptSteps: 3}) : policy.operation"/>
+            <set field="receivePieces" from="transfers.pieces(lines, quantities)"/>
+            <set field="target" from="receiving.destination(userScope, tr.destinationFacilityId, receiveProductId,
+                    operation, locationSeqId, quantities.accepted, receivePieces[0]?.asset?.ownerPartyId)"/>
+            <set field="plan" from="{pieces: receivePieces, target: target}"/>
+            <script>posting.period([tr.destination.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- 5. each piece received with its issuance's stock; the entered quantity; the inspections; delivered when
+                nothing is left in transit -->
+            <set field="posted" from="transfers.postPieces(tr, plan, context)"/>
+            <entity-find-one entity-name="mantle.product.Product" value-field="receiveProduct" disable-authz="true">
+                <field-map field-name="productId" from="receiveProductId"/></entity-find-one>
+            <script>receiving.stamp(posted.assetReceiptIds.map(id =&gt; ec.entity.find('mantle.product.receipt.AssetReceipt')
+                    .condition('assetReceiptId', id).disableAuthz().one()), {enteredUomId: receiveProduct.amountUomId,
+                    factor: toDecimal(1)})</script>
+            <set field="qualityInspectionIds"
+                    from="inspect ? quality.receiptInspections(userScope, posted.assetReceiptIds) : []"/>
+            <set field="delivered" from="transfers.settleReceived(tr)"/>
+            <set field="inTransitAfter" from="transfers.receiveLines(tr, {shipmentId: shipmentId, productId: receiveProductId})
+                    .reduce((sum, row) =&gt; sum.add(row.inTransit), toDecimal(0))"/>
+            <set field="financialRead" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
+                    .has('ACCOUNTING_VIEW')"/>
+            <set field="result" from="posting.complete(begun.op, tr.destination.ownerPartyId, 'mantle.shipment.Shipment',
+                    shipmentId, {resultCode: 'RECEIVED', shipmentId: shipmentId, facilityId: tr.destinationFacilityId,
+                        productId: receiveProductId, quantityAccepted: transfers.text(quantities.accepted),
+                        quantityRejected: transfers.text(quantities.rejected), receiptSteps: plan.target.receiptSteps,
+                        locationSeqId: plan.target.locationSeqId, statusId: plan.target.statusId,
+                        putawayExplanation: plan.target.putaway?.explanation || null,
+                        ownerPartyIds: [...new Set(plan.pieces.map(piece =&gt; piece.asset?.ownerPartyId).filter(Boolean))],
+                        costCarried: plan.pieces.every(piece =&gt; piece.asset?.acquireCost != null),
+                        acquireCosts: financialRead ? plan.pieces.map(piece =&gt; piece.asset?.acquireCost == null ? null
+                            : String(piece.asset.acquireCost)) : null,
+                        assetIds: posted.assetIds, assetReceiptIds: posted.assetReceiptIds,
+                        qualityInspectionIds: qualityInspectionIds, inTransitQuantity: transfers.text(inTransitAfter),
+                        delivered: delivered})"/>
+        </actions>
+    </service>
+    <service verb="dispatch" noun="SubcontractStock" allow-remote="false">
+        <description>Dispatch components to a vendor-custody facility with no in-transit step, or take back unused ones the
+            same way (design-warehouse §8 SubcontractShipmentDetail): an asset, or part of it, on a subcontract dispatch's line
+            moved through mantle.product.AssetServices.move#Asset to a location of the other facility, which keeps its owner
+            and cost and posts nothing; the line's not-handled quantity lowered. When every line went this way the dispatch is
+            shipped and delivered. A retry with the same operation key answers the first. Requires STOCK_MOVE
+            (PERMISSION_DENIED); refuses a dispatch outside the user's facilities (RECORD_UNAVAILABLE), a transfer that is not
+            a subcontract dispatch (NOT_SUBCONTRACT), one shipped (TRANSFER_SHIPPED), a cancelled line (SOURCE_CANCELLED),
+            more than is left to send (QUANTITY_EXCEEDS_REMAINING), stock of another facility or product, held or unusable
+            stock, more than its available to promise (as issue#TransferStock), a closed or missing location
+            (LOCATION_CLOSED, LOCATION_UNAVAILABLE, LOCATION_REQUIRED) and a status change with no flow
+            (HELD_STOCK).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentItemSourceId" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"><description>Empty sends what is left on the line.</description>
+            </parameter>
+            <parameter name="toLocationSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode DISPATCHED, shipmentId, shipmentItemSourceId,
+                productId, assetId, toAssetId, quantity, fromFacilityId, toFacilityId, toLocationSeqId, ownerPartyId,
+                statusId, delivered, warnings, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractDispatch', 'STOCK_MOVE', ['shipmentId',
+                    'shipmentItemSourceId', 'assetId', 'quantity', 'toLocationSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the dispatch, its line, the stock by id; 3. the other facility's open location, locked last -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="tr" from="transfers.dispatchTransfer(userScope, shipmentId)"/>
+            <set field="src" from="transfers.sourceOf(tr, shipmentItemSourceId)"/>
+            <set field="line" from="transfers.lineOf(src)"/>
+            <set field="sendQuantity" from="transfers.quantityToSend(line, quantity)"/>
+            <set field="asset" from="transfers.stockToSend(userScope, tr, src, assetId, sendQuantity)"/>
+            <set field="target" from="posting.destination(userScope, tr.destinationFacilityId,
+                    {toLocationSeqId: toLocationSeqId})"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <!-- 4. held stock stays held; expiry is a warning -->
+            <set field="statusAfter" from="posting.keepHeld(asset, target)"/>
+            <set field="warnings" from="posting.expiryWarnings(asset.assetId)"/>
+            <!-- 5. Mantle's move to the other facility: the owner and cost stay, nothing posts -->
+            <service-call name="mantle.product.AssetServices.move#Asset" disable-authz="true" out-map="moved"
+                    in-map="{assetId:asset.assetId, facilityId:tr.destinationFacilityId, locationSeqId:target.locationSeqId,
+                        containerId:null, quantity:sendQuantity}"/>
+            <set field="toAssetId" from="moved.newAssetId || asset.assetId"/>
+            <script>transfers.handled(src, sendQuantity)</script>
+            <!-- shipped and delivered when every line went by moves, this one counted before its answer is stored -->
+            <set field="delivered" from="transfers.settleDispatched(tr, {[shipmentItemSourceId]: sendQuantity})"/>
+            <set field="answer" from="{resultCode: 'DISPATCHED', shipmentId: shipmentId,
+                    shipmentItemSourceId: shipmentItemSourceId, productId: src.productId, assetId: asset.assetId,
+                    toAssetId: toAssetId, quantity: transfers.text(sendQuantity), fromFacilityId: tr.originFacilityId,
+                    toFacilityId: tr.destinationFacilityId, toLocationSeqId: target.locationSeqId,
+                    ownerPartyId: asset.ownerPartyId, statusId: statusAfter, delivered: delivered, warnings: warnings}"/>
+            <set field="result" from="posting.complete(begun.op, tr.origin.ownerPartyId, 'mantle.shipment.ShipmentItemSource',
+                    shipmentItemSourceId, answer)"/>
+        </actions>
+    </service>
+    <service verb="allocate" noun="InventoryRequest" allow-remote="false">
+        <description>Allocate stock to an approved internal stock request (design-warehouse §8 RequestDetail, crosscut §3.11
+            InventoryRequestProgress; WH-REQUEST): from another facility a transfer to the request's facility (create#Transfer's
+            checks, one line per item), from the request's own facility a guarded move of a named asset to a location there
+            (move#Stock, as its own operation under this key), each recorded as an InventoryRequestAllocation. The request's
+            progress then comes from these movements (get#InventoryRequestProgress). A retry with the same operation key
+            answers the first. Requires STOCK_MOVE (PERMISSION_DENIED); refuses a request outside the user's facilities
+            (RECORD_UNAVAILABLE), one that is not a stock request (NOT_INVENTORY_REQUEST) or not approved (NOT_APPROVED), an
+            item of another request, an item on two rows (DUPLICATE_ITEM), no quantity (QUANTITY_INVALID), more than is
+            approved and not yet allocated (QUANTITY_EXCEEDS_APPROVED), stock not at the request's facility for a move
+            (OTHER_FACILITY); and what create#Transfer or move#Stock refuse.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="requestId" required="true"/>
+            <parameter name="fromFacilityId" required="true"/>
+            <parameter name="allocationRows" type="List" required="true"><description>Maps of requestItemSeqId and quantity
+                (stock units); for a move within the facility also assetId and toLocationSeqId.</description></parameter>
+            <parameter name="estimatedArrivalDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ALLOCATED, requestId, kind (transfer or move),
+                shipmentId, allocations (allocationId, requestItemSeqId, quantity, shipmentItemSourceId, assetId), and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="transfers" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Transfers.js')"/>
+            <set field="begun" from="posting.begin(context, 'InventoryRequestAllocate', 'STOCK_MOVE', ['requestId',
+                    'fromFacilityId', 'allocationRows', 'estimatedArrivalDate'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- 2. the request, locked, approved and in scope; then the operation once more -->
+            <set field="userScope" from="posting.scope()"/>
+            <set field="req" from="transfers.inventoryRequest(userScope, requestId)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="plannedRows" from="transfers.allocationRows(req, context)"/>
+            <set field="allocations" from="[]"/>
+            <if condition="fromFacilityId == req.facility.facilityId">
+                <then>
+                    <!-- within the facility: each row a guarded move of the named asset, its own operation -->
+                    <set field="kind" value="move"/>
+                    <set field="shipmentId" from="null"/>
+                    <iterate list="plannedRows" entry="plannedRow">
+                        <if condition="!plannedRow.assetId || !plannedRow.toLocationSeqId">
+                            <return error="true" message="ASSET_REQUIRED: A move within the facility names the stock and
+                                    the location for item ${plannedRow.item.requestItemSeqId}"/>
+                        </if>
+                        <entity-find-one entity-name="mantle.product.asset.Asset" value-field="rowAsset" disable-authz="true">
+                            <field-map field-name="assetId" from="plannedRow.assetId"/></entity-find-one>
+                        <if condition="rowAsset?.productId != plannedRow.item.productId">
+                            <return error="true" message="PRODUCT_MISMATCH: Asset ${plannedRow.assetId} is not
+                                    ${plannedRow.item.productId}"/>
+                        </if>
+                        <!-- the stock is at the request's facility (P15 review A1); move#Stock refuses another facility too -->
+                        <if condition="rowAsset.facilityId != req.facility.facilityId">
+                            <return error="true" message="OTHER_FACILITY: Asset ${plannedRow.assetId} is not at
+                                    ${req.facility.facilityId}; stock from another facility comes on a transfer"/>
+                        </if>
+                        <service-call name="mantle.shipment.WarehouseTaskServices.move#Stock" out-map="moveOut"
+                                in-map="{operationKey: begun.op.clientKey + '/' + plannedRow.index + '/' +
+                                        plannedRow.item.requestItemSeqId,
+                                    assetId: plannedRow.assetId, quantity: plannedRow.quantity,
+                                    toLocationSeqId: plannedRow.toLocationSeqId, toFacilityId: req.facility.facilityId,
+                                    reason: 'Stock request ' + requestId}"/>
+                        <set field="allocationId" from="transfers.writeAllocation(req, plannedRow, {allocationTypeEnumId:
+                                'IratMove', fromFacilityId: fromFacilityId, assetId: moveOut.result.toAssetId},
+                                begun.op.operationKey)"/>
+                        <script>allocations.push({allocationId: allocationId, requestItemSeqId:
+                            plannedRow.item.requestItemSeqId, quantity: transfers.text(plannedRow.quantity),
+                            assetId: moveOut.result.toAssetId, shipmentItemSourceId: null})</script>
+                    </iterate>
+                </then>
+                <else>
+                    <!-- from another facility: one transfer to the request's facility, a line per item -->
+                    <set field="kind" value="transfer"/>
+                    <set field="created" from="transfers.create(userScope, {originFacilityId: fromFacilityId,
+                            destinationFacilityId: req.facility.facilityId, estimatedArrivalDate: estimatedArrivalDate,
+                            reference: 'Stock request ' + requestId, lines: plannedRows.map(row =&gt;
+                                ({productId: row.item.productId, quantity: row.quantity}))})"/>
+                    <set field="shipmentId" from="created.shipmentId"/>
+                    <script><![CDATA[
+                        plannedRows.forEach((row, index) => {
+                            const sourceId = created.lines[index].shipmentItemSourceId
+                            const allocationId = transfers.writeAllocation(req, row, {allocationTypeEnumId: 'IratTransfer',
+                                fromFacilityId: fromFacilityId, shipmentId: shipmentId, shipmentItemSourceId: sourceId},
+                                begun.op.operationKey)
+                            allocations.push({allocationId: allocationId, requestItemSeqId: row.item.requestItemSeqId,
+                                quantity: transfers.text(row.quantity), assetId: null, shipmentItemSourceId: sourceId})
+                        })
+                    ]]></script>
+                </else>
+            </if>
+            <set field="result" from="posting.complete(begun.op, req.facility.ownerPartyId, 'mantle.request.Request',
+                    requestId, {resultCode: 'ALLOCATED', requestId: requestId, kind: kind, shipmentId: shipmentId,
+                        allocations: allocations})"/>
         </actions>
     </service>
 </services>
