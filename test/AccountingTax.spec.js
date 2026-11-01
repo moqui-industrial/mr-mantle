@@ -353,6 +353,46 @@ feature("a sales tax statement for a period lists its invoice lines and exports 
     }
 })
 
+feature("a statement takes an invoice by its book day, not its timestamp's day in the statement user's zone", {
+    when() {
+        // two invoices at the month's end: one on its last day in the Americas whose timestamp is the next month in UTC,
+        // one on the next month's first day whose timestamp is the month's last day at noon UTC
+        const month = one("mantle.party.time.TimePeriod", {timePeriodId: monthId})
+        const lastDay = helper().lib.policy.calendarDateText(month.thruDate)
+        const [y, m, d] = lastDay.split("-").map(Number)
+        const nextDay = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+        const invoice = (invoiceId, accountingDate, invoiceDate) => {
+            helper().call("create#mantle.account.invoice.Invoice", {
+                invoiceId,
+                invoiceTypeEnumId: "InvoiceSales",
+                fromPartyId: f.org,
+                toPartyId: "NATIVE_TAX_UT",
+                statusId: "InvoiceFinalized",
+                invoiceDate,
+                accountingDate,
+                currencyUomId: "USD"
+            })
+            helper().call("create#mantle.account.invoice.InvoiceItem", {
+                invoiceId,
+                invoiceItemSeqId: "01",
+                itemTypeEnumId: "ItemSalesTax",
+                taxAuthorityId: authorityId,
+                quantity: "1",
+                amount: "1.00"
+            })
+        }
+        invoice("NATIVE_TAX_MONTH_END", lastDay, Date.UTC(y, m - 1, d + 1, 4, 30))
+        invoice("NATIVE_TAX_NEXT_MONTH", nextDay, Date.UTC(y, m - 1, d, 12))
+        login(f.users.tax)
+        const found = tax("find#SalesTaxLines", {organizationPartyId: f.org, taxAuthorityId: authorityId, timePeriodId: monthId})
+        return {lastDay, lines: Array.from(found.lines)}
+    },
+    then({lastDay, lines}) {
+        lines.some(line => line.invoiceId == "NATIVE_TAX_MONTH_END" && line.invoiceDateText == lastDay)
+        !lines.some(line => line.invoiceId == "NATIVE_TAX_NEXT_MONTH")
+    }
+})
+
 // A vendor's approved bill and a delivered payment applied to it, in the year.
 function paidVendor(id, registered, amount, ssn) {
     helper().call("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})

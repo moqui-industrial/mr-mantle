@@ -37,14 +37,39 @@ function statementScope(p, need) {
     return {statement, timePeriod, organizationPartyId: scope.organizationPartyId}
 }
 
-// The issued sales invoices' tax lines of an authority dated in a period, oldest first.
-function lineRows(organizationPartyId, taxAuthorityId, fromTimestamp, thruTimestamp) {
+// The issued sales invoices' tax lines of an authority in a period, oldest first: an invoice with a book day
+// (accountingDate) by that calendar day within the period's days, so the zone of the user who makes the statement does
+// not move an invoice to another month; an older one without it by its timestamp within the period's timestamps.
+function lineRows(organizationPartyId, taxAuthorityId, dates) {
+    const cf = ec.entity.conditionFactory
+    const fromDay = lib.calendarDateText(dates.timePeriod.fromDate),
+        thruDay = lib.calendarDateText(dates.timePeriod.thruDate)
+    const inPeriod = cf.makeCondition(
+        [
+            cf.makeCondition(
+                [
+                    cf.makeCondition("accountingDate", "is-not-null", null),
+                    cf.makeCondition("accountingDate", "greater-equals", fromDay),
+                    cf.makeCondition("accountingDate", "less-equals", thruDay)
+                ],
+                "and"
+            ),
+            cf.makeCondition(
+                [
+                    cf.makeCondition("accountingDate", "is-null", null),
+                    cf.makeCondition("invoiceDate", "greater-equals", dates.fromTimestamp),
+                    cf.makeCondition("invoiceDate", "less-equals", dates.thruTimestamp)
+                ],
+                "and"
+            )
+        ],
+        "or"
+    )
     return Array.from(
         find("mantle.other.tax.InvoiceTaxLine", {fromPartyId: organizationPartyId, taxAuthorityId})
             .condition("itemTypeEnumId", "in", ["ItemSalesTax", "ItemVatTax"])
             .condition("statusId", "in", issuedStatuses)
-            .condition("invoiceDate", "greater-equals", fromTimestamp)
-            .condition("invoiceDate", "less-equals", thruTimestamp)
+            .condition(inPeriod)
             .orderBy("invoiceDate,invoiceId,invoiceItemSeqId")
             .list()
     )
@@ -73,15 +98,18 @@ function salesTaxLines(p) {
         timePeriodId = p.timePeriodId
     }
     const dates = period(timePeriodId, organizationPartyId)
-    const lines = lineRows(organizationPartyId, taxAuthorityId, dates.fromTimestamp, dates.thruTimestamp)
+    const lines = lineRows(organizationPartyId, taxAuthorityId, dates)
     const names = lib.partyNames(lines.map(line => line.toPartyId))
     return Object.assign(totals(lines), {
-        lines: lines.map(line =>
-            Object.assign(lib.display(line), {
+        lines: lines.map(line => {
+            const shown = lib.display(line)
+            return Object.assign(shown, {
+                // the invoice's day is its book day when it has one, as the statement selects it
+                invoiceDateText: line.accountingDate ? shown.accountingDateText : shown.invoiceDateText,
                 customerName: names[line.toPartyId] || "",
                 taxAmount: toDecimal(line.quantity ?? 1).multiply(toDecimal(line.amount ?? 0))
             })
-        ),
+        }),
         lineCount: lines.length
     })
 }
@@ -103,7 +131,7 @@ function createSalesTax(p) {
         })
         if (operation?.old) return lib.previous(operation)
     }
-    const lines = lineRows(organizationPartyId, taxAuthority.taxAuthorityId, dates.fromTimestamp, dates.thruTimestamp)
+    const lines = lineRows(organizationPartyId, taxAuthority.taxAuthorityId, dates)
     const sums = totals(lines)
     const currency = policy.preference(organizationPartyId).baseCurrencyUomId
     const formMap = {
