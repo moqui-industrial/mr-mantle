@@ -131,11 +131,13 @@ spec({
             ["PICK1", "FltPick"],
             ["PICK2", "FltPick"],
             ["PICK3", "FltPick"],
+            ["PICK4", "FltPick"],
             ["BULK1", "FltBulk"],
+            ["BULK2", "FltBulk"],
             ["STAGE1", "FltStaging"]
         ])
             call("create#mantle.facility.FacilityLocation", {facilityId: facility, locationSeqId, locationTypeEnumId})
-        for (const productId of ["WPK_A", "WPK_B", "WPK_FACE"])
+        for (const productId of ["WPK_A", "WPK_B", "WPK_FACE", "WPK_FACE2"])
             call("create#mantle.product.Product", {
                 productId,
                 productName: productId,
@@ -227,6 +229,8 @@ feature("a picker picks one line into the cart and short-picks another: Short, a
             shipmentItemSourceId: state.lineA, quantity: 3, locationSeqId: "PICK1"})
         const reader = run("wpk_reader", T + "pick#ShipmentStock", {operationKey: key(), shipmentId,
             shipmentItemSourceId: state.lineA, quantity: 2, locationSeqId: "PICK1"})
+        const otherAsset = run("wpk_picker", T + "pick#ShipmentStock", {operationKey: key(), shipmentId,
+            shipmentItemSourceId: state.lineA, quantity: 1, assetId: state.assetB})
         const forged = run("wpk_picker", T + "pick#ShipmentStock", {operationKey: key(), shipmentId,
             shipmentItemSourceId: sourcesOf(state.loads[1] ? one("mantle.shipment.Shipment",
                 {shipWorkEffortId: state.loads[1]}).shipmentId : shipmentId)[0].shipmentItemSourceId,
@@ -245,16 +249,18 @@ feature("a picker picks one line into the cart and short-picks another: Short, a
             shipmentItemSourceId: state.lineB, quantityShort: 2, locationSeqId: "PICK2", reasonEnumId: "SprFewer"})
         const recount = short.result ? one("mantle.product.asset.PhysicalInventory",
             {physicalInventoryId: short.result.physicalInventoryId}) : null
-        return {wrongPlace, tooMany, reader, forged, picked, again, short, noReason, overShort, recount, beforeB,
+        state.cartAsset = rows("mantle.product.asset.Asset", {containerId: state.cart})[0]?.assetId
+        return {wrongPlace, tooMany, reader, otherAsset, forged, picked, again, short, noReason, overShort, recount, beforeB,
             afterB: onHandAt("WPK_B", "PICK2"), inCart: rows("mantle.product.asset.Asset", {containerId: state.cart}),
             lineA: one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: state.lineA}),
             exceptions: rows("mantle.shipment.ShipmentPickException", {shipmentItemSourceId: state.lineB})}
     },
-    then({wrongPlace, tooMany, reader, forged, picked, again, short, noReason, overShort, recount, beforeB, afterB, inCart,
+    then({wrongPlace, tooMany, reader, otherAsset, forged, picked, again, short, noReason, overShort, recount, beforeB, afterB, inCart,
         lineA, exceptions}) {
         wrongPlace.error.includes("NOT_RESERVED_HERE")
         tooMany.error.includes("QUANTITY_EXCEEDS_REMAINING")
         reader.error.includes("PERMISSION_DENIED")
+        otherAsset.error.includes("NOT_RESERVED_HERE")
         forged.error.includes("RECORD_UNAVAILABLE")
         picked.error === ""
         picked.result.resultCode === "PICKED"
@@ -284,18 +290,29 @@ feature("a cancelled balance shows in put back, and nothing moves until the pick
         call("mantle.order.OrderServices.cancel#OrderItem", {orderId: lineA.orderId, orderItemSeqId: lineA.orderItemSeqId,
             cancelQuantity: 1})
         const flagged = one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: state.lineA})
+        const afterCancel = rows("mantle.product.issuance.AssetReservation", {orderId: lineA.orderId,
+            orderItemSeqId: lineA.orderItemSeqId})
         const unconfirmed = run("wpk_picker", T + "reverse#Pick", {operationKey: key(), shipmentId,
             shipmentItemSourceId: state.lineA})
         const cartBefore = rows("mantle.product.asset.Asset", {containerId: state.cart}).reduce((s, r) => s + n(r.quantityOnHandTotal), 0)
         const pickBefore = onHandAt("WPK_A", "PICK1")
         const putBack = run("wpk_picker", T + "reverse#Pick", {operationKey: key(), shipmentId,
             shipmentItemSourceId: state.lineA, confirmed: "Y"})
-        return {flagged, unconfirmed, cartBefore, pickBefore, putBack,
+        const afterPutBack = rows("mantle.product.issuance.AssetReservation", {orderId: lineA.orderId,
+            orderItemSeqId: lineA.orderItemSeqId})
+        return {flagged, afterCancel, afterPutBack, unconfirmed, cartBefore, pickBefore, putBack,
             cartAfter: rows("mantle.product.asset.Asset", {containerId: state.cart}).reduce((s, r) => s + n(r.quantityOnHandTotal), 0),
             pickAfter: onHandAt("WPK_A", "PICK1"),
             after: one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: state.lineA})}
     },
-    then({flagged, unconfirmed, cartBefore, pickBefore, putBack, cartAfter, pickAfter, after}) {
+    then({flagged, afterCancel, afterPutBack, unconfirmed, cartBefore, pickBefore, putBack, cartAfter, pickAfter, after}) {
+        // the line's remaining reservation is on the picked stock in the cart, before and after the put back (F262)
+        afterCancel.length === 1
+        afterCancel[0].assetId === state.cartAsset
+        n(afterCancel[0].quantity) === 1
+        afterPutBack.length === 1
+        afterPutBack[0].assetId === state.cartAsset
+        putBack.result.moves[0].reservationKept === false
         n(flagged.quantity) === 1
         n(flagged.putBackQuantity) === 1
         unconfirmed.error.includes("CONFIRMATION_REQUIRED")
@@ -315,18 +332,23 @@ feature("finishing the shipment names what is outstanding until it is backordere
         const shipmentId = state.shipment1
         const outstanding = run("wpk_picker", T + "finish#Pick", {operationKey: key(), shipmentId})
         const finished = run("wpk_picker", T + "finish#Pick", {operationKey: key(), shipmentId, backorderRemaining: "Y"})
+        call("mantle.shipment.ShipmentServices.pack#ShipmentItemSource", {shipmentItemSourceId: state.lineA, quantity: 1})
+        const issued = rows("mantle.product.issuance.AssetIssuance", {shipmentId})
         const loadOutstanding = run("wpk_supervisor", T + "finish#Pick", {operationKey: key(), workEffortId: state.loads[1]})
         const pickerLoad = run("wpk_picker", T + "finish#Pick", {operationKey: key(), workEffortId: state.loads[1]})
-        return {outstanding, finished, loadOutstanding, pickerLoad, shipment: one("mantle.shipment.Shipment", {shipmentId}),
+        return {outstanding, finished, issued, loadOutstanding, pickerLoad, shipment: one("mantle.shipment.Shipment", {shipmentId}),
             lineB: one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: state.lineB}),
             exception: rows("mantle.shipment.ShipmentPickException", {shipmentItemSourceId: state.lineB})[0]}
     },
-    then({outstanding, finished, loadOutstanding, pickerLoad, shipment, lineB, exception}) {
+    then({outstanding, finished, issued, loadOutstanding, pickerLoad, shipment, lineB, exception}) {
+        // packing issues the line from the picked stock in the cart, by its reservation
+        issued.length === 1
+        issued[0].assetId === state.cartAsset
         outstanding.error.includes("OUTSTANDING")
         outstanding.error.includes("WPK_B")
         finished.error === ""
         finished.result.backordered.length === 1
-        shipment.statusId === "ShipPicked"
+        ["ShipPicked", "ShipPacked"].includes(shipment.statusId)
         n(lineB.quantity) === 0
         exception.resolutionEnumId === "SpresBackorder"
         loadOutstanding.error.includes("OUTSTANDING")
@@ -376,6 +398,30 @@ feature("a pick face below its minimum lists its bulk source and is replenished 
         moved.error === ""
         onHandAt("WPK_FACE", "PICK3") === 10
         !after.faceRows.some(row => row.productId === "WPK_FACE")
+    }
+})
+
+feature("a face whose bulk is split over two assets gets a move per source, each within that asset's stock", {
+    when() {
+        as("john.doe", () => {
+            receive("WPK_FACE2", 5, "BULK1")
+            receive("WPK_FACE2", 5, "BULK2")
+            call("create#mantle.facility.ProductFacilityLocation", {productId: "WPK_FACE2", facilityId: facility,
+                locationSeqId: "PICK4", minimumStock: 10, moveQuantity: 8})
+        })
+        const found = run("wpk_mover", T + "find#PickFaceReplenishment", {facilityId: facility, productId: "WPK_FACE2"})
+        const face = found.faceRows[0]
+        const moves = face.sources.filter(source => n(source.moveQuantity) > 0).map(source =>
+            run("wpk_mover", T + "move#Stock", {operationKey: key(), assetId: source.assetId, quantity: source.moveQuantity,
+                toLocationSeqId: face.locationSeqId}))
+        return {face, moves}
+    },
+    then({face, moves}) {
+        n(face.suggestedQuantity) === 8
+        face.sources.map(source => n(source.moveQuantity)).sort().join() === "3,5"
+        moves.length === 2
+        moves.every(move => move.error === "")
+        onHandAt("WPK_FACE2", "PICK4") === 8
     }
 })
 

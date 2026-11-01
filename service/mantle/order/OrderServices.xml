@@ -2045,6 +2045,31 @@ General Order Placement and eCommerce Usage
                 </if>
             </then><else>
                 <!-- reduce OrderItem Reservations by quantityCancelled? no need to, AssetReservation ECA rule will pick it up -->
+                <!-- the OrderItem update's SECA resets the item's reservations by the store's order, which may take them off
+                    stock already picked into a pick container; that stock is what will be packed, so the line's remaining
+                    reservation goes back on it first (impl-warehouse P11, F262) -->
+                <set field="pickedContainerAssetIds" from="[]"/>
+                <iterate list="itemShipmentItemSourceList" entry="pickedSis">
+                    <if condition="toDecimal(pickedSis.quantityPicked ?? 0).compare(0) &gt; 0">
+                        <entity-find-one entity-name="mantle.shipment.Shipment" value-field="pickedShipment">
+                            <field-map field-name="shipmentId" from="pickedSis.shipmentId"/></entity-find-one>
+                        <if condition="pickedShipment?.pickContainerId">
+                            <entity-find entity-name="mantle.product.asset.Asset" list="pickedContainerAssets">
+                                <econdition field-name="containerId" from="pickedShipment.pickContainerId"/>
+                                <econdition field-name="productId" from="orderItem.productId"/>
+                                <econdition field-name="quantityOnHandTotal" operator="greater" from="toDecimal(0)"/>
+                                <order-by field-name="assetId"/>
+                            </entity-find>
+                            <script>for (const pickedAsset of pickedContainerAssets)
+                                pickedContainerAssetIds.push(pickedAsset.assetId)</script>
+                        </if>
+                    </if>
+                </iterate>
+                <if condition="pickedContainerAssetIds.length">
+                    <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem"
+                            in-map="{orderId:orderId, orderItemSeqId:orderItem.orderItemSeqId, resetReservations:true,
+                                assetIdList:pickedContainerAssetIds}"/>
+                </if>
             </else></if>
         </actions>
     </service>

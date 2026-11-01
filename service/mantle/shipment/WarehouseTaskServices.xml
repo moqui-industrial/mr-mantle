@@ -499,17 +499,21 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="pickQuantity" from="picking.quantityToPick(src, quantity)"/>
             <set field="containerId" from="toContainerId || sh.shipment.pickContainerId || null"/>
             <if condition="containerId"><script>posting.container(userScope, containerId)</script></if>
-            <!-- 3-4. the container's open location and the status it gives, then the stock reserved there for the line -->
+            <set field="pickAssets" from="picking.reservedAt(userScope, sh, src, context, pickQuantity, containerId)"/>
+            <!-- 3-4. after the assets, the container's open location (the one lock order), and the status it gives them -->
             <set field="target" from="containerId ? posting.destination(userScope, sh.facilityId,
                     {toContainerId: containerId}) : null"/>
-            <set field="pickAssets" from="picking.reservedAt(userScope, sh, src, context, pickQuantity, target)"/>
+            <if condition="target">
+                <script>for (const pickAsset of pickAssets) posting.keepHeld(pickAsset, target)</script>
+            </if>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
             <set field="warnings" from="picking.expiryWarnings(pickAssets)"/>
             <!-- 5. Mantle's pick of this line, and what was entered -->
             <service-call name="mantle.shipment.ShipmentServices.pickMove#ShipmentProduct" disable-authz="true"
                     out-map="picked" in-map="{shipmentId:shipmentId, shipmentItemSourceId:shipmentItemSourceId,
-                        scanProduct:src.productId, locationSeqId:locationSeqId || null, toContainerId:containerId,
+                        pickAssetId:assetId || null, scanProduct:src.productId, locationSeqId:locationSeqId || null,
+                        toContainerId:containerId,
                         quantity:pickQuantity, insufficientQtyWarn:false}"/>
             <if condition="picking.number(picked.quantityPicked) != pickQuantity">
                 <return error="true" message="NOT_RESERVED_HERE: Only ${picked.quantityPicked} of ${pickQuantity} could be
@@ -589,9 +593,12 @@ along with this software (see the LICENSE.md file). If not, see
             (CONFIRMATION_REQUIRED, nothing moves before), the quantity (by default the line's putBackQuantity, which
             cancel#OrderItem flags when a cancelled balance leaves more picked than the line's quantity, else all picked and not
             packed) moved out of the pick container back to the location each guarded pick took it from (or toLocationSeqId),
-            the line's reservation travelling with it so the allocation is restored (a cancelled balance has none); the line's
-            quantityPicked lowered and its flag cleared; a picked shipment that is short again goes back to Scheduled. Stock
-            picked without a container moves nothing (untrackedQuantity). A retry answers the first. Requires SHIPMENT_PICK;
+            an unpick taking the line's reservation with it so the allocation is restored, a cancelled balance moving none (the
+            line's remaining reservation stays on the picked stock, which cancel#OrderItem re-reserves, F262); each put back
+            names the pick it consumed (pickKey), so a chosen location does not count the pick twice; the line's quantityPicked
+            lowered and its flag cleared; a picked shipment that is short again goes back to Scheduled. Stock picked without a
+            container moves nothing (untrackedQuantity), but a shipment with a pick container refuses quantity no recorded
+            pick covers (UNTRACKED_PICK: move it instead). A retry answers the first. Requires SHIPMENT_PICK;
             refuses as pick#ShipmentStock for the shipment and line, a packed shipment (ALREADY_PACKED: put back from Pack),
             nothing to put back (NOTHING_TO_PUT_BACK), more than is picked and not packed (QUANTITY_EXCEEDS_PICKED), a pick with
             no location to return to (LOCATION_REQUIRED), and a closed location (LOCATION_CLOSED).</description>
@@ -767,11 +774,13 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="PickFaceReplenishment" allow-remote="false">
         <description>PickLocationMoves' BelowMinimum (design-warehouse §9): the pick faces of a facility of the user's
             organizations (ProductFacilityLocation rows of open pick locations with a minimumStock, F19: the first reader of
-            these levels) whose available stock there is below the minimum, each with its bulk sources (available stock at
-            open bulk locations, earliest expiry first) and the suggested quantity (moveQuantity, else up to the minimum), at
-            most what bulk holds. A face with no bulk stock is left out unless includeWithoutSource. Each move goes through
-            move#Stock (STOCK_MOVE). Reads only; requires STOCK_MOVE, SHIPMENT_PICK or SHIPMENT_LOAD_EDIT; refuses a facility
-            outside the scope (RECORD_UNAVAILABLE).</description>
+            these levels; a location closing in the future is still open) whose on-hand stock there, of available status, is
+            below the minimum, each with its bulk sources (available-to-promise stock at open bulk locations, earliest expiry
+            first) and the suggested quantity (moveQuantity, else up to the minimum), at most what bulk holds, split over the
+            sources: each source's moveQuantity is at most its own available stock (F261). A face with no bulk stock is left
+            out unless includeWithoutSource. Each source's move goes through move#Stock (STOCK_MOVE). Reads only; requires
+            STOCK_MOVE, SHIPMENT_PICK or SHIPMENT_LOAD_EDIT; refuses a facility outside the scope
+            (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="facilityId" required="true"/>
             <parameter name="productId"/>
@@ -780,7 +789,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="faceRows" type="List"><description>productId, productName, locationSeqId, minimumStock,
                 moveQuantity, currentQuantity, bulkQuantity, suggestedQuantity, sources (assetId, locationSeqId, lotId,
-                available, expiryDate).</description></parameter>
+                available, expiryDate, moveQuantity: this source's share of the suggestion).</description></parameter>
             <parameter name="truncated" type="Boolean"/>
         </out-parameters>
         <actions>

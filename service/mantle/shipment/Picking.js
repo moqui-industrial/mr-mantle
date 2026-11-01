@@ -65,10 +65,11 @@ function quantityToPick(source, quantity) {
     return wanted
 }
 // The line's reservations whose stock is at the location (and is the asset, when one was scanned), each asset locked in id
-// order and checked as stock of the user's facilities; refuses less reserved there than the quantity (NOT_RESERVED_HERE: a
-// short pick records what is missing) and, when the pick moves the stock into a container, a status the container's location
-// would change (keepHeld).
-function reservedAt(userScope, sh, source, p, quantity, target) {
+// order and checked as stock of the user's facilities, never held stock (HELD_STOCK: quarantine is released only by a
+// disposition, with or without a container); refuses less reserved there than the quantity (NOT_RESERVED_HERE: a short pick
+// records what is missing). Stock already in the pick container (containerId) is not picked again. The caller locks the
+// destination location after these assets (the one lock order) and then checks keepHeld against it.
+function reservedAt(userScope, sh, source, p, quantity, containerId) {
     const reservations = Array.from(
         find(RESERVATION, {orderId: source.orderId, orderItemSeqId: source.orderItemSeqId, productId: source.productId})
             .condition("quantityNotIssued", "not-equals", 0)
@@ -87,9 +88,10 @@ function reservedAt(userScope, sh, source, p, quantity, target) {
         if (!asset || asset.facilityId !== sh.facilityId) continue
         if (!blank(p.locationSeqId) && asset.locationSeqId !== p.locationSeqId) continue
         if (!blank(p.assetId) && asset.assetId !== p.assetId) continue
-        if (target && asset.containerId && asset.containerId === target.containerId) continue
+        if (containerId && asset.containerId === containerId) continue
         posting.stock(userScope, assetId, null)
-        if (target) posting.keepHeld(asset, target)
+        if (posting.heldStatuses.includes(asset.statusId))
+            denied("HELD_STOCK", "Asset " + assetId + " is " + asset.statusId + "; held stock is not picked")
         for (const reservation of byAsset.get(assetId))
             available += Math.max(0, number(reservation.quantityNotIssued) - number(reservation.quantityNotAvailable))
         assets.push(asset)
@@ -219,12 +221,11 @@ function pickedMoves(source) {
             }
             remaining.get(keyOf).quantity += number(move.quantity)
         }
+    // each put back names the pick it consumed (pickKey), whatever location it went to
     for (const answer of answers("ShipmentPickReverse"))
-        for (const move of answer.moves || []) {
-            const keyOf = move.assetId + "|" + (move.toLocationSeqId || "")
-            if (remaining.has(keyOf)) remaining.get(keyOf).quantity -= number(move.quantity)
-        }
-    return order.reverse().map(keyOf => remaining.get(keyOf)).filter(move => move.quantity > 0)
+        for (const move of answer.moves || [])
+            if (move.pickKey && remaining.has(move.pickKey)) remaining.get(move.pickKey).quantity -= number(move.quantity)
+    return order.reverse().map(keyOf => Object.assign(remaining.get(keyOf), {pickKey: keyOf})).filter(move => move.quantity > 0)
 }
 // The quantity to put back (by default the flagged quantity, else everything picked and not packed), and each move back:
 // the picked stock still in its pick container to the location it came from, or to toLocationSeqId. Locks the containers,
@@ -259,21 +260,30 @@ function reversePlan(userScope, sh, source, p) {
         const take = Math.min(left, move.quantity, number(asset.quantityOnHandTotal))
         const toLocationSeqId = blank(p.toLocationSeqId) ? move.fromLocationSeqId : String(p.toLocationSeqId)
         if (!toLocationSeqId) denied("LOCATION_REQUIRED", "Choose where to put back asset " + asset.assetId)
-        moves.push({asset, quantity: take, toLocationSeqId})
+        moves.push({asset, quantity: take, toLocationSeqId, pickKey: move.pickKey})
         left -= take
     }
+    // stock picked into the shipment's container by another path has no recorded pick: it is put back by a move, not here
+    if (left > 0 && sh.shipment.pickContainerId)
+        denied(
+            "UNTRACKED_PICK",
+            text(left) + " picked on line " + source.shipmentItemSourceId + " has no recorded pick to put back; " +
+                "move it out of container " + sh.shipment.pickContainerId + " instead"
+        )
     for (const move of moves) {
         move.target = posting.destination(userScope, sh.facilityId, {toLocationSeqId: move.toLocationSeqId})
         move.statusId = posting.keepHeld(move.asset, move.target)
     }
     return {quantity, moves, untracked: left}
 }
-// The moves (the line's reservation on the stock travels with it, so the allocation is restored; a cancelled balance has
-// none), the line's picked and put back quantities, and the shipment back to Scheduled when a picked shipment is short again.
+// The moves (an unpick takes the line's reservation on the stock with it, so the allocation is restored; a cancelled balance
+// moves no reservation: the line's remaining reservation stays on the picked stock in the container, F262), the line's picked
+// and put back quantities, and the shipment back to Scheduled when a picked shipment is short again.
 function putBack(sh, source, plan) {
     const done = []
+    const cancelledBalance = number(source.putBackQuantity) > 0
     for (const move of plan.moves) {
-        const reservation = Array.from(
+        const reservation = cancelledBalance ? null : Array.from(
             find(RESERVATION, {assetId: move.asset.assetId, orderId: source.orderId, orderItemSeqId: source.orderItemSeqId})
                 .condition("quantityNotIssued", "greater", 0)
                 .list()
@@ -293,8 +303,26 @@ function putBack(sh, source, plan) {
             quantity: text(move.quantity),
             fromContainerId: move.asset.containerId,
             toLocationSeqId: move.target.locationSeqId,
+            pickKey: move.pickKey,
             reservationKept: !!reservation
         })
+    }
+    // move#Asset carries reservations along when stock enters a pick location from elsewhere, so after a cancelled balance's
+    // put back the line's remaining reservation is put back on the picked stock still in the container (F262)
+    if (cancelledBalance && sh.shipment.pickContainerId && source.orderId) {
+        const picked = Array.from(
+            find(ASSET, {containerId: sh.shipment.pickContainerId, productId: source.productId})
+                .condition("quantityOnHandTotal", "greater", 0)
+                .orderBy("assetId")
+                .list()
+        ).map(row => row.assetId)
+        if (picked.length)
+            call("mantle.product.AssetServices.reserve#AssetForOrderItem", {
+                orderId: source.orderId,
+                orderItemSeqId: source.orderItemSeqId,
+                resetReservations: true,
+                assetIdList: picked
+            })
     }
     const fresh = one(SOURCE, {shipmentItemSourceId: source.shipmentItemSourceId})
     const putBackLeft = Math.max(0, number(fresh.putBackQuantity) - plan.quantity)
@@ -368,17 +396,24 @@ function loadOutstanding(workEffortId) {
 }
 
 // ===== pick faces =====
-// The pick faces (ProductFacilityLocation rows of open pick locations with a minimumStock) whose stock there is below the
-// minimum, each with the bulk stock that can refill it (available stock at open bulk locations, earliest expiry first) and the
-// suggested quantity (moveQuantity, else up to the minimum), at most the bulk stock. Faces with no bulk stock are left out
-// unless includeWithoutSource. The first reader of these levels (F19). Reads only.
+// The pick faces (ProductFacilityLocation rows of open pick locations with a minimumStock) whose on-hand stock there (of
+// available status) is below the minimum, each with the bulk stock that can refill it (available-to-promise stock at open
+// bulk locations, earliest expiry first) and the suggested quantity (moveQuantity, else up to the minimum), at most the bulk
+// stock, split over the sources in that order: each source's moveQuantity is at most its own available stock, so each is one
+// move#Stock (F261). Faces with no bulk stock are left out unless includeWithoutSource. The first reader of these levels
+// (F19). A location closing in the future is still open. Reads only.
 const faceLimit = 500
 function pickFaceReplenishment(p) {
     posting.requirePermission(["STOCK_MOVE", "SHIPMENT_PICK", "SHIPMENT_LOAD_EDIT"])
     const userScope = posting.scope()
     const facility = posting.facility(userScope, p.facilityId)
     const facilityId = facility.facilityId
-    const locations = new Map(rows(LOCATION, {facilityId}).filter(row => !row.thruDate).map(row => [row.locationSeqId, row]))
+    const now = lib.ms(ec.user.nowTimestamp)
+    const locations = new Map(
+        rows(LOCATION, {facilityId})
+            .filter(row => !row.thruDate || lib.ms(row.thruDate) > now)
+            .map(row => [row.locationSeqId, row])
+    )
     let faceQuery = find("mantle.facility.ProductFacilityLocation", {facilityId}).condition("minimumStock", "is-not-null", null)
     if (!blank(p.productId)) faceQuery = faceQuery.condition("productId", p.productId)
     const faces = Array.from(faceQuery.orderBy("locationSeqId,productId").limit(faceLimit + 1).list())
@@ -411,6 +446,13 @@ function pickFaceReplenishment(p) {
         if (!sources.length && !truthy(p.includeWithoutSource)) continue
         const bulk = sources.reduce((sum, row) => sum + number(row.available), 0)
         const wanted = number(face.moveQuantity) > 0 ? number(face.moveQuantity) : minimum - current
+        const suggested = Math.min(wanted, bulk)
+        let left = suggested
+        for (const source of sources) {
+            const take = Math.min(left, number(source.available))
+            source.moveQuantity = text(take)
+            left -= take
+        }
         const product = one("mantle.product.Product", {productId: face.productId})
         faceRows.push({
             productId: face.productId,
@@ -420,7 +462,7 @@ function pickFaceReplenishment(p) {
             moveQuantity: face.moveQuantity == null ? null : text(face.moveQuantity),
             currentQuantity: text(current),
             bulkQuantity: text(bulk),
-            suggestedQuantity: text(Math.min(wanted, bulk)),
+            suggestedQuantity: text(suggested),
             sources
         })
     }
