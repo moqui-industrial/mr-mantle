@@ -31,20 +31,43 @@ along with this software (see the LICENSE.md file). If not, see
             is handled. Refuses more than was authorized (RECEIPT_EXCEEDS_RETURN), an item not on the shipment, a closed
             item, a shipment that is not a customer return, and an organization that does not settle returns separately
             (RETURN_SETTLEMENT_OFF: Mantle receives its returns when the shipment is delivered). Needs STOCK_RECEIVE in
-            the receiving organization.</description>
+            the receiving organization. With an operationKey it is the Warehouse return receipt (impl-warehouse P14,
+            ReturnStock.js), on the posting guard: a retry answers the first receipt; the facility is one of the user's
+            organizations' (RECORD_UNAVAILABLE); the tracking policy's lot and serial rules (LOT_REQUIRED,
+            SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE; a serialized line is received a unit at a time); a rejection needs a
+            reason (REASON_REQUIRED); the accepted stock goes as AstQuarantine to a quarantine location (the receiver's,
+            the operation policy's, else the facility's first; LOCATION_NOT_QUARANTINE, LOCATION_REQUIRED, LOCATION_CLOSED),
+            and an inspection of each accepted receipt is created in the same operation (source QisReturn, context
+            QicReturn): its disposition releases the stock; a closed fiscal period today is PERIOD_CLOSED.</description>
         <in-parameters>
             <parameter name="shipmentId" required="true"/>
             <parameter name="facilityId"><description>Defaults to the shipment's destination facility.</description></parameter>
             <parameter name="itemList" type="List" required="true"><description>Maps of returnId, returnItemSeqId,
                 quantityAccepted, quantityRejected, rejectionReasonEnumId and, for the stock, statusId (default
-                AstOnHold) and lotNumber.</description></parameter>
+                AstOnHold) and lotNumber; with an operationKey also serialNumbers, expirationDate and locationSeqId (the
+                status is AstQuarantine).</description></parameter>
+            <parameter name="operationKey"><description>The Warehouse receipt's operation key (a form's render token or a
+                scan id); without it the receipt is Accounting's, unchanged.</description></parameter>
+            <parameter name="locationSeqId"><description>With an operationKey, the quarantine location received
+                into.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="receivedItems" type="List"><description>Each item's returnId, returnItemSeqId,
                 receivedQuantity, statusId and assetReceiptIds.</description></parameter>
             <parameter name="shipmentDelivered" type="Boolean"/>
+            <parameter name="result" type="Map"><description>With an operationKey: resultCode RECEIVED, shipmentId,
+                facilityId, locationSeqId, statusId, quantityAccepted and quantityRejected, receivedItems, assetReceiptIds,
+                qualityInspectionIds, shipmentDelivered, warnings and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
+            <if condition="operationKey">
+                <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                        .execute('receive', context)"/>
+                <set field="result" from="answer.result"/>
+                <set field="receivedItems" from="answer.receivedItems || result.receivedItems"/>
+                <set field="shipmentDelivered" from="!!result.shipmentDelivered"/>
+                <return/>
+            </if>
             <set field="module" value="component://mr-mantle/service/mantle/order/ReturnSettlement.js"/>
             <set field="answer" from="ec.resource.script(module).execute('receive', context)"/>
             <set field="receivedItems" from="answer.receivedItems"/>
@@ -1941,6 +1964,86 @@ along with this software (see the LICENSE.md file). If not, see
                         putawayRuleId: planned.suggested ? planned.resolved.putawayRuleId : null,
                         fromStatusId: asset.statusId, statusId: statusAfter, reservationsChecked: reservationsChecked,
                         warnings: warnings, reason: reason || null})"/>
+        </actions>
+    </service>
+    <!-- ===== supplier returns and the return label (impl-warehouse P14, ReturnStock.js) ===== -->
+    <service verb="issue" noun="SupplierReturnStock" allow-remote="false">
+        <description>Send back part of a supplier return item (design-warehouse SupplierReturnShipment): a quantity of the
+            stock the item names (ReturnItem.assetId, or another asset that holds its receipt's stock) issued to the item's
+            source on the ShpTpPurchaseReturn shipment through mantle.product.AssetServices.issue#AnyAssetForShipmentItemSource
+            with that asset, whatever its status, and packed into the shipment's package; the asset is the returning
+            organization's (OWNER_MISMATCH). Held stock (quarantined or on hold) needs QUALITY_DISPOSE (PERMISSION_DENIED)
+            and, when an inspection holds it, a Return to supplier disposition covering the
+            quantity (RETURN_NOT_DISPOSED); the dispositions' returnedQuantity rises and their inspection's heldQuantity falls
+            by it, so the receipt's held quantity counts it once (get#SourceInspectionStatus). The expiry gate is off on a
+            purchase return (F424). A retry answers the first issue. Requires QUALITY_DISPOSE or STOCK_ISSUE; refuses a
+            shipment outside the user's facilities (RECORD_UNAVAILABLE), one that is not a supplier return
+            (RETURN_SHIPMENT_REQUIRED) or already packed or shipped (SHIPMENT_CLOSED), an item not on it
+            (RETURN_ITEM_NOT_ON_SHIPMENT) or not approved (RETURN_NOT_APPROVED), another product (PRODUCT_MISMATCH), stock at
+            another facility (OTHER_FACILITY), equipment or stock of another status (NOT_STOCK, NOT_ISSUABLE), more than is
+            left to send (QUANTITY_EXCEEDS_REMAINING) or on hand (QUANTITY_EXCEEDS_ON_HAND).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="returnItemSeqId" required="true"/>
+            <parameter name="assetId"><description>Defaults to the item's asset.</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ISSUED, shipmentId, returnId, returnItemSeqId,
+                assetId, statusId, locationSeqId, quantity, remainingQuantity, dispositions (each inspection and disposition
+                with the quantity it sent back) and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('issueSupplierReturn', context)"/>
+        </actions>
+    </service>
+    <service verb="ship" noun="SupplierReturn" allow-remote="false">
+        <description>Ship a supplier return (design-warehouse SupplierReturnShipment, crosscut §3.18): the ShpTpPurchaseReturn
+            shipment with every source issued (OUTSTANDING names each item and what is left), packed and shipped through
+            mantle.shipment.ShipmentServices.pack#Shipment and ship#Shipment, the tracking code given kept on its packages;
+            each return item whose authorized quantity was issued goes to ReturnShipped, and the return once every item has
+            (mantle.order.ReturnServices.checkUpdate#ReturnHeaderStatus). It settles nothing: the supplier credit is
+            Accounting's settle#Return. A retry answers the first. Requires SHIPMENT_SHIP; refuses a shipment outside the
+            user's facilities (RECORD_UNAVAILABLE), not a supplier return (RETURN_SHIPMENT_REQUIRED), already shipped
+            (SHIPMENT_CLOSED) or with no items (NOTHING_TO_SHIP).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="trackingCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SHIPPED, shipmentId, facilityId, returnIds,
+                shippedItems, trackingCode and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('shipSupplierReturn', context)"/>
+        </actions>
+    </service>
+    <service verb="request" noun="ReturnLabel" allow-remote="false">
+        <description>Customer Service's "Issue return label" (design-warehouse ReturnReceipt): an approved customer return's
+            open return shipment gets a package and its route segment, and its label is requested through the carrier
+            interface (mantle.shipment.CarrierServices.request#ShipmentLabels) when a shipping gateway applies to the
+            shipment (LABEL_REQUESTED); with none it answers LABEL_NOT_CONFIGURED and the package waits for the carrier; a
+            label already on the package answers LABEL_EXISTS and requests none. The operation key is the request's identity:
+            a retry answers the first and buys no second label. Requires SHIPMENT_SHIP or RETURN_AUTHORIZE; refuses a return
+            outside the user's organizations (RECORD_UNAVAILABLE), not approved (RETURN_NOT_APPROVED) or with no open return
+            shipment (RETURN_NO_SHIPMENT). P13's durable provider-request records take over the carrier call.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="returnId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode (LABEL_REQUESTED, LABEL_EXISTS, LABEL_NOT_CONFIGURED),
+                shipmentId, returnId, shipmentPackageSeqId, shipmentRouteSegmentSeqId, trackingCode, labelUrl, message and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('requestReturnLabel', context)"/>
         </actions>
     </service>
     <!-- ===== transfers, stock requests and the subcontract dispatch (impl-warehouse P15) ===== -->

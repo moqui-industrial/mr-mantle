@@ -185,6 +185,11 @@ function receive(p) {
                 rejectionReasonEnumId: line.rejectionReasonEnumId,
                 statusId: line.statusId || item.inventoryStatusId || "AstOnHold",
                 lotNumber: line.lotNumber,
+                // the Warehouse return receipt's quarantine location and identity (impl-warehouse P14, ReturnStock.js)
+                locationSeqId: line.locationSeqId || null,
+                lotId: line.lotId || null,
+                serialNumber: line.serialNumber || null,
+                expirationDate: line.expirationDate || null,
                 shipmentId: p.shipmentId,
                 shipmentItemSourceId: source.shipmentItemSourceId,
                 orderId: source.orderId,
