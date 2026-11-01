@@ -1,6 +1,11 @@
 // Financial accounts (mantle.account.FinancialAccountServices): deposits, withdrawals, transfers, authorizations,
 // disbursement and replenishment through payments, statements. New spec, no Groovy original.
-const effectiveTime = Date.now()
+// The pinned clock: the latest first of a month at 04:30 UTC, the evening of the month's last day in the Americas, so the
+// statement month is the user's calendar month and not the UTC one at any time of day.
+const effectiveTime = (() => {
+    const before = new Date(Date.now() - 4.5 * 3600000)
+    return Date.UTC(before.getUTCFullYear(), before.getUTCMonth(), 1, 4, 30)
+})()
 let orgId, ownerId, finAccountId, otherAccountId, authId
 
 spec({
@@ -28,7 +33,7 @@ feature("create financial accounts, and get or create finds the same one", {
     when() {
         orgId = call("mantle.party.PartyServices.create#Organization", { organizationName: "FinAcct Org", roleTypeId: "Supplier" }).partyId
         call("create#mantle.party.PartyRole", { partyId: orgId, roleTypeId: "OrgInternal" })
-        call("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", { sourcePartyId: "DefaultSettings", organizationPartyId: orgId, startYear: String(new Date(effectiveTime).getUTCFullYear()) })
+        call("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", { sourcePartyId: "DefaultSettings", organizationPartyId: orgId, startYear: ec.l10n.format(effectiveTime, "yyyy") })
         ownerId = call("mantle.party.PartyServices.create#Person", { firstName: "Fin", lastName: "Owner" }).partyId
         finAccountId = call("mantle.account.FinancialAccountServices.create#FinancialAccount", { finAccountTypeId: "CustomerCredit", finAccountName: "Credit A",
                 organizationPartyId: orgId, ownerPartyId: ownerId, currencyUomId: "USD" }).finAccountId
@@ -121,11 +126,14 @@ feature("disburse and replenish through payments", {
 
 feature("statement print info", {
     when() {
-        const year = String(new Date(effectiveTime).getUTCFullYear()), month = String(new Date(effectiveTime).getUTCMonth() + 1)
-        return { info: call("mantle.account.FinancialAccountServices.get#StatementPrintInfo", { finAccountId, year, month }) }
+        // the statement month is the user's: the calendar month of today in the user's zone
+        const year = ec.l10n.format(effectiveTime, "yyyy"), month = String(Number(ec.l10n.format(effectiveTime, "MM")))
+        const firstOfMonth = ec.l10n.parseTimestamp(year + "-" + month.padStart(2, "0") + "-01 00:00:00", "yyyy-MM-dd HH:mm:ss")
+        return { info: call("mantle.account.FinancialAccountServices.get#StatementPrintInfo", { finAccountId, year, month }), firstOfMonth }
     },
-    then({ info }) {
+    then({ info, firstOfMonth }) {
         info.financialAccount.finAccountId == finAccountId
+        String(info.fromDate) == String(firstOfMonth)
         info.financialAccountTransList.length >= 1
     },
 })

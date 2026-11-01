@@ -12,7 +12,11 @@ const one = (entity, conditions) => find(entity, conditions).one()
 const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
 const n = value => (value == null ? 0 : Number(String(value)))
 const since = "2000-01-01T00:00:00Z"
-const daysAgo = days => new Date(Date.now() - days * 86400000).toISOString()
+const DAY = 86400000
+// the due feature's pinned clock: the latest 04:30 UTC, still the day before in Chicago, the zone of the spec's users, so
+// its due dates are days in the user's zone and not in UTC at any time of day; the due bins' last counts are days before it
+const dueAt = Math.floor((Date.now() - 4.5 * 3600000) / DAY) * DAY + 4.5 * 3600000
+const daysAgo = days => new Date(dueAt - days * DAY).toISOString()
 // the blind count the scenario's features share, in order
 const state = {}
 let keySeq = 0
@@ -54,6 +58,7 @@ function user(partyId, userGroupId, organizationPartyId) {
         userId: partyId,
         username: partyId.toLowerCase(),
         partyId,
+        timeZone: "America/Chicago",
         currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
         passwordHashType: "SHA"
     })
@@ -144,72 +149,87 @@ spec({
     }
 })
 
+// The due feature's scenario, on its pinned clock: the schedules, a bin emptied today and the due finds of each user. The
+// expected days are the counter's, in the user's zone.
+function dueScenario() {
+    ec.artifactExecution.disableAuthz()
+    const emptied = receive("WCN_EMPTY", 3, "ZERO1", "WCN_DUE")
+    call("mantle.product.AssetServices.change#AssetQuantity", {assetId: emptied, quantityDiff: -3, productId: "WCN_EMPTY"})
+    ec.artifactExecution.enableAuthz()
+    const today = as("wcn_counter", () => ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd"))
+    const month = Number(today.slice(5, 7))
+    const day = Number(today.slice(8, 10))
+    const store = (username, parameters) =>
+        as(username, () =>
+            invoke(
+                "mantle.facility.WarehousePolicyServices.store#CountSchedule",
+                Object.assign({organizationPartyId: org, changeReason: "Cycle count program"}, parameters)
+            )
+        )
+    const counterStore = store("wcn_counter", {
+        facilityId: "WCN_DUE",
+        scheduleKindEnumId: "CskAnnual",
+        annualMonth: month,
+        annualDay: day
+    })
+    const periodic = store("wcn_manager", {
+        facilityId: "WCN_DUE",
+        locationTypeEnumId: "FltPick",
+        scheduleKindEnumId: "CskPeriodic",
+        frequencyDays: 30,
+        countModeEnumId: "CntModeCycle",
+        blindIndicator: "Y"
+    })
+    const annual = store("wcn_manager", {
+        facilityId: "WCN_DUE",
+        scheduleKindEnumId: "CskAnnual",
+        annualMonth: month,
+        annualDay: day
+    })
+    const zero = store("wcn_manager", {facilityId: "WCN_DUE", scheduleKindEnumId: "CskZero"})
+    const mixed = store("wcn_manager", {
+        facilityId: "WCN_DUE",
+        locationTypeEnumId: "FltPick",
+        abcClassEnumId: "AbcA",
+        scheduleKindEnumId: "CskPeriodic",
+        frequencyDays: 7
+    })
+    const due = run("wcn_counter", "find#DueCounts", {facilityId: "WCN_DUE"})
+    const reader = run("wcn_mover", "find#DueCounts", {facilityId: "WCN_DUE"})
+    const outsider = run("wcn_outsider", "find#DueCounts", {facilityId: "WCN_DUE"})
+    const listed = as("wcn_counter", () =>
+        invoke("mantle.facility.WarehousePolicyServices.find#CountSchedules", {
+            organizationPartyId: org,
+            facilityId: "WCN_DUE"
+        })
+    )
+    return {
+        counterStore,
+        periodic,
+        annual,
+        zero,
+        mixed,
+        due,
+        reader,
+        outsider,
+        listed,
+        today,
+        utcDay: new Date(Number(ec.user.nowTimestamp)).toISOString().slice(0, 10)
+    }
+}
+
 feature("a pick-face type every 30 days, the annual date and a location just at zero each come due, the earlier date winning", {
     when() {
-        ec.artifactExecution.disableAuthz()
-        const emptied = receive("WCN_EMPTY", 3, "ZERO1", "WCN_DUE")
-        call("mantle.product.AssetServices.change#AssetQuantity", {assetId: emptied, quantityDiff: -3, productId: "WCN_EMPTY"})
-        ec.artifactExecution.enableAuthz()
-        const month = Number(ec.l10n.format(ec.user.nowTimestamp, "MM"))
-        const day = Number(ec.l10n.format(ec.user.nowTimestamp, "dd"))
-        const store = (username, parameters) =>
-            as(username, () =>
-                invoke(
-                    "mantle.facility.WarehousePolicyServices.store#CountSchedule",
-                    Object.assign({organizationPartyId: org, changeReason: "Cycle count program"}, parameters)
-                )
-            )
-        const counterStore = store("wcn_counter", {
-            facilityId: "WCN_DUE",
-            scheduleKindEnumId: "CskAnnual",
-            annualMonth: month,
-            annualDay: day
-        })
-        const periodic = store("wcn_manager", {
-            facilityId: "WCN_DUE",
-            locationTypeEnumId: "FltPick",
-            scheduleKindEnumId: "CskPeriodic",
-            frequencyDays: 30,
-            countModeEnumId: "CntModeCycle",
-            blindIndicator: "Y"
-        })
-        const annual = store("wcn_manager", {
-            facilityId: "WCN_DUE",
-            scheduleKindEnumId: "CskAnnual",
-            annualMonth: month,
-            annualDay: day
-        })
-        const zero = store("wcn_manager", {facilityId: "WCN_DUE", scheduleKindEnumId: "CskZero"})
-        const mixed = store("wcn_manager", {
-            facilityId: "WCN_DUE",
-            locationTypeEnumId: "FltPick",
-            abcClassEnumId: "AbcA",
-            scheduleKindEnumId: "CskPeriodic",
-            frequencyDays: 7
-        })
-        const due = run("wcn_counter", "find#DueCounts", {facilityId: "WCN_DUE"})
-        const reader = run("wcn_mover", "find#DueCounts", {facilityId: "WCN_DUE"})
-        const outsider = run("wcn_outsider", "find#DueCounts", {facilityId: "WCN_DUE"})
-        const listed = as("wcn_counter", () =>
-            invoke("mantle.facility.WarehousePolicyServices.find#CountSchedules", {
-                organizationPartyId: org,
-                facilityId: "WCN_DUE"
-            })
-        )
-        return {
-            counterStore,
-            periodic,
-            annual,
-            zero,
-            mixed,
-            due,
-            reader,
-            outsider,
-            listed,
-            today: ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd")
+        ec.user.setEffectiveTime(dueAt)
+        try {
+            return dueScenario()
+        } finally {
+            ec.user.setEffectiveTime(null)
         }
     },
-    then({counterStore, periodic, annual, zero, mixed, due, reader, outsider, listed, today}) {
+    then({counterStore, periodic, annual, zero, mixed, due, reader, outsider, listed, today, utcDay}) {
+        // the pinned clock is on the day before the UTC day in the user's zone
+        today != utcDay
         counterStore.error.includes("POLICY_MANAGE_REQUIRED")
         periodic.error == ""
         annual.error == ""

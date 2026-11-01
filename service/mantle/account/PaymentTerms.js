@@ -153,12 +153,32 @@ function addDays(dayText, days) {
     const pad = n => String(n).padStart(2, "0")
     return value.getUTCFullYear() + "-" + pad(value.getUTCMonth() + 1) + "-" + pad(value.getUTCDate())
 }
+// The lines of a term in effect at the end of a calendar day in the user's zone, in sequence: an invoice takes the lines
+// of its book day, as the rest of its schedule is in days, so a line changed later that day applies and the time of day
+// of the invoice's timestamp does not matter.
+function linesOfDay(settlementTermId, dayText) {
+    if (!settlementTermId) return []
+    const next = ec.l10n.parseTimestamp(addDays(dayText, 1) + " 00:00:00", "yyyy-MM-dd HH:mm:ss")
+    const cf = ec.entity.conditionFactory
+    return Array.from(
+        find(L, {settlementTermId})
+            .condition("fromDate", "less", next)
+            .condition(
+                cf.makeCondition(
+                    [cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater-equals", next)],
+                    "or"
+                )
+            )
+            .orderBy("sequenceNum")
+            .list()
+    )
+}
 // The schedule an invoice's term gives it: each line's portion of the total and its discount, the last portion taking
 // what rounding leaves; a term without lines is one portion due on the invoice's due date.
 function plannedSchedule(invoice, total) {
     const currency = invoice.currencyUomId,
         start = bookDay(invoice),
-        lines = linesInEffect(invoice.settlementTermId, invoice.invoiceDate || ec.user.nowTimestamp)
+        lines = linesOfDay(invoice.settlementTermId, start)
     if (!lines.length)
         return [
             {scheduleSeqId: "01", dueDate: stampDay(invoice.dueDate), amount: total, settlementTermId: invoice.settlementTermId}
@@ -314,4 +334,4 @@ function execute(op, parameters) {
     ec.context.putAll(result)
     return result
 }
-;({execute, checkPromptDiscount, lineDays, linesInEffect, schedule, schedules, discountAccount, day, stampDay, addDays})
+;({execute, checkPromptDiscount, lineDays, linesInEffect, linesOfDay, schedule, schedules, discountAccount, day, stampDay, addDays})
