@@ -70,6 +70,37 @@ function quarantineLocation(facility, requested, operation) {
     if (!found) denied("LOCATION_REQUIRED", "A return is received into quarantine: facility " + facility.facilityId + " has none")
     return found.locationSeqId
 }
+// The lot a returned unit comes back in: the one given, else the lot of that number the product's stock was in (the lot it
+// was sold from), else one of that number with no manufacturer, else a new lot of that number. Mantle's receive#Asset would
+// make the customer the manufacturer of a lot it creates for a return shipment and then not find it again for a second box
+// (its lot is looked up by number and the given manufacturer), so the receipt always names the lot.
+function returnLot(product, line, expirationDate) {
+    if (!blank(line.lotId)) {
+        if (!one("mantle.product.asset.Lot", {lotId: line.lotId}))
+            denied("LOT_UNAVAILABLE", "Lot " + line.lotId + " is not available")
+        return line.lotId
+    }
+    if (blank(line.lotNumber)) return null
+    const lotNumber = String(line.lotNumber).trim()
+    const lots = rows("mantle.product.asset.Lot", {lotNumber})
+    if (lots.length) {
+        const ofProduct = find(ASSET, {productId: product.productId})
+            .condition(
+                "lotId",
+                "in",
+                lots.map(row => row.lotId)
+            )
+            .selectField("lotId")
+            .orderBy("lotId")
+            .limit(1)
+            .list()
+        const sold = Array.from(ofProduct)[0]?.lotId
+        if (sold) return sold
+        const unnamed = lots.find(row => !row.mfgPartyId)
+        if (unnamed) return unnamed.lotId
+    }
+    return call("create#mantle.product.asset.Lot", {lotNumber, expirationDate: expirationDate || null}).lotId
+}
 // The guarded receipt (receive#ReturnItems with an operation key): the shipment, then each item locked, the tracking rules of
 // the product's policy, the quarantine location locked last, the open period of today (not locking the periods, as every
 // receipt); Accounting's receipt (ReturnSettlement.js receive) of the accepted stock as AstQuarantine there, one call per
@@ -111,19 +142,21 @@ function receive(p) {
             target = posting.destination(userScope, facility.facilityId, {
                 toLocationSeqId: quarantineLocation(facility, line.locationSeqId || p.locationSeqId, policy.operation)
             })
+        line.product = product
         received.push({line, accepted, rejected, track})
     }
     posting.period([facility.ownerPartyId], ec.user.nowTimestamp, {lock: false})
     // Accounting's receipt of each line: a serialized line one unit at a time, the dock rejection with the first
     const calls = []
     for (const {line, accepted, rejected, track} of received) {
+        const lotId = accepted.compare(0) > 0 ? returnLot(line.product, line, track.expirationDate) : null
         const base = {
             returnId: line.returnId,
             returnItemSeqId: line.returnItemSeqId,
             rejectionReasonEnumId: line.rejectionReasonEnumId || null,
             statusId: "AstQuarantine",
             locationSeqId: target?.locationSeqId || null,
-            lotNumber: blank(line.lotNumber) ? null : String(line.lotNumber).trim(),
+            lotId,
             expirationDate: track.expirationDate || null
         }
         if (track.serials.length)

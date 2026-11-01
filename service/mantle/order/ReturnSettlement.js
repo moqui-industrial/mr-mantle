@@ -187,6 +187,7 @@ function receive(p) {
                 lotNumber: line.lotNumber,
                 // the Warehouse return receipt's quarantine location and identity (impl-warehouse P14, ReturnStock.js)
                 locationSeqId: line.locationSeqId || null,
+                lotId: line.lotId || null,
                 serialNumber: line.serialNumber || null,
                 expirationDate: line.expirationDate || null,
                 shipmentId: p.shipmentId,

@@ -271,12 +271,12 @@ feature("the RMA in two boxes: a dock rejection and quarantine with an inspectio
         const box1 = run("wrt_receiver", T + "receive#ReturnItems", {
             operationKey: boxKey,
             shipmentId: ids.returnShipmentId,
-            itemList: [line(1, 1, {rejectionReasonEnumId: "ArjDamaged"})]
+            itemList: [line(1, 1, {rejectionReasonEnumId: "ArjDamaged", lotNumber: "WRT-RMA-LOT"})]
         })
         const retry = run("wrt_receiver", T + "receive#ReturnItems", {
             operationKey: boxKey,
             shipmentId: ids.returnShipmentId,
-            itemList: [line(1, 1, {rejectionReasonEnumId: "ArjDamaged"})]
+            itemList: [line(1, 1, {rejectionReasonEnumId: "ArjDamaged", lotNumber: "WRT-RMA-LOT"})]
         })
         const afterBox1 = {
             item: returnItem(ids.returnId),
@@ -290,7 +290,7 @@ feature("the RMA in two boxes: a dock rejection and quarantine with an inspectio
         const box2 = run("wrt_receiver", T + "receive#ReturnItems", {
             operationKey: key(),
             shipmentId: ids.returnShipmentId,
-            itemList: [line(1, 0)]
+            itemList: [line(1, 0, {lotNumber: "WRT-RMA-LOT"})]
         })
         const receipts = rows("mantle.product.receipt.AssetReceipt", {returnId: ids.returnId})
         const billings = rows("mantle.order.return.ReturnItemBilling", {returnId: ids.returnId})
@@ -318,6 +318,9 @@ feature("the RMA in two boxes: a dock rejection and quarantine with an inspectio
         one("mantle.order.return.ReturnHeader", {returnId: ids.returnId}).statusId == "ReturnManResp"
         receipts.length == 2
         receipts.reduce((total, row) => total + n(row.quantityRejected), 0) == 1
+        // both boxes in the one lot of that number, not a lot of the customer's per box
+        new Set(receipts.map(row => asset(row.assetId).lotId)).size == 1
+        !one("mantle.product.asset.Lot", {lotId: asset(receipts[0].assetId).lotId}).mfgPartyId
         receipts.every(row => asset(row.assetId).statusId == "AstQuarantine" && asset(row.assetId).locationSeqId == "QUAR1")
         inspection(ids.inspections[0]).sourceTypeEnumId == "QisReturn"
         inspection(ids.inspections[0]).inspectionContextEnumId == "QicReturn"
