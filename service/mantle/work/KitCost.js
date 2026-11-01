@@ -48,8 +48,11 @@ function receiptLines(p) {
     const quantity = toDecimal(p.quantity ?? 0)
     if (quantity.compare(0) <= 0) return null
     const bom = Array.from(
-        find("mantle.work.effort.WorkEffortProductAssoc", {workEffortId: p.workEffortId, typeEnumId: "WeptProduce",
-            productId: p.assemblyProductId})
+        find("mantle.work.effort.WorkEffortProductAssoc", {
+            workEffortId: p.workEffortId,
+            typeEnumId: "WeptProduce",
+            productId: p.assemblyProductId
+        })
             .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
             .conditionDate("componentFromDate", "componentThruDate", ec.user.nowTimestamp)
             .list()
@@ -65,7 +68,12 @@ function receiptLines(p) {
                 .list()
         ).filter(row => toDecimal(row.quantity ?? 0).compare(0) > 0)
         const from = toDecimal(used[component.toProductId] ?? 0)
-        const componentValue = sliceValue(issuances, from, from.add(quantity.multiply(component.componentQuantity ?? 1)), currency)
+        const componentValue = sliceValue(
+            issuances,
+            from,
+            from.add(quantity.multiply(component.componentQuantity ?? 1)),
+            currency
+        )
         if (componentValue == null) return null
         value = value.add(componentValue)
     }

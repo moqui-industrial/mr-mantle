@@ -79,7 +79,8 @@ function receive(productId, quantity, locationSeqId, acquireCost = 2) {
         acquireCostUomId: "USD"
     }).assetId
 }
-const preference = fields => call("update#mantle.ledger.config.PartyAcctgPreference", Object.assign({organizationPartyId: org}, fields))
+const preference = fields =>
+    call("update#mantle.ledger.config.PartyAcctgPreference", Object.assign({organizationPartyId: org}, fields))
 // an approved sales order of the lines ([productId, quantity]) from the facility, and its shipment
 function salesShipment(lines) {
     const created = call("mantle.order.OrderServices.create#Order", {
@@ -112,15 +113,20 @@ function salesShipment(lines) {
     }).shipmentId
     return {orderId: created.orderId, shipmentId}
 }
-const sourceOf = (shipmentId, productId) => rows("mantle.shipment.ShipmentItemSource", {shipmentId}).find(row => row.productId === productId)
+const sourceOf = (shipmentId, productId) =>
+    rows("mantle.shipment.ShipmentItemSource", {shipmentId}).find(row => row.productId === productId)
 const packagesOf = shipmentId => rows("mantle.shipment.ShipmentPackage", {shipmentId})
-const contentOf = (shipmentId, shipmentPackageSeqId) => rows("mantle.shipment.ShipmentPackageContent", {shipmentId, shipmentPackageSeqId})
+const contentOf = (shipmentId, shipmentPackageSeqId) =>
+    rows("mantle.shipment.ShipmentPackageContent", {shipmentId, shipmentPackageSeqId})
 const invoicesOf = shipmentId =>
     [...new Set(rows("mantle.order.OrderItemBilling", {shipmentId}).map(row => row.invoiceId))].map(invoiceId =>
         one("mantle.account.invoice.Invoice", {invoiceId})
     )
 const onHandAt = (productId, locationSeqId) =>
-    rows("mantle.product.asset.Asset", {productId, facilityId: facility, locationSeqId}).reduce((sum, row) => sum + n(row.quantityOnHandTotal), 0)
+    rows("mantle.product.asset.Asset", {productId, facilityId: facility, locationSeqId}).reduce(
+        (sum, row) => sum + n(row.quantityOnHandTotal),
+        0
+    )
 // picks a whole line from its location into the shipment's cart through the P11 guard
 function pickLine(shipmentId, productId, locationSeqId) {
     const line = sourceOf(shipmentId, productId)
@@ -147,7 +153,10 @@ spec({
             sourcePartyId: "DefaultSettings",
             baseCurrencyUomId: "USD"
         })
-        call("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", {organizationPartyId: org, filterDate: ec.user.nowTimestamp})
+        call("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", {
+            organizationPartyId: org,
+            filterDate: ec.user.nowTimestamp
+        })
         preference({salesInvoiceFinalizedAtShip: "Y"})
         call("create#mantle.party.Party", {partyId: "WPN_CARRIER", partyTypeEnumId: "PtyOrganization"})
         call("create#mantle.party.PartyRole", {partyId: "WPN_CARRIER", roleTypeId: "Carrier"})
@@ -173,7 +182,12 @@ spec({
                 amountUomId: "OTH_ea",
                 ownerPartyId: org
             })
-            call("create#mantle.product.ProductDimension", {productId, dimensionTypeId: "ShippingWeight", value: 0.5, valueUomId: "WT_lb"})
+            call("create#mantle.product.ProductDimension", {
+                productId,
+                dimensionTypeId: "ShippingWeight",
+                value: 0.5,
+                valueUomId: "WT_lb"
+            })
         }
         receive("WPN_A", 20, "PICK1")
         receive("WPN_B", 20, "PICK2")
@@ -223,43 +237,141 @@ feature("a picked shipment packs into two boxes with their weights; Complete pac
         const pickedA = pickLine(shipmentId, "WPN_A", "PICK1")
         const pickedB = pickLine(shipmentId, "WPN_B", "PICK2")
         const lineA = sourceOf(shipmentId, "WPN_A").shipmentItemSourceId
-        const reader = run("wpn_reader", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, shipmentItemSourceId: lineA, quantity: 2})
-        const outsider = run("wpn_outsider", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, shipmentItemSourceId: lineA, quantity: 2})
-        const box1 = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_S"})
-        const tooMany = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, shipmentItemSourceId: lineA,
-            quantity: 3, shipmentPackageSeqId: box1.result?.shipmentPackageSeqId})
+        const reader = run("wpn_reader", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 2
+        })
+        const outsider = run("wpn_outsider", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 2
+        })
+        const box1 = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_S"
+        })
+        const tooMany = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 3,
+            shipmentPackageSeqId: box1.result?.shipmentPackageSeqId
+        })
         const packKey = key()
-        const packedA = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: packKey, shipmentId, shipmentItemSourceId: lineA,
-            quantity: 2, shipmentPackageSeqId: box1.result?.shipmentPackageSeqId})
-        const againA = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: packKey, shipmentId, shipmentItemSourceId: lineA,
-            quantity: 2, shipmentPackageSeqId: box1.result?.shipmentPackageSeqId})
-        const box2 = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_M"})
-        const nothing = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, scanInput: "WPN_NOPE",
-            quantity: 1, shipmentPackageSeqId: box2.result?.shipmentPackageSeqId})
-        const scannedB = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, scanInput: "WPN_B",
-            quantity: 3, shipmentPackageSeqId: box2.result?.shipmentPackageSeqId})
+        const packedA = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: packKey,
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 2,
+            shipmentPackageSeqId: box1.result?.shipmentPackageSeqId
+        })
+        const againA = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: packKey,
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 2,
+            shipmentPackageSeqId: box1.result?.shipmentPackageSeqId
+        })
+        const box2 = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_M"
+        })
+        const nothing = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            scanInput: "WPN_NOPE",
+            quantity: 1,
+            shipmentPackageSeqId: box2.result?.shipmentPackageSeqId
+        })
+        const scannedB = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            scanInput: "WPN_B",
+            quantity: 3,
+            shipmentPackageSeqId: box2.result?.shipmentPackageSeqId
+        })
         const unweighed = run("wpn_packer", T + "complete#Pack", {operationKey: key(), shipmentId})
-        const weighed = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "weigh",
-            shipmentPackageSeqId: box1.result?.shipmentPackageSeqId})
-        const heavy = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "update",
-            shipmentPackageSeqId: box2.result?.shipmentPackageSeqId, weight: 2.5, weightUomId: "WT_lb"})
+        const weighed = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "weigh",
+            shipmentPackageSeqId: box1.result?.shipmentPackageSeqId
+        })
+        const heavy = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "update",
+            shipmentPackageSeqId: box2.result?.shipmentPackageSeqId,
+            weight: 2.5,
+            weightUomId: "WT_lb"
+        })
         const completeKey = key()
         const completed = run("wpn_packer", T + "complete#Pack", {operationKey: completeKey, shipmentId})
         const retry = run("wpn_packer", T + "complete#Pack", {operationKey: completeKey, shipmentId})
-        const closed = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, shipmentItemSourceId: lineA, quantity: 1})
+        const closed = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineA,
+            quantity: 1
+        })
         state.box1 = box1.result?.shipmentPackageSeqId
         state.box2 = box2.result?.shipmentPackageSeqId
-        return {pickedA, pickedB, reader, outsider, box1, tooMany, packedA, againA, nothing, scannedB, unweighed, weighed, heavy,
-            completed, retry, closed, packages: packagesOf(shipmentId), invoices: invoicesOf(shipmentId),
+        return {
+            pickedA,
+            pickedB,
+            reader,
+            outsider,
+            box1,
+            tooMany,
+            packedA,
+            againA,
+            nothing,
+            scannedB,
+            unweighed,
+            weighed,
+            heavy,
+            completed,
+            retry,
+            closed,
+            packages: packagesOf(shipmentId),
+            invoices: invoicesOf(shipmentId),
             routes: rows("mantle.shipment.ShipmentPackageRouteSeg", {shipmentId}),
             shipment: one("mantle.shipment.Shipment", {shipmentId}),
             contents1: contentOf(shipmentId, box1.result?.shipmentPackageSeqId),
-            contents2: contentOf(shipmentId, box2.result?.shipmentPackageSeqId)}
+            contents2: contentOf(shipmentId, box2.result?.shipmentPackageSeqId)
+        }
     },
-    then({pickedA, pickedB, reader, outsider, box1, tooMany, packedA, againA, nothing, scannedB, unweighed, weighed, heavy,
-        completed, retry, closed, packages, invoices, routes, shipment, contents1, contents2}) {
+    then({
+        pickedA,
+        pickedB,
+        reader,
+        outsider,
+        box1,
+        tooMany,
+        packedA,
+        againA,
+        nothing,
+        scannedB,
+        unweighed,
+        weighed,
+        heavy,
+        completed,
+        retry,
+        closed,
+        packages,
+        invoices,
+        routes,
+        shipment,
+        contents1,
+        contents2
+    }) {
         pickedA.error === ""
         pickedB.error === ""
         reader.error.includes("PERMISSION_DENIED")
@@ -301,37 +413,96 @@ feature("a package reopened while its invoice is in process leaves the invoice, 
         const shipmentId = state.shipment
         const lineB = sourceOf(shipmentId, "WPN_B")
         const invoiceBefore = invoicesOf(shipmentId)[0]
-        const unconfirmed = run("wpn_packer", T + "reopen#ShipmentPackage", {operationKey: key(), shipmentId,
-            shipmentPackageSeqId: state.box2, reason: "Order change"})
-        const reader = run("wpn_reader", T + "reopen#ShipmentPackage", {operationKey: key(), shipmentId,
-            shipmentPackageSeqId: state.box2, reason: "Order change", confirmed: "Y"})
-        const reopened = run("wpn_packer", T + "reopen#ShipmentPackage", {operationKey: key(), shipmentId,
-            shipmentPackageSeqId: state.box2, reason: "Order change", confirmed: "Y"})
+        const unconfirmed = run("wpn_packer", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: state.box2,
+            reason: "Order change"
+        })
+        const reader = run("wpn_reader", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: state.box2,
+            reason: "Order change",
+            confirmed: "Y"
+        })
+        const reopened = run("wpn_packer", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: state.box2,
+            reason: "Order change",
+            confirmed: "Y"
+        })
         const afterReopen = {
             shipment: one("mantle.shipment.Shipment", {shipmentId}),
             line: one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: lineB.shipmentItemSourceId}),
             invoice: one("mantle.account.invoice.Invoice", {invoiceId: invoiceBefore.invoiceId}),
             billings: rows("mantle.order.OrderItemBilling", {shipmentId}).length,
-            reservations: rows("mantle.product.issuance.AssetReservation", {orderId: lineB.orderId, orderItemSeqId: lineB.orderItemSeqId}),
+            reservations: rows("mantle.product.issuance.AssetReservation", {
+                orderId: lineB.orderId,
+                orderItemSeqId: lineB.orderItemSeqId
+            }),
             contents2: contentOf(shipmentId, state.box2)
         }
         // the order drops one of the three: the line is flagged, and Pick's put back returns it to the shelf
-        call("mantle.order.OrderServices.cancel#OrderItem", {orderId: lineB.orderId, orderItemSeqId: lineB.orderItemSeqId, cancelQuantity: 1})
+        call("mantle.order.OrderServices.cancel#OrderItem", {
+            orderId: lineB.orderId,
+            orderItemSeqId: lineB.orderItemSeqId,
+            cancelQuantity: 1
+        })
         const flagged = one("mantle.shipment.ShipmentItemSource", {shipmentItemSourceId: lineB.shipmentItemSourceId})
         const shelfBefore = onHandAt("WPN_B", "PICK2")
-        const putBack = run("wpn_picker", T + "reverse#Pick", {operationKey: key(), shipmentId,
-            shipmentItemSourceId: lineB.shipmentItemSourceId, confirmed: "Y"})
+        const putBack = run("wpn_picker", T + "reverse#Pick", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineB.shipmentItemSourceId,
+            confirmed: "Y"
+        })
         const shelfAfter = onHandAt("WPN_B", "PICK2")
-        const repacked = run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId,
-            shipmentItemSourceId: lineB.shipmentItemSourceId, quantity: 2, shipmentPackageSeqId: state.box2})
-        run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "weigh", shipmentPackageSeqId: state.box2})
+        const repacked = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: lineB.shipmentItemSourceId,
+            quantity: 2,
+            shipmentPackageSeqId: state.box2
+        })
+        run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "weigh",
+            shipmentPackageSeqId: state.box2
+        })
         const completed = run("wpn_packer", T + "complete#Pack", {operationKey: key(), shipmentId})
         const billedB = rows("mantle.order.OrderItemBilling", {shipmentId, orderItemSeqId: lineB.orderItemSeqId})
-        return {unconfirmed, reader, reopened, afterReopen, flagged, shelfBefore, putBack, shelfAfter, repacked, completed, billedB,
-            invoicesAfter: invoicesOf(shipmentId)}
+        return {
+            unconfirmed,
+            reader,
+            reopened,
+            afterReopen,
+            flagged,
+            shelfBefore,
+            putBack,
+            shelfAfter,
+            repacked,
+            completed,
+            billedB,
+            invoicesAfter: invoicesOf(shipmentId)
+        }
     },
-    then({unconfirmed, reader, reopened, afterReopen, flagged, shelfBefore, putBack, shelfAfter, repacked, completed, billedB,
-        invoicesAfter}) {
+    then({
+        unconfirmed,
+        reader,
+        reopened,
+        afterReopen,
+        flagged,
+        shelfBefore,
+        putBack,
+        shelfAfter,
+        repacked,
+        completed,
+        billedB,
+        invoicesAfter
+    }) {
         unconfirmed.error.includes("CONFIRMATION_REQUIRED")
         reader.error.includes("PERMISSION_DENIED")
         reopened.error === ""
@@ -367,17 +538,41 @@ feature("a package whose invoice is final stays closed", {
     when() {
         preference({salesInvoiceFinalizedAtShip: "N"})
         const {shipmentId} = salesShipment([["WPN_A", 1]])
-        const box = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_S"}).result.shipmentPackageSeqId
-        run("wpn_packer", T + "pack#ShipmentStock", {operationKey: key(), shipmentId, productId: "WPN_A", quantity: 1,
-            shipmentPackageSeqId: box})
-        run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "weigh", shipmentPackageSeqId: box})
+        const box = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_S"
+        }).result.shipmentPackageSeqId
+        run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            productId: "WPN_A",
+            quantity: 1,
+            shipmentPackageSeqId: box
+        })
+        run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "weigh",
+            shipmentPackageSeqId: box
+        })
         const completed = run("wpn_packer", T + "complete#Pack", {operationKey: key(), shipmentId})
         preference({salesInvoiceFinalizedAtShip: "Y"})
-        const reopen = run("wpn_packer", T + "reopen#ShipmentPackage", {operationKey: key(), shipmentId, shipmentPackageSeqId: box,
-            reason: "Too late", confirmed: "Y"})
-        return {completed, reopen, shipment: one("mantle.shipment.Shipment", {shipmentId}), contents: contentOf(shipmentId, box),
-            invoices: invoicesOf(shipmentId)}
+        const reopen = run("wpn_packer", T + "reopen#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            shipmentPackageSeqId: box,
+            reason: "Too late",
+            confirmed: "Y"
+        })
+        return {
+            completed,
+            reopen,
+            shipment: one("mantle.shipment.Shipment", {shipmentId}),
+            contents: contentOf(shipmentId, box),
+            invoices: invoicesOf(shipmentId)
+        }
     },
     then({completed, reopen, shipment, contents, invoices}) {
         completed.error === ""
@@ -392,20 +587,36 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
     when() {
         preference({kitCostFromComponents: "Y"})
         const {shipmentId} = salesShipment([["DEMO_PA", 3]])
-        const one1 = run("wpn_packer", T + "pack#ShipmentAssembly", {operationKey: key(), shipmentId, productId: "DEMO_1_1",
-            assemblyProductId: "DEMO_PA", quantity: 3})
-        const two = run("wpn_packer", T + "pack#ShipmentAssembly", {operationKey: key(), shipmentId, productId: "DEMO_2_1",
-            assemblyProductId: "DEMO_PA", quantity: 6})
+        const one1 = run("wpn_packer", T + "pack#ShipmentAssembly", {
+            operationKey: key(),
+            shipmentId,
+            productId: "DEMO_1_1",
+            assemblyProductId: "DEMO_PA",
+            quantity: 3
+        })
+        const two = run("wpn_packer", T + "pack#ShipmentAssembly", {
+            operationKey: key(),
+            shipmentId,
+            productId: "DEMO_2_1",
+            assemblyProductId: "DEMO_PA",
+            quantity: 6
+        })
         preference({kitCostFromComponents: "N"})
         const workEffortId = one("mantle.shipment.Shipment", {shipmentId}).assemblyWorkEffortId
         const issuances = rows("mantle.product.issuance.AssetIssuance", {workEffortId})
         const receipts = rows("mantle.product.receipt.AssetReceipt", {workEffortId})
         const value = (list, field) =>
-            list.reduce((sum, row) => sum + n(row[field]) * n(one("mantle.product.asset.Asset", {assetId: row.assetId}).acquireCost), 0)
+            list.reduce(
+                (sum, row) => sum + n(row[field]) * n(one("mantle.product.asset.Asset", {assetId: row.assetId}).acquireCost),
+                0
+            )
         // the WIP account's entries of the work effort's issuances and receipts net to zero
         const transIds = rows("mantle.ledger.transaction.AcctgTrans", {organizationPartyId: org})
-            .filter(trans => issuances.some(row => row.assetIssuanceId === trans.assetIssuanceId) ||
-                receipts.some(row => row.assetReceiptId === trans.assetReceiptId))
+            .filter(
+                trans =>
+                    issuances.some(row => row.assetIssuanceId === trans.assetIssuanceId) ||
+                    receipts.some(row => row.assetReceiptId === trans.assetReceiptId)
+            )
             .map(trans => trans.acctgTransId)
         const wip = {debit: 0, credit: 0}
         for (const acctgTransId of transIds)
@@ -415,8 +626,17 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
                 wip[entry.debitCreditFlag === "D" ? "debit" : "credit"] += n(entry.amount)
             }
         const kitIssued = rows("mantle.product.issuance.AssetIssuance", {shipmentId, productId: "DEMO_PA"})
-        return {one1, two, issuances, receipts, issuedValue: value(issuances, "quantity"), receivedValue: value(receipts, "quantityAccepted"),
-            wip, kitIssued, kitAssets: receipts.map(row => one("mantle.product.asset.Asset", {assetId: row.assetId}))}
+        return {
+            one1,
+            two,
+            issuances,
+            receipts,
+            issuedValue: value(issuances, "quantity"),
+            receivedValue: value(receipts, "quantityAccepted"),
+            wip,
+            kitIssued,
+            kitAssets: receipts.map(row => one("mantle.product.asset.Asset", {assetId: row.assetId}))
+        }
     },
     then({one1, two, receipts, issuedValue, receivedValue, wip, kitIssued, kitAssets}) {
         one1.error === ""
@@ -428,20 +648,35 @@ feature("the DEMO_PA kit packs at its components' cost and leaves no work in pro
         Math.round(issuedValue * 10000) === 120100
         Math.round(receivedValue * 10000) === 120100
         receipts.reduce((sum, row) => sum + n(row.quantityAccepted), 0) === 3
-        kitAssets.map(asset => n(asset.acquireCost)).sort().join() === "4.0033,4.0034"
+        kitAssets
+            .map(asset => n(asset.acquireCost))
+            .sort()
+            .join() === "4.0033,4.0034"
         Math.round(wip.debit * 100) === 1201
         Math.round((wip.debit - wip.credit) * 10000) === 0
         kitIssued.reduce((sum, row) => sum + n(row.quantity), 0) === 3
     }
 })
 
-feature("with the flag off a kit is received with no cost, as before", {
+feature("with the flag off a kit is received with no cost, as before; its unreserved components are issued (F282)", {
     when() {
-        const {shipmentId} = salesShipment([["DEMO_PA", 1]])
-        run("wpn_packer", T + "pack#ShipmentAssembly", {operationKey: key(), shipmentId, productId: "DEMO_1_1",
-            assemblyProductId: "DEMO_PA", quantity: 1})
-        const two = run("wpn_packer", T + "pack#ShipmentAssembly", {operationKey: key(), shipmentId, productId: "DEMO_2_1",
-            assemblyProductId: "DEMO_PA", quantity: 2})
+        const {orderId, shipmentId} = salesShipment([["DEMO_PA", 1]])
+        // no component reservation: the assembly pack issues any available component stock to the kit's work effort
+        call("mantle.product.AssetServices.remove#OrderItemReservations", {orderId, orderItemSeqId: "01"})
+        run("wpn_packer", T + "pack#ShipmentAssembly", {
+            operationKey: key(),
+            shipmentId,
+            productId: "DEMO_1_1",
+            assemblyProductId: "DEMO_PA",
+            quantity: 1
+        })
+        const two = run("wpn_packer", T + "pack#ShipmentAssembly", {
+            operationKey: key(),
+            shipmentId,
+            productId: "DEMO_2_1",
+            assemblyProductId: "DEMO_PA",
+            quantity: 2
+        })
         const workEffortId = one("mantle.shipment.Shipment", {shipmentId}).assemblyWorkEffortId
         const receipts = rows("mantle.product.receipt.AssetReceipt", {workEffortId})
         return {two, receipts, kit: receipts.length ? one("mantle.product.asset.Asset", {assetId: receipts[0].assetId}) : null}
@@ -457,35 +692,109 @@ feature("with the flag off a kit is received with no cost, as before", {
 feature("box types, carrier codes and a facility's box types are kept by the facility administrator", {
     when() {
         const reader = run("wpn_reader", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", description: "Large box"})
-        const created = run("wpn_admin", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", isNew: "Y",
-            description: "Large box", boxLength: 18, boxWidth: 12, boxHeight: 12, dimensionUomId: "LEN_in", boxWeight: 1,
-            weightUomId: "WT_lb", maxWeight: 40})
-        const again = run("wpn_admin", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", isNew: "Y", description: "Dup"})
+        const created = run("wpn_admin", PK + "store#ShipmentBoxType", {
+            shipmentBoxTypeId: "WPN_BOX_L",
+            isNew: "Y",
+            description: "Large box",
+            boxLength: 18,
+            boxWidth: 12,
+            boxHeight: 12,
+            dimensionUomId: "LEN_in",
+            boxWeight: 1,
+            weightUomId: "WT_lb",
+            maxWeight: 40
+        })
+        const again = run("wpn_admin", PK + "store#ShipmentBoxType", {
+            shipmentBoxTypeId: "WPN_BOX_L",
+            isNew: "Y",
+            description: "Dup"
+        })
         const badUnit = run("wpn_admin", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", weightUomId: "LEN_in"})
-        const code = run("wpn_admin", PK + "store#CarrierShipmentBoxType", {carrierPartyId: "WPN_CARRIER",
-            shipmentBoxTypeId: "WPN_BOX_L", packagingTypeCode: "02"})
-        const notCarrier = run("wpn_admin", PK + "store#CarrierShipmentBoxType", {carrierPartyId: org,
-            shipmentBoxTypeId: "WPN_BOX_L", packagingTypeCode: "02"})
+        const code = run("wpn_admin", PK + "store#CarrierShipmentBoxType", {
+            carrierPartyId: "WPN_CARRIER",
+            shipmentBoxTypeId: "WPN_BOX_L",
+            packagingTypeCode: "02"
+        })
+        const notCarrier = run("wpn_admin", PK + "store#CarrierShipmentBoxType", {
+            carrierPartyId: org,
+            shipmentBoxTypeId: "WPN_BOX_L",
+            packagingTypeCode: "02"
+        })
         const used = run("wpn_admin", PK + "store#FacilityBoxType", {facilityId: facility, shipmentBoxTypeId: "WPN_BOX_L"})
         const outsider = run("wpn_outsider", PK + "store#FacilityBoxType", {facilityId: facility, shipmentBoxTypeId: "WPN_BOX_S"})
         const {shipmentId} = salesShipment([["WPN_A", 1]])
-        const notUsedHere = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_S"})
-        const usedHere = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_L"})
+        const notUsedHere = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_S"
+        })
+        const usedHere = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_L"
+        })
         const retired = run("wpn_admin", PK + "store#ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L", retire: "Y"})
-        const afterRetire = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "create",
-            shipmentBoxTypeId: "WPN_BOX_L"})
-        const removed = run("wpn_admin", PK + "store#FacilityBoxType", {facilityId: facility, shipmentBoxTypeId: "WPN_BOX_L", remove: "Y"})
-        const deleted = run("wpn_packer", T + "edit#ShipmentPackage", {operationKey: key(), shipmentId, action: "delete",
-            shipmentPackageSeqId: usedHere.result?.shipmentPackageSeqId})
-        return {reader, created, again, badUnit, code, notCarrier, used, outsider, notUsedHere, usedHere, retired, afterRetire, removed,
-            deleted, box: one("mantle.shipment.ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L"}),
-            binding: one("mantle.shipment.carrier.CarrierShipmentBoxType", {carrierPartyId: "WPN_CARRIER", shipmentBoxTypeId: "WPN_BOX_L"}),
-            packages: packagesOf(shipmentId)}
+        const afterRetire = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "create",
+            shipmentBoxTypeId: "WPN_BOX_L"
+        })
+        const removed = run("wpn_admin", PK + "store#FacilityBoxType", {
+            facilityId: facility,
+            shipmentBoxTypeId: "WPN_BOX_L",
+            remove: "Y"
+        })
+        const deleted = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "delete",
+            shipmentPackageSeqId: usedHere.result?.shipmentPackageSeqId
+        })
+        return {
+            reader,
+            created,
+            again,
+            badUnit,
+            code,
+            notCarrier,
+            used,
+            outsider,
+            notUsedHere,
+            usedHere,
+            retired,
+            afterRetire,
+            removed,
+            deleted,
+            box: one("mantle.shipment.ShipmentBoxType", {shipmentBoxTypeId: "WPN_BOX_L"}),
+            binding: one("mantle.shipment.carrier.CarrierShipmentBoxType", {
+                carrierPartyId: "WPN_CARRIER",
+                shipmentBoxTypeId: "WPN_BOX_L"
+            }),
+            packages: packagesOf(shipmentId)
+        }
     },
-    then({reader, created, again, badUnit, code, notCarrier, used, outsider, notUsedHere, usedHere, retired, afterRetire, removed,
-        deleted, box, binding, packages}) {
+    then({
+        reader,
+        created,
+        again,
+        badUnit,
+        code,
+        notCarrier,
+        used,
+        outsider,
+        notUsedHere,
+        usedHere,
+        retired,
+        afterRetire,
+        removed,
+        deleted,
+        box,
+        binding,
+        packages
+    }) {
         reader.error.includes("PERMISSION_DENIED")
         created.error === ""
         again.error.includes("BOX_TYPE_EXISTS")

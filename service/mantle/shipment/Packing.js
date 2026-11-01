@@ -32,7 +32,8 @@ function requirePackable(sh) {
     if (!packable.includes(sh.shipment.statusId))
         denied("PACK_CLOSED", "Shipment " + sh.shipmentId + " is " + sh.shipment.statusId + "; reopen a package to change it")
 }
-const packagesOf = shipmentId => rows(PACKAGE, {shipmentId}).sort((a, b) => String(a.shipmentPackageSeqId).localeCompare(String(b.shipmentPackageSeqId)))
+const packagesOf = shipmentId =>
+    rows(PACKAGE, {shipmentId}).sort((a, b) => String(a.shipmentPackageSeqId).localeCompare(String(b.shipmentPackageSeqId)))
 const contentsOf = (shipmentId, shipmentPackageSeqId) =>
     rows(CONTENT, shipmentPackageSeqId ? {shipmentId, shipmentPackageSeqId} : {shipmentId})
 // A package of the shipment; a missing one is refused (PACKAGE_UNAVAILABLE).
@@ -116,7 +117,10 @@ function completePlan(sh, p) {
     const contents = contentsOf(sh.shipmentId)
     const empty = packages.filter(row => !contents.some(content => content.shipmentPackageSeqId === row.shipmentPackageSeqId))
     if (empty.length)
-        denied("EMPTY_PACKAGE", "Package " + empty.map(row => row.shipmentPackageSeqId).join(", ") + " is empty; remove it or pack it")
+        denied(
+            "EMPTY_PACKAGE",
+            "Package " + empty.map(row => row.shipmentPackageSeqId).join(", ") + " is empty; remove it or pack it"
+        )
     const unweighed = packages.filter(row => !(number(row.weight) > 0))
     if (unweighed.length)
         denied("WEIGHT_REQUIRED", "Weigh package " + unweighed.map(row => row.shipmentPackageSeqId).join(", ") + " first")
@@ -125,7 +129,9 @@ function completePlan(sh, p) {
         issuedByProduct.set(row.productId, (issuedByProduct.get(row.productId) || 0) + number(row.quantity))
     const unpackaged = [...issuedByProduct.entries()]
         .map(([productId, issued]) => {
-            const inBoxes = contents.filter(row => row.productId === productId).reduce((sum, row) => sum + number(row.quantity), 0)
+            const inBoxes = contents
+                .filter(row => row.productId === productId)
+                .reduce((sum, row) => sum + number(row.quantity), 0)
             return {productId, missing: issued - inBoxes}
         })
         .filter(row => row.missing > 0)
@@ -135,14 +141,16 @@ function completePlan(sh, p) {
     if (pickedLeft.length)
         denied(
             "PUT_BACK_FIRST",
-            "Picked and not packed: " + pickedLeft.map(row => row.productId + " " + text(row.picked - row.packed)).join(", ") +
+            "Picked and not packed: " +
+                pickedLeft.map(row => row.productId + " " + text(row.picked - row.packed)).join(", ") +
                 "; pack it or put it back"
         )
     const outstanding = lines.filter(row => row.left > 0)
     if (outstanding.length && !picking.truthy(p.acknowledged))
         denied(
             "OUTSTANDING",
-            "Not packed: " + outstanding.map(row => row.productId + " " + text(row.left)).join(", ") +
+            "Not packed: " +
+                outstanding.map(row => row.productId + " " + text(row.left)).join(", ") +
                 ". Completing the pack ships only what is packed"
         )
     return {lines, packages, outstanding}
@@ -169,7 +177,10 @@ function reopenPlan(sh, pkg, p) {
         const quantity = blank(p.quantity) || blank(p.productId) ? held : number(p.quantity)
         if (!(quantity > 0)) denied("QUANTITY_INVALID", "Give a quantity above zero")
         if (quantity > held)
-            denied("QUANTITY_EXCEEDS_PACKED", "Package " + pkg.shipmentPackageSeqId + " holds only " + text(held) + " of " + content.productId)
+            denied(
+                "QUANTITY_EXCEEDS_PACKED",
+                "Package " + pkg.shipmentPackageSeqId + " holds only " + text(held) + " of " + content.productId
+            )
         const issuances = Array.from(
             find(ISSUANCE, {shipmentId: sh.shipmentId, productId: content.productId})
                 .condition("quantity", "greater", 0)
@@ -185,7 +196,10 @@ function reopenPlan(sh, pkg, p) {
             left -= take
         }
         if (left > 0)
-            denied("QUANTITY_EXCEEDS_PACKED", "Only " + text(quantity - left) + " of " + content.productId + " is issued to the shipment")
+            denied(
+                "QUANTITY_EXCEEDS_PACKED",
+                "Only " + text(quantity - left) + " of " + content.productId + " is issued to the shipment"
+            )
         return {productId: content.productId, held, quantity, parts}
     })
     return {takes}
@@ -199,11 +213,16 @@ function reopenOrders(plan) {
     for (const take of plan.takes)
         for (const part of take.parts) {
             const issuance = one(ISSUANCE, {assetIssuanceId: part.assetIssuanceId})
-            const item = issuance?.orderId ? one("mantle.order.OrderItem", {orderId: issuance.orderId, orderItemSeqId: issuance.orderItemSeqId}) : null
-            if (item) parts.set(item.orderId + "|" + item.orderPartSeqId, {orderId: item.orderId, orderPartSeqId: item.orderPartSeqId})
+            const item = issuance?.orderId
+                ? one("mantle.order.OrderItem", {orderId: issuance.orderId, orderItemSeqId: issuance.orderItemSeqId})
+                : null
+            if (item)
+                parts.set(item.orderId + "|" + item.orderPartSeqId, {orderId: item.orderId, orderPartSeqId: item.orderPartSeqId})
         }
     const reopened = []
-    for (const {orderId, orderPartSeqId} of [...parts.values()].sort((a, b) => (a.orderId + a.orderPartSeqId).localeCompare(b.orderId + b.orderPartSeqId))) {
+    for (const {orderId, orderPartSeqId} of [...parts.values()].sort((a, b) =>
+        (a.orderId + a.orderPartSeqId).localeCompare(b.orderId + b.orderPartSeqId)
+    )) {
         const part = find("mantle.order.OrderPart", {orderId, orderPartSeqId}).forUpdate(true).one()
         const header = find("mantle.order.OrderHeader", {orderId}).forUpdate(true).one()
         if (part?.statusId === "OrderCompleted") {
@@ -231,7 +250,11 @@ function unpack(sh, pkg, plan) {
             productId: take.productId,
             quantity: take.held - take.quantity
         })
-        done.push({productId: take.productId, quantity: text(take.quantity), assetIssuanceIds: take.parts.map(row => row.assetIssuanceId)})
+        done.push({
+            productId: take.productId,
+            quantity: text(take.quantity),
+            assetIssuanceIds: take.parts.map(row => row.assetIssuanceId)
+        })
     }
     return done
 }

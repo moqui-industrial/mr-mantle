@@ -2577,8 +2577,16 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="assetList" entry="asset">
                 <set field="curQuantity" from="toDecimal(asset.availableToPromiseTotal).compare(quantityRemaining) &gt; 0 ? quantityRemaining : asset.availableToPromiseTotal"/>
                 <if condition="!toDecimal(curQuantity).isZero()">
-                    <service-call name="mantle.product.AssetServices.issue#Asset"
-                            in-map="Object.assign({}, baseMap, {quantity:curQuantity, issuedDate:issuedDate, assetId:asset.assetId})"/>
+                    <if condition="workEffortOnly"><then>
+                        <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                        <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                in-map="{assetId:asset.assetId, workEffortId:workEffortId,
+                                    quantity:curQuantity, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                    </then><else>
+                        <service-call name="mantle.product.AssetServices.issue#Asset"
+                                in-map="Object.assign({}, baseMap, {quantity:curQuantity,
+                                    issuedDate:issuedDate, assetId:asset.assetId})"/>
+                    </else></if>
                     <set field="quantityRemaining" from="toDecimal(quantityRemaining).subtract(curQuantity)"/>
                     <if condition="toDecimal(quantityRemaining).isZero()"><break/></if>
                 </if>
@@ -2604,8 +2612,16 @@ along with this software (see the LICENSE.md file). If not, see
                         <service-call name="mantle.product.AssetServices.displace#AssetReservations"
                                 in-map="{assetId:asset.assetId, quantity:curQuantity}"/>
 
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:curQuantity, issuedDate:issuedDate, assetId:asset.assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:asset.assetId, workEffortId:workEffortId,
+                                        quantity:curQuantity, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:curQuantity,
+                                        issuedDate:issuedDate, assetId:asset.assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(quantityRemaining).subtract(curQuantity)"/>
                         <if condition="toDecimal(quantityRemaining).isZero()"><break/></if>
                     </if>
@@ -2625,16 +2641,32 @@ along with this software (see the LICENSE.md file). If not, see
                         <order-by field-name="-receivedDate,-assetId"/>
                     </entity-find>
                     <if condition="(recentAssetList?.length > 0)"><then>
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:quantityRemaining, issuedDate:issuedDate, assetId:recentAssetList[0].assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:recentAssetList[0].assetId, workEffortId:workEffortId,
+                                        quantity:quantityRemaining, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:quantityRemaining,
+                                        issuedDate:issuedDate, assetId:recentAssetList[0].assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(0)"/>
                     </then><else>
                         <!-- no asset... create a shell one to record the reservation and detail against -->
                         <service-call name="mantle.product.AssetServices.create#ProductAssetAdHoc" out-map="createAssetOut"
                                 in-map="{productId:productId, facilityId:facilityId, ownerPartyId:vendorPartyId,
                                     createdDate:nowTimestamp}"/>
-                        <service-call name="mantle.product.AssetServices.issue#Asset"
-                                in-map="Object.assign({}, baseMap, {quantity:quantityRemaining, issuedDate:issuedDate, assetId:createAssetOut.assetId})"/>
+                        <if condition="workEffortOnly"><then>
+                            <!-- to the work effort only (a pick assembly's component, F282): issue#Asset needs a shipment -->
+                            <service-call name="mantle.product.AssetServices.issue#AssetToWorkEffort"
+                                    in-map="{assetId:createAssetOut.assetId, workEffortId:workEffortId,
+                                        quantity:quantityRemaining, issuedDate:issuedDate, noOriginFacility:'ignore'}"/>
+                        </then><else>
+                            <service-call name="mantle.product.AssetServices.issue#Asset"
+                                    in-map="Object.assign({}, baseMap, {quantity:quantityRemaining,
+                                        issuedDate:issuedDate, assetId:createAssetOut.assetId})"/>
+                        </else></if>
                         <set field="quantityRemaining" from="toDecimal(0)"/>
                     </else></if>
                 </if>
