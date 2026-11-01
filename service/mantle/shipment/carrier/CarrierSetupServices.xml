@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Carrier setup (impl-warehouse P13; design-warehouse §12 Carriers): Carriers is the one editor of a carrier's methods
+    (CarrierShipmentMethod) and of which shipping gateway serves a carrier (ShippingGatewayCarrier, crosscut §5). Carrier
+    setup is shared by every organization, so it takes its own permission, SHIPPING_CARRIER_EDIT. A gateway's credentials
+    (ShippingGatewayOption) are edited only through Admin; Commerce binds stores to gateways itself. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="store" noun="CarrierShipmentMethod" allow-remote="false">
+        <description>A carrier's method: create or change its description, sequence and codes, or with remove Y delete one
+            no route segment or store ship option uses. Requires SHIPPING_CARRIER_EDIT; refuses a party that is not a
+            carrier (CARRIER_INVALID), a method that is not a shipment method (METHOD_INVALID) and a method in use
+            (METHOD_IN_USE).</description>
+        <in-parameters>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="shipmentMethodEnumId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="gatewayServiceCode"/>
+            <parameter name="carrierServiceCode"/>
+            <parameter name="scaCode"/>
+            <parameter name="remove"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultCode"/>
+        </out-parameters>
+        <actions>
+            <if condition="!ec.user.hasPermission('SHIPPING_CARRIER_EDIT')">
+                <return error="true" message="PERMISSION_DENIED: SHIPPING_CARRIER_EDIT is required"/></if>
+            <if condition="carrierPartyId != '_NA_'">
+                <entity-find-count entity-name="mantle.party.PartyRole" count-field="carrierRoles" disable-authz="true">
+                    <econdition field-name="partyId" from="carrierPartyId"/>
+                    <econdition field-name="roleTypeId" value="Carrier"/>
+                </entity-find-count>
+                <if condition="!carrierRoles">
+                    <return error="true" message="CARRIER_INVALID: ${carrierPartyId} is not a carrier"/></if>
+            </if>
+            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="methodEnum" disable-authz="true">
+                <field-map field-name="enumId" from="shipmentMethodEnumId"/></entity-find-one>
+            <if condition="methodEnum?.enumTypeId != 'ShipmentMethod'">
+                <return error="true" message="METHOD_INVALID: ${shipmentMethodEnumId} is not a shipment method"/></if>
+            <entity-find-one entity-name="mantle.shipment.carrier.CarrierShipmentMethod" value-field="existing"
+                    for-update="true" disable-authz="true"/>
+            <if condition="remove == 'Y' || remove == 'true'">
+                <if condition="existing == null">
+                    <set field="resultCode" value="NOTHING_TO_REMOVE"/>
+                    <return/>
+                </if>
+                <entity-find-count entity-name="mantle.shipment.ShipmentRouteSegment" count-field="segmentUses"
+                        disable-authz="true">
+                    <econdition field-name="carrierPartyId"/>
+                    <econdition field-name="shipmentMethodEnumId"/>
+                </entity-find-count>
+                <entity-find-count entity-name="mantle.product.store.ProductStoreShipOption" count-field="storeUses"
+                        disable-authz="true">
+                    <econdition field-name="carrierPartyId"/>
+                    <econdition field-name="shipmentMethodEnumId"/>
+                </entity-find-count>
+                <if condition="segmentUses || storeUses">
+                    <return error="true" message="METHOD_IN_USE: ${methodEnum.description} of ${carrierPartyId} is used by
+                        ${segmentUses} shipment(s) and ${storeUses} store option(s)"/></if>
+                <entity-delete value-field="existing"/>
+                <set field="resultCode" value="REMOVED"/>
+                <return/>
+            </if>
+            <set field="values" from="{carrierPartyId:carrierPartyId, shipmentMethodEnumId:shipmentMethodEnumId,
+                    description:description ?? existing?.description, sequenceNum:sequenceNum ?? existing?.sequenceNum,
+                    gatewayServiceCode:gatewayServiceCode ?? existing?.gatewayServiceCode,
+                    carrierServiceCode:carrierServiceCode ?? existing?.carrierServiceCode,
+                    scaCode:scaCode ?? existing?.scaCode}"/>
+            <if condition="existing == null"><then>
+                <service-call name="create#mantle.shipment.carrier.CarrierShipmentMethod" in-map="values"
+                        disable-authz="true"/>
+                <set field="resultCode" value="CREATED"/>
+            </then><else>
+                <service-call name="update#mantle.shipment.carrier.CarrierShipmentMethod" in-map="values"
+                        disable-authz="true"/>
+                <set field="resultCode" value="UPDATED"/>
+            </else></if>
+        </actions>
+    </service>
+    <service verb="store" noun="ShippingGatewayCarrier" allow-remote="false">
+        <description>Which shipping gateway serves a carrier (its rates and labels), with the carrier account the gateway
+            uses, or with remove Y the binding removed. Requires SHIPPING_CARRIER_EDIT; refuses an unknown gateway
+            (GATEWAY_INVALID) and a party that is not a carrier (CARRIER_INVALID).</description>
+        <in-parameters>
+            <parameter name="shippingGatewayConfigId" required="true"/>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="gatewayAccountId"/>
+            <parameter name="remove"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultCode"/>
+        </out-parameters>
+        <actions>
+            <if condition="!ec.user.hasPermission('SHIPPING_CARRIER_EDIT')">
+                <return error="true" message="PERMISSION_DENIED: SHIPPING_CARRIER_EDIT is required"/></if>
+            <entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayConfig" value-field="gateway"
+                    disable-authz="true"/>
+            <if condition="gateway == null">
+                <return error="true" message="GATEWAY_INVALID: there is no shipping gateway ${shippingGatewayConfigId}"/></if>
+            <entity-find-count entity-name="mantle.party.PartyRole" count-field="carrierRoles" disable-authz="true">
+                <econdition field-name="partyId" from="carrierPartyId"/>
+                <econdition field-name="roleTypeId" value="Carrier"/>
+            </entity-find-count>
+            <if condition="!carrierRoles &amp;&amp; carrierPartyId != '_NA_'">
+                <return error="true" message="CARRIER_INVALID: ${carrierPartyId} is not a carrier"/></if>
+            <entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayCarrier" value-field="existing"
+                    for-update="true" disable-authz="true"/>
+            <if condition="remove == 'Y' || remove == 'true'">
+                <if condition="existing != null"><entity-delete value-field="existing"/></if>
+                <set field="resultCode" from="existing != null ? 'REMOVED' : 'NOTHING_TO_REMOVE'"/>
+                <return/>
+            </if>
+            <set field="values" from="{shippingGatewayConfigId:shippingGatewayConfigId, carrierPartyId:carrierPartyId,
+                    gatewayAccountId:gatewayAccountId ?? existing?.gatewayAccountId}"/>
+            <if condition="existing == null"><then>
+                <service-call name="create#mantle.shipment.carrier.ShippingGatewayCarrier" in-map="values"
+                        disable-authz="true"/>
+                <set field="resultCode" value="CREATED"/>
+            </then><else>
+                <service-call name="update#mantle.shipment.carrier.ShippingGatewayCarrier" in-map="values"
+                        disable-authz="true"/>
+                <set field="resultCode" value="UPDATED"/>
+            </else></if>
+        </actions>
+    </service>
+</services>
