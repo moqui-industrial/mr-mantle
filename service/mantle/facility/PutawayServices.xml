@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Putaway (design-warehouse §17 WH-PUTAWAY; impl-warehouse P9; Putaway.js): the dated putaway rules, the destination
+    resolver and location capacity. The putaway itself is a move, mantle.shipment.WarehouseTaskServices.putaway#Stock
+    (STOCK_MOVE), and a one-step receipt posts to the resolver's destination (Receiving.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="store" noun="PutawayRule" allow-remote="false">
+        <description>A putaway rule of one of the user's facilities (FACILITY_EDIT, PERMISSION_DENIED; another organization's
+            facility FACILITY_UNAVAILABLE): what it applies to (a source location or location type, a product, a product
+            category, a storage type), its destination (a location, or a location type with an optional area), its priority
+            (lower first) and an optional capacity with its unit (empty: the stock unit). With putawayRuleId the rule in
+            effect ends where the changed one starts (fromDate, now or later), or ends now with endNow; key fields are
+            audit-logged under the reason (REASON_REQUIRED). Refuses a destination that is closed (LOCATION_CLOSED), an
+            ended rule (RULE_ENDED), a stale change (RULE_CHANGED) and an invalid value (RULE_INVALID).</description>
+        <in-parameters>
+            <parameter name="putawayRuleId"/>
+            <parameter name="facilityId"/>
+            <parameter name="description"/>
+            <parameter name="fromLocationTypeEnumId"/>
+            <parameter name="fromLocationSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="storageTypeEnumId"/>
+            <parameter name="toLocationTypeEnumId"/>
+            <parameter name="toAreaId"/>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="priority"/>
+            <parameter name="capacity"/>
+            <parameter name="capacityUomId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="endNow" type="Boolean" default="false"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="putawayRuleId"/>
+            <parameter name="rule" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Putaway.js')
+                    .execute('store', context)"/>
+            <set field="putawayRuleId" from="answer.putawayRuleId"/>
+            <set field="rule" from="answer.rule"/>
+        </actions>
+    </service>
+    <service verb="find" noun="PutawayRules" allow-remote="false">
+        <description>A facility's putaway rules in effect now and to come, or every row with includeHistory, by priority, each
+            with what it applies to, from where and to where in words, its capacity and dates. Any user with the facility in
+            their scope reads (FACILITY_UNAVAILABLE otherwise); canEdit says whether they may change them.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="includeHistory" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="rules" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Putaway.js')
+                    .execute('list', context)"/>
+            <set field="facilityId" from="answer.facilityId"/>
+            <set field="canEdit" from="answer.canEdit"/>
+            <set field="rules" from="answer.rules"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="Destination" allow-remote="false">
+        <description>Where stock goes: an asset (its facility, product, quantity on hand, owner, status and location), or a
+            product and quantity at a facility (from a source location or location type; none is a receipt, which counts as
+            receiving). Tries the product's default locations (ProductFacilityLocation), then the destinations of the rules
+            in effect at asOfDate (now by default) that apply, by priority, each checked: open (LOCATION_CLOSED,
+            FACILITY_CLOSED), not where the stock is (SAME_LOCATION), a storage location (NOT_STORAGE; quarantined stock
+            only in quarantine, QUARANTINE_ONLY), a status the stock may take (STATUS_FLOW), the storage type
+            (STORAGE_TYPE), one owner (OTHER_OWNER), and the location's and the rule's capacity with what is coming to it
+            (CAPACITY_EXCEEDED, RULE_CAPACITY; CAPACITY_UNMEASURED for stock it cannot measure). Answers the first that
+            fits and every candidate with its explanation, or NO_DESTINATION with the reasons. Reads only; the facility
+            must be in the user's scope (FACILITY_UNAVAILABLE, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"><description>The stock unit; the asset's on hand by
+                default.</description></parameter>
+            <parameter name="fromLocationSeqId"/>
+            <parameter name="fromLocationTypeEnumId"/>
+            <parameter name="ownerPartyId"><description>The facility's owner by default.</description></parameter>
+            <parameter name="statusId"/>
+            <parameter name="lotId"/>
+            <parameter name="asOfDate" type="Timestamp"><description>The rules in effect then (a rule to come can be
+                tried); capacity is now.</description></parameter>
+            <parameter name="explain" type="Boolean" default="true"><description>False stops at the first location
+                that fits (a queue, a sheet), answering only the candidates tried.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity"/>
+            <parameter name="fromLocationSeqId"/>
+            <parameter name="statusId"/>
+            <parameter name="locationSeqId"><description>The destination, empty when none fits.</description></parameter>
+            <parameter name="source"><description>default or rule</description></parameter>
+            <parameter name="putawayRuleId"/>
+            <parameter name="statusAfter"/>
+            <parameter name="explanation"/>
+            <parameter name="reasonCode"><description>NO_DESTINATION when none fits.</description></parameter>
+            <parameter name="reasonText"/>
+            <parameter name="candidates" type="List"><description>Each tried location: locationSeqId, locationText, source,
+                sourceText, putawayRuleId, chosen, ok, reasonCode, explanation, statusAfter, capacity, occupied, incoming,
+                remaining, capacityUnitText.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Putaway.js')
+                    .execute('resolve', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Capacity" allow-remote="false">
+        <description>How full the open locations of a facility are (the given ones, else those with a capacity, at most 200):
+            capacity in the location's unit, occupied, incoming (the putaway queue's stock of the products whose default
+            location it is, less excludeAssetIds), remaining, and the stock that cannot be measured in that unit
+            (unmeasured; such a location cannot claim spare capacity). With productId and quantity, whether it fits. No
+            capacity is no limit. Reads only; the facility must be in the user's scope.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="locationSeqIds" type="List"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="excludeAssetIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="capacityRows" type="List"><description>locationSeqId, description, locationTypeEnumId, limited,
+                capacity, capacityUomId, capacityUnitText, occupied, incoming, remaining, unmeasured, measured and
+                fits.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/facility/Putaway.js')
+                    .execute('capacity', context)"/>
+            <set field="facilityId" from="answer.facilityId"/>
+            <set field="capacityRows" from="answer.capacityRows"/>
+        </actions>
+    </service>
+</services>
