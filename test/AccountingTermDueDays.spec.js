@@ -65,6 +65,8 @@ spec({
             currencyUomId: "USD",
             companyNameOnAccount: "DST Org"
         }).paymentMethodId
+        // current from before the pinned clocks: made now, it would not be current yet at a pinned time in the past
+        h.call("update#mantle.account.method.PaymentMethod", {paymentMethodId: bankId, fromDate: Date.UTC(2026, 0, 1)})
     },
     cleanupSpec() {
         login("john.doe")
