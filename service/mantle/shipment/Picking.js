@@ -124,6 +124,12 @@ function transferStockAt(userScope, sh, source, p, quantity, containerId) {
         if (posting.heldStatuses.includes(asset.statusId))
             denied("HELD_STOCK", "Asset " + asset.assetId + " is " + asset.statusId + "; held stock is not picked")
         if (!["AstAvailable", "AstOnHold"].includes(asset.statusId)) continue
+        // a transfer keeps the facility owner's stock: a scanned asset of another owner is refused, another left alone
+        if (asset.ownerPartyId !== sh.facility.ownerPartyId) {
+            if (!blank(p.assetId))
+                denied("OWNER_MISMATCH", "Asset " + asset.assetId + " is " + asset.ownerPartyId + "'s, not the facility owner's")
+            continue
+        }
         available += number(asset.availableToPromiseTotal)
         assets.push(asset)
     }

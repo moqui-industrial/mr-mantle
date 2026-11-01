@@ -31,8 +31,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId"/>
         </out-parameters>
         <actions>
-            <!-- an internal stock request (impl-warehouse P15 WH-REQUEST) names the facility the stock is for, one of the
-                user's organizations' (FACILITY_REQUIRED, RECORD_UNAVAILABLE); that organization is its OrgInternal party -->
+            <!-- an internal stock request (impl-warehouse P15 WH-REQUEST): with the operation policy's inventoryRequestCheck
+                it names the facility the stock is for, one of the user's organizations' (FACILITY_REQUIRED,
+                RECORD_UNAVAILABLE), and that organization is its OrgInternal party; without it nothing changes -->
             <set field="inventoryRequest" from="null"/>
             <if condition="requestTypeEnumId == 'RqtInventory'">
                 <set field="inventoryRequests" value="component://mr-mantle/service/mantle/request/InventoryRequests.js"/>
@@ -40,7 +41,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="visitId" from="ec.user.visitId"/>
             <service-call name="create#mantle.request.Request" out-map="context" in-map="context"/>
-            <if condition="inventoryRequest"><service-call name="create#mantle.request.RequestParty"
+            <if condition="inventoryRequest?.checked"><service-call name="create#mantle.request.RequestParty"
                     in-map="{requestId:requestId, partyId:inventoryRequest.organizationPartyId, roleTypeId:'OrgInternal',
                         fromDate:ec.user.nowTimestamp}"/></if>
             <if condition="filedByPartyId"><service-call name="create#mantle.request.RequestParty"
@@ -145,6 +146,21 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="clientPartyId"><description>Retained for backward compatibility, uses Customer role just like customerPartyId</description></parameter>
         </in-parameters>
         <actions>
+            <!-- a request made a stock request, or a stock request moved to another facility: the same check as create#Request
+                (impl-warehouse P15 review B3) -->
+            <if condition="requestTypeEnumId == 'RqtInventory' || facilityId">
+                <entity-find-one entity-name="mantle.request.Request" value-field="storedRequest">
+                    <field-map field-name="requestId"/></entity-find-one>
+                <set field="becomesInventory" from="requestTypeEnumId == 'RqtInventory' &amp;&amp;
+                        storedRequest?.requestTypeEnumId != 'RqtInventory'"/>
+                <set field="movesInventory" from="(requestTypeEnumId || storedRequest?.requestTypeEnumId) == 'RqtInventory'
+                        &amp;&amp; facilityId &amp;&amp; facilityId != storedRequest?.facilityId"/>
+                <if condition="becomesInventory || movesInventory">
+                    <set field="inventoryRequests" value="component://mr-mantle/service/mantle/request/InventoryRequests.js"/>
+                    <script>ec.resource.script(inventoryRequests).validate({facilityId: facilityId || storedRequest?.facilityId})
+                    </script>
+                </if>
+            </if>
             <service-call name="update#mantle.request.Request" out-map="context" in-map="context"/>
             <if condition="assignToPartyId"><service-call name="mantle.request.RequestServices.replace#RequestParty"
                     in-map="{requestId:requestId, roleTypeId:'Assignee', newPartyId:assignToPartyId}"/></if>

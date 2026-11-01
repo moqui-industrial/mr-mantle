@@ -123,6 +123,9 @@ spec({
             organizationPartyId: org,
             filterDate: ec.user.nowTimestamp
         })
+        // the organization's operation policy asks for the stock request check (P15 review B3); WTR_OTHER has none
+        call("create#mantle.facility.WarehousePolicy", {organizationPartyId: org, policyType: "operation", facilityId: "_NA_",
+            productId: "_NA_", fromDate: since, inventoryRequestCheck: "Y", changeReason: "Stock requests name a facility"})
         user("WTR_MOVER", ["STOCK_MOVE"])
         user("WTR_ISSUER", ["STOCK_ISSUE", "SHIPMENT_PICK"])
         user("WTR_RECEIVER", ["STOCK_RECEIVE", "ACCOUNTING_VIEW"])
@@ -164,6 +167,10 @@ spec({
         call("create#mantle.order.OrderItem", {orderId: "WTR_PO", orderItemSeqId: "01", orderPartSeqId: "01",
             productId: "WTR_COATING", quantity: 8, unitAmount: 1.5, itemTypeEnumId: "ItemProduct"})
         call("create#mantle.order.OrderItemWorkEffort", {orderId: "WTR_PO", orderItemSeqId: "01", workEffortId: "WTR_OP"})
+        // a goods item on the same order linked to the operation: not a service
+        call("create#mantle.order.OrderItem", {orderId: "WTR_PO", orderItemSeqId: "02", orderPartSeqId: "01",
+            productId: "WTR_COMP", quantity: 1, unitAmount: 1, itemTypeEnumId: "ItemProduct"})
+        call("create#mantle.order.OrderItemWorkEffort", {orderId: "WTR_PO", orderItemSeqId: "02", workEffortId: "WTR_OP"})
         ec.artifactExecution.enableAuthz()
     },
     setup() {
@@ -312,6 +319,12 @@ feature("a stock request is approved into a requirement, allocated by transfer a
     when() {
         const noFacility = as("wtr_mover", () => invoke(R + "create#Request", {requestTypeEnumId: "RqtInventory",
             requestName: "No facility"}))
+        // the check is the organization's policy: without it Mantle's default stands, on create and on update
+        const unchecked = as("wtr_outsider", () => invoke(R + "create#Request", {requestTypeEnumId: "RqtInventory",
+            requestName: "No facility, no check"}))
+        const plain = as("wtr_mover", () => invoke(R + "create#Request", {requestTypeEnumId: "RqtSupport", requestName: "Plain"}))
+        const switched = as("wtr_mover", () => invoke(R + "update#Request", {requestId: plain.requestId,
+            requestTypeEnumId: "RqtInventory", facilityId: foreign}))
         const created = as("wtr_mover", () => invoke(R + "create#Request", {requestTypeEnumId: "RqtInventory",
             requestName: "Bins for the east line", facilityId: destination}))
         state.request = created.requestId
@@ -339,14 +352,17 @@ feature("a stock request is approved into a requirement, allocated by transfer a
         const after = run("wtr_mover", R + "get#InventoryRequestProgress", {requestId: state.request})
         const outsider = run("wtr_outsider", R + "get#InventoryRequestProgress", {requestId: state.request})
         const links = rows("mantle.request.requirement.RequirementRequestItem", {requestId: state.request})
-        return {noFacility, created, item, service, draftAllocate, moverApprove, approved, over, allocated, outsider, links,
+        return {noFacility, unchecked, switched, created, item, service, draftAllocate, moverApprove, approved, over, allocated,
+            outsider, links,
             before: (before.itemRows || [])[0] || {}, inTransit: (inTransit.itemRows || [])[0] || {},
             after: (after.itemRows || [])[0] || {},
             parties: rows("mantle.request.RequestParty", {requestId: state.request, roleTypeId: "OrgInternal"})}
     },
-    then({noFacility, created, item, service, draftAllocate, moverApprove, approved, over, allocated, before, inTransit,
-        after, outsider, links, parties}) {
+    then({noFacility, unchecked, switched, created, item, service, draftAllocate, moverApprove, approved, over, allocated,
+        before, inTransit, after, outsider, links, parties}) {
         noFacility.error.includes("FACILITY_REQUIRED")
+        unchecked.error === "" && !!unchecked.requestId
+        switched.error.includes("RECORD_UNAVAILABLE")
         created.error === "" && parties.length === 1 && parties[0].partyId === org
         item.error === ""
         service.error.includes("NOT_STOCK")
@@ -371,19 +387,33 @@ feature("within the request's facility the allocation is a guarded move; another
         const created = as("wtr_mover", () => invoke(R + "create#Request", {requestTypeEnumId: "RqtInventory",
             requestName: "Bins for the pick face", facilityId: origin, statusId: "ReqSubmitted"}))
         const item = run("wtr_mover", R + "add#InventoryRequestItem", {requestId: created.requestId, productId: "WTR_B", quantity: 2})
+        const itemA = run("wtr_mover", R + "add#InventoryRequestItem", {requestId: created.requestId, productId: "WTR_A",
+            quantity: 1})
         run("wtr_planner", R + "approve#InventoryRequest", {operationKey: key(), requestId: created.requestId})
+        // stock of another facility is not moved inside it as this request's (P15 review A1), nor an item given twice (B2)
+        const elsewhere = rows("mantle.product.asset.Asset", {productId: "WTR_A", facilityId: destination})
+            .find(row => n(row.quantityOnHandTotal) > 0)
+        const otherFacility = run("wtr_mover", T + "allocate#InventoryRequest", {operationKey: key(),
+            requestId: created.requestId, fromFacilityId: origin,
+            allocationRows: [{requestItemSeqId: itemA.requestItemSeqId, quantity: 1, assetId: elsewhere.assetId,
+                toLocationSeqId: "RECV1"}]})
+        const twice = run("wtr_mover", T + "allocate#InventoryRequest", {operationKey: key(), requestId: created.requestId,
+            fromFacilityId: origin, allocationRows: [{requestItemSeqId: item.requestItemSeqId, quantity: 1},
+                {requestItemSeqId: item.requestItemSeqId, quantity: 1}]})
         const noAsset = run("wtr_mover", T + "allocate#InventoryRequest", {operationKey: key(), requestId: created.requestId,
             fromFacilityId: origin, allocationRows: [{requestItemSeqId: item.requestItemSeqId, quantity: 2}]})
         const moved = run("wtr_mover", T + "allocate#InventoryRequest", {operationKey: key(), requestId: created.requestId,
             fromFacilityId: origin, allocationRows: [{requestItemSeqId: item.requestItemSeqId, quantity: 2, assetId: state.other,
                 toLocationSeqId: "RECV1"}]})
         const progress = run("wtr_mover", R + "get#InventoryRequestProgress", {requestId: created.requestId})
-        return {support, noAsset, moved, row: (progress.itemRows || [])[0] || {},
+        return {support, noAsset, otherFacility, twice, moved, row: (progress.itemRows || [])[0] || {},
             at: asset(moved.result?.allocations?.[0]?.assetId || "-")}
     },
-    then({support, noAsset, moved, row, at}) {
+    then({support, noAsset, otherFacility, twice, moved, row, at}) {
         support.error === "" && !!support.requestId
         noAsset.error.includes("ASSET_REQUIRED")
+        otherFacility.error.includes("OTHER_FACILITY")
+        twice.error.includes("DUPLICATE_ITEM")
         moved.error === "" && moved.result.kind === "move"
         at.locationSeqId === "RECV1" && n(at.quantityOnHandTotal) === 2
         row.allocated === "2" && row.transferred === "2" && row.received === "2" && row.links[0].kind === "move"
@@ -396,6 +426,16 @@ feature("components dispatched to a vendor-custody facility by move stay the org
         const lines = [{productId: "WTR_COMP", quantity: 5}]
         const notCustody = run("wtr_mover", T + "create#Transfer", Object.assign({operationKey: key(), originFacilityId: origin,
             destinationFacilityId: destination, lines}, keys))
+        const notService = run("wtr_mover", T + "create#Transfer", Object.assign({operationKey: key(), originFacilityId: origin,
+            destinationFacilityId: vendor, lines}, keys, {subcontractOrderItemSeqId: "02"}))
+        // a dispatch sent partly by move and shipped short has nothing in transit: it is delivered at once (B6)
+        const short = run("wtr_mover", T + "create#Transfer", Object.assign({operationKey: key(), originFacilityId: origin,
+            destinationFacilityId: vendor, lines: [{productId: "WTR_COMP", quantity: 2}]}, keys))
+        const shortMove = run("wtr_mover", T + "dispatch#SubcontractStock", {operationKey: key(),
+            shipmentId: short.result?.shipmentId, shipmentItemSourceId: short.result?.lines?.[0]?.shipmentItemSourceId,
+            assetId: state.component, quantity: 1, toLocationSeqId: "PICK1"})
+        const shortShip = run("wtr_issuer", T + "ship#Transfer", {operationKey: key(), shipmentId: short.result?.shipmentId,
+            shipShort: true})
         const created = run("wtr_mover", T + "create#Transfer", Object.assign({operationKey: key(), originFacilityId: origin,
             destinationFacilityId: vendor, lines}, keys))
         const shipmentId = created.result?.shipmentId
@@ -413,13 +453,18 @@ feature("components dispatched to a vendor-custody facility by move stay the org
         const returned = run("wtr_mover", T + "dispatch#SubcontractStock", {operationKey: key(), shipmentId: back.result?.shipmentId,
             shipmentItemSourceId: back.result?.lines?.[0]?.shipmentItemSourceId, assetId: atVendor[0]?.assetId,
             toLocationSeqId: "PICK1"})
-        return {notCustody, created, plainTransfer, firstMove, secondMove, atVendor, back, returned,
+        return {notCustody, notService, shortMove, shortShip, created, plainTransfer, firstMove, secondMove, atVendor, back,
+            returned, shortShipment: one("mantle.shipment.Shipment", {shipmentId: short.result?.shipmentId || "-"}),
             shipment: one("mantle.shipment.Shipment", {shipmentId}),
             vendorAfter: rows("mantle.product.asset.Asset", {productId: "WTR_COMP", facilityId: vendor}),
             postings: rows("mantle.product.issuance.AssetIssuance", {shipmentId}).length}
     },
-    then({notCustody, created, plainTransfer, firstMove, secondMove, atVendor, back, returned, shipment, vendorAfter, postings}) {
+    then({notCustody, notService, shortMove, shortShip, shortShipment, created, plainTransfer, firstMove, secondMove, atVendor,
+        back, returned, shipment, vendorAfter, postings}) {
         notCustody.error.includes("NOT_CUSTODY")
+        notService.error.includes("NOT_SERVICE")
+        shortMove.error === "" && shortShip.error === "" && shortShip.result.delivered === true
+        shortShipment.statusId === "ShipDelivered"
         created.error === "" && created.result.subcontract === true && created.result.custodianPartyId === supplier
         shipment.subcontractWorkEffortId === "WTR_OP" && shipment.subcontractOrderId === "WTR_PO"
         plainTransfer.error.includes("NOT_SUBCONTRACT")
@@ -427,9 +472,33 @@ feature("components dispatched to a vendor-custody facility by move stay the org
         secondMove.error === "" && secondMove.result.delivered === true
         shipment.statusId === "ShipDelivered"
         postings === 0
-        sum(atVendor, "quantityOnHandTotal") === 5
+        sum(atVendor, "quantityOnHandTotal") === 6
         atVendor.every(row => row.ownerPartyId === org && n(row.acquireCost) === 3)
         back.error === "" && returned.error === "" && returned.result.delivered === true
-        sum(vendorAfter, "quantityOnHandTotal") === 4
+        sum(vendorAfter, "quantityOnHandTotal") === 5
+    }
+})
+
+feature("picked stock of two assets is sent without naming them; a rejected piece keeps its value at the transfer account", {
+    when() {
+        const created = run("wtr_mover", T + "create#Transfer", {operationKey: key(), originFacilityId: origin,
+            destinationFacilityId: destination, lines: [{productId: "WTR_A", quantity: 4}]})
+        const shipmentId = created.result?.shipmentId,
+            lineId = created.result?.lines?.[0]?.shipmentItemSourceId
+        for (const assetId of [state.cheap, state.dear])
+            run("wtr_issuer", T + "pick#ShipmentStock", {operationKey: key(), shipmentId, shipmentItemSourceId: lineId,
+                assetId, quantity: 2})
+        const issued = run("wtr_issuer", T + "issue#TransferStock", {operationKey: key(), shipmentId,
+            shipmentItemSourceId: lineId})
+        run("wtr_issuer", T + "ship#Transfer", {operationKey: key(), shipmentId})
+        const received = run("wtr_receiver", T + "receive#TransferStock", {operationKey: key(), shipmentId, productId: "WTR_A",
+            quantityAccepted: 3, quantityRejected: 1, rejectionReasonEnumId: "ArjDamaged", locationSeqId: "PICK1"})
+        return {issued, received, account: transferAccount(shipmentId)}
+    },
+    then({issued, received, account}) {
+        issued.error === "" && issued.result.assetIds.length === 2
+        received.error === "" && received.result.delivered === true
+        // 2 at 2 and 2 at 4 sent (12); 2 at 2 and 1 at 4 received (8): the rejected unit's 4 stays until a write-off (§5)
+        account === 4
     }
 })

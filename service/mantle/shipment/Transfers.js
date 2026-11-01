@@ -63,8 +63,10 @@ function productOf(productId) {
 
 // ===== the subcontract keys =====
 // The production work (an operation of a run, or the run) and the service purchase order item, linked by
-// OrderItemWorkEffort, the order's supplier the custodian of the vendor-custody facility.
-function subcontractKeys(p, custodianPartyId) {
+// OrderItemWorkEffort: the run the organization's (its owner, and its facility when it has one, in the user's scope), the
+// order not cancelled, bought by the facilities' owner from the custodian of the vendor-custody facility, the item a service
+// (P15 review B4).
+function subcontractKeys(userScope, p, custodianPartyId, ownerPartyId) {
     const workEffortId = blank(p.subcontractWorkEffortId) ? null : String(p.subcontractWorkEffortId)
     const orderId = blank(p.subcontractOrderId) ? null : String(p.subcontractOrderId)
     const orderItemSeqId = blank(p.subcontractOrderItemSeqId) ? null : String(p.subcontractOrderItemSeqId)
@@ -82,13 +84,25 @@ function subcontractKeys(p, custodianPartyId) {
               : null
     if (!work || run?.purposeEnumId !== "WepProductionRun")
         denied("RUN_REQUIRED", "Work " + workEffortId + " is not a production run or one of its operations")
+    const runFacility = run.facilityId ? one("mantle.facility.Facility", {facilityId: run.facilityId}) : null
+    if (run.ownerPartyId !== ownerPartyId || (run.facilityId && !facilityScope.owns(userScope, runFacility?.ownerPartyId)))
+        denied("RECORD_UNAVAILABLE", "Production run " + run.workEffortId + " is not available")
     const item = one("mantle.order.OrderItem", {orderId, orderItemSeqId})
     if (!item) denied("RECORD_UNAVAILABLE", "Order item " + orderId + ":" + orderItemSeqId + " is not available")
     if (!one("mantle.order.OrderItemWorkEffort", {orderId, orderItemSeqId, workEffortId}))
         denied("SUBCONTRACT_LINK", "Order item " + orderId + ":" + orderItemSeqId + " is not for work " + workEffortId)
     const part = one("mantle.order.OrderPart", {orderId, orderPartSeqId: item.orderPartSeqId})
+    if (part?.customerPartyId !== ownerPartyId)
+        denied("RECORD_UNAVAILABLE", "Order " + orderId + " is not a purchase of " + ownerPartyId)
     if (part?.vendorPartyId !== custodianPartyId)
         denied("CUSTODIAN_MISMATCH", "Order " + orderId + " is not with the facility's custodian " + custodianPartyId)
+    const header = one("mantle.order.OrderHeader", {orderId})
+    const closed = ["OrderCancelled", "OrderRejected"]
+    if (closed.includes(header?.statusId) || closed.includes(part.statusId) || closed.includes(item.statusId))
+        denied("ORDER_CANCELLED", "Order " + orderId + " is cancelled")
+    const service = item.productId ? one("mantle.product.Product", {productId: item.productId}) : null
+    if (service?.productTypeEnumId !== "PtService")
+        denied("NOT_SERVICE", "Order item " + orderId + ":" + orderItemSeqId + " is not a service")
     return {subcontractWorkEffortId: workEffortId, subcontractOrderId: orderId, subcontractOrderItemSeqId: orderItemSeqId,
         runWorkEffortId: run.workEffortId}
 }
@@ -112,7 +126,7 @@ function create(userScope, p) {
         return {product, quantity, row}
     })
     const custodian = custodianOf(destination.facilityId) || custodianOf(origin.facilityId)
-    const keys = subcontractKeys(p, custodian) || {}
+    const keys = subcontractKeys(userScope, p, custodian, origin.ownerPartyId) || {}
     const created = call("mantle.shipment.ShipmentServices.create#Shipment", {
         shipmentTypeEnumId: "ShpTpTransfer",
         statusId: "ShipInput",
@@ -239,28 +253,18 @@ const linesOf = (shipmentId, pending = {}) =>
         .map(source => lineOf(source, pending[source.shipmentItemSourceId]))
 
 // ===== the stock sent =====
-// The stock a line sends: the named asset, else the stock the line's guarded picks took (P11's pick#ShipmentStock answers),
-// locked; at the origin, of the line's product, available or on a receiving hold, the quantity within its available to
-// promise (stock reserved for orders stays theirs).
+// A named asset a line sends, locked: at the origin, the origin owner's (OWNER_MISMATCH: a transfer keeps one owner's stock),
+// of the line's product, available or on a receiving hold, the quantity within its available to promise (stock reserved for
+// orders stays theirs).
 function stockToSend(userScope, tr, source, assetId, quantity) {
-    let chosen = blank(assetId) ? null : String(assetId)
-    if (!chosen) {
-        const picked = Array.from(
-            find(OPERATION, {resultId: source.shipmentItemSourceId, operationType: "ShipmentPick", resultEntityName: SOURCE})
-                .orderBy("completedDate")
-                .list()
-        ).flatMap(row => lib.json(row.resultJson, {}).moves || []).map(move => move.toAssetId).filter(Boolean)
-        chosen = [...new Set(picked)].find(id => {
-            const row = one(ASSET, {assetId: id})
-            return row && row.facilityId === tr.originFacilityId && dec(row.availableToPromiseTotal).compare(0) > 0
-        })
-        if (!chosen) denied("ASSET_REQUIRED", "Choose the stock to send on line " + source.shipmentItemSourceId)
-    }
+    const chosen = String(assetId)
     const asset = posting.stock(userScope, chosen, quantity)
     if (asset.facilityId !== tr.originFacilityId)
         denied("OTHER_FACILITY", "Asset " + chosen + " is not at " + tr.originFacilityId + ", the transfer's origin")
     if (asset.productId !== source.productId)
         denied("PRODUCT_MISMATCH", "Asset " + chosen + " is not " + source.productId)
+    if (asset.ownerPartyId !== tr.origin.ownerPartyId)
+        denied("OWNER_MISMATCH", "Asset " + chosen + " is " + asset.ownerPartyId + "'s, not the facility owner's")
     if (posting.heldStatuses.includes(asset.statusId))
         denied("HELD_STOCK", "Asset " + chosen + " is " + asset.statusId + "; only an inspection's disposition releases it")
     if (!usableStatuses.includes(asset.statusId))
@@ -271,6 +275,43 @@ function stockToSend(userScope, tr, source, assetId, quantity) {
             "Asset " + chosen + " has only " + text(asset.availableToPromiseTotal) + " not reserved for orders"
         )
     return asset
+}
+// The stock a line sends, as [{asset, quantity}]: the named asset, else the stock the line's guarded picks took (P11's
+// pick#ShipmentStock answers), across as many of those assets as the quantity needs, each locked in id order and checked
+// as a named one (P15 review C).
+function piecesToSend(userScope, tr, source, assetId, quantity) {
+    if (!blank(assetId)) return [{asset: stockToSend(userScope, tr, source, assetId, quantity), quantity: dec(quantity)}]
+    // what the line's picks took onto each asset, less what the line already issued from it
+    const picked = new Map()
+    for (const row of Array.from(
+        find(OPERATION, {resultId: source.shipmentItemSourceId, operationType: "ShipmentPick", resultEntityName: SOURCE}).list()
+    ))
+        for (const move of lib.json(row.resultJson, {}).moves || [])
+            if (move.toAssetId) picked.set(move.toAssetId, (picked.get(move.toAssetId) || zero()).add(dec(move.quantity)))
+    for (const issuance of rows(ISSUANCE, {shipmentItemSourceId: source.shipmentItemSourceId}))
+        if (picked.has(issuance.assetId))
+            picked.set(issuance.assetId, picked.get(issuance.assetId).subtract(dec(issuance.quantity)))
+    const candidates = [...picked.keys()]
+        .sort()
+        .filter(id => picked.get(id).compare(0) > 0)
+        .map(id => one(ASSET, {assetId: id}))
+        .filter(row => row && row.facilityId === tr.originFacilityId && dec(row.availableToPromiseTotal).compare(0) > 0)
+    if (!candidates.length) denied("ASSET_REQUIRED", "Choose the stock to send on line " + source.shipmentItemSourceId)
+    const pieces = []
+    let left = dec(quantity)
+    for (const row of candidates) {
+        if (left.compare(0) <= 0) break
+        const take = min(min(left, picked.get(row.assetId)), dec(row.availableToPromiseTotal))
+        pieces.push({asset: stockToSend(userScope, tr, source, row.assetId, take), quantity: take})
+        left = left.subtract(take)
+    }
+    if (left.compare(0) > 0)
+        denied(
+            "QUANTITY_EXCEEDS_AVAILABLE",
+            "The stock picked for line " + source.shipmentItemSourceId + " has only " + text(dec(quantity).subtract(left)) +
+                " available; name the stock for the rest"
+        )
+    return pieces
 }
 // The quantity to send on a line: above zero, at most what is left to send.
 function quantityToSend(line, quantity) {
@@ -357,10 +398,14 @@ function shipShortLines(tr, outstanding) {
     }
 }
 // The shipment shipped: a picked one through packed (Mantle's flow has no Picked to Shipped), then ship#Shipment.
+// A subcontract dispatch whose lines all went by moves (none issued) has nothing in transit, so it is delivered at once
+// (P15 review B6, settleDispatched's rule). Answers whether it was delivered.
 function shipShipment(tr) {
-    if (tr.shipment.statusId === "ShipPicked")
-        call("update#" + SHIPMENT, {shipmentId: tr.shipmentId, statusId: "ShipPacked"})
+    if (tr.shipment.statusId === "ShipPicked") call("mantle.shipment.ShipmentServices.pack#Shipment", {shipmentId: tr.shipmentId})
     call("mantle.shipment.ShipmentServices.ship#Shipment", {shipmentId: tr.shipmentId})
+    const movesOnly = !!tr.shipment.subcontractWorkEffortId && linesOf(tr.shipmentId).every(line => line.issued.compare(0) === 0)
+    if (movesOnly) call("mantle.shipment.ShipmentServices.deliver#Shipment", {shipmentId: tr.shipmentId})
+    return movesOnly
 }
 
 // ===== receive#TransferStock =====
@@ -554,7 +599,11 @@ function inventoryRequest(userScope, requestId) {
 function allocationRows(req, p) {
     const list = Array.from(p.allocationRows || []).filter(row => row && dec(row.quantity).compare(0) > 0)
     if (!list.length) denied("QUANTITY_INVALID", "Give a quantity above zero to allocate")
-    return list.map(row => {
+    // one row per item, so the approved quantity is checked against all of it (P15 review B2)
+    const itemIds = list.map(row => String(row.requestItemSeqId))
+    const repeated = itemIds.filter((id, index) => itemIds.indexOf(id) !== index)
+    if (repeated.length) denied("DUPLICATE_ITEM", "Item " + repeated[0] + " is on more than one row; give it one quantity")
+    return list.map((row, index) => {
         const item = one("mantle.request.RequestItem", {requestId: req.request.requestId, requestItemSeqId: row.requestItemSeqId})
         if (!item) denied("RECORD_UNAVAILABLE", "Item " + row.requestItemSeqId + " is not on request " + req.request.requestId)
         const approved = approvedOf(item.requestId, item.requestItemSeqId)
@@ -565,7 +614,7 @@ function allocationRows(req, p) {
                 "QUANTITY_EXCEEDS_APPROVED",
                 "Only " + text(open) + " of item " + item.requestItemSeqId + " is approved and not allocated"
             )
-        return {item, quantity, assetId: row.assetId || null, toLocationSeqId: row.toLocationSeqId || null}
+        return {item, quantity, index, assetId: row.assetId || null, toLocationSeqId: row.toLocationSeqId || null}
     })
 }
 function writeAllocation(req, row, fields, operationKey) {
@@ -590,6 +639,7 @@ function writeAllocation(req, row, fields, operationKey) {
     lineOf,
     linesOf,
     stockToSend,
+    piecesToSend,
     quantityToSend,
     handled,
     postIssue,

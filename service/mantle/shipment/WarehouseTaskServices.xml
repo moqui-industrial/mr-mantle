@@ -1955,8 +1955,10 @@ along with this software (see the LICENSE.md file). If not, see
             (FACILITY_CLOSED), the same facility at both ends (SAME_FACILITY: a move), two owners (OWNER_MISMATCH), no lines
             (LINES_REQUIRED), a product that is not stocked (NOT_STOCK) or a quantity not above zero (QUANTITY_INVALID); for a
             subcontract dispatch no vendor-custody facility at either end (NOT_CUSTODY), a missing key (SUBCONTRACT_KEYS),
-            work that is not a production run or its operation (RUN_REQUIRED), an order item not linked to the work
-            (SUBCONTRACT_LINK, OrderItemWorkEffort) or whose supplier is not the custodian (CUSTODIAN_MISMATCH).</description>
+            work that is not a production run or its operation (RUN_REQUIRED), a run of another owner or outside the user's
+            facilities, or an order not bought by the facilities' owner (RECORD_UNAVAILABLE), an order item not linked to the
+            work (SUBCONTRACT_LINK, OrderItemWorkEffort), whose supplier is not the custodian (CUSTODIAN_MISMATCH), on a
+            cancelled order (ORDER_CANCELLED) or not a service (NOT_SERVICE).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="originFacilityId" required="true"/>
@@ -1993,13 +1995,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="issue" noun="TransferStock" allow-remote="false">
         <description>Send stock on a transfer line at its origin: the named asset (else the stock the line's guarded picks
-            took) issued to the line through mantle.product.AssetServices.issue#Asset, which posts the issue to the inventory
-            type's transferGlAccountId; the issuance's entered quantity (F7) and the line's not-handled quantity written. The
+            took, across as many of those assets as the quantity needs) issued to the line through
+            mantle.product.AssetServices.issue#Asset, which posts the issue to the inventory type's transferGlAccountId; the
+            issuance's entered quantity (F7) and the line's not-handled quantity written. The
             stock keeps its owner and cost for the receipt at the destination (receive#TransferStock). A retry with the same
             operation key answers the first. Requires STOCK_ISSUE (PERMISSION_DENIED); refuses a transfer or line outside the
             user's facilities (RECORD_UNAVAILABLE), one that has shipped (TRANSFER_SHIPPED), a cancelled line
             (SOURCE_CANCELLED), more than is left to send (QUANTITY_EXCEEDS_REMAINING), no stock named or picked
-            (ASSET_REQUIRED), stock of another facility (OTHER_FACILITY) or product (PRODUCT_MISMATCH), quarantined
+            (ASSET_REQUIRED), stock of another facility (OTHER_FACILITY), product (PRODUCT_MISMATCH) or owner
+            (OWNER_MISMATCH), quarantined
             (HELD_STOCK) or otherwise unusable (STATUS_NOT_USABLE) stock, more than its available to promise
             (QUANTITY_EXCEEDS_AVAILABLE: reserved for orders), and a closed fiscal period today (PERIOD_CLOSED, read without
             locking the periods). Expired and near-expiry stock is sent with a warning naming its date.</description>
@@ -2013,8 +2017,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode ISSUED, shipmentId, shipmentItemSourceId, productId,
-                assetId, facilityId, quantity, issuedQuantity, remainingQuantity, assetIssuanceId, warnings, and the operation
-                fields.</description></parameter>
+                assetId (the first) and assetIds, facilityId, quantity, issuedQuantity, remainingQuantity, assetIssuanceId and
+                assetIssuanceIds, warnings, and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -2032,21 +2036,23 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="src" from="transfers.sourceOf(tr, shipmentItemSourceId)"/>
             <set field="line" from="transfers.lineOf(src)"/>
             <set field="sendQuantity" from="transfers.quantityToSend(line, quantity)"/>
-            <set field="asset" from="transfers.stockToSend(userScope, tr, src, assetId, sendQuantity)"/>
+            <set field="sendPieces" from="transfers.piecesToSend(userScope, tr, src, assetId, sendQuantity)"/>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
             <!-- 4. expiry warnings; the issue posts value, so the period of today (not locking the periods) -->
-            <set field="warnings" from="posting.expiryWarnings(asset.assetId)"/>
+            <set field="warnings" from="sendPieces.flatMap(piece =&gt; posting.expiryWarnings(piece.asset.assetId))"/>
             <script>posting.period([tr.origin.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
-            <!-- 5. Mantle's issue of the asset to the line -->
-            <set field="assetIssuanceId" from="transfers.postIssue(tr, src, asset, sendQuantity)"/>
+            <!-- 5. Mantle's issue of each asset to the line -->
+            <set field="assetIssuanceIds" from="sendPieces.map(piece =&gt; transfers.postIssue(tr, src, piece.asset,
+                    piece.quantity))"/>
             <set field="after" from="transfers.lineOf(src)"/>
             <set field="result" from="posting.complete(begun.op, tr.origin.ownerPartyId, 'mantle.shipment.ShipmentItemSource',
                     shipmentItemSourceId, {resultCode: 'ISSUED', shipmentId: shipmentId,
-                        shipmentItemSourceId: shipmentItemSourceId, productId: src.productId, assetId: asset.assetId,
+                        shipmentItemSourceId: shipmentItemSourceId, productId: src.productId,
+                        assetId: sendPieces[0].asset.assetId, assetIds: sendPieces.map(piece =&gt; piece.asset.assetId),
                         facilityId: tr.originFacilityId, quantity: transfers.text(sendQuantity),
                         issuedQuantity: transfers.text(after.issued), remainingQuantity: transfers.text(after.toSend),
-                        assetIssuanceId: assetIssuanceId, warnings: warnings})"/>
+                        assetIssuanceId: assetIssuanceIds[0], assetIssuanceIds: assetIssuanceIds, warnings: warnings})"/>
         </actions>
     </service>
     <service verb="ship" noun="Transfer" allow-remote="false">
@@ -2063,8 +2069,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipShort" type="Boolean"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="result" type="Map"><description>resultCode SHIPPED, shipmentId, shortLines (shipmentItemSourceId,
-                productId, sent, of), and the operation fields.</description></parameter>
+            <parameter name="result" type="Map"><description>resultCode SHIPPED, shipmentId, delivered (a subcontract dispatch
+                whose lines all went by moves is delivered at once), shortLines (shipmentItemSourceId, productId, sent, of), and
+                the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -2082,9 +2089,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <set field="plan" from="transfers.shipPlan(tr, context)"/>
             <if condition="plan.outstanding.length"><script>transfers.shipShortLines(tr, plan.outstanding)</script></if>
-            <script>transfers.shipShipment(tr)</script>
+            <set field="delivered" from="transfers.shipShipment(tr)"/>
             <set field="result" from="posting.complete(begun.op, tr.origin.ownerPartyId, 'mantle.shipment.Shipment', shipmentId,
-                    {resultCode: 'SHIPPED', shipmentId: shipmentId, shortLines: plan.outstanding.map(row =&gt;
+                    {resultCode: 'SHIPPED', shipmentId: shipmentId, delivered: delivered,
+                        shortLines: plan.outstanding.map(row =&gt;
                         ({shipmentItemSourceId: row.source.shipmentItemSourceId, productId: row.source.productId,
                             sent: transfers.text(row.issued.add(row.moved)), of: transfers.text(row.quantity)}))})"/>
         </actions>
@@ -2258,8 +2266,9 @@ along with this software (see the LICENSE.md file). If not, see
             progress then comes from these movements (get#InventoryRequestProgress). A retry with the same operation key
             answers the first. Requires STOCK_MOVE (PERMISSION_DENIED); refuses a request outside the user's facilities
             (RECORD_UNAVAILABLE), one that is not a stock request (NOT_INVENTORY_REQUEST) or not approved (NOT_APPROVED), an
-            item of another request, no quantity (QUANTITY_INVALID), more than is approved and not yet allocated
-            (QUANTITY_EXCEEDS_APPROVED); and what create#Transfer or move#Stock refuse.</description>
+            item of another request, an item on two rows (DUPLICATE_ITEM), no quantity (QUANTITY_INVALID), more than is
+            approved and not yet allocated (QUANTITY_EXCEEDS_APPROVED), stock not at the request's facility for a move
+            (OTHER_FACILITY); and what create#Transfer or move#Stock refuse.</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="requestId" required="true"/>
@@ -2305,10 +2314,17 @@ along with this software (see the LICENSE.md file). If not, see
                             <return error="true" message="PRODUCT_MISMATCH: Asset ${plannedRow.assetId} is not
                                     ${plannedRow.item.productId}"/>
                         </if>
+                        <!-- the stock is at the request's facility (P15 review A1); move#Stock refuses another facility too -->
+                        <if condition="rowAsset.facilityId != req.facility.facilityId">
+                            <return error="true" message="OTHER_FACILITY: Asset ${plannedRow.assetId} is not at
+                                    ${req.facility.facilityId}; stock from another facility comes on a transfer"/>
+                        </if>
                         <service-call name="mantle.shipment.WarehouseTaskServices.move#Stock" out-map="moveOut"
-                                in-map="{operationKey: begun.op.clientKey + '/' + plannedRow.item.requestItemSeqId,
+                                in-map="{operationKey: begun.op.clientKey + '/' + plannedRow.index + '/' +
+                                        plannedRow.item.requestItemSeqId,
                                     assetId: plannedRow.assetId, quantity: plannedRow.quantity,
-                                    toLocationSeqId: plannedRow.toLocationSeqId, reason: 'Stock request ' + requestId}"/>
+                                    toLocationSeqId: plannedRow.toLocationSeqId, toFacilityId: req.facility.facilityId,
+                                    reason: 'Stock request ' + requestId}"/>
                         <set field="allocationId" from="transfers.writeAllocation(req, plannedRow, {allocationTypeEnumId:
                                 'IratMove', fromFacilityId: fromFacilityId, assetId: moveOut.result.toAssetId},
                                 begun.op.operationKey)"/>

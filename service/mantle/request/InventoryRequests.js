@@ -21,13 +21,33 @@ const blank = value => value == null || String(value).trim() === ""
 const text = value => (dec(value).compare(0) === 0 ? "0" : String(dec(value).toNumber()))
 const positive = value => (value.compare(0) > 0 ? value : toDecimal(0))
 
-// create#Request of RqtInventory: the facility the stock is for, one of the user's organizations'.
+// Whether the operation policy (resolve#WarehousePolicy) asks for the stock request check: for a facility of the user's
+// scope that facility's policy, else (no facility, or one outside the scope) any of the user's organizations'. Off by
+// default (impl-warehouse §2: a new refusal behind its own WarehousePolicy flag; F344).
+function checkOn(userScope, facility) {
+    const flagged = parameters => {
+        try {
+            const out = call("mantle.facility.WarehousePolicyServices.resolve#WarehousePolicy", parameters)
+            return out.operationPolicy?.inventoryRequestCheck === "Y"
+        } catch (error) {
+            ec.logger.warn("Stock request check of " + JSON.stringify(parameters) + " not read: " + error.message)
+            return false
+        }
+    }
+    if (facility && facilityScope.owns(userScope, facility.ownerPartyId)) return flagged({facilityId: facility.facilityId})
+    return (userScope.memberPartyIds || []).some(organizationPartyId => flagged({organizationPartyId}))
+}
+// create#Request (and update#Request switching to RqtInventory or another facility) of a stock request: with the policy's
+// inventoryRequestCheck, the facility the stock is for, one of the user's organizations' (FACILITY_REQUIRED,
+// RECORD_UNAVAILABLE), whose owner becomes the OrgInternal party; with the check off, Mantle's default (nothing refused).
 function validate(p) {
+    const userScope = facilityScope.scope()
+    const facility = blank(p.facilityId) ? null : one(FACILITY, {facilityId: p.facilityId})
+    if (!checkOn(userScope, facility)) return {organizationPartyId: null, checked: false}
     if (blank(p.facilityId)) denied("FACILITY_REQUIRED", "A stock request names the facility the stock is for")
-    const facility = one(FACILITY, {facilityId: p.facilityId})
-    if (!facility || !facilityScope.owns(facilityScope.scope(), facility.ownerPartyId))
+    if (!facility || !facilityScope.owns(userScope, facility.ownerPartyId))
         denied("RECORD_UNAVAILABLE", "Facility " + p.facilityId + " is not available")
-    return {organizationPartyId: facility.ownerPartyId}
+    return {organizationPartyId: facility.ownerPartyId, checked: true}
 }
 // The request, locked when asked: a stock request of a facility of the user's organizations.
 function requestOf(requestId, lock = false) {
@@ -71,7 +91,10 @@ function addItem(p) {
 function approve(userScope, p) {
     const {request, facility} = requestOf(p.requestId, true)
     if (!approvableStatuses.includes(request.statusId))
-        denied("NOT_SUBMITTED", "Request " + request.requestId + " is " + request.statusId + "; only a submitted request is approved")
+        denied(
+            "NOT_SUBMITTED",
+            "Request " + request.requestId + " is " + request.statusId + "; only a submitted request is approved"
+        )
     const items = rows(ITEM, {requestId: request.requestId}).filter(item => item.statusId !== "ReqCancelled")
     if (!items.length) denied("NO_ITEMS", "Request " + request.requestId + " has no items to approve")
     for (const item of items) {

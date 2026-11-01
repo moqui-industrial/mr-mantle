@@ -33,6 +33,11 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="subcontractOrderId" related="orderId"/>
             <key-map field-name="subcontractOrderItemSeqId" related="orderItemSeqId"/></relationship>
     </extend-entity>
+    <extend-entity entity-name="WarehousePolicy" package="mantle.facility">
+        <!-- operation policy (store#OperationPolicy, P15 review B3): Y makes create#Request and update#Request refuse a
+            stock request (RqtInventory) without a facility of the user's organizations; empty or N keeps Mantle's default -->
+        <field name="inventoryRequestCheck" type="text-indicator" enable-audit-log="true"/>
+    </extend-entity>
     <entity entity-name="InventoryRequestAllocation" package="mantle.request" cache="never">
         <description>Stock allocated to an internal stock request item (WH-REQUEST): a line of a transfer shipment to the
             request's facility, or a guarded move within it (the asset the quantity moved into). Written by
