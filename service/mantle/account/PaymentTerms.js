@@ -1,6 +1,6 @@
 // Payment terms: a term's installment and discount lines (SettlementTermLine, effective-dated), the due schedule an
 // invoice keeps from them when it is issued (InvoiceDueSchedule), and the prompt-payment discount open on a day. Dates
-// are computed as checkSet#InvoiceDueDate computes the due date: days after the invoice date in the server's zone.
+// are computed as checkSet#InvoiceDueDate computes the due date: calendar days after the invoice's day in the user's zone.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/account/InvoiceWorkflowLib.js")
 const {find, one, rows, call, denied} = lib
 const I = lib.invoiceEntity,
