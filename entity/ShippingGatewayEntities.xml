@@ -124,4 +124,40 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Count Documents" enumId="PtpCountDocuments" enumTypeId="PrinterPurpose"/>
         </seed-data>
     </extend-entity>
+    <view-entity entity-name="ShipmentPackageTracking" package="mantle.shipment">
+        <description>Each package's route segment with its shipment and segment (PackageTracking): the tracking, label and
+            delivery fields with the shipment's type, status and parties and the segment's facilities, carrier and method,
+            so a tracking list filters by facility, carrier, code and status in one query.</description>
+        <member-entity entity-alias="SPRS" entity-name="mantle.shipment.ShipmentPackageRouteSeg"/>
+        <member-entity entity-alias="SHMT" entity-name="mantle.shipment.Shipment" join-from-alias="SPRS">
+            <key-map field-name="shipmentId"/></member-entity>
+        <member-entity entity-alias="SHRS" entity-name="mantle.shipment.ShipmentRouteSegment" join-from-alias="SPRS">
+            <key-map field-name="shipmentId"/><key-map field-name="shipmentRouteSegmentSeqId"/></member-entity>
+        <alias entity-alias="SPRS" name="shipmentId"/>
+        <alias entity-alias="SPRS" name="shipmentPackageSeqId"/>
+        <alias entity-alias="SPRS" name="shipmentRouteSegmentSeqId"/>
+        <alias entity-alias="SPRS" name="trackingCode"/>
+        <alias entity-alias="SPRS" name="trackingUrl"/>
+        <alias entity-alias="SPRS" name="trackingStatusEnumId"/>
+        <alias entity-alias="SPRS" name="trackingSubStatus"/>
+        <alias entity-alias="SPRS" name="trackingStatusDate"/>
+        <alias entity-alias="SPRS" name="trackingEta"/>
+        <alias entity-alias="SPRS" name="labelDate"/>
+        <alias entity-alias="SPRS" name="gatewayLabelId"/>
+        <alias entity-alias="SPRS" name="gatewayRefundStatus"/>
+        <alias entity-alias="SPRS" name="deliveryRecipientName"/>
+        <alias entity-alias="SPRS" name="deliveryNote"/>
+        <alias entity-alias="SHMT" name="shipmentTypeEnumId"/>
+        <alias entity-alias="SHMT" name="statusId"/>
+        <alias entity-alias="SHMT" name="fromPartyId"/>
+        <alias entity-alias="SHMT" name="toPartyId"/>
+        <alias entity-alias="SHMT" name="estimatedShipDate"/>
+        <alias entity-alias="SHRS" name="originFacilityId"/>
+        <alias entity-alias="SHRS" name="destinationFacilityId"/>
+        <alias entity-alias="SHRS" name="carrierPartyId"/>
+        <alias entity-alias="SHRS" name="shipmentMethodEnumId"/>
+        <alias entity-alias="SHRS" name="shippingGatewayConfigId"/>
+        <alias entity-alias="SHRS" name="actualStartDate"/>
+        <alias entity-alias="SHRS" name="estimatedArrivalDate"/>
+    </view-entity>
 </entities>
