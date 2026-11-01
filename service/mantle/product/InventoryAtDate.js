@@ -75,15 +75,22 @@ function candidateIds(p, facilityIds, from) {
     const factory = ec.entity.conditionFactory
     const conditions = [factory.makeCondition("assetTypeEnumId", "in", STOCK_TYPES)]
     if (p.productId) conditions.push(factory.makeCondition("productId", "equals", p.productId))
+    let truncated = false
     for (const field of PLACE_FIELDS) {
         if (!p[field]) continue
         const earlier = Array.from(
             find(AUDIT, {changedEntityName: ASSET, changedFieldName: field, oldValueText: p[field]})
                 .selectField("pkPrimaryValue")
                 .distinct(true)
+                .orderBy("pkPrimaryValue")
                 .limit(assetLimit + 1)
                 .list()
         ).map(row => row.pkPrimaryValue)
+        // more assets left this value than one report reads: those past the limit are not read
+        if (earlier.length > assetLimit) {
+            truncated = true
+            earlier.length = assetLimit
+        }
         const current = factory.makeCondition(field, "equals", p[field])
         conditions.push(
             earlier.length ? factory.makeCondition([current, factory.makeCondition("assetId", "in", earlier)], "or") : current
@@ -111,10 +118,12 @@ function candidateIds(p, facilityIds, from) {
             .list()
     ).map(row => row.assetId)
     const ids = unique(holding.concat(moved)).sort()
-    return {ids: ids.slice(0, assetLimit), truncated: ids.length > assetLimit}
+    return {ids: ids.slice(0, assetLimit), truncated: truncated || ids.length > assetLimit}
 }
 
-// The place of an asset just before a time: the value the first later audit row replaced, else the current value.
+// The place of an asset just before a time: the value the first later audit row replaced, else the current value. The
+// audit rows are its changes only: the rows its create wrote (F381) are its starting values, which the current value or a
+// later change's old value already gives.
 function placeBefore(asset, changes, at) {
     const place = {productId: asset.productId}
     for (const field of PLACE_FIELDS) {
@@ -187,27 +196,60 @@ function inventoryAtDate(p) {
     const candidates = candidateIds(p, facilityIds, from)
     const cutoffStamp = new Date(cutoff)
     const assets = rowsIn(ASSET, "assetId", candidates.ids)
+    // each asset's quantity before the opening day, summed in the query; its ledger rows of the period
+    const openings = new Map()
+    for (const row of rowsIn("mantle.product.asset.AssetDetailSummary", "assetId", candidates.ids, query =>
+        query.condition("effectiveDate", "less", new Date(from)).selectField("assetId").selectField("quantityOnHandTotal")
+    ))
+        openings.set(row.assetId, toDecimal(row.quantityOnHandTotal ?? 0))
     const details = new Map()
     for (const row of rowsIn(DETAIL, "assetId", candidates.ids, query =>
-        query.condition("effectiveDate", "less", cutoffStamp).orderBy("effectiveDate").orderBy("assetDetailId")
+        query
+            .condition("effectiveDate", "greater-equals", new Date(from))
+            .condition("effectiveDate", "less", cutoffStamp)
+            .orderBy("effectiveDate")
+            .orderBy("assetDetailId")
     )) {
         if (!details.has(row.assetId)) details.set(row.assetId, [])
         details.get(row.assetId).push(row)
     }
-    const changes = new Map()
+    // each asset's changes of place; the rows its create wrote are its starting values, not changes: each field's first
+    // row with no old value, written by the same call (artifact stack) within a second of the asset's first audit row with
+    // no old value (statusId is always logged on create)
+    const auditRows = new Map()
     for (const row of rowsIn(AUDIT, "pkPrimaryValue", candidates.ids, query =>
         query
             .condition("changedEntityName", ASSET)
-            .condition("changedFieldName", "in", PLACE_FIELDS)
+            .condition("changedFieldName", "in", PLACE_FIELDS.concat(["statusId"]))
             .orderBy("changedDate")
             .orderBy("auditHistorySeqId")
     )) {
-        if (!changes.has(row.pkPrimaryValue)) changes.set(row.pkPrimaryValue, [])
-        changes.get(row.pkPrimaryValue).push({
-            field: row.changedFieldName,
-            at: ms(row.changedDate),
-            oldValue: row.oldValueText || null
-        })
+        if (!auditRows.has(row.pkPrimaryValue)) auditRows.set(row.pkPrimaryValue, [])
+        auditRows.get(row.pkPrimaryValue).push(row)
+    }
+    const changes = new Map()
+    for (const [assetId, rows] of auditRows) {
+        const created = rows.find(row => !row.oldValueText)
+        const createdAt = created ? ms(created.changedDate) : null
+        const createdBy = created ? created.artifactStack || "" : null
+        const seen = new Set()
+        const isCreate = row => {
+            const first = !seen.has(row.changedFieldName)
+            seen.add(row.changedFieldName)
+            return (
+                first &&
+                createdAt != null &&
+                !row.oldValueText &&
+                (row.artifactStack || "") === createdBy &&
+                ms(row.changedDate) - createdAt < 1000
+            )
+        }
+        changes.set(
+            assetId,
+            rows
+                .filter(row => !isCreate(row) && row.changedFieldName !== "statusId")
+                .map(row => ({field: row.changedFieldName, at: ms(row.changedDate), oldValue: row.oldValueText || null}))
+        )
     }
     const revaluations = traceability.revaluationPairs(
         Array.from(details.values()).flatMap(list => list.flatMap(row => [row.assetId, row.otherAssetId]))
@@ -234,16 +276,14 @@ function inventoryAtDate(p) {
     for (const asset of assets) {
         const rows = details.get(asset.assetId) || []
         const assetChanges = changes.get(asset.assetId) || []
-        if (!rows.length) continue
+        const opening = openings.get(asset.assetId) || zero()
+        if (!rows.length && opening.isZero()) continue
         const events = []
-        let opening = zero()
-        let closing = zero()
+        let closing = opening
         for (const row of rows) {
-            const at = ms(row.effectiveDate)
             const diff = toDecimal(row.quantityOnHandDiff ?? 0)
             closing = closing.add(diff)
-            if (at < from) opening = opening.add(diff)
-            else events.push({at, row, diff})
+            events.push({at: ms(row.effectiveDate), row, diff})
         }
         // a change of place in the window moves what the asset held then (its rows up to that time)
         for (const at of unique(assetChanges.map(change => change.at).filter(at => at >= from && at < cutoff)))
@@ -459,6 +499,12 @@ function inventoryAtDate(p) {
     )
 
     const historyKnown = overall == null || from >= overall
+    // the start the notice names: the latest of the incomplete rows' facilities, else the facilities read
+    const incompleteStarts = stockRows
+        .filter(row => !row.complete)
+        .map(row => startOf(row.facilityId))
+        .filter(start => start != null)
+    const noticeStart = incompleteStarts.length ? Math.max(...incompleteStarts) : historyKnown ? null : overall
     const complete = !candidates.truncated && !historyTruncated && historyKnown && stockRows.every(row => row.complete)
     return Object.assign(
         {
@@ -467,7 +513,7 @@ function inventoryAtDate(p) {
             complete,
             truncated: candidates.truncated || historyTruncated,
             historyIncomplete: !historyKnown || stockRows.some(row => !row.complete),
-            historyStartText: overall == null ? "" : dateText(new Date(overall)),
+            historyStartText: noticeStart == null ? "" : dateText(new Date(noticeStart)),
             totalRows
         },
         lib.pageList(stockRows, p, "stockRows", {noLimitCap}),

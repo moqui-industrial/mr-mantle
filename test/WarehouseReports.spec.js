@@ -159,7 +159,8 @@ spec({
         for (const [productId, productName, amountUomId] of [
             ["WRP_P", "Report sealant", "OTH_ea"],
             ["WRP_K", "Report gasket sheet", "WT_kg"],
-            ["WRP_D", "Report boundary part", "OTH_ea"]
+            ["WRP_D", "Report boundary part", "OTH_ea"],
+            ["WRP_M", "Report moved part", "OTH_ea"]
         ])
             call("create#mantle.product.Product", {
                 productId,
@@ -226,14 +227,13 @@ spec({
             statusId: "PIComplete"
         })
         // the lot at A1: received 10 and 5 (one rejected), 3 issued, 1 damaged, 6 split to WRP_A2 by a revaluation, 2 moved
-        // to WRP_A3 at B1; WRP_A2 moved whole from A1 to B1 on June 22 (its audit row); kilograms of gasket at A1; the lot at
-        // the second warehouse; another organization's stock
+        // to WRP_A3 at B1; kilograms of gasket at A1; the lot at the second warehouse; another organization's stock
         asset("WRP_A1", "WRP_P", wh, "A1", {lotId})
         receipt("WRP_R1", "WRP_A1", "WRP_P", 10, june(1), "WRP_SHIP_IN")
         receipt("WRP_R2", "WRP_A1", "WRP_P", 5, june(12), "WRP_SHIP_IN", 1)
         issuance("WRP_I1", "WRP_A1", "WRP_P", 3, june(15), "WRP_SHIP_OUT")
         detail("WRP_ADJ", "WRP_A1", "WRP_P", -1, june(18), {physicalInventoryId: "WRP_PI", varianceReasonEnumId: "InVrDamaged"})
-        asset("WRP_A2", "WRP_P", wh, "B1", {lotId})
+        asset("WRP_A2", "WRP_P", wh, "A1", {lotId})
         split("WRP_REVAL", "WRP_A1", "WRP_A2", 6, june(20))
         call("create#mantle.product.asset.AssetBookEvent", {
             assetBookEventId: "WRP_REVAL",
@@ -242,15 +242,6 @@ spec({
             eventTypeEnumId: "AbeInventoryRevaluation",
             eventDate: june(20),
             organizationPartyId: org
-        })
-        call("create#moqui.entity.EntityAuditLog", {
-            auditHistorySeqId: "WRP_AUDIT_A2",
-            changedEntityName: ASSET,
-            changedFieldName: "locationSeqId",
-            pkPrimaryValue: "WRP_A2",
-            oldValueText: "A1",
-            newValueText: "B1",
-            changedDate: june(22)
         })
         asset("WRP_A3", "WRP_P", wh, "B1", {lotId})
         split("WRP_MOVE", "WRP_A1", "WRP_A3", 2, june(25))
@@ -280,12 +271,12 @@ feature("stock at a past date for a lot shows its opening, receipts, issues, adj
         rowAt(out, "A1").receiptQuantity == 5
         rowAt(out, "A1").issueQuantity == 3
         rowAt(out, "A1").adjustmentQuantity == -1
-        // the revaluation split nets out in its row; the whole move of WRP_A2 and the partial move to WRP_A3 leave it
-        rowAt(out, "A1").moveQuantity == -8
-        rowAt(out, "A1").closingQuantity == 3
+        // the revaluation split nets out in its row; the partial move to WRP_A3 leaves it
+        rowAt(out, "A1").moveQuantity == -2
+        rowAt(out, "A1").closingQuantity == 9
         rowAt(out, "B1").openingQuantity == 0
-        rowAt(out, "B1").moveQuantity == 8
-        rowAt(out, "B1").closingQuantity == 8
+        rowAt(out, "B1").moveQuantity == 2
+        rowAt(out, "B1").closingQuantity == 2
         rowAt(out, "A1").unitText != ""
         // another organization's stock and the second warehouse's are not in it
         out.stockRows.length == 2
@@ -305,31 +296,50 @@ feature("the history reads a revaluation split's pair as one row and keeps each 
         }
     },
     then({out, kinds, balances, split, receipt, atB1}) {
-        kinds == "receipt,issue,adjustment,revaluation,move,move"
-        balances == "15,12,11,11,5,3"
+        kinds == "receipt,issue,adjustment,revaluation,move"
+        balances == "15,12,11,11,9"
         split.quantity == 0
         split.movedQuantity == 6
         split.text == "Revaluation split of 6 from asset WRP_A1 to asset WRP_A2"
         receipt.documentText == "Shipment WRP_SHIP_IN"
         receipt.recordedDateText != ""
-        atB1.join(",") == "6,2"
-        out.historyRowsCount == 8
+        atB1.join(",") == "2"
+        out.historyRowsCount == 6
     }
 })
-feature("a place filter reads an asset's place then, from its audit log", {
+feature("a receipt with no location later moved reads at no location before the move and at its bin after (F381)", {
     when() {
+        // received three days ago with no location (a one-step receipt), then moved whole to B1 now: the location's first
+        // value is set by an update, which the asset's audit log keeps
+        const day = offset => as("wrp.reader", () => ec.l10n.format(new Date(Date.now() + offset * DAY), "yyyy-MM-dd"))
+        ec.artifactExecution.disableAuthz()
+        const received = call("mantle.product.AssetServices.receive#Asset", {
+            productId: "WRP_M",
+            facilityId: wh,
+            ownerPartyId: org,
+            quantity: 5,
+            receivedDate: new Date(Date.now() - 3 * DAY)
+        })
+        call("mantle.product.AssetServices.move#Asset", {assetId: received.assetId, locationSeqId: "B1"})
+        ec.artifactExecution.enableAuthz()
+        const period = {productId: "WRP_M", facilityId: wh, fromDate: day(-5)}
         return {
-            atA1: atDate("wrp.reader", {lotId, facilityId: wh, locationSeqId: "A1", asOfDate: "2026-06-21"}),
-            atB1: atDate("wrp.reader", {lotId, facilityId: wh, locationSeqId: "B1", asOfDate: "2026-06-21"}),
-            nowB1: atDate("wrp.reader", {lotId, facilityId: wh, locationSeqId: "B1", asOfDate: "2026-06-30"})
+            before: atDate("wrp.reader", Object.assign({asOfDate: day(-2)}, period)),
+            beforeAtB1: atDate("wrp.reader", Object.assign({asOfDate: day(-2), locationSeqId: "B1"}, period)),
+            after: atDate("wrp.reader", Object.assign({asOfDate: day(0)}, period)),
+            afterAtB1: atDate("wrp.reader", Object.assign({asOfDate: day(0), locationSeqId: "B1"}, period))
         }
     },
-    then({atA1, atB1, nowB1}) {
-        // before its move WRP_A2's 6 were at A1 with WRP_A1's 5
-        rowAt(atA1, "A1").closingQuantity == 11
-        atA1.stockRows.length == 1
-        atB1.stockRows.length == 0
-        rowAt(nowB1, "B1").closingQuantity == 8
+    then({before, beforeAtB1, after, afterAtB1}) {
+        before.stockRows.length == 1
+        before.stockRows[0].locationSeqId == null
+        before.stockRows[0].closingQuantity == 5
+        beforeAtB1.stockRows.length == 0
+        rowAt(after, "B1").moveQuantity == 5
+        rowAt(after, "B1").closingQuantity == 5
+        after.stockRows.find(row => row.locationSeqId == null).receiptQuantity == 5
+        after.stockRows.find(row => row.locationSeqId == null).closingQuantity == 0
+        afterAtB1.stockRows.length == 1
     }
 })
 feature("history from before a facility's first movement is incomplete, not zero", {
@@ -343,7 +353,7 @@ feature("history from before a facility's first movement is incomplete, not zero
         early.complete == false
         rowAt(early, "A1").openingQuantity == null
         rowAt(early, "A1").complete == false
-        rowAt(early, "A1").closingQuantity == 3
+        rowAt(early, "A1").closingQuantity == 9
         early.historyStartText.startsWith("2026-06-01")
         before.complete == false
         before.stockRows.length == 0

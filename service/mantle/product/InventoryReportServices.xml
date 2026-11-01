@@ -161,7 +161,8 @@ along with this software (see the LICENSE.md file). If not, see
             history of the period, oldest first, each row with its effective and recorded dates, source document and the
             row's balance after it. An asset's facility, location, lot and owner at a time come from its audit log, so a
             whole asset moved or relabelled moves its stock between rows. A revaluation split's pair of rows (F34) and a
-            partial move within one row read as one history row with no change. History from before a facility's first
+            partial move within one row read as one history row with no change. The opening is one summed query per page of
+            assets; the rows read are the period's. History from before a facility's first
             ledger row is incomplete: those quantities are null (unknown), never zero, and complete is false; so is it when
             more assets or history rows match than one report reads (truncated). Totals by unit, never across units.
             Refuses a future day, a first day after the cut-off and a facility outside the scope.</description>
@@ -235,7 +236,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The receipts, shipments, returns and transfers of a period (fromDate through thruDate, calendar days
             in the user's zone; the 30 days to today by default), one row per document and product: its operation, status,
             other party, facilities, carrier, expected and actual dates and the days between them, and its expected,
-            accepted, rejected, picked, shipped and delivered quantities in the product's unit. dateBasis movement (the
+            accepted, rejected, picked, shipped and delivered quantities in the product's unit (each the whole document's;
+            delivered empty until the shipment is delivered). dateBasis movement (the
             default) reads the documents with a receipt or issue in the period, document those expected in it (arrival for
             incoming, ship for outgoing). Totals of each unit over every row of the period, never across units. complete is
             false when more documents match than one report reads. Refuses a facility outside the scope and an unknown

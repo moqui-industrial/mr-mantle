@@ -99,38 +99,39 @@ function documentIds(p, facilityIds, dates) {
     // the shipments to read: by movement, those with a receipt or issue in the period; by document, those expected in it
     let limitTo = null
     if (p.dateBasis === "document") {
-        const inbound = factory.makeCondition(
-            [
-                condition("shipmentTypeEnumId", "in", INBOUND),
-                condition("estimatedArrivalDate", "greater-equals", dates.from),
-                condition("estimatedArrivalDate", "less", dates.before)
-            ],
-            "and"
-        )
-        const outbound = factory.makeCondition(
-            [
-                condition("shipmentTypeEnumId", "not-in", INBOUND),
-                condition("estimatedShipDate", "greater-equals", dates.from),
-                condition("estimatedShipDate", "less", dates.before)
-            ],
-            "and"
-        )
-        base.push(factory.makeCondition([inbound, outbound], "or"))
+        // the expected date each row shows: arrival for incoming; a transfer's arrival, else its ship date; an outgoing
+        // shipment's ship date, else its ready date
+        const all = list => factory.makeCondition(list, "and")
+        const inPeriod = field => all([condition(field, "greater-equals", dates.from), condition(field, "less", dates.before)])
+        const firstOf = (primary, fallback) =>
+            factory.makeCondition([inPeriod(primary), all([condition(primary, "is-null", null), inPeriod(fallback)])], "or")
+        const inbound = all([condition("shipmentTypeEnumId", "in", INBOUND), inPeriod("estimatedArrivalDate")])
+        const transfer = all([
+            condition("shipmentTypeEnumId", "equals", "ShpTpTransfer"),
+            firstOf("estimatedArrivalDate", "estimatedShipDate")
+        ])
+        const outbound = all([
+            condition("shipmentTypeEnumId", "not-in", INBOUND.concat(["ShpTpTransfer"])),
+            firstOf("estimatedShipDate", "estimatedReadyDate")
+        ])
+        base.push(factory.makeCondition([inbound, transfer, outbound], "or"))
         if (p.productId)
             limitTo = Array.from(
                 find("mantle.shipment.ShipmentItem", {productId: p.productId}).selectField("shipmentId").distinct(true).list()
             ).map(row => row.shipmentId)
     } else {
+        // the receipts (by their asset's facility) and issues (by theirs) in the period, in the facilities first
         const moved = (entity, dateField) => {
             let query = find(entity)
                 .condition(dateField, "greater-equals", dates.from)
                 .condition(dateField, "less", dates.before)
                 .condition("shipmentId", "is-not-null", null)
             if (p.productId) query = query.condition("productId", p.productId)
+            if (facilityIds != null) query = query.condition("facilityId", "in", facilityIds.length ? facilityIds : ["_NA_"])
             return Array.from(query.selectField("shipmentId").distinct(true).list()).map(row => row.shipmentId)
         }
         limitTo = unique(
-            moved("mantle.product.receipt.AssetReceipt", "receivedDate").concat(
+            moved("mantle.product.receipt.AssetReceiptDetail", "receivedDate").concat(
                 moved("mantle.product.issuance.AssetIssuance", "issuedDate")
             )
         )
@@ -279,7 +280,8 @@ function operationsHistory(p) {
             rejectedQuantity: inbound || transfer ? number(entry.rejected) : null,
             pickedQuantity: outbound ? number(entry.picked) : null,
             shippedQuantity: outbound ? number(entry.shipped) : null,
-            deliveredQuantity: outbound ? (shipment.statusId === "ShipDelivered" ? number(entry.shipped) : 0) : null,
+            // delivered only once the shipment is: unknown (null) before, not zero
+            deliveredQuantity: outbound && shipment.statusId === "ShipDelivered" ? number(entry.shipped) : null,
             expectedDateText: expectedDay || "",
             actualDateText: actualDate ? dateText(actualDate) : "",
             daysFromExpected:

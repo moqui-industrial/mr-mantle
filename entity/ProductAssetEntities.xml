@@ -31,7 +31,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="assetTypeEnumId" type="id"/>
         <field name="classEnumId" type="id"/>
         <field name="statusId" type="id" enable-audit-log="true"/>
-        <field name="ownerPartyId" type="id" enable-audit-log="update"/>
+        <!-- ownerPartyId, facilityId, locationSeqId and lotId are audit-logged on create as well, so a value first set by an
+            update is logged too and get#InventoryAtDate reads an asset's place at any time (impl-warehouse P17, F381) -->
+        <field name="ownerPartyId" type="id" enable-audit-log="true"/>
         <field name="assetPoolId" type="id" enable-audit-log="update"/>
 
         <field name="productId" type="id" enable-audit-log="update">
@@ -67,16 +69,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="capacityUomId" type="id"/>
         <field name="bookable" type="text-indicator"><description>Y when this asset can be booked on a calendar (equipment). Type AstTpEquipment alone does not make it bookable.</description></field>
 
-        <field name="facilityId" type="id" enable-audit-log="update">
+        <field name="facilityId" type="id" enable-audit-log="true">
             <description>Current Facility, where stored.</description></field>
-        <field name="locationSeqId" type="id" enable-audit-log="update"/>
+        <field name="locationSeqId" type="id" enable-audit-log="true"/>
         <field name="containerId" type="id" enable-audit-log="update"><description>
             Container stored in, if specified the current facilityId and locationSeqId should come from the container
             and not from this record or with standard EECA rule in place facilityId and locationSeqId will be set and
             maintained from the Container values.
         </description></field>
         <field name="shipmentBoxTypeId" type="id"/>
-        <field name="lotId" type="id" enable-audit-log="update"/>
+        <field name="lotId" type="id" enable-audit-log="true"/>
         <field name="geoPointId" type="id" enable-audit-log="update"/>
 
         <field name="originId" type="id"><description>Origin ID, the ID used wherever this came from.</description></field>
