@@ -112,7 +112,9 @@ feature("finance administration saves a term's discount line; other users and po
 
 feature("an issued bill keeps the due schedule of its term, which a later term change does not alter", {
     when() {
-        billA = bill(supplierA, "500", {settlementTermId: term})
+        // dated now, after the term's discount line took effect: the fixtures' noon is before it in the afternoon, when the
+        // bill would take the term's lines of the morning (none) and no discount
+        billA = bill(supplierA, "500", {settlementTermId: term, invoiceDate: ec.user.nowTimestamp})
         login(users.financeadmin)
         helper().call("mantle.ledger.SetupServices.store#SettlementTerm", {
             organizationPartyId: f.org,
