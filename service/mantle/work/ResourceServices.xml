@@ -1093,7 +1093,9 @@ const L = (text) => ec.l10n.localize(text)
             project. Each {partyId, name, hasSkill, skillRating, hasRole, fits, shortWeeks (the weeks without enough free hours),
             freeHours (free over the period), needHours, minFreeWeek, currentProjects (the names of the open projects, those the
             user sees, they are on), costRate and costCurrencyUomId (the person's current vendor rate, RateAmount RaprVendor, only
-            withRates for ADMIN and holders of TIME_ENTRY_RATE)}. The allocation itself is not counted against its own person.
+            withRates for ADMIN and holders of TIME_ENTRY_RATE; an employee's is the employee's pay, null for one without
+            PAYROLL_VIEW: mantle.humanres.EmploymentServices.get#PayRateAccess)}. The allocation itself is not counted against its
+            own person.
         </description>
         <in-parameters>
             <parameter name="workEffortAllocationId"/>
@@ -1166,6 +1168,9 @@ candidateList = []
                     return party ? ([party.firstName, party.lastName].filter((part) => part).join(' ') || party.organizationName || partyId) : partyId
                 }
                 const nowStamp = ec.user.nowTimestamp
+                // an employee's cost rate is pay: only with PAYROLL_VIEW, asked once for the people
+                const payHidden = new Set(showRates ? Array.from(ec.service.sync().name('mantle.humanres.EmploymentServices.get#PayRateAccess')
+                        .parameters({partyIdList: people}).call()?.hiddenPartyIds || []) : [])
                 for (const person of people) {
                     try {
                         const capacity = capacities[person]
@@ -1192,7 +1197,7 @@ candidateList = []
                         const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating, hasRole: roleHolders.has(person),
                             fits: shortWeeks === 0 && needHours > 0, shortWeeks: shortWeeks, freeHours: round(freeHours), needHours: round(needHours),
                             minFreeWeek: minFree == null ? null : round(minFree), currentProjects: projects, costRate: null, costCurrencyUomId: null}
-                        if (showRates) {
+                        if (showRates && !payHidden.has(person)) {
                             const rate = Array.from(ec.entity.find('mantle.humanres.rate.RateAmount').condition('partyId', person).condition('ratePurposeEnumId', 'RaprVendor')
                                     .condition('workEffortId', 'is-null', null).conditionDate('fromDate', 'thruDate', nowStamp).orderBy('-fromDate').limit(1).list())[0]
                             if (rate) { entry.costRate = Number(String(rate.rateAmount)); entry.costCurrencyUomId = rate.rateCurrencyUomId || null }

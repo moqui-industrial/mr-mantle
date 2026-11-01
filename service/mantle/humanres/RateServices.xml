@@ -15,6 +15,9 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="create" noun="RateAmount">
+        <description>Creates a RateAmount, its time period unit defaulted (each for a piece rate, else hour). A worker pay rate
+            (RaprVendor) of a person who is an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) is the
+            employee's pay: only with PAYROLL_EDIT, refused without it.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.humanres.rate.RateAmount" include="nonpk">
                 <exclude field-name="rateTypeEnumId"/>
@@ -31,12 +34,19 @@ along with this software (see the LICENSE.md file). If not, see
                  to what makes the most sense; 'Each' for anything containing the word Piece, and
                  'Hour' for anything else. -->
             <set field="timePeriodUomId" from="timePeriodUomId||(rateTypeEnumId.includes('Piece')?'OTH_ea':'TF_hr')"/>
+            <if condition="ratePurposeEnumId == 'RaprVendor' &amp;&amp; partyId">
+                <service-call name="mantle.humanres.EmploymentServices.get#PayRateAccess" out-map="payAccess" disable-authz="true"
+                        in-map="{partyIdList:[partyId]}"/>
+                <if condition="payAccess.lockedPartyIds?.length">
+                    <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
+            </if>
             <service-call name="create#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
         </actions>
     </service>
 
     <service verb="update" noun="RateAmount">
-        <description>Limited update of RateAmount record</description>
+        <description>Limited update of RateAmount record: its dates and amount. A worker pay rate (RaprVendor) of a person who is
+            an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) only with PAYROLL_EDIT, refused without it.</description>
         <in-parameters>
             <parameter name="rateAmountId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
@@ -45,6 +55,13 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="rateAmountId"/></out-parameters>
         <actions>
+            <entity-find-one entity-name="mantle.humanres.rate.RateAmount" value-field="rate" disable-authz="true"/>
+            <if condition="rate?.ratePurposeEnumId == 'RaprVendor' &amp;&amp; rate?.partyId">
+                <service-call name="mantle.humanres.EmploymentServices.get#PayRateAccess" out-map="payAccess" disable-authz="true"
+                        in-map="{partyIdList:[rate.partyId]}"/>
+                <if condition="payAccess.lockedPartyIds?.length">
+                    <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
+            </if>
             <service-call name="update#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
         </actions>
     </service>

@@ -97,6 +97,13 @@ along with this software (see the LICENSE.md file). If not, see
 
     <userPermissions userPermissionId="TIME_ENTRY_RATE" description="Time Entry Rate Override"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIME_ENTRY_RATE" fromDate="0"/>
+    <!-- an employee's pay rate (the worker rate of the time of a person with a current PrtEmployee relationship, a person's worker
+        pay rate) is read with PAYROLL_VIEW and set with PAYROLL_EDIT (mantle.humanres.EmploymentServices.get#PayRateAccess);
+        TIME_ENTRY_RATE alone keeps client rates and the rates of workers who are not employees -->
+    <userPermissions userPermissionId="PAYROLL_VIEW" description="Payroll View (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PAYROLL_EDIT" description="Payroll Edit (an employee's pay rate)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_EDIT" fromDate="0"/>
     <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
     <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>
@@ -281,10 +288,11 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- a mention in a chat room, as org.moqui.impl.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
         eventSeq, authorUserId, authorName and summary in the message, reason NrMention, the room (moqui.chat.ChatRoom) as
         its record, the actor the author, and the caller's roomUrl as its link; in the Notifications inbox (it asks for the
-        user, so it is in the badge) -->
+        user, so it is in the badge). No summary (a user who turned previews off, an end-to-end encrypted room, which has
+        no text on the server): the title is who mentioned the user where. -->
     <moqui.security.user.NotificationTopic topic="ChatMention" inboxEnumId="NinNotifications" description="Mentioned in a Chat Room" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
-            titleTemplate="${authorName} mentioned you in ${roomName}: ${summary}" linkTemplate=""/>
+            titleTemplate="${authorName} mentioned you in ${roomName}${summary ? ': ' + summary : ''}" linkTemplate=""/>
     <!-- a task, activity or event coming due or starting: workEffortId, workEffortName, whenText (the due or start time in
         the user's words, such as "due today" or "at 2:30 PM") -->
     <moqui.security.user.NotificationTopic topic="WorkEffortReminder" description="Task or Event Reminder" typeString="info"
