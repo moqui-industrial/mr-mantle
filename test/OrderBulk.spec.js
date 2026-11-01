@@ -118,15 +118,30 @@ feature("change the status of order parts in bulk: place, approve and cancel", {
     },
 })
 
-feature("generate test orders: refused unless sure, then one random order", {
+// The random order is of this spec's own product, in its own category, from its own stock: of every finished good it
+// could take and ship any demo stock at the store's warehouse (another component's, such as a Warehouse spec's serialized
+// asset, which a later spec then did not find).
+const generatedCategoryId = "OBULK_GEN", generatedProductId = "OBULK_GEN_ITEM"
+feature("generate test orders: refused unless sure, then one random order of the category's products only", {
     when() {
+        call("create#mantle.product.Product", { productId: generatedProductId, productTypeEnumId: "PtAsset", assetTypeEnumId: "AstTpInventory",
+                assetClassEnumId: "AsClsInventoryFin", productName: "Bulk generated item", ownerPartyId: vendorId, amountUomId: "OTH_ea" })
+        call("create#mantle.product.category.ProductCategory", { productCategoryId: generatedCategoryId, categoryName: "Bulk generated" })
+        call("create#mantle.product.category.ProductCategoryMember", { productCategoryId: generatedCategoryId, productId: generatedProductId,
+                fromDate: effectiveTime - 86400000 })
+        call("mantle.product.AssetServices.receive#Asset", { productId: generatedProductId, facilityId, quantity: 10, ownerPartyId: vendorId })
+        const issuances = () => ec.entity.find("mantle.product.issuance.AssetIssuance")
+        const issued = () => issuances().count() - issuances().condition("productId", generatedProductId).count()
         const refused = errorOf("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1 })
-        const before = ec.entity.find("mantle.order.OrderHeader").count()
-        call("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1, maxItems: 2, maxQuantity: 2, maxDaysPast: 1, ifSureSetToTrue: true })
-        return { refused, before, after: ec.entity.find("mantle.order.OrderHeader").count() }
+        const before = ec.entity.find("mantle.order.OrderHeader").count(), otherIssuedBefore = issued()
+        call("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1, maxItems: 2, maxQuantity: 2, maxDaysPast: 1,
+                productCategoryId: generatedCategoryId, ifSureSetToTrue: true })
+        return { refused, before, after: ec.entity.find("mantle.order.OrderHeader").count(), otherIssuedBefore, otherIssuedAfter: issued() }
     },
-    then({ refused, before, after }) {
+    then({ refused, before, after, otherIssuedBefore, otherIssuedAfter }) {
         refused.includes("didn't say you were sure")
         after >= before
+        // no other product's stock was issued
+        otherIssuedAfter == otherIssuedBefore
     },
 })
