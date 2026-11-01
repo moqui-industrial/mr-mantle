@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Putaway (design-warehouse §17 WH-PUTAWAY; impl-warehouse P9): the putaway rules mantle.facility.PutawayServices
+    resolves destinations by, and the storage type of a product and of a location (StorageType, data/PutawayData.xml). A
+    product's ProductFacilityLocation stays its default location; a rule adds destinations for the stock it applies to. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PutawayRule" package="mantle.facility" cache="never">
+        <description>Where stock of a facility is put away (design-warehouse PutawayRules RuleList): one dated row per rule.
+            It applies to stock at a source location or of a source location type (receiving, staging; a receipt counts as
+            receiving), of a product, a product category or a storage type (each optional, all given must match), and names
+            a destination: one location, or the open locations of a location type (optionally in one area), in pick
+            sequence. Lower priority is tried first. capacity with capacityUomId (empty: the stock unit) is the most the rule
+            fills a destination to, beside the location's own capacity. A change ends the row in effect and starts the next
+            (previousPutawayRuleId), with the key fields audit-logged; history is never rewritten.</description>
+        <field name="putawayRuleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"><description>The facility's owner.</description>
+        </field>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="fromLocationTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="fromLocationSeqId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="storageTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="toLocationTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="toAreaId" type="id" enable-audit-log="true"/>
+        <field name="toLocationSeqId" type="id" enable-audit-log="true"/>
+        <field name="priority" type="number-integer" enable-audit-log="true"/>
+        <field name="capacity" type="number-decimal" enable-audit-log="true"/>
+        <field name="capacityUomId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="previousPutawayRuleId" type="id"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" title="FromLocationType" related="moqui.basic.Enumeration" short-alias="fromLocationType">
+            <key-map field-name="fromLocationTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.Product"/>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one" title="StorageType" related="moqui.basic.Enumeration" short-alias="storageType">
+            <key-map field-name="storageTypeEnumId"/></relationship>
+        <relationship type="one" title="ToLocationType" related="moqui.basic.Enumeration" short-alias="toLocationType">
+            <key-map field-name="toLocationTypeEnumId"/></relationship>
+        <relationship type="one" title="Capacity" related="moqui.basic.Uom" short-alias="capacityUom">
+            <key-map field-name="capacityUomId"/></relationship>
+        <index name="PUTAWAY_RULE_FAC"><index-field name="facilityId"/><index-field name="thruDate"/></index>
+    </entity>
+    <extend-entity entity-name="FacilityLocation" package="mantle.facility">
+        <field name="storageTypeEnumId" type="id"><description>What the location stores (StorageType): it takes only
+            products of that storage type. Empty takes any product without one.</description></field>
+        <relationship type="one" title="StorageType" related="moqui.basic.Enumeration" short-alias="storageType">
+            <key-map field-name="storageTypeEnumId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="Product" package="mantle.product">
+        <field name="storageTypeEnumId" type="id" enable-audit-log="true"><description>How the product must be stored
+            (StorageType): it is put away only in locations of that storage type.</description></field>
+        <relationship type="one" title="StorageType" related="moqui.basic.Enumeration" short-alias="storageType">
+            <key-map field-name="storageTypeEnumId"/></relationship>
+    </extend-entity>
+</entities>
