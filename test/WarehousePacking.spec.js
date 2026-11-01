@@ -995,3 +995,41 @@ feature("box types, carrier codes and a facility's box types are kept by the fac
         packages.length === 0
     }
 })
+
+feature("a package with no box type is not weighed and says why, and its weight entered by hand completes the pack (P18)", {
+    when() {
+        const {shipmentId} = salesShipment([["WPN_A", 1]])
+        pickLine(shipmentId, "WPN_A", "PICK1")
+        const packed = run("wpn_packer", T + "pack#ShipmentStock", {
+            operationKey: key(),
+            shipmentId,
+            shipmentItemSourceId: sourceOf(shipmentId, "WPN_A").shipmentItemSourceId,
+            quantity: 1
+        })
+        const seqId = packed.result?.shipmentPackageSeqId
+        const weighed = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "weigh",
+            shipmentPackageSeqId: seqId
+        })
+        const entered = run("wpn_packer", T + "edit#ShipmentPackage", {
+            operationKey: key(),
+            shipmentId,
+            action: "update",
+            shipmentPackageSeqId: seqId,
+            weight: 3,
+            weightUomId: "WT_lb"
+        })
+        const completed = run("wpn_packer", T + "complete#Pack", {operationKey: key(), shipmentId})
+        return {packed, weighed, entered, completed, shipment: one("mantle.shipment.Shipment", {shipmentId})}
+    },
+    then({packed, weighed, entered, completed, shipment}) {
+        packed.error === ""
+        weighed.error.includes("WEIGHT_UNAVAILABLE")
+        weighed.error.includes("No box type")
+        entered.error === ""
+        completed.error === ""
+        shipment.statusId === "ShipPacked"
+    }
+})

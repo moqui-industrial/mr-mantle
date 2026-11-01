@@ -2735,7 +2735,7 @@ along with this software (see the LICENSE.md file). If not, see
                             shipmentBoxTypeId:box?.shipmentBoxTypeId || pkg.shipmentBoxTypeId || null,
                             weightUomId:weightUomId || null}"/>
                 <if condition="weighed.weight == null">
-                    <set field="whyText" from="ec.message.getMessages().join('; ')"/>
+                    <set field="whyText" from="Array.from(ec.message.messageInfos || []).map(info => info.message).join('; ')"/>
                     <return error="true" message="WEIGHT_UNAVAILABLE: Package ${seqId} cannot be weighed: ${whyText}"/>
                 </if>
                 <set field="weight" from="weighed.weight"/>
