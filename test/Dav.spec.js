@@ -235,3 +235,90 @@ feature("a phone's new card is a personal contact in the book; a changed card re
         left == null
     },
 })
+
+// a phone's change of a task goes through the task services (update#Task, set#TaskStatus along its status flow): a completion
+// the flow has not is refused (409) and the task is as it was; one it has sets the resolution and the completion date; a reopen
+// goes to the first open status the flow allows
+feature("a phone's task status follows the task's flow: a refused completion leaves it as it was, an allowed one completes it, a reopen resumes it", {
+    when() {
+        login("dv.ana", "moqui1!!")
+        try {
+            s.flowTaskId = call("mantle.work.TaskServices.create#SimpleTask", { workEffortName: "Review the spec", assignToPartyId: s.partyId,
+                    statusFlowId: "WorkEffortDevelopment" }).workEffortId
+        } finally { login("john.doe") }
+        const path = `/dav/calendars/dv.ana/tasks/${s.flowTaskId}.ics`
+        const todo = (status, summary) => ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VTODO", `UID:mantle-task-${s.flowTaskId}`, `SUMMARY:${summary}`,
+            `STATUS:${status}`].concat(status === "COMPLETED" ? ["COMPLETED:20270608T120000Z"] : [], ["END:VTODO", "END:VCALENDAR", ""]).join("\r\n")
+        const task = () => ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", s.flowTaskId).one()
+        // In Planning to Complete: the development flow goes through In Progress
+        const refused = dav("PUT", path, todo("COMPLETED", "Review the spec (phone)"))
+        const unchanged = task()
+        const begun = dav("PUT", path, todo("IN-PROCESS", "Review the spec (phone)"))
+        const inProgress = task()
+        const done = dav("PUT", path, todo("COMPLETED", "Review the spec (phone)"))
+        const completed = task()
+        // COMPLETED again, as a phone sends a completed task back with a new title: no move
+        const renamed = dav("PUT", path, todo("COMPLETED", "Review the spec (done)"))
+        const stillDone = task()
+        const reopened = dav("PUT", path, todo("NEEDS-ACTION", "Review the spec (done)"))
+        const resumed = task()
+        return { refused, unchanged, begun, inProgress, done, completed, renamed, stillDone, reopened, resumed }
+    },
+    then({ refused, unchanged, begun, inProgress, done, completed, renamed, stillDone, reopened, resumed }) {
+        refused.status == 409
+        unchanged.statusId == "WeInPlanning"
+        unchanged.workEffortName == "Review the spec"
+        unchanged.actualCompletionDate == null
+        begun.status == 204
+        inProgress.statusId == "WeInProgress"
+        inProgress.workEffortName == "Review the spec (phone)"
+        done.status == 204
+        completed.statusId == "WeComplete"
+        completed.resolutionEnumId == "WerCompleted"
+        completed.actualCompletionDate != null
+        renamed.status == 204
+        stillDone.statusId == "WeComplete"
+        stillDone.workEffortName == "Review the spec (done)"
+        reopened.status == 204
+        resumed.statusId == "WeInProgress"
+        resumed.resolutionEnumId == "WerUnresolved"
+        resumed.actualCompletionDate == null
+    },
+})
+
+// a phone's new time for an event that holds a meeting room is checked as a move on the screens is (check#ResourceBookings): a
+// clash with another booking of the room is refused (409) and the event stays; a free time is taken with the booking
+feature("a phone moves a booked event: into a clash with the room's other booking it is refused (409), to a free time it moves", {
+    when() {
+        const path = `/dav/calendars/dv.ana/${s.calendarId}/phone-event-2.ics`
+        const created = dav("PUT", path, ics("phone-event-2@example.com", "Standup", "20270614T150000Z", "20270614T160000Z"), { "If-None-Match": "*" })
+        const row = ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", s.calendarId)
+                .condition("universalId", "phone-event-2@example.com").one()
+        call("create#mantle.facility.Facility", { facilityId: "DV_ROOM", facilityTypeEnumId: "FcTpRoom", facilityName: "Dav Room" })
+        login("dv.ana", "moqui1!!")
+        let otherId
+        try {
+            otherId = call("mantle.work.EventServices.create#Event", { workEffortName: "Room hog", calendarId: s.calendarId, statusId: "WeApproved",
+                    estimatedStartDate: new Date(Date.UTC(2027, 5, 14, 17, 0, 0)), estimatedCompletionDate: new Date(Date.UTC(2027, 5, 14, 18, 0, 0)) }).workEffortId
+            call("mantle.work.EventServices.book#Resource", { workEffortId: otherId, facilityId: "DV_ROOM" })
+            call("mantle.work.EventServices.book#Resource", { workEffortId: row.workEffortId, facilityId: "DV_ROOM" })
+        } finally { login("john.doe") }
+        const event = () => ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", row.workEffortId).one()
+        const clash = dav("PUT", path, ics("phone-event-2@example.com", "Standup moved", "20270614T173000Z", "20270614T183000Z"), { "If-Match": etagOf(created) })
+        const stayed = event()
+        const free = dav("PUT", path, ics("phone-event-2@example.com", "Standup moved", "20270614T190000Z", "20270614T200000Z"), { "If-Match": etagOf(created) })
+        const moved = event()
+        const booking = ec.entity.find("mantle.work.effort.WorkEffortFacility").condition("workEffortId", row.workEffortId).condition("facilityId", "DV_ROOM").one()
+        return { created, clash, stayed, free, moved, booking }
+    },
+    then({ created, clash, stayed, free, moved, booking }) {
+        created.status == 201
+        clash.status == 409
+        stayed.workEffortName == "Standup"
+        Number(String(stayed.estimatedStartDate)) == Date.UTC(2027, 5, 14, 15, 0, 0)
+        free.status == 204
+        moved.workEffortName == "Standup moved"
+        Number(String(moved.estimatedStartDate)) == Date.UTC(2027, 5, 14, 19, 0, 0)
+        booking.statusId == "WefAssigned"
+    },
+})

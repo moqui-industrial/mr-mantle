@@ -15,6 +15,14 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="store" noun="TimeEntry">
+        <description>Creates or updates a time entry: its times and hours, its week's timesheet (check#TimeEntryTimesheet and the
+            policy's lock), the person's position class and work type, the client and the vendor, then its rates
+            (get#TimeEntryRate). Rates given by hand (clientHourRate, vendorHourRate, the piece rates; hasModifiedRates) are kept
+            only for a holder of TIME_ENTRY_RATE; for anyone else they are found from the rates. The vendor rates of an employee's
+            time (a person with a PrtEmployee relationship on the entry's date or now, mantle.humanres.EmploymentServices
+            get#PayRateAccess) are the employee's pay: setting or changing them (vendorHourRate, vendorPieceRate, vendorRateAmountId,
+            vendorPieceRateAmountId, the vendor increments) also needs PAYROLL_EDIT, and is refused without it; left empty, they
+            stay as stored.</description>
         <in-parameters>
             <parameter name="timeEntryId"><description>If specified updates the record, if not creates a new one</description></parameter>
             <auto-parameters entity-name="mantle.work.time.TimeEntry" include="nonpk"/>
@@ -267,6 +275,30 @@ along with this software (see the LICENSE.md file). If not, see
                     <else><set field="pieceRateTypeEnumId" value="RatpPieceOrHour"/></else></if>
             </if>
              -->
+
+            <!-- an employee's pay (the vendor rates of the time of a person employed on the entry's date or now, as stored or as
+                given) is set or changed only with PAYROLL_EDIT: a vendor rate given that differs from the stored one is refused; one
+                left empty (a screen that does not show it) stays as stored -->
+            <service-call name="mantle.humanres.EmploymentServices.get#PayRateAccess" out-map="payAccess" disable-authz="true"
+                    in-map="{entryList:[{key:'stored', partyId:timeEntry?.partyId, date:(timeEntry?.fromDate ?? timeEntry?.thruDate)},
+                        {key:'given', partyId:(partyId || timeEntry?.partyId), date:(fromDate ?? thruDate)}].filter((entry) => entry.partyId)}"/>
+            <if condition="payAccess.lockedKeys?.length">
+                <script><![CDATA[
+                    const given = (value) => value != null && String(value) !== ''
+                    const rateDiffers = (rate, stored) => given(rate) && (stored == null || toDecimal(rate).compare(toDecimal(stored)) !== 0)
+                    const idDiffers = (id, stored) => given(id) && String(id) !== String(stored ?? '')
+                    payRateRefused = rateDiffers(vendorHourRate, timeEntry?.vendorHourRate) || rateDiffers(vendorPieceRate, timeEntry?.vendorPieceRate)
+                            || idDiffers(vendorRateAmountId, timeEntry?.vendorRateAmountId) || idDiffers(vendorPieceRateAmountId, timeEntry?.vendorPieceRateAmountId)
+                            || (given(vendorHourRateIncrement) && !toDecimal(vendorHourRateIncrement).isZero())
+                            || (given(vendorPieceRateIncrement) && !toDecimal(vendorPieceRateIncrement).isZero())
+                    vendorHourRate = timeEntry?.vendorHourRate ?? null
+                    vendorPieceRate = timeEntry?.vendorPieceRate ?? null
+                    vendorRateAmountId = timeEntry?.vendorRateAmountId ?? null
+                    vendorPieceRateAmountId = timeEntry?.vendorPieceRateAmountId ?? null
+                ]]></script>
+                <if condition="payRateRefused">
+                    <return error="true" message="The worker rate of an employee's time is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
+            </if>
 
             <set field="hasModifiedRates" value="N"/>
             <if condition="ec.user.hasPermission('TIME_ENTRY_RATE')"><then>
@@ -1433,9 +1465,13 @@ along with this software (see the LICENSE.md file). If not, see
             billable, comments, clientPartyId, timesheetId, sheetStatusId (In-Process when none), returned, locked (its week
             submitted or approved under a locking policy), invoiceId, vendorInvoiceId, invoiced}; with rates (withRates, for
             ADMIN and holders of TIME_ENTRY_RATE: those who manage money) also clientHourRate, vendorHourRate, clientAmount and
-            vendorAmount (hours times the rate: the entry's own hour rate, else its RateAmount's, impl-projects.md F86). totals (withTotals, over every match, not the page): hours, billableHours,
-            nonBillableHours, entryCount, byPerson, byWorkType and byItem (hours of each, with an item's estimate), and with
-            rates clientAmount and vendorAmount.
+            vendorAmount (hours times the rate: the entry's own hour rate, else its RateAmount's, impl-projects.md F86) and
+            vendorRateShown. The vendor rate of an employee's time is the employee's pay (mantle.humanres.EmploymentServices
+            get#PayRateAccess: a person with a PrtEmployee relationship on the entry's date or now): for one without PAYROLL_VIEW
+            its vendorHourRate and vendorAmount are null and vendorRateShown false; a contractor's are TIME_ENTRY_RATE's. totals (withTotals, over
+            every match, not the page): hours, billableHours, nonBillableHours, entryCount, byPerson, byWorkType and byItem (hours
+            of each, with an item's estimate), and with rates clientAmount and vendorAmount, the money of the whole match
+            (employees' time in it too, as a project's cost is).
         </description>
         <in-parameters>
             <parameter name="partyId"/>
@@ -1594,6 +1630,11 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 const typeLabels = {}
                 for (const type of ec.entity.find('moqui.basic.Enumeration').condition('enumTypeId', 'WorkType').useCache(true).list()) typeLabels[type.enumId] = type.description || type.enumId
+                // an employee's pay rate (employed on the entry's date or now) only with PAYROLL_VIEW: the page's entries it is hidden on,
+                // asked once
+                const payHidden = new Set(ratesShown ? Array.from(ec.service.sync().name('mantle.humanres.EmploymentServices.get#PayRateAccess')
+                        .parameters({entryList: page.map((row) => ({key: row.timeEntryId, partyId: row.partyId, date: row.fromDate ?? row.thruDate}))})
+                        .call()?.hiddenKeys || []) : [])
                 const rateAmounts = {}
                 const rateOf = (own, rateAmountId) => {
                     if (num(own) != null) return num(own)
@@ -1619,7 +1660,8 @@ along with this software (see the LICENSE.md file). If not, see
                     if (ratesShown) {
                         // the entry's own hour rate, else its RateAmount's (new entries carry only rateAmountId, impl-projects.md F86)
                         out.clientHourRate = rateOf(row.clientHourRate, row.rateAmountId)
-                        out.vendorHourRate = rateOf(row.vendorHourRate, row.vendorRateAmountId)
+                        out.vendorRateShown = !payHidden.has(row.timeEntryId)
+                        out.vendorHourRate = out.vendorRateShown ? rateOf(row.vendorHourRate, row.vendorRateAmountId) : null
                         out.clientAmount = out.clientHourRate == null ? null : round(hours * out.clientHourRate)
                         out.vendorAmount = out.vendorHourRate == null ? null : round(hours * out.vendorHourRate)
                     }
