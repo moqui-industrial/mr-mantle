@@ -796,33 +796,30 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.account.invoice.SettlementTerm" value-field="settlementTerm">
                     <field-map field-name="settlementTermId" from="invoice.settlementTermId"/></entity-find-one>
                 <script><![CDATA[
-                    // dates are epoch millis in scripts; the due date is computed in the server's zone as Java's systemDefault
-                    const dueDateDt = new Date(Number(invoiceDate))
+                    // The due date is a calendar day in the user's zone (the server's without a user) at the invoice's time
+                    // of day: the days are counted on the day text with UTC dates, never with the local Date setters, whose
+                    // local-to-UTC conversion is off by an hour on a DST change day, nor with 24-hour days.
+                    const pattern = 'yyyy-MM-dd HH:mm:ss.SSS'
+                    const local = ec.l10n.format(new Date(Number(invoiceDate)), pattern)
+                    const [year, month, date] = local.slice(0, 10).split('-').map(Number)
+                    const invoiceDay = Date.UTC(year, month - 1, date)
                     const termValue = settlementTerm.termValue == null ? null : Math.trunc(toDecimal(settlementTerm.termValue).toNumber())
-                    const setDayOfMonth = () => {
-                        // the term's day of the month, at most the month's last day
-                        const maxDays = new Date(dueDateDt.getFullYear(), dueDateDt.getMonth() + 1, 0).getDate()
-                        dueDateDt.setDate(Math.min(termValue || 1, maxDays))
-                    }
+                    // the term's day of a month (month index, may be 12), at most the month's last day
+                    const dayOfMonth = (y, m) => Date.UTC(y, m, Math.min(termValue || 1, new Date(Date.UTC(y, m + 1, 0)).getUTCDate()))
+                    let dueDay
                     switch (settlementTerm.termTypeEnumId) {
-                        case 'TtFinPaymentDayNextMonth':
-                            dueDateDt.setDate(1)
-                            dueDateDt.setMonth(dueDateDt.getMonth() + 1)
-                            setDayOfMonth()
-                            break
-                        case 'TtFinPaymentDayCurMonth':
-                            setDayOfMonth()
-                            break
-                        default:
-                            dueDateDt.setDate(dueDateDt.getDate() + (termValue || 0))
+                        case 'TtFinPaymentDayNextMonth': dueDay = dayOfMonth(year, month); break
+                        case 'TtFinPaymentDayCurMonth': dueDay = dayOfMonth(year, month - 1); break
+                        default: dueDay = Date.UTC(year, month - 1, date + (termValue || 0))
                     }
-                    // could happen for TtFinPaymentDayCurMonth with a day less than today
-                    if (dueDateDt.getTime() < Number(invoiceDate)) {
-                        dueDateDt.setDate(1)
-                        dueDateDt.setMonth(dueDateDt.getMonth() + 1)
-                        setDayOfMonth()
+                    // could happen for TtFinPaymentDayCurMonth with a day before the invoice's
+                    if (dueDay < invoiceDay) {
+                        const due = new Date(dueDay)
+                        dueDay = dayOfMonth(due.getUTCFullYear(), due.getUTCMonth() + 1)
                     }
-                    const dueDate = dueDateDt.getTime()
+                    const dueText = new Date(dueDay).toISOString().slice(0, 10)
+                    const parsed = ec.l10n.parseTimestamp(dueText + local.slice(10), pattern)
+                    const dueDate = /^-?\d+$/.test(String(parsed)) ? Number(parsed) : Date.parse(String(parsed))
 
                     if (origDueDate == null || Number(origDueDate) !== dueDate) {
                         invoice.dueDate = dueDate
