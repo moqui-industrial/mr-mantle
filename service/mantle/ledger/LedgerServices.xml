@@ -1095,7 +1095,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="filterDate" type="Timestamp"/>
             <parameter name="accountingDate" type="Date"/>
             <parameter name="timePeriodTypeId"/>
-            <parameter name="term"/>
+            <parameter name="term"><description>Text in the period name, or a period's id (a drop-down's current value).
+                A term only finds periods: one that matches none creates none.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="timePeriodList" type="List"/>
@@ -1113,10 +1114,13 @@ along with this software (see the LICENSE.md file). If not, see
                 // loaded in UTC on the evening of a month's last day in the Americas) have the year and quarter of the day
                 // but not its month, and a posting would then update no month summary. A year with no months is complete,
                 // and so is a day whose year or quarter is closed: nothing is made under a closed period.
+                // A term is a search (a name, or the id a drop-down holds): it finds periods and makes none. Before, a term that
+                // matched no name (an id) made the parent's periods, of whichever row came first, for the organization.
                 function incompleteOf(list) {
+                    if (term) return false
                     const rows = Array.from(list || [])
                     if (!rows.length) return true
-                    if (requestedTypeId || term || !filterSqlDate) return false
+                    if (requestedTypeId || !filterSqlDate) return false
                     if (rows.some(p => ['FiscalYear', 'FiscalQuarter'].includes(p.timePeriodTypeId) && p.isClosed == 'Y')) return false
                     const year = rows.find(p => p.timePeriodTypeId == 'FiscalYear')
                     if (!year) return true
@@ -1134,7 +1138,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="periodPurposeEnumId" value="Fiscal" ignore="requestedTypeId"/>
                 <econdition field-name="partyId" from="organizationPartyId"/>
                 <econdition field-name="timePeriodTypeId" from="requestedTypeId" ignore-if-empty="true"/>
-                <econdition field-name="periodName" operator="like" value="%${term}%" ignore-case="true" ignore="!term"/>
+                <econditions combine="or">
+                    <econdition field-name="periodName" operator="like" value="%${term}%" ignore-case="true" ignore="!term"/>
+                    <econdition field-name="timePeriodId" from="term" ignore="!term"/>
+                </econditions>
             </entity-find>
             <if condition="incompleteOf(timePeriodList)">
                 <!-- see if a parent org has time periods, if so create for current org based on them -->
