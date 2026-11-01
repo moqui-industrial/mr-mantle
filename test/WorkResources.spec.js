@@ -49,8 +49,8 @@ function errorOf(name, params) {
     return errors || null
 }
 // as another user: the services decide by the user, authorization stays off (the screens' app roots grant the services)
-function as(username, run) {
-    login(username)
+function as(username, run, password) {
+    login(username, password)
     ec.user.setEffectiveTime(NOW())
     try { return run() } finally { login("john.doe"); ec.user.setEffectiveTime(NOW()) }
 }
@@ -256,5 +256,41 @@ feature("joe requests Sam for 8 more hours; john rejects it; joe may not cancel 
         after.counts.allocated == 2
         after.counts.requested == 0
         after.rowList.find((row) => row.workEffortAllocationId == made.half).hoursText == "50 %"
+    },
+})
+
+// an employee's pay (Y2): a staffing candidate's cost rate is the person's worker pay rate; an employee's (PrtEmployee) only with
+// PAYROLL_VIEW, a contractor's with TIME_ENTRY_RATE
+feature("the staffing candidates' cost rates: TIME_ENTRY_RATE alone sees the contractor's, not the employee's; PAYROLL_VIEW sees both", {
+    when() {
+        const password = "moqui1!!"
+        const groups = { RSW_RATES: ["TIME_ENTRY_RATE"], RSW_PAYROLL: ["TIME_ENTRY_RATE", "PAYROLL_VIEW"] }
+        for (const [userGroupId, permissions] of Object.entries(groups)) {
+            call("create#moqui.security.UserGroup", { userGroupId, description: `Resource walk ${userGroupId}` })
+            for (const userPermissionId of permissions) call("create#moqui.security.UserGroupPermission", { userGroupId, userPermissionId, fromDate: 0 })
+        }
+        for (const [username, firstName, userGroupId] of [["rsw.rates", "Rena", "RSW_RATES"], ["rsw.payroll", "Pia", "RSW_PAYROLL"]]) {
+            const partyId = call("mantle.party.PartyServices.create#Person", { firstName, lastName: "Resourcewalk" }).partyId
+            const userId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: `${username}@example.com`, username,
+                    newPassword: password, newPasswordVerify: password, timeZone: "America/Chicago" }).userId
+            call("create#moqui.security.UserGroupMember", { userGroupId, userId, fromDate: 0 })
+        }
+        // Sam is an employee, Pat a contractor; each has a worker pay rate
+        call("create#mantle.party.PartyRelationship", { relationshipTypeEnumId: "PrtEmployee", fromPartyId: "RSW_SAM", fromRoleTypeId: "Employee",
+                toPartyId: "ORG_ZIZI_SERVICES", toRoleTypeId: "OrgInternal", fromDate: at("2027-01-01", 0) })
+        for (const [partyId, rateAmount] of [["RSW_SAM", 50], ["RSW_PAT", 70]])
+            call("mantle.humanres.RateServices.create#RateAmount", { ratePurposeEnumId: "RaprVendor", rateTypeEnumId: "RatpStandard", partyId, rateAmount,
+                    rateCurrencyUomId: "USD", timePeriodUomId: "TF_hr", fromDate: at("2027-01-01", 0) })
+        const fields = { fromDate: "2027-02-15", thruDate: "2027-02-26", hoursPerWeek: 4, roleTypeId: "Programmer", skillTypeEnumId: "RswSkDesign", withRates: true, limit: 50 }
+        const rateOf = (out, partyId) => { const one = out.candidateList.find((candidate) => candidate.partyId == partyId); return one ? [one.costRate, one.costCurrencyUomId] : null }
+        const rates = as("rsw.rates", () => call(`${RS}.find#StaffingCandidates`, fields), password)
+        const payroll = as("rsw.payroll", () => call(`${RS}.find#StaffingCandidates`, fields), password)
+        return { ratesSam: rateOf(rates, "RSW_SAM"), ratesPat: rateOf(rates, "RSW_PAT"), payrollSam: rateOf(payroll, "RSW_SAM"), payrollPat: rateOf(payroll, "RSW_PAT") }
+    },
+    then({ ratesSam, ratesPat, payrollSam, payrollPat }) {
+        ratesSam == [null, null]
+        ratesPat == [70, "USD"]
+        payrollSam == [50, "USD"]
+        payrollPat == [70, "USD"]
     },
 })

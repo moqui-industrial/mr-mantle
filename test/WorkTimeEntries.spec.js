@@ -14,6 +14,8 @@ const TASK = "mantle.work.TaskServices"
 const at = (day, hour, minute) => Number(String(ec.l10n.parseTimestamp(`2027-02-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}:00.000`,
         "yyyy-MM-dd HH:mm:ss.SSS")))
 const made = {}
+// the password of the users the spec makes
+const PASSWORD = "moqui1!!"
 
 spec({
     stepwise: true,
@@ -45,8 +47,8 @@ function errorOf(name, params) {
     ec.message.clearErrors()
     return errors
 }
-function as(username, run) {
-    login(username)
+function as(username, run, password) {
+    login(username, password)
     ec.user.setEffectiveTime(made.now || at(10, 9))
     try { return run() } finally { login("john.doe"); ec.user.setEffectiveTime(made.now || at(10, 9)) }
 }
@@ -208,5 +210,112 @@ feature("the time logged on a work item is in its record timeline, as kind time,
         !notes.entryList.some((one) => one.kind === "time")
         direct.entryList.length == 2
         party.entryList.length == 0
+    },
+})
+
+// an employee's pay (Y2): the worker rate of the time of a person with a current employment (PrtEmployee) is read with
+// PAYROLL_VIEW and set with PAYROLL_EDIT; TIME_ENTRY_RATE alone keeps the client rates and a contractor's worker rate
+feature("pay rates: TIME_ENTRY_RATE alone sees a contractor's worker rate, not an employee's; PAYROLL_VIEW sees both; an employee's set only with PAYROLL_EDIT", {
+    when() {
+        // two managers of the project who manage money, one of them also payroll; an employee and a contractor who log on it
+        const groups = { TEM_RATES: ["TIME_ENTRY_RATE"], TEM_PAYROLL: ["TIME_ENTRY_RATE", "PAYROLL_VIEW", "PAYROLL_EDIT"] }
+        for (const [userGroupId, permissions] of Object.entries(groups)) {
+            call("create#moqui.security.UserGroup", { userGroupId, description: `Time entries ${userGroupId}` })
+            for (const userPermissionId of permissions) call("create#moqui.security.UserGroupPermission", { userGroupId, userPermissionId, fromDate: 0 })
+        }
+        for (const [username, firstName, userGroupId] of [["tem.rates", "Rhea", "TEM_RATES"], ["tem.payroll", "Paul", "TEM_PAYROLL"]]) {
+            const partyId = call("mantle.party.PartyServices.create#Person", { firstName, lastName: "Timeentries" }).partyId
+            const userId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, emailAddress: `${username}@example.com`, username,
+                    newPassword: PASSWORD, newPasswordVerify: PASSWORD, timeZone: "America/Chicago" }).userId
+            call("create#moqui.security.UserGroupMember", { userGroupId, userId, fromDate: 0 })
+            call("create#mantle.work.effort.WorkEffortParty", { workEffortId: "TEM", partyId, roleTypeId: "ProjectManager", fromDate: at(1, 0), statusId: "WeptAssigned" })
+        }
+        made.employee = call("mantle.party.PartyServices.create#Person", { firstName: "Erin", lastName: "Employee" }).partyId
+        made.contractor = call("mantle.party.PartyServices.create#Person", { firstName: "Cole", lastName: "Contractor" }).partyId
+        call("create#mantle.party.PartyRelationship", { relationshipTypeEnumId: "PrtEmployee", fromPartyId: made.employee, fromRoleTypeId: "Employee",
+                toPartyId: "ORG_ZIZI_SERVICES", toRoleTypeId: "OrgInternal", fromDate: at(1, 0) })
+        made.empEntry = entry({ partyId: made.employee, workEffortId: made.task1, fromDate: at(4, 9), thruDate: at(4, 11), hours: 2, clientHourRate: 100, vendorHourRate: 40 })
+        made.conEntry = entry({ partyId: made.contractor, workEffortId: made.task1, fromDate: at(4, 13), thruDate: at(4, 14), hours: 1, clientHourRate: 100, vendorHourRate: 60 })
+        const ids = { withRates: true, timeEntryIds: [made.empEntry, made.conEntry] }
+        const rowOf = (out, id) => out.rowList.find((row) => row.timeEntryId === id)
+        const rates = as("tem.rates", () => call(`${TIME}.find#TimeEntries`, Object.assign({ rootWorkEffortId: "TEM", pageNoLimit: true }, ids)), PASSWORD)
+        const payroll = as("tem.payroll", () => call(`${TIME}.find#TimeEntries`, Object.assign({ rootWorkEffortId: "TEM", pageNoLimit: true }, ids)), PASSWORD)
+        const stored = (id) => one("mantle.work.time.TimeEntry", { timeEntryId: id })
+        // the same change refused without PAYROLL_EDIT and taken with it
+        const refused = as("tem.rates", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.empEntry, partyId: made.employee, vendorHourRate: 45 }), PASSWORD)
+        const afterRefused = Number(String(stored(made.empEntry).vendorHourRate))
+        const vendorRateId = as("tem.rates", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.empEntry, partyId: made.employee, vendorRateAmountId: "NO_SUCH_RATE" }), PASSWORD)
+        // a client rate change by TIME_ENTRY_RATE keeps the employee's worker rate it does not see
+        const clientChange = as("tem.rates", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.empEntry, partyId: made.employee, clientHourRate: 110, vendorHourRate: null }), PASSWORD)
+        const afterClient = stored(made.empEntry)
+        const contractorChange = as("tem.rates", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.conEntry, partyId: made.contractor, vendorHourRate: 65 }), PASSWORD)
+        const payrollChange = as("tem.payroll", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.empEntry, partyId: made.employee, vendorHourRate: 45 }), PASSWORD)
+        return { emp: rowOf(rates, made.empEntry), con: rowOf(rates, made.conEntry), payEmp: rowOf(payroll, made.empEntry), payCon: rowOf(payroll, made.conEntry),
+            refused, afterRefused, vendorRateId, clientChange, afterClient, contractorChange, contractorRate: Number(String(stored(made.conEntry).vendorHourRate)),
+            payrollChange, payrollRate: Number(String(stored(made.empEntry).vendorHourRate)) }
+    },
+    then({ emp, con, payEmp, payCon, refused, afterRefused, vendorRateId, clientChange, afterClient, contractorChange, contractorRate, payrollChange, payrollRate }) {
+        // TIME_ENTRY_RATE alone: the client rate of both, the contractor's worker rate, not the employee's
+        emp.clientHourRate == 100 && emp.clientAmount == 200
+        emp.vendorHourRate == null && emp.vendorAmount == null && emp.vendorRateShown == false
+        con.vendorHourRate == 60 && con.vendorAmount == 60 && con.vendorRateShown == true
+        // PAYROLL_VIEW: both
+        payEmp.vendorHourRate == 40 && payEmp.vendorAmount == 80 && payEmp.vendorRateShown == true
+        payCon.vendorHourRate == 60
+        // the employee's worker rate set without PAYROLL_EDIT: refused, as it was
+        refused.includes("only payroll (PAYROLL_EDIT) sets it")
+        afterRefused == 40
+        vendorRateId.includes("only payroll (PAYROLL_EDIT) sets it")
+        clientChange == null
+        Number(String(afterClient.clientHourRate)) == 110 && Number(String(afterClient.vendorHourRate)) == 40
+        contractorChange == null && contractorRate == 65
+        payrollChange == null && payrollRate == 45
+    },
+})
+
+// an employee's pay stays hidden after the employment ends: the worker rate of an entry from when the person was an employee
+feature("an ex-employee's past entry keeps its worker rate hidden from TIME_ENTRY_RATE alone, and refuses one set; a contractor's is shown", {
+    when() {
+        made.exEmployee = call("mantle.party.PartyServices.create#Person", { firstName: "Ezra", lastName: "Formeremployee" }).partyId
+        // employed from February 1 until the 8th; now is the 10th
+        call("create#mantle.party.PartyRelationship", { relationshipTypeEnumId: "PrtEmployee", fromPartyId: made.exEmployee, fromRoleTypeId: "Employee",
+                toPartyId: "ORG_ZIZI_SERVICES", toRoleTypeId: "OrgInternal", fromDate: at(1, 0), thruDate: at(8, 0) })
+        made.exEntry = entry({ partyId: made.exEmployee, workEffortId: made.task1, fromDate: at(4, 15), thruDate: at(4, 16), hours: 1, clientHourRate: 100, vendorHourRate: 30 })
+        const ids = { rootWorkEffortId: "TEM", pageNoLimit: true, withRates: true, timeEntryIds: [made.exEntry, made.conEntry] }
+        const rowOf = (out, id) => out.rowList.find((row) => row.timeEntryId === id)
+        const rates = as("tem.rates", () => call(`${TIME}.find#TimeEntries`, ids), PASSWORD)
+        const payroll = as("tem.payroll", () => call(`${TIME}.find#TimeEntries`, ids), PASSWORD)
+        const refused = as("tem.rates", () => errorOf(`${TIME}.store#TimeEntry`, { timeEntryId: made.exEntry, partyId: made.exEmployee, vendorHourRate: 35 }), PASSWORD)
+        return { ex: rowOf(rates, made.exEntry), con: rowOf(rates, made.conEntry), payEx: rowOf(payroll, made.exEntry), refused,
+            stored: Number(String(one("mantle.work.time.TimeEntry", { timeEntryId: made.exEntry }).vendorHourRate)) }
+    },
+    then({ ex, con, payEx, refused, stored }) {
+        ex.clientHourRate == 100
+        ex.vendorHourRate == null && ex.vendorAmount == null && ex.vendorRateShown == false
+        con.vendorHourRate == 65 && con.vendorRateShown == true
+        payEx.vendorHourRate == 30 && payEx.vendorRateShown == true
+        refused.includes("only payroll (PAYROLL_EDIT) sets it")
+        stored == 30
+    },
+})
+
+// a person's worker pay rate (RaprVendor) is pay when the person is an employee: Mantle's create# and update#RateAmount need
+// PAYROLL_EDIT for it; a contractor's is TIME_ENTRY_RATE's
+feature("an employee's worker pay rate is created and changed only with PAYROLL_EDIT; a contractor's without it", {
+    when() {
+        const rate = (partyId) => ({ ratePurposeEnumId: "RaprVendor", rateTypeEnumId: "RatpStandard", partyId, rateAmount: 41, rateCurrencyUomId: "USD", fromDate: at(1, 0) })
+        const refused = as("tem.rates", () => errorOf("mantle.humanres.RateServices.create#RateAmount", rate(made.employee)), PASSWORD)
+        const created = as("tem.payroll", () => call("mantle.humanres.RateServices.create#RateAmount", rate(made.employee)), PASSWORD).rateAmountId
+        const updateRefused = as("tem.rates", () => errorOf("mantle.humanres.RateServices.update#RateAmount", { rateAmountId: created, rateAmount: 43 }), PASSWORD)
+        const updated = as("tem.payroll", () => errorOf("mantle.humanres.RateServices.update#RateAmount", { rateAmountId: created, rateAmount: 43 }), PASSWORD)
+        const contractor = as("tem.rates", () => call("mantle.humanres.RateServices.create#RateAmount", rate(made.contractor)), PASSWORD).rateAmountId
+        return { refused, created, updateRefused, updated, amount: Number(String(one("mantle.humanres.rate.RateAmount", { rateAmountId: created }).rateAmount)), contractor }
+    },
+    then({ refused, created, updateRefused, updated, amount, contractor }) {
+        refused.includes("only payroll (PAYROLL_EDIT) sets it")
+        created != null
+        updateRefused.includes("only payroll (PAYROLL_EDIT) sets it")
+        updated == null && amount == 43
+        contractor != null
     },
 })
