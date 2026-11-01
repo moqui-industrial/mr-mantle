@@ -2730,12 +2730,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="resultCode" value="CREATED"/>
             </if>
             <if condition="action == 'weigh'">
+                <!-- why it cannot be weighed: the messages get#ShipmentPackageWeight adds, not the request's earlier ones -->
+                <set field="messagesBefore" from="Array.from(ec.message.messageInfos || []).length"/>
                 <service-call name="mantle.shipment.ShipmentServices.get#ShipmentPackageWeight" disable-authz="true"
                         out-map="weighed" in-map="{shipmentId:shipmentId, shipmentPackageSeqId:seqId,
                             shipmentBoxTypeId:box?.shipmentBoxTypeId || pkg.shipmentBoxTypeId || null,
                             weightUomId:weightUomId || null}"/>
                 <if condition="weighed.weight == null">
-                    <set field="whyText" from="Array.from(ec.message.messageInfos || []).map(info => info.message).join('; ')"/>
+                    <set field="whyText" from="Array.from(ec.message.messageInfos || []).slice(messagesBefore)
+                            .map(info => info.message).join('; ')"/>
                     <return error="true" message="WEIGHT_UNAVAILABLE: Package ${seqId} cannot be weighed: ${whyText}"/>
                 </if>
                 <set field="weight" from="weighed.weight"/>

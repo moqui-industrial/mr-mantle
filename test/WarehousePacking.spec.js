@@ -1007,6 +1007,8 @@ feature("a package with no box type is not weighed and says why, and its weight 
             quantity: 1
         })
         const seqId = packed.result?.shipmentPackageSeqId
+        // a message of the request before the weigh is not given as the reason
+        ec.message.addMessage("P18 earlier message")
         const weighed = run("wpn_packer", T + "edit#ShipmentPackage", {
             operationKey: key(),
             shipmentId,
@@ -1028,6 +1030,7 @@ feature("a package with no box type is not weighed and says why, and its weight 
         packed.error === ""
         weighed.error.includes("WEIGHT_UNAVAILABLE")
         weighed.error.includes("No box type")
+        !weighed.error.includes("P18 earlier message")
         entered.error === ""
         completed.error === ""
         shipment.statusId === "ShipPacked"
