@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's production runs and production stock guards (design-manufacturing §12 M2 and M4; built by impl-warehouse
+    P16, its §4 owner contracts): create, release and read a run with its own lines (P16a), and the stock guards that
+    issue to it, return unused material, receive its output and receive a subcontract's output (P16b), each on
+    StockPosting.js's steps with Production.js's run steps. Manufacturing's own screens and its transition, change, split,
+    loss and cost services come with impl-manufacturing. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== the runs (P16a, part of M4) ===== -->
+    <service verb="create" noun="ProductionOrder" allow-remote="false">
+        <description>Create a draft production run (design-manufacturing NewWorkOrder, §12.1's create#ProductionOrder
+            contract): the product checked usable for Produce (check#ProductUsable), Mantle's
+            ManufacturingServices.create#ProductionRun without the legacy consume and produce products (no PatMfgBom row is
+            read or written, D15), WepProductionRun in WeInPlanning owned by the organization (R-SA-03), its own lines
+            (ProductionRunLine: the output, a material line per component Products' released BOM requires as of the method
+            date, now by default, stopping at non-phantom sub-assemblies and blowing phantoms through with their routing,
+            and the by-products) and the WeptConsume/WeptProduce rows planning reads (R-SA-05). The run's revision is 1, its
+            method date, BOM, routing and demand links audit-logged fields. A retry with the same operation key answers the
+            first draft (existing true). Requires PRODUCTION_PLAN (PERMISSION_DENIED) and the method read the explosion
+            checks; refuses an organization or facility outside the user's (RECORD_UNAVAILABLE), a facility of another owner
+            (FACILITY_OWNER), no product (PRODUCT_REQUIRED) or quantity (QUANTITY_INVALID), a product that cannot be produced
+            (PRODUCT_NOT_USABLE), no released BOM at the date (METHOD_REQUIRED), several (METHOD_AMBIGUOUS) and an explosion
+            with findings, a routing that is not released or that misses a line's operation (METHOD_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="productId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"><description>The BOM's unit when empty.</description></parameter>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="originFacilityId"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="productBomId"><description>The product's MAIN (or only) released BOM when empty.</description>
+            </parameter>
+            <parameter name="routingWorkEffortId"><description>The BOM's routing when empty.</description></parameter>
+            <parameter name="methodDate" type="Timestamp"><description>As of when the BOM and routing are read; now when
+                empty.</description></parameter>
+            <parameter name="planningSuggestionId"/>
+            <parameter name="requirementId"/>
+            <parameter name="sourceOrderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="workEffortName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="existing" type="Boolean"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="result" type="Map"><description>resultCode CREATED, workEffortId, organizationPartyId,
+                facilityId, productId, productBomId, routingWorkEffortId, methodDate, revision, lines, operationCount, and
+                the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="findings" from="[]"/>
+            <set field="begun" from="posting.begin(context, 'ProductionCreate', 'PRODUCTION_PLAN', ['organizationPartyId',
+                    'productId', 'quantity', 'quantityUomId', 'facilityId', 'originFacilityId', 'productBomId',
+                    'routingWorkEffortId', 'methodDate', 'requirementId', 'sourceOrderId', 'orderItemSeqId'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <set field="workEffortId" from="result.workEffortId"/>
+                <set field="existing" from="true"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="created" from="production.create(userScope, context)"/>
+            <set field="result" from="posting.complete(begun.op, created.organizationPartyId, 'mantle.work.effort.WorkEffort',
+                    created.workEffortId, Object.assign({resultCode: 'CREATED'}, created))"/>
+            <set field="workEffortId" from="created.workEffortId"/>
+            <set field="existing" from="false"/>
+        </actions>
+    </service>
+    <service verb="release" noun="ProductionOrder" allow-remote="false">
+        <description>Release a draft run (design-manufacturing WorkOrderDetail, §12.1): the product checked usable again; a
+            release of the run's BOM, a phantom's BOM or its routings since the run's method date and in effect now is refused
+            (METHOD_CHANGED) unless reexplode, which rewrites the draft lines and the WeptConsume/WeptProduce rows as of now
+            (R-SA-12); with no later release the lines are kept. Then the operation children (WetTask, WeApproved, the run's
+            owner, each with its routing operation, sequence and work center, audit-logged) from the routings as of the method
+            date, the lines frozen (frozenDate) on their operations, the WorkEffortProduct rows rewritten from the lines, the
+            frozen standard (the approved ProductStandardCost in effect now for the organization and facility, Products P9)
+            and the release time stamped, the revision counted up, and the run WeApproved. A retry with the same operation key
+            answers the first. Requires PRODUCTION_PLAN; refuses a run outside the user's organizations (RECORD_UNAVAILABLE),
+            one not a draft (RUN_NOT_DRAFT), a changed revision (REVISION_CHANGED), a run with no lines (LINES_REQUIRED) and a
+            product that cannot be produced (PRODUCT_NOT_USABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="reexplode" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RELEASED, workEffortId, statusId, releaseDate,
+                methodDate, reexploded, revision, productStandardCostId, operationWorkEffortIds, lines, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionRelease', 'PRODUCTION_PLAN', ['workEffortId',
+                    'expectedRevision', 'reexplode'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="userScope" from="posting.scope()"/>
+            <set field="run" from="production.runOf(userScope, workEffortId, true)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="released" from="production.release(userScope, run, context)"/>
+            <set field="result" from="posting.complete(begun.op, run.ownerPartyId, 'mantle.work.effort.WorkEffort',
+                    workEffortId, Object.assign({resultCode: 'RELEASED'}, released))"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionOrder" allow-remote="false">
+        <description>A production run as MaterialIssueReceipt and WorkOrderDetail show it: the run (status, facility, owner,
+            revision, method date, release time, BOM, routing, the frozen standard's id and, with ACCOUNTING_VIEW, its unit
+            cost, the demand links), its lines (material: issued, returned, remaining; output: received, remaining), its
+            operations, and its issuances and receipts (a movement's value only with ACCOUNTING_VIEW). Requires PRODUCTION_VIEW
+            or STOCK_ISSUE (the warehouse issues to it); refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="operations" type="List"/>
+            <parameter name="issuances" type="List"/>
+            <parameter name="receipts" type="List"/>
+            <parameter name="financialRead" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <script>posting.requirePermission(['PRODUCTION_VIEW', 'STOCK_ISSUE'])</script>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')
+                    .read(posting.scope(), workEffortId)"/>
+            <set field="run" from="answer.run"/>
+            <set field="lines" from="answer.lines"/>
+            <set field="operations" from="answer.operations"/>
+            <set field="issuances" from="answer.issuances"/>
+            <set field="receipts" from="answer.receipts"/>
+            <set field="financialRead" from="answer.financialRead"/>
+        </actions>
+    </service>
+
+</services>

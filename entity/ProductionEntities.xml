@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's production runs, their lines and the production stock fields (design-manufacturing §12 M2 and M4,
+    crosscut CX-PRODUCTION; built by impl-warehouse P16), and Purchasing's service acceptance (design-purchasing
+    PUR-RECEIPT). Under the shared effective-date rule a run keeps its own lines, written at create and frozen at release,
+    in place of snapshot records: they are records of their own because issuances and receipts reference them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- The run's own fields (M4), audit-logged: the revision counter, the method date its lines were read as of, its
+        release time, the BOM and routing it was made from, the frozen standard cost (Products' effective-dated estimate,
+        stamped at release) and its demand links. An operation child of a released run carries the routing operation it
+        was made from, its sequence and work center. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionMethodDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionReleaseDate" type="date-time" enable-audit-log="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="productionRoutingId" type="id" enable-audit-log="true"/>
+        <field name="productStandardCostId" type="id" enable-audit-log="true"/>
+        <field name="demandOrderId" type="id" enable-audit-log="true"/>
+        <field name="demandOrderItemSeqId" type="id" enable-audit-log="true"/>
+        <field name="demandRequirementId" type="id" enable-audit-log="true"/>
+        <field name="routingOperationWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="operationSequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="workCenterFacilityId" type="id" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.bom.ProductBom" short-alias="productBom"/>
+        <relationship type="one" related="mantle.product.cost.ProductStandardCost" short-alias="productStandardCost"/>
+        <relationship type="one" title="RoutingOperation" related="mantle.work.effort.WorkEffort"
+                short-alias="routingOperation">
+            <key-map field-name="routingOperationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="WorkCenter" related="mantle.facility.Facility" short-alias="workCenterFacility">
+            <key-map field-name="workCenterFacilityId" related="facilityId"/></relationship>
+    </extend-entity>
+
+    <!-- A run's material and output lines by role, each with a stable id, its source BOM line (bomItemId, and the BOM it is
+        in: a phantom's lines are blown through into its parent's run), product, quantity and unit, the exact conversion to
+        the stock unit (stockQuantity in the product's amountUomId), and its operation: the routing operation at create,
+        the run's operation child from release. Written by create#ProductionOrder, frozen by release#ProductionOrder
+        (frozenDate); key fields audit-logged. -->
+    <entity entity-name="ProductionRunLine" package="mantle.work.production" cache="never">
+        <field name="productionRunLineId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id" enable-audit-log="true"/>
+        <field name="lineRoleEnumId" type="id" enable-audit-log="true"/>
+        <field name="lineSeqNum" type="number-integer"/>
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="stockQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="stockUomId" type="id" enable-audit-log="true"/>
+        <field name="conversionFactor" type="number-decimal" enable-audit-log="true"/>
+        <field name="uomConversionId" type="id"/>
+        <field name="scrapFactor" type="number-decimal" enable-audit-log="true"/>
+        <field name="substitutionRuleEnumId" type="id"/>
+        <field name="bomItemId" type="id" enable-audit-log="true"/>
+        <field name="productBomId" type="id"/>
+        <field name="bomPath" type="text-medium"/>
+        <field name="routingOperationWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="operationWorkEffortId" type="id" enable-audit-log="true"/>
+        <field name="frozenDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="ProductionRunLineRole" related="moqui.basic.Enumeration" short-alias="lineRole">
+            <key-map field-name="lineRoleEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId"/></relationship>
+        <relationship type="one" title="Stock" related="moqui.basic.Uom" short-alias="stockUom">
+            <key-map field-name="stockUomId" related="uomId"/></relationship>
+        <relationship type="one" related="mantle.product.bom.ProductBomItem" short-alias="bomItem"/>
+        <relationship type="one" title="RoutingOperation" related="mantle.work.effort.WorkEffort"
+                short-alias="routingOperation">
+            <key-map field-name="routingOperationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <index name="PRODRUNLINE_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+
+</entities>
