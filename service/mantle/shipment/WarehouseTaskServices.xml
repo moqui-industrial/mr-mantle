@@ -1966,8 +1966,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Send back part of a supplier return item (design-warehouse SupplierReturnShipment): a quantity of the
             stock the item names (ReturnItem.assetId, or another asset that holds its receipt's stock) issued to the item's
             source on the ShpTpPurchaseReturn shipment through mantle.product.AssetServices.issue#AnyAssetForShipmentItemSource
-            with that asset, whatever its status, and packed into the shipment's package. Quarantined stock needs
-            QUALITY_DISPOSE (PERMISSION_DENIED) and, when an inspection holds it, a Return to supplier disposition covering the
+            with that asset, whatever its status, and packed into the shipment's package; the asset is the returning
+            organization's (OWNER_MISMATCH). Held stock (quarantined or on hold) needs QUALITY_DISPOSE (PERMISSION_DENIED)
+            and, when an inspection holds it, a Return to supplier disposition covering the
             quantity (RETURN_NOT_DISPOSED); the dispositions' returnedQuantity rises and their inspection's heldQuantity falls
             by it, so the receipt's held quantity counts it once (get#SourceInspectionStatus). The expiry gate is off on a
             purchase return (F424). A retry answers the first issue. Requires QUALITY_DISPOSE or STOCK_ISSUE; refuses a

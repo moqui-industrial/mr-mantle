@@ -509,3 +509,107 @@ feature("a supplier return of a rejected, expired lot issues the quarantined ass
         n(r.afterRead.receiptRows[0].eligibleQuantity) == 0
     }
 })
+
+feature(
+    "a partial release keeps returned-to-supplier stock out of the match once, and held stock on hold needs disposition authority",
+    {
+        when() {
+            // ten of the lot received and inspected: six released, four to go back to the supplier, not yet shipped
+            const po = call("mantle.order.OrderServices.create#Order", {
+                customerPartyId: org,
+                vendorPartyId: supplier,
+                currencyUomId: "USD",
+                facilityId: facility
+            })
+            call("mantle.order.OrderServices.add#OrderProductQuantity", {
+                orderId: po.orderId,
+                orderPartSeqId: po.orderPartSeqId,
+                productId: "WRT_LOTTED",
+                quantity: 10,
+                unitAmount: 5,
+                itemTypeEnumId: "ItemInventory"
+            })
+            call("mantle.order.OrderServices.place#Order", {orderId: po.orderId})
+            call("mantle.order.OrderServices.approve#Order", {orderId: po.orderId})
+            const receiptShipment = run("wrt_receiver", T + "ensure#PurchaseReceipt", {
+                operationKey: key(),
+                orderId: po.orderId,
+                orderPartSeqId: "01",
+                facilityId: facility
+            }).result.shipmentId
+            const received = run("wrt_receiver", T + "receive#ShipmentStock", {
+                operationKey: key(),
+                shipmentId: receiptShipment,
+                productId: "WRT_LOTTED",
+                quantityAccepted: 10,
+                lotNumber: "WRT-LOT-2"
+            })
+            const qualityInspectionId = received.result.qualityInspectionIds[0]
+            inspect(qualityInspectionId, 6, 4)
+            run("wrt_manager", Q + "dispose#Inspection", {
+                operationKey: key(),
+                qualityInspectionId,
+                dispositionEnumId: "QdRelease",
+                quantity: 6
+            })
+            run("wrt_manager", Q + "dispose#Inspection", {
+                operationKey: key(),
+                qualityInspectionId,
+                dispositionEnumId: "QdReturnSupplier",
+                quantity: 4
+            })
+            const status = call(Q + "get#SourceInspectionStatus", {assetReceiptId: received.result.assetReceiptIds[0]})
+            const lot = one("mantle.product.asset.Lot", {lotNumber: "WRT-LOT-2"})
+            const byLot = run("wrt_manager", R + "find#ReturnableReceipts", {vendorPartyId: supplier, lotId: lot.lotId})
+            const otherFacility = run("wrt_manager", R + "find#ReturnableReceipts", {
+                vendorPartyId: supplier,
+                facilityId: "WRT_NONE"
+            })
+            // stock on hold sent back with issue authority alone is refused
+            const onHold = call("mantle.product.AssetServices.receive#Asset", {
+                productId: "WRT_KETTLE",
+                facilityId: facility,
+                locationSeqId: "PICK1",
+                ownerPartyId: org,
+                quantity: 2,
+                statusId: "AstOnHold"
+            }).assetId
+            const returnId = call(R + "create#Return", {
+                customerPartyId: org,
+                vendorPartyId: supplier,
+                facilityId: facility,
+                currencyUomId: "USD"
+            }).returnId
+            call("create#mantle.order.return.ReturnItem", {
+                returnId,
+                statusId: "ReturnCreated",
+                productId: "WRT_KETTLE",
+                itemTypeEnumId: "ItemInventory",
+                returnQuantity: 2,
+                returnReasonEnumId: "RrsnDefective",
+                returnResponseEnumId: "RrspCredit",
+                assetId: onHold
+            })
+            call(R + "approve#Return", {returnId})
+            const holdIssue = run("wrt_issuer", T + "issue#SupplierReturnStock", {
+                operationKey: key(),
+                shipmentId: shipmentOf(returnId),
+                returnId,
+                returnItemSeqId: returnItem(returnId).returnItemSeqId,
+                quantity: 2
+            })
+            return {status, byLot, otherFacility, holdIssue}
+        },
+        then({status, byLot, otherFacility, holdIssue}) {
+            // 10 accepted, 6 released, 4 held for the supplier: 6 match-eligible before the return ships (F318)
+            n(status.receiptRows[0].heldQuantity) == 4
+            n(status.receiptRows[0].matchEligibleQuantity) == 6
+            n(status.receiptRows[0].inspectionRejectedQuantity) == 4
+            n(status.receiptRows[0].inspectionRemovedQuantity) == 0
+            byLot.receiptRows.length == 1
+            n(byLot.receiptRows[0].eligibleQuantity) == 10
+            otherFacility.receiptRows.length == 0
+            holdIssue.error.includes("PERMISSION_DENIED")
+        }
+    }
+)

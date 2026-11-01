@@ -33,6 +33,33 @@ along with this software (see the LICENSE.md file). If not, see
             issued to a supplier return shipment so far (issue#SupplierReturnStock); the inspection's heldQuantity falls by
             the same.</description></field>
     </extend-entity>
+    <view-entity entity-name="ReturnableReceiptView" package="mantle.order.return">
+        <description>A purchase receipt with its order part and stock, for find#ReturnableReceipts' query: the shipment type,
+            the buying organization, the supplier, the receipt asset's lot and facility filtered in the database (P14 review
+            B3).</description>
+        <member-entity entity-alias="ARCT" entity-name="mantle.product.receipt.AssetReceipt"/>
+        <member-entity entity-alias="SHPM" entity-name="mantle.shipment.Shipment" join-from-alias="ARCT">
+            <key-map field-name="shipmentId"/></member-entity>
+        <member-entity entity-alias="OITM" entity-name="mantle.order.OrderItem" join-from-alias="ARCT">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></member-entity>
+        <member-entity entity-alias="OPRT" entity-name="mantle.order.OrderPart" join-from-alias="OITM">
+            <key-map field-name="orderId"/><key-map field-name="orderPartSeqId"/></member-entity>
+        <member-entity entity-alias="ASST" entity-name="mantle.product.asset.Asset" join-from-alias="ARCT" join-optional="true">
+            <key-map field-name="assetId"/></member-entity>
+        <alias name="assetReceiptId" entity-alias="ARCT"/>
+        <alias name="assetId" entity-alias="ARCT"/>
+        <alias name="productId" entity-alias="ARCT"/>
+        <alias name="orderId" entity-alias="ARCT"/>
+        <alias name="orderItemSeqId" entity-alias="ARCT"/>
+        <alias name="shipmentId" entity-alias="ARCT"/>
+        <alias name="quantityAccepted" entity-alias="ARCT"/>
+        <alias name="receivedDate" entity-alias="ARCT"/>
+        <alias name="shipmentTypeEnumId" entity-alias="SHPM"/>
+        <alias name="vendorPartyId" entity-alias="OPRT"/>
+        <alias name="customerPartyId" entity-alias="OPRT"/>
+        <alias name="lotId" entity-alias="ASST"/>
+        <alias name="facilityId" entity-alias="ASST"/>
+    </view-entity>
     <entity entity-name="ReturnContent" package="mantle.order.return" cache="never">
         <description>A file of a return: a photo of the goods, the customer's or supplier's authorization, a packing list
             (crosscut CX-RECORD-HOSTS, the record files of get#RecordLinkInfo). Written through

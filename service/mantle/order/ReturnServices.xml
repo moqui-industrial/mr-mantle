@@ -1698,10 +1698,12 @@ along with this software (see the LICENSE.md file). If not, see
             receipts of the user's organizations (the order part's buying organization, FacilityScope.js) by supplier, order,
             product or receipt, narrowed by lot or facility, each with what it accepted (available and quarantined stock
             alike; units rejected at the dock are no stock), what earlier supplier returns linked to it took (their
-            ReturnItem.assetReceiptId, not cancelled), what may still be returned (eligibleQuantity), what is on hand to send
-            (issuableQuantity) and the assets that hold its stock now (its own and those its inspections' dispositions left it
-            in, with what a Return to supplier disposition holds). Eligible receipts only unless includeIneligible; at most
-            200, newest first. Mantle's calculate#OrderItemReturnable is not used: it counts billed quantity, and a rejected
+            ReturnItem.assetReceiptId, not cancelled), what the receipt still allows (receiptEligibleQuantity), what may be
+            returned now, no more than its stock on hand (eligibleQuantity, issuableQuantity), and the assets that hold its
+            stock now (its own and those its inspections' dispositions left it in, with what a Return to supplier disposition
+            holds). The shipment type, organization, supplier, lot and facility of the receipt's stock are query conditions;
+            receipts with something to return only unless includeIneligible; at most 200, newest first, of at most 5000 read
+            (receiptRowsTruncated). Mantle's calculate#OrderItemReturnable is not used: it counts billed quantity, and a rejected
             lot is returned before the supplier bills. Requires PURCHASE_ORDER_EDIT, QUALITY_DISPOSE or STOCK_ISSUE; refuses
             no filter (FILTER_REQUIRED).</description>
         <in-parameters>
@@ -1719,10 +1721,14 @@ along with this software (see the LICENSE.md file). If not, see
                 quarantinedQuantity, onHandQuantity, returnedQuantity, eligibleQuantity, issuableQuantity and assets (assetId,
                 statusId, locationSeqId, lotId, serialNumber, quantityOnHand, returnSupplierQuantity).</description>
             </parameter>
+            <parameter name="receiptRowsTruncated" type="Boolean"><description>More than 5000 receipts matched; narrow the
+                filters.</description></parameter>
         </out-parameters>
         <actions>
-            <set field="receiptRows" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
-                    .execute('returnableReceipts', context).receiptRows"/>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/ReturnStock.js')
+                    .execute('returnableReceipts', context)"/>
+            <set field="receiptRows" from="found.receiptRows"/>
+            <set field="receiptRowsTruncated" from="found.receiptRowsTruncated"/>
         </actions>
     </service>
     <service verb="add" noun="ReceiptToReturn" allow-remote="false">
@@ -1759,7 +1765,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="create" noun="ReturnContent">
         <description>A file of a return (ReturnContent, the record files of get#RecordLinkInfo): the row, and the uploaded
-            file saved through save#ReturnContentFile.</description>
+            file saved through save#ReturnContentFile. Needs one of the permissions that work a return (STOCK_RECEIVE,
+            QUALITY_DISPOSE, RETURN_AUTHORIZE, PURCHASE_ORDER_EDIT, RECEIVABLE_EDIT, PAYABLE_EDIT; PERMISSION_DENIED) and the
+            return's vendor or customer in the user's organizations (FacilityScope.js; RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.order.return.ReturnContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
@@ -1768,12 +1776,27 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="returnContentId"/></out-parameters>
         <actions>
+            <script><![CDATA[
+                const lib = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                const facilityScope = ec.resource.script('component://mr-mantle/service/mantle/facility/FacilityScope.js')
+                const works = ['STOCK_RECEIVE', 'QUALITY_DISPOSE', 'RETURN_AUTHORIZE', 'PURCHASE_ORDER_EDIT', 'RECEIVABLE_EDIT',
+                    'PAYABLE_EDIT']
+                if (!works.some(lib.access.has))
+                    lib.denied('PERMISSION_DENIED', 'A return permission is required to add its files')
+                const header = lib.one('mantle.order.return.ReturnHeader', {returnId})
+                const userScope = facilityScope.scope()
+                const parties = header ? [header.vendorPartyId, header.customerPartyId] : []
+                if (!parties.some(partyId => facilityScope.owns(userScope, partyId)))
+                    lib.denied('RECORD_UNAVAILABLE', 'Return ' + returnId + ' is not available')
+            ]]></script>
             <service-call name="create#mantle.order.return.ReturnContent" in-map="context" out-map="context"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <service-call name="mantle.order.ReturnServices.save#ReturnContentFile" in-map="context"/></if>
         </actions>
     </service>
-    <service verb="save" noun="ReturnContentFile">
+    <service verb="save" noun="ReturnContentFile" allow-remote="false">
+        <description>Internal to create#ReturnContent, which checks the permission and scope: the file of a ReturnContent
+            row of that return.</description>
         <in-parameters>
             <parameter name="returnContentId" required="true"/>
             <parameter name="returnId" required="true"/>
@@ -1781,6 +1804,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
+            <entity-find-one entity-name="mantle.order.return.ReturnContent" value-field="contentRow"/>
+            <if condition="contentRow == null || contentRow.returnId != returnId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${returnContentId} is not of return ${returnId}"/></if>
             <set field="filename" from="contentFile.getName()"/>
             <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
                     : 'mantle.content.large.root'"/>

@@ -1548,11 +1548,15 @@ function sourceStatus(p) {
               ? accepted
               : zero
         const ownIds = new Set(own.map(row => row.qualityInspectionId))
-        const inspectionRejected = dispositions
-            .filter(row => ownIds.has(row.qualityInspectionId))
-            .reduce((sum, row) => sum.add(dec(row.quantity)), zero)
-        // what the inspection scrapped or returned to the supplier leaves the match too (P8 review B2)
-        const eligible = accepted.subtract(held).subtract(inspectionRejected)
+        const ownDispositions = dispositions.filter(row => ownIds.has(row.qualityInspectionId))
+        const inspectionRejected = ownDispositions.reduce((sum, row) => sum.add(dec(row.quantity)), zero)
+        // what the inspection scrapped or returned to the supplier leaves the match too (P8 review B2); Return to supplier
+        // stock not yet sent back is still in held, so only its returnedQuantity counts here (P14 review B1, F318)
+        const inspectionRemoved = ownDispositions.reduce(
+            (sum, row) => sum.add(row.dispositionEnumId === "QdReturnSupplier" ? dec(row.returnedQuantity) : dec(row.quantity)),
+            zero
+        )
+        const eligible = accepted.subtract(held).subtract(inspectionRemoved)
         return {
             assetReceiptId: receipt.assetReceiptId,
             shipmentId: receipt.shipmentId,
@@ -1564,6 +1568,7 @@ function sourceStatus(p) {
             heldQuantity: held,
             matchEligibleQuantity: eligible.compare(0) > 0 ? eligible : zero,
             inspectionRejectedQuantity: inspectionRejected,
+            inspectionRemovedQuantity: inspectionRemoved,
             openInspectionIds: own.filter(row => openStatuses.includes(row.statusId)).map(row => row.qualityInspectionId)
         }
     })
@@ -1574,7 +1579,8 @@ function sourceStatus(p) {
         rejectedQuantity: total("rejectedQuantity"),
         heldQuantity: total("heldQuantity"),
         matchEligibleQuantity: total("matchEligibleQuantity"),
-        inspectionRejectedQuantity: total("inspectionRejectedQuantity")
+        inspectionRejectedQuantity: total("inspectionRejectedQuantity"),
+        inspectionRemovedQuantity: total("inspectionRemovedQuantity")
     }
 }
 

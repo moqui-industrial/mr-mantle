@@ -49,6 +49,10 @@ function returnShipment(userScope, shipmentId, facilityId) {
             .sort((a, b) => String(b.shipmentRouteSegmentSeqId).localeCompare(String(a.shipmentRouteSegmentSeqId)))
             .find(segment => segment.destinationFacilityId)?.destinationFacilityId
     if (blank(homeId)) denied("FACILITY_REQUIRED", "Choose the receiving facility")
+    // a return is received where its shipment goes (P14 review C)
+    const destinations = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId}).map(row => row.destinationFacilityId)
+    if (!blank(facilityId) && destinations.some(Boolean) && !destinations.includes(facilityId))
+        denied("OTHER_FACILITY", "Return shipment " + shipmentId + " goes to " + destinations.filter(Boolean).join(", "))
     const facility = posting.facility(userScope, homeId)
     return {shipment, facility}
 }
@@ -70,31 +74,46 @@ function quarantineLocation(facility, requested, operation) {
     if (!found) denied("LOCATION_REQUIRED", "A return is received into quarantine: facility " + facility.facilityId + " has none")
     return found.locationSeqId
 }
-// The lot a returned unit comes back in: the one given, else the lot of that number the product's stock was in (the lot it
-// was sold from), else one of that number with no manufacturer, else a new lot of that number. Mantle's receive#Asset would
-// make the customer the manufacturer of a lot it creates for a return shipment and then not find it again for a second box
-// (its lot is looked up by number and the given manufacturer), so the receipt always names the lot.
+// The lot a returned unit comes back in: the one given (a lot the product's stock has been in, LOT_INVALID otherwise); else,
+// of the lots of that number, the one the return item's order line was issued from (AssetIssuance by order line), then one
+// the product's stock has been in, then one with no manufacturer; else a new lot of that number (P14 review C). Mantle's
+// receive#Asset would make the customer the manufacturer of a lot it creates for a return shipment and then not find it
+// again for a second box (its lot is looked up by number and the given manufacturer), so the receipt always names the lot.
 function returnLot(product, line, expirationDate) {
+    const ofProduct = lotIds =>
+        Array.from(
+            find(ASSET, {productId: product.productId})
+                .condition("lotId", "in", lotIds)
+                .selectField("lotId")
+                .distinct(true)
+                .orderBy("lotId")
+                .list()
+        ).map(row => row.lotId)
     if (!blank(line.lotId)) {
-        if (!one("mantle.product.asset.Lot", {lotId: line.lotId}))
-            denied("LOT_UNAVAILABLE", "Lot " + line.lotId + " is not available")
+        if (!one("mantle.product.asset.Lot", {lotId: line.lotId}) || !ofProduct([line.lotId]).length)
+            denied("LOT_INVALID", "Lot " + line.lotId + " holds no stock of " + product.productId)
         return line.lotId
     }
     if (blank(line.lotNumber)) return null
     const lotNumber = String(line.lotNumber).trim()
     const lots = rows("mantle.product.asset.Lot", {lotNumber})
     if (lots.length) {
-        const ofProduct = find(ASSET, {productId: product.productId})
-            .condition(
-                "lotId",
-                "in",
-                lots.map(row => row.lotId)
+        const lotIds = lots.map(row => row.lotId)
+        const item = line.item
+        if (item?.orderId) {
+            const issuedAssetIds = unique(
+                rows(ISSUANCE, {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}).map(row => row.assetId)
             )
-            .selectField("lotId")
-            .orderBy("lotId")
-            .limit(1)
-            .list()
-        const sold = Array.from(ofProduct)[0]?.lotId
+            const issuedLots = issuedAssetIds.length
+                ? unique(
+                      Array.from(find(ASSET).condition("assetId", "in", issuedAssetIds).list())
+                          .map(row => row.lotId)
+                          .filter(lotId => lotIds.includes(lotId))
+                  )
+                : []
+            if (issuedLots.length) return issuedLots.sort()[0]
+        }
+        const sold = ofProduct(lotIds)[0]
         if (sold) return sold
         const unnamed = lots.find(row => !row.mfgPartyId)
         if (unnamed) return unnamed.lotId
@@ -292,46 +311,61 @@ function receiptRow(receipt, order, assets) {
         quarantinedQuantity: quarantined,
         onHandQuantity: onHand,
         returnedQuantity: returned,
-        eligibleQuantity: eligible.compare(0) > 0 ? eligible : zero(),
+        // what the receipt still allows, and what may be returned now: no more than its stock on hand (P14 review C)
+        receiptEligibleQuantity: eligible.compare(0) > 0 ? eligible : zero(),
+        eligibleQuantity: min(eligible.compare(0) > 0 ? eligible : zero(), onHand),
         issuableQuantity: min(eligible.compare(0) > 0 ? eligible : zero(), onHand),
         assets: assets.map(row => Object.assign({}, row, {quantityOnHand: row.quantityOnHand}))
     }
 }
 // find#ReturnableReceipts: the purchase receipts of the user's organizations (the buying organization of the order part)
-// by supplier, order, product, receipt, lot or facility, with what each may still be returned; eligible rows only unless
-// includeIneligible. At most 200 receipts, newest first.
+// by supplier, order, product or receipt, narrowed by lot and facility (of the receipt's stock), with what each may still be
+// returned. The shipment type, organization, supplier, lot and facility are conditions of the query
+// (ReturnableReceiptView); the receipts are read newest first a page at a time until 200 eligible ones are found (eligible
+// only unless includeIneligible), at most 5000 read (receiptRowsTruncated) (P14 review B3).
+const eligibleLimit = 200,
+    scanLimit = 5000
 function returnableReceipts(p) {
     posting.requirePermission(["PURCHASE_ORDER_EDIT", "QUALITY_DISPOSE", "STOCK_ISSUE"])
     const userScope = posting.scope()
-    let orderIds = null
-    if (!blank(p.orderId)) orderIds = [p.orderId]
-    else if (!blank(p.vendorPartyId)) {
-        let parts = find("mantle.order.OrderPart", {vendorPartyId: p.vendorPartyId})
-        if (userScope.organizationPartyIds) parts = parts.condition("customerPartyId", "in", userScope.organizationPartyIds)
-        orderIds = unique(Array.from(parts.selectField("orderId").orderBy("-orderId").limit(500).list()).map(row => row.orderId))
-    }
-    let query = find(RECEIPT).condition("orderId", "is-not-null", null).condition("quantityAccepted", "greater", 0)
-    if (!blank(p.assetReceiptId)) query = query.condition("assetReceiptId", p.assetReceiptId)
-    if (orderIds) query = query.condition("orderId", "in", orderIds.length ? orderIds : ["_none_"])
-    if (!blank(p.productId)) query = query.condition("productId", p.productId)
-    if (blank(p.assetReceiptId) && !orderIds && blank(p.productId))
+    if (blank(p.assetReceiptId) && blank(p.orderId) && blank(p.vendorPartyId) && blank(p.productId))
         denied("FILTER_REQUIRED", "Give a supplier, an order, a product or a receipt")
-    const receipts = Array.from(query.orderBy("-receivedDate,-assetReceiptId").limit(200).list())
-    const receiptRows = []
-    for (const receipt of receipts) {
-        const shipment = receipt.shipmentId ? one(SHIPMENT, {shipmentId: receipt.shipmentId}) : null
-        if (shipment && shipment.shipmentTypeEnumId !== "ShpTpPurchase") continue
-        const order = receiptOrder(receipt)
-        if (!order.part || !facilityScope.owns(userScope, order.part.customerPartyId)) continue
-        if (!blank(p.vendorPartyId) && order.part.vendorPartyId !== p.vendorPartyId) continue
-        const assets = holdingAssets(receipt)
-        if (!blank(p.facilityId) && !assets.some(row => one(ASSET, {assetId: row.assetId})?.facilityId === p.facilityId)) continue
-        if (!blank(p.lotId) && !assets.some(row => row.lotId === p.lotId)) continue
-        const row = receiptRow(receipt, order, assets)
-        if (row.eligibleQuantity.compare(0) <= 0 && p.includeIneligible !== true && p.includeIneligible !== "true") continue
-        receiptRows.push(row)
+    const query = () => {
+        let q = find("mantle.order.return.ReturnableReceiptView")
+            .condition("shipmentTypeEnumId", "ShpTpPurchase")
+            .condition("quantityAccepted", "greater", 0)
+        if (userScope.organizationPartyIds)
+            q = q.condition(
+                "customerPartyId",
+                "in",
+                userScope.organizationPartyIds.length ? userScope.organizationPartyIds : ["_none_"]
+            )
+        for (const field of ["assetReceiptId", "orderId", "vendorPartyId", "productId", "lotId", "facilityId"])
+            if (!blank(p[field])) q = q.condition(field, p[field])
+        return q.orderBy("-receivedDate,-assetReceiptId")
     }
-    return {receiptRows}
+    const includeIneligible = p.includeIneligible === true || p.includeIneligible === "true"
+    const receiptRows = []
+    let offset = 0,
+        truncated = false
+    while (receiptRows.length < eligibleLimit) {
+        const page = Array.from(query().offset(offset).limit(eligibleLimit).list())
+        if (!page.length) break
+        offset += page.length
+        for (const view of page) {
+            const receipt = one(RECEIPT, {assetReceiptId: view.assetReceiptId})
+            const row = receiptRow(receipt, receiptOrder(receipt), holdingAssets(receipt))
+            if (!includeIneligible && row.issuableQuantity.compare(0) <= 0) continue
+            receiptRows.push(row)
+            if (receiptRows.length >= eligibleLimit) break
+        }
+        if (page.length < eligibleLimit) break
+        if (offset >= scanLimit) {
+            truncated = true
+            break
+        }
+    }
+    return {receiptRows, receiptRowsTruncated: truncated}
 }
 // The supplier return, locked: its customer an internal organization of the user's scope (a purchase return), still open
 // for items (created or requested).
@@ -376,7 +410,9 @@ function addReceiptToReturn(p) {
                 text(row.acceptedQuantity) +
                 ", " +
                 text(row.returnedQuantity) +
-                " already returned"
+                " already returned, " +
+                text(row.onHandQuantity) +
+                " on hand"
         )
     const preferred =
         assets.find(asset => asset.returnSupplierQuantity.compare(0) > 0 && asset.quantityOnHand.compare(0) > 0) ||
@@ -461,7 +497,7 @@ function issueSupplierReturn(p) {
             .list()
     ).find(row => row.statusId !== "SisCancelled")
     if (!source) denied("RETURN_ITEM_NOT_ON_SHIPMENT", "Return item " + p.returnId + ":" + p.returnItemSeqId + " is not on it")
-    find(HEADER, {returnId: p.returnId}).forUpdate(true).one()
+    const header = find(HEADER, {returnId: p.returnId}).forUpdate(true).one()
     const item = find(ITEM, {returnId: p.returnId, returnItemSeqId: p.returnItemSeqId}).forUpdate(true).one()
     if (item.statusId !== "ReturnApproved")
         denied("RETURN_NOT_APPROVED", "Return item " + p.returnItemSeqId + " is " + item.statusId + ", not approved")
@@ -479,7 +515,11 @@ function issueSupplierReturn(p) {
         denied("OTHER_FACILITY", "Asset " + assetId + " is not at " + facility.facilityId + ", where the return ships from")
     if (!issuableStatuses.includes(asset.statusId))
         denied("NOT_ISSUABLE", "Asset " + assetId + " is " + asset.statusId + " and is not sent back from here")
-    const held = asset.statusId === "AstQuarantine"
+    // the return's organization sends back its own stock (P14 review C)
+    if (asset.ownerPartyId && asset.ownerPartyId !== header.customerPartyId)
+        denied("OWNER_MISMATCH", "Asset " + assetId + " is owned by " + asset.ownerPartyId + ", not the returning organization")
+    // held stock, quarantined or on hold, goes back only with disposition authority (P14 review B5)
+    const held = ["AstQuarantine", "AstOnHold"].includes(asset.statusId)
     if (held && !access.has("QUALITY_DISPOSE")) denied("PERMISSION_DENIED", "QUALITY_DISPOSE is required to send held stock back")
     const quantity = dec(p.quantity)
     const remaining = dec(source.quantity).subtract(issuedOn(source.shipmentItemSourceId))

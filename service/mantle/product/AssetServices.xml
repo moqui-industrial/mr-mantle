@@ -2564,7 +2564,9 @@ along with this software (see the LICENSE.md file). If not, see
                         invoiceId:shipmentItemSource.invoiceId, invoiceItemSeqId:shipmentItemSource.invoiceItemSeqId}"/>
             </else></if>
 
-            <!-- one named asset (impl-warehouse P14): only it is issued, whatever its status -->
+            <!-- one named asset (impl-warehouse P14): only it is issued, whatever its status, to the shipment source -->
+            <if condition="assetId &amp;&amp; workEffortOnly">
+                <return error="true" message="A named asset is issued to a shipment item source, not to a work effort only"/></if>
             <if condition="assetId">
                 <entity-find-one entity-name="mantle.product.asset.Asset" value-field="namedAsset" for-update="true"/>
                 <if condition="namedAsset == null || namedAsset.productId != productId || namedAsset.facilityId != facilityId">
