@@ -185,6 +185,46 @@ feature("an account action runs the account service, and a registered client's s
         frontChannel.error.code == "NotFound"
     }
 })
+feature("only the authority's call marks its client verified: a flag in an account service's input is not trusted", {
+    when() {
+        const account = ec.resource.script("component://framework/service/org/moqui/public/Account.js")
+        const refusal = input => {
+            try {
+                account.execute("issueDelegation", {siteId: SITE, clientId: CLIENT, ...input})
+                return ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+            }
+        }
+        login("john.doe")
+        const flagged = refusal({clientVerified: true})
+        const secret = refusal({clientSecret: "pass-authority-spec-secret"})
+        logout()
+        const session = handle({
+            operation: "account.session",
+            input: {username: "john.doe", password: "moqui"},
+            clientId: CLIENT,
+            clientVerified: true
+        })
+        const left = {
+            verified: ec.user.context.passVerifiedClient ?? null,
+            requester: ec.user.context.passRequester ?? null
+        }
+        logout()
+        return {flagged, secret, session, left}
+    },
+    then({flagged, secret, session, left}) {
+        flagged.includes("Unregistered deployment or site")
+        secret == ""
+        // in the authority's call the transport's verification is the client's
+        session.result.credential.length == 64
+        // and nothing of it is left after the call
+        left.verified == null
+        left.requester == null
+    }
+})
 feature("the servlet answers a route through the authority, and a failure with the envelope and its status", {
     when() {
         return {

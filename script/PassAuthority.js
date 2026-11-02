@@ -97,12 +97,17 @@ function envelope(error) {
    (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token)}.
    Answers {result} (with download: {location, contentType, filename, disposition} for a file) or {error}. */
 function handle(p) {
+    // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
+    // limit key, and the client the transport authenticated (never a flag in a service's input)
+    ec.user.context.remove('passRequester')
+    ec.user.context.remove('passVerifiedClient')
     try {
         return run(p || {})
     } catch (error) {
         return { error: envelope(error) }
     } finally {
         ec.user.context.remove('passRequester')
+        ec.user.context.remove('passVerifiedClient')
     }
 }
 function run(p) {
@@ -119,6 +124,8 @@ function run(p) {
             siteId,
             p.clientVerified === true,
         )
+    if (registered && p.clientVerified === true)
+        ec.user.context.passVerifiedClient = clientId
     // A registered deployment names its browser's address, for the account rate limits only.
     if (registered && (p.visitorAddress || !ec.web?.request))
         ec.user.context.passRequester =
@@ -201,7 +208,6 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
                     siteId,
                     clientId: p.clientId,
                     clientSecret: p.clientSecret,
-                    clientVerified: registered,
                 },
             ),
         }
@@ -254,7 +260,6 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
                         siteId,
                         clientId: p.clientId,
                         clientSecret: p.clientSecret || '',
-                        clientVerified: registered,
                     },
                 ),
             }
