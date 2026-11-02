@@ -26,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
             address Shippo rejects (ADDRESS_INVALID).</description>
         <implements service="mantle.shipment.CarrierServices.get#ShippingRatesBulk"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('ratesBulk', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('ratesBulk', context)"/>
             <set field="shippingRateInfoList" from="answer.shippingRateInfoList"/>
         </actions>
     </service>
@@ -37,7 +37,7 @@ along with this software (see the LICENSE.md file). If not, see
             (CURRENCY_MISMATCH).</description>
         <implements service="mantle.shipment.CarrierServices.get#OrderShippingRate"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('orderRate', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('orderRate', context)"/>
             <set field="shippingTotal" from="answer.shippingTotal"/>
             <set field="orderItemSeqId" from="answer.orderItemSeqId"/>
         </actions>
@@ -47,7 +47,7 @@ along with this software (see the LICENSE.md file). If not, see
             given.</description>
         <implements service="mantle.shipment.CarrierServices.get#ShippingRate"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('rate', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('rate', context)"/>
             <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
         </actions>
     </service>
@@ -63,7 +63,7 @@ along with this software (see the LICENSE.md file). If not, see
             package is thrown before a refusal.</description>
         <implements service="mantle.shipment.CarrierServices.request#ShippingLabels"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('requestLabels', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('requestLabels', context)"/>
             <set field="pending" from="!!answer.pending"/>
         </actions>
     </service>
@@ -74,7 +74,7 @@ along with this software (see the LICENSE.md file). If not, see
             the package's refund or its label's status. Nothing is bought.</description>
         <implements service="mantle.shipment.CarrierServices.find#ShippingLabels"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('findLabels', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('findLabels', context)"/>
             <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
         </actions>
     </service>
@@ -85,7 +85,7 @@ along with this software (see the LICENSE.md file). If not, see
             label.</description>
         <implements service="mantle.shipment.CarrierServices.refund#ShippingLabels"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('refundLabels', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('refundLabels', context)"/>
             <set field="pending" from="!!answer.pending"/>
         </actions>
     </service>
@@ -95,7 +95,7 @@ along with this software (see the LICENSE.md file). If not, see
             others go on.</description>
         <implements service="mantle.shipment.CarrierServices.track#ShippingLabels"/>
         <actions>
-            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('trackLabels', context)</script>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('trackLabels', context)</script>
         </actions>
     </service>
     <service verb="validate" noun="ShippingPostalAddress" allow-remote="false">
@@ -104,7 +104,7 @@ along with this software (see the LICENSE.md file). If not, see
             was.</description>
         <implements service="mantle.shipment.CarrierServices.validate#ShippingPostalAddress"/>
         <actions>
-            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('validateAddress', context)"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('validateAddress', context)"/>
             <set field="contactMechId" from="answer.contactMechId"/>
         </actions>
     </service>
@@ -121,7 +121,7 @@ along with this software (see the LICENSE.md file). If not, see
             </parameter>
         </out-parameters>
         <actions>
-            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('receiveWebhook', context)"/>
+            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('receiveWebhook', context)"/>
             <set field="systemMessageIdList" from="receiveOut.systemMessageIdList"/>
             <set field="duplicateOfId" from="receiveOut.duplicateOfId"/>
         </actions>
@@ -134,7 +134,7 @@ along with this software (see the LICENSE.md file). If not, see
             repeated, late and out-of-order events converge; a test event on a production remote is ignored.</description>
         <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
         <actions>
-            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('consumeWebhook', context)</script>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/ext/shipment/Shippo.js').execute('consumeWebhook', context)</script>
         </actions>
     </service>
 </services>

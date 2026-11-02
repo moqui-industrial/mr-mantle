@@ -58,7 +58,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="supportedFormats" from="['PmftBankOfAmericaAr', 'PmftCityBankCnb', 'PmftSunTrustCpr',
                         'PmftWachoviaAr', 'PmftWellsFargoArp', 'PmftZionsBankCsv']"/>
                 <if condition="supportedFormats.includes(bankAccount.posPayFormatEnumId)">
-                    <then><set field="formatServiceName" value="mantle.account.PositivePayServices.generate#${bankAccount.posPayFormatEnumId}"/></then>
+                    <then><set field="formatServiceName" value="mantle.ext.account.PositivePayServices.generate#${bankAccount.posPayFormatEnumId}"/></then>
                     <else><return error="true" message="Positive Pay File Format ${bankAccount.posPayFormatEnumId} not supported and no format service specified"/></else>
                 </if>
             </if>
@@ -133,7 +133,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- returns paymentMethodFileId or null if no applicable Payment records -->
             <!-- NOTE: run in new TX so that is committed (record exists) before async create of SystemMessage done by produce service below -->
-            <service-call name="mantle.account.PositivePayServices.generate#PositivePayFile"
+            <service-call name="mantle.ext.account.PositivePayServices.generate#PositivePayFile"
                     in-map="context" out-map="context" transaction="force-new"/>
             <if condition="!paymentMethodFileId">
                 <log message="In send#PositivePayJob no file generated, not sending"/>
@@ -161,7 +161,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
     </service>
     <service verb="generate" noun="PmftBankOfAmericaAr">
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions>
             <if condition="!bankAccount.posPayBankNumber || bankAccount.posPayBankNumber.length != 3">
                 <return error="true" message="Pos. Pay Bank Number must be set and 3 characters long (for bank account [${bankAccount.paymentMethodId}])"/></if>
@@ -266,7 +266,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="generate" noun="PmftCityBankCnb">
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions>
             <if condition="!bankAccount.posPayBankNumber || bankAccount.posPayBankNumber.length != 3">
                 <return error="true" message="Pos. Pay Bank Number must be set and be 3 digits (for bank account [${bankAccount.paymentMethodId}])"/></if>
@@ -334,7 +334,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="generate" noun="PmftSunTrustCpr">
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions>
             <if condition="!bankAccount.posPayBankNumber || bankAccount.posPayBankNumber.length != 3">
                 <return error="true" message="Pos. Pay Bank Number must be set and 3 characters long (for bank account [${bankAccount.paymentMethodId}])"/></if>
@@ -490,7 +490,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="generate" noun="PmftWachoviaAr">
         <description>Generate Wachovia Account Reconcilement File; note that uses spaces/blanks for filler</description>
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions>
             <if condition="!bankAccount.posPayBankNumber || bankAccount.posPayBankNumber.length > 4">
                 <return error="true" message="Pos. Pay Bank Number must be set and 4 digits or less (for bank account [${bankAccount.paymentMethodId}])"/></if>
@@ -577,7 +577,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="generate" noun="PmftWellsFargoArp">
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions>
             <if condition="!bankAccount.posPayBankNumber || bankAccount.posPayBankNumber.length > 5">
                 <return error="true" message="Pos. Pay Bank Number must be set and 5 digits or less (for bank account [${bankAccount.paymentMethodId}])"/></if>
@@ -683,7 +683,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="generate" noun="PmftZionsBankCsv">
-        <implements service="mantle.account.PositivePayServices.generate#PositivePayInterface"/>
+        <implements service="mantle.ext.account.PositivePayServices.generate#PositivePayInterface"/>
         <actions><script><![CDATA[
             // CSV in the Commons CSV DEFAULT format: comma separated, CRLF record separator, a field quoted when it has a
             // comma, quote or line break, starts with a character at or below '#', ends with a space or less, or is an empty first field

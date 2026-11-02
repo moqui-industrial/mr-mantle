@@ -12,7 +12,7 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Shippo (mantle.shipment.carrier.ShippoServices, docs/Shippo.md; ported from mantle-shippo 1.2.1, 2356f07): its
+<!-- Shippo (mantle.ext.shipment.ShippoServices, docs/Shippo.md; ported from mantle-shippo 1.2.1, 2356f07): its
     options group and its webhook (the gateway type ShGtwyShippo and its option SgoLookupGraceSeconds are the seed of
     ShippingGatewayEntities.xml). A Shippo webhook posts to
     /rest/sm/ShippoWebhook/{systemMessageRemoteId}, the remote of the gateway's connection, whose
@@ -22,5 +22,5 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration description="Shippo Gateway Options" enumId="EgShippoOption" enumTypeId="EnumGroup"/>
     <moqui.basic.EnumGroupMember enumGroupEnumId="EgShippoOption" enumId="SgoLabelType" sequenceNum="1"/>
     <moqui.basic.EnumGroupMember enumGroupEnumId="EgShippoOption" enumId="SgoLookupGraceSeconds" sequenceNum="2"/>
-    <moqui.service.message.SystemMessageType systemMessageTypeId="ShippoWebhook" description="Shippo webhook event" contentType="application/json" receiveServiceName="mantle.shipment.carrier.ShippoServices.receive#Webhook" consumeServiceName="mantle.shipment.carrier.ShippoServices.consume#Webhook"/>
+    <moqui.service.message.SystemMessageType systemMessageTypeId="ShippoWebhook" description="Shippo webhook event" contentType="application/json" receiveServiceName="mantle.ext.shipment.ShippoServices.receive#Webhook" consumeServiceName="mantle.ext.shipment.ShippoServices.consume#Webhook"/>
 </entity-facade-xml>

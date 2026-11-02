@@ -1,6 +1,6 @@
 # PayTrace payment gateway
 
-Mantle's PayTrace gateway: `service/mantle/account/PayTraceServices.xml` and `PayTrace.js`, on the gateway interfaces
+Mantle's PayTrace gateway: `service/mantle/ext/account/gateway/PayTraceServices.xml` and `PayTrace.js`, on the gateway interfaces
 of `PaymentServices.xml` (authorize, capture, release, refund, details), with what it shares with the Authorize.Net
 gateway in `GatewayLib.js`. It uses the PayTrace JSON API v3 (the OpenAPI schema at `https://api.paytrace.com/v3/openapi.json`,
 3.5.1 when ported) with the framework HTTP client, no SDK. It was ported from the Java Moqui
@@ -11,7 +11,7 @@ v1. The plan and its implementation record are [plan/payments-shipping-edi.md](.
 
 | Record | What goes there |
 | --- | --- |
-| `PaymentGatewayConfig` | `paymentGatewayTypeEnumId` `PgtPayTrace`, the service names (`mantle.account.PayTraceServices.authorize#Payment`, `capture#`, `release#`, `refund#Payment`, `get#PaymentGatewayDetails`; for a sale `authorizeAndCapture#Payment` with no capture service), and `systemMessageRemoteId` |
+| `PaymentGatewayConfig` | `paymentGatewayTypeEnumId` `PgtPayTrace`, the service names (`mantle.ext.account.gateway.PayTraceServices.authorize#Payment`, `capture#`, `release#`, `refund#Payment`, `get#PaymentGatewayDetails`; for a sale `authorizeAndCapture#Payment` with no capture service), and `systemMessageRemoteId` |
 | `SystemMessageRemote` | `sendUrl` the API base (`https://api.sandbox.paytrace.com` sandbox, `https://api.paytrace.com` production), `usageCode` `T` or `P` (it picks the Protect.js host), `username` the PayTrace API user, `password` its password. The password is an encrypted field |
 | `PaymentGatewayPayTrace` | Non-secret options: `merchantId`, `integratorId` (issued by PayTrace for the integration, sent as `X-Integrator-Id`, at most 12 characters), `currencyUomId` (the merchant account's currency; a payment in another is refused), `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode` and `defaultUnitOfMeasure` for level 3 lines, `customerLabelPrefix` (for instances sharing one account) |
 
@@ -20,7 +20,7 @@ merchant id or integrator id. Enter them in the System Message Remote screen or 
 seed data. The API user's password expires every 90 days at PayTrace (error 979): change it on the remote too.
 
 **Authentication.** OAuth client credentials (`POST /v3/token`, form encoded, the API user as `client_id` and its
-password as `client_secret`). The access token is kept in the process cache `mantle.account.PayTrace.accessToken` until
+password as `client_secret`). The access token is kept in the process cache `mantle.ext.account.gateway.PayTrace.accessToken` until
 a minute before `expires_in`, by remote, endpoint and user, sealed: XORed with a keystream of the conf's single-use hash
 (SHA-256 by default) of the remote's password, a random nonce and a block counter, so the Tools cache screen shows only
 hex. A request answered 401 (expired or revoked) gets a new token and is sent once more; a second 401 is an error, not

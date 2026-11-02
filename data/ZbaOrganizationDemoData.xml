@@ -305,7 +305,7 @@ along with this software (see the LICENSE.md file). If not, see
     <mantle.account.method.PaymentMethodFileType paymentMethodId="ZIRET_BA" fileTypeEnumId="PmftZionsBankCsv"
             systemMessageTypeId="DemoZiretPosPay" systemMessageRemoteId="DemoZiretBankSftp"/>
     <moqui.service.job.ServiceJob jobName="DemoZiret_send_PosPay" description="Demo ZIRET Send Positive Pay"
-            serviceName="mantle.account.PositivePayServices.send#PositivePayJob" cronExpression="0 0 2 * * ?" paused="Y">
+            serviceName="mantle.ext.account.PositivePayServices.send#PositivePayJob" cronExpression="0 0 2 * * ?" paused="Y">
         <parameters parameterName="paymentMethodId" parameterValue="ZIRET_BA"/>
         <parameters parameterName="lookBackDays" parameterValue="7"/>
     </moqui.service.job.ServiceJob>
@@ -314,7 +314,7 @@ along with this software (see the LICENSE.md file). If not, see
             produceServiceName="mantle.account.PaymentMethodServices.produce#PaymentMethodFileSystemMessage"
             sendServiceName="org.moqui.sftp.SftpMessageServices.send#SystemMessageSftp"
             receiveServiceName=""
-            consumeServiceName="mantle.account.NachaServices.consume#NachaReturnSystemMessage"
+            consumeServiceName="mantle.ext.account.NachaServices.consume#NachaReturnSystemMessage"
             sendPath="/sftp_user/${systemMessageTypeId}/NACHA-${remoteMessageId||systemMessageId}-${dateTime}.txt"
             receivePath="/sftp_user/${systemMessageTypeId}/return" receiveFilePattern=".*\.txt"
             receiveResponseEnumId="MsgRrMove" receiveMovePath="/sftp_user/${systemMessageTypeId}/return/received"/>
@@ -322,7 +322,7 @@ along with this software (see the LICENSE.md file). If not, see
             systemMessageTypeId="DemoZiretNacha" systemMessageRemoteId="DemoZiretBankSftp"/>
     <!--
     <moqui.service.job.ServiceJob jobName="DemoZiret_send_Nacha" description="Demo ZIRET Send NACHA"
-            serviceName="mantle.account.NachaServices.generate#NachaFile" cronExpression="0 0 2 * * ?" paused="Y">
+            serviceName="mantle.ext.account.NachaServices.generate#NachaFile" cronExpression="0 0 2 * * ?" paused="Y">
         <parameters parameterName="paymentMethodId" parameterValue="ZIRET_BA"/>
         <parameters parameterName="produceSystemMessage" parameterValue="true"/>
     </moqui.service.job.ServiceJob>
@@ -331,7 +331,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- bank integration examples: poll to receive OFX/QFX, BAI 2 -->
     <moqui.service.message.SystemMessageType systemMessageTypeId="DemoZiretOfx" description="Demo ZIRET OFX/QFX"
             receiveServiceName=""
-            consumeServiceName="mantle.account.OfxServices.consume#OfxV1SystemMessage"
+            consumeServiceName="mantle.ext.account.OfxServices.consume#OfxV1SystemMessage"
             receivePath="/sftp_user/${systemMessageTypeId}" receiveFilePattern=".*"
             receiveResponseEnumId="MsgRrMove" receiveMovePath="/sftp_user/${systemMessageTypeId}/received"/>
     <mantle.account.method.PaymentMethodFileType paymentMethodId="ZIRET_BA" fileTypeEnumId="PmftOfx"
@@ -344,7 +344,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <moqui.service.message.SystemMessageType systemMessageTypeId="DemoZiretBai2" description="Demo ZIRET BAI 2"
             receiveServiceName=""
-            consumeServiceName="mantle.account.BaiServices.consume#Bai2SystemMessage"
+            consumeServiceName="mantle.ext.account.BaiServices.consume#Bai2SystemMessage"
             receivePath="/sftp_user/${systemMessageTypeId}" receiveFilePattern=".*"
             receiveResponseEnumId="MsgRrMove" receiveMovePath="/sftp_user/${systemMessageTypeId}/received"/>
     <mantle.account.method.PaymentMethodFileType paymentMethodId="ZIRET_BA" fileTypeEnumId="PmftBai2"

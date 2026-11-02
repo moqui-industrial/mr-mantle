@@ -1,6 +1,6 @@
 # Shippo shipping gateway
 
-Mantle's Shippo gateway: `service/mantle/shipment/carrier/ShippoServices.xml` and `Shippo.js`, on the carrier interfaces
+Mantle's Shippo gateway: `service/mantle/ext/shipment/ShippoServices.xml` and `Shippo.js`, on the carrier interfaces
 of `CarrierServices.xml` (rates, labels, label lookup, refunds, tracking, address validation). It uses the Shippo REST
 API with the framework HTTP client, no SDK, and sends `Shippo-API-Version: 2018-02-08` on every request (the contract it
 was written against; an account's default version may be newer). It was ported from the Java Moqui
@@ -11,7 +11,7 @@ implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipp
 
 | Record | What goes there |
 | --- | --- |
-| `ShippingGatewayConfig` | `shippingGatewayTypeEnumId` `ShGtwyShippo`, the `mantle.shipment.carrier.ShippoServices` service names (`get#ShippingRatesBulk`, `get#OrderShippingRate`, `get#ShippingRate`, `request#`, `find#`, `refund#`, `track#ShippingLabels`, `validate#ShippingPostalAddress`), `systemMessageRemoteId`, and `testMode` Y for a test token |
+| `ShippingGatewayConfig` | `shippingGatewayTypeEnumId` `ShGtwyShippo`, the `mantle.ext.shipment.ShippoServices` service names (`get#ShippingRatesBulk`, `get#OrderShippingRate`, `get#ShippingRate`, `request#`, `find#`, `refund#`, `track#ShippingLabels`, `validate#ShippingPostalAddress`), `systemMessageRemoteId`, and `testMode` Y for a test token |
 | `SystemMessageRemote` | `sendUrl` `https://api.goshippo.com`, `usageCode` `T` (test token) or `P` (live token), `password` the API token, `sharedSecret` the webhook secret, `messageAuthEnumId` `SmatHmacSha256Timestamp` with `authHeaderName` `Shippo-Auth-Signature`, or `SmatUrlToken` with `authHeaderName` `token` (or empty; see Webhooks). The secrets are encrypted fields |
 | `ShippingGatewayCarrier` | Per carrier party, `gatewayAccountId` the Shippo carrier account `object_id` (`GET /carrier_accounts`) |
 | `ShippingGatewayMethod`, `CarrierShipmentMethod` | `gatewayServiceCode` the Shippo service level token (the gateway's row overrides the carrier method's) |

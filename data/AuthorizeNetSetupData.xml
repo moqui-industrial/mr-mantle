@@ -16,5 +16,5 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- Authorize.Net webhooks: an Authorize.Net webhook posts to /rest/sm/AuthorizeNetWebhook/{systemMessageRemoteId}, the
         remote of the gateway's connection, whose SmatHmacSha512 check of X-ANET-Signature runs before anything is kept.
         The gateway type (PgtAuthorizeNet) is the seed of PaymentGatewayAuthorizeNet; see docs/AuthorizeNet.md. -->
-    <moqui.service.message.SystemMessageType systemMessageTypeId="AuthorizeNetWebhook" description="Authorize.Net webhook notification" contentType="application/json" receiveServiceName="mantle.account.AuthorizeNetServices.receive#Webhook" consumeServiceName="mantle.account.AuthorizeNetServices.consume#Webhook"/>
+    <moqui.service.message.SystemMessageType systemMessageTypeId="AuthorizeNetWebhook" description="Authorize.Net webhook notification" contentType="application/json" receiveServiceName="mantle.ext.account.gateway.AuthorizeNetServices.receive#Webhook" consumeServiceName="mantle.ext.account.gateway.AuthorizeNetServices.consume#Webhook"/>
 </entity-facade-xml>

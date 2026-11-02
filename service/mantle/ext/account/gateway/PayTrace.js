@@ -25,7 +25,7 @@
 // charge's, sent again by send#EnhancedData. Card data, tokens and credentials are never recorded or logged; the request
 // and answer bodies are not logged at all.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const G = ec.resource.script("component://mr-mantle/service/mantle/account/GatewayLib.js")
+const G = ec.resource.script("component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js")
 const {one, rows, find, call} = lib
 const {clip, record, refuse, describe, isRefund, authorizedTransaction} = G
 const P = "mantle.account.payment.Payment",
@@ -34,7 +34,7 @@ const P = "mantle.account.payment.Payment",
     CONFIG = "mantle.account.method.PaymentGatewayConfig",
     OPTIONS = "mantle.account.method.PaymentGatewayPayTrace",
     REMOTE = "moqui.service.message.SystemMessageRemote"
-const TOKEN_CACHE = "mantle.account.PayTrace.accessToken"
+const TOKEN_CACHE = "mantle.ext.account.gateway.PayTrace.accessToken"
 // a cached access token is used until this long before it expires
 const TOKEN_MARGIN_SECONDS = 60
 // expires_in when an answer has none: the shortest lifetime the documentation shows (900 seconds)
@@ -1055,7 +1055,7 @@ function afterCapture(gw, payment, amount, transactionId) {
     try {
         ec.service
             .special()
-            .name("mantle.account.PayTraceServices.send#EnhancedData")
+            .name("mantle.ext.account.gateway.PayTraceServices.send#EnhancedData")
             .parameters({paymentId: payment.paymentId, transactionId, amount: String(amount)})
             .registerOnCommit()
     } catch (error) {
@@ -1132,7 +1132,7 @@ function retryEnhancedData(p) {
         )
         if (sends[0]?.resultSuccess === "Y" || sends.length >= maxAttempts || voidedBeforeSettlement(payment)) continue
         try {
-            const out = lib.probe("mantle.account.PayTraceServices.send#EnhancedData", {paymentId})
+            const out = lib.probe("mantle.ext.account.gateway.PayTraceServices.send#EnhancedData", {paymentId})
             if (!out.sent) continue
             outcome.retried++
             if (out.accepted) outcome.accepted++

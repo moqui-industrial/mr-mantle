@@ -13,51 +13,52 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
-    <service verb="upload" noun="OfxVersion1">
+    <service verb="upload" noun="BaiVersion2">
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
-            <parameter name="ofxFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="baiFile" type="org.apache.commons.fileupload2.core.FileItem"/>
         </in-parameters>
         <actions>
-            <if condition="ofxFile == null || ofxFile.size == 0">
-                <return error="true" message="No OFX file content uploaded"/></if>
-            <set field="ofxString" from="ofxFile.getString('UTF-8')"/>
-            <service-call name="mantle.account.OfxServices.import#OfxVersion1" in-map="context"/>
+            <if condition="baiFile == null || baiFile.size == 0">
+                <return error="true" message="No BAI file content uploaded"/></if>
+            <set field="baiString" from="baiFile.getString('UTF-8')"/>
+            <service-call name="mantle.ext.account.BaiServices.import#BaiVersion2" in-map="context"/>
         </actions>
     </service>
-    <service verb="consume" noun="OfxV1SystemMessage">
+    <service verb="consume" noun="Bai2SystemMessage">
         <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
         <actions>
             <entity-find-one entity-name="moqui.service.message.SystemMessage" value-field="systemMessage"/>
-            <set field="ofxString" from="systemMessage.messageText"/>
+            <set field="baiString" from="systemMessage.messageText"/>
 
             <!-- determine paymentMethodId by PaymentMethodFileType record -->
             <entity-find entity-name="mantle.account.method.PaymentMethodFileType" list="pmftList">
-                <econdition field-name="fileTypeEnumId" value="PmftOfx"/>
+                <econdition field-name="fileTypeEnumId" value="PmftBai2"/>
                 <econdition field-name="systemMessageTypeId" from="systemMessage.systemMessageTypeId"/>
                 <econdition field-name="systemMessageRemoteId" from="systemMessage.systemMessageRemoteId"/>
             </entity-find>
             <if condition="!pmftList.length">
-                <return error="true" message="Could not find paymentMethodId from PaymentMethodFileType record for file type PmftOfx message type ${systemMessage.systemMessageTypeId} remote ${systemMessage.systemMessageRemoteId}"/>
+                <return error="true" message="Could not find paymentMethodId from PaymentMethodFileType record for file type PmftBai2 message type ${systemMessage.systemMessageTypeId} remote ${systemMessage.systemMessageRemoteId}"/>
             </if>
 
             <!-- weird but allow multiple in case transactions should be added for more than one BankAccount -->
             <iterate list="pmftList" entry="pmft">
                 <set field="paymentMethodId" from="pmft.paymentMethodId"/>
-                <service-call name="mantle.account.OfxServices.import#OfxVersion1" in-map="context"/>
+                <service-call name="mantle.ext.account.BaiServices.import#BaiVersion2" in-map="context"/>
             </iterate>
         </actions>
     </service>
 
-    <service verb="import" noun="OfxVersion1">
-        <description>Import the lines of an OFX statement into the bank account. A line already imported (by its
-            identity: the FIT id) is skipped, so a file imported again adds nothing; a row that cannot be read is logged by
-            its row and the others are imported. Refuses a file that is not the bank account's or in its currency. The
-            statement balance is updated when the statement is newer. Statement files a person reviews go through
+    <service verb="import" noun="BaiVersion2">
+        <description>Import the lines of a BAI2 statement into the bank account. A line already imported (by its
+            identity: the source-row key, since BAI2 has no transaction id) is skipped, so a file imported again adds
+            nothing; a row that cannot be read is logged by its row and the others are imported. Refuses a file that is not
+            the bank account's, or whose control total does not match its rows. The statement balance is updated when the
+            statement is newer. Statement files a person reviews go through
             ReconciliationServices.review#StatementImport and commit#StatementImport.</description>
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
-            <parameter name="ofxString" required="true" allow-html="any"/>
+            <parameter name="baiString" required="true" allow-html="any"/>
         </in-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/account/BankReconciliation.js"/>
@@ -65,14 +66,14 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="paymentMethod == null">
                 <return error="true" message="Bank account ${paymentMethodId} is not available"/></if>
             <set field="parsed" from="ec.resource.script(module).execute('statement', {method:paymentMethod,
-                    formatEnumId:'SifOfx', text:ofxString})"/>
+                    formatEnumId:'SifBai2', text:baiString})"/>
             <iterate list="parsed.fileErrors.concat(parsed.warnings)" entry="fileError">
                 <message error="true">${fileError}</message>
             </iterate>
             <check-errors/>
             <iterate list="parsed.rows" entry="row">
                 <if condition="row.status == 'rejected'">
-                    <log level="error" message="OFX statement of ${paymentMethodId}, row ${row.sourceRow}: ${row.error}"/>
+                    <log level="error" message="BAI2 statement of ${paymentMethodId}, row ${row.sourceRow}: ${row.error}"/>
                     <continue/>
                 </if>
                 <if condition="row.status != 'new'"><continue/></if>

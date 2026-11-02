@@ -16,6 +16,12 @@ specs run by `moqui test`), then merged into this repository with the commit his
 it with `<depends-on name="mr-mantle"/>`; the renames from the Java names are in the MR Moqui
 `docs/dev/Moqui-Java-Migration.md`.
 
+Services are in `service/mantle/<package>/`. Integrations with particular external systems are apart, by the same
+package, in `service/mantle/ext/`: bank files (NACHA, Positive Pay, BAI, OFX) in `ext/account/`, payment processors
+(Authorize.Net, PayTrace) in `ext/account/gateway/`, Shippo in `ext/shipment/`, Google Maps in `ext/party/`. The
+interfaces they implement and the payment, shipment and message handling around them stay in the package. X12 EDI is
+in `service/mantle/edi/`.
+
 ```sh
 ./moq component-get mr-mantle
 ./moq test mr-mantle

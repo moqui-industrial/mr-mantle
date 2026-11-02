@@ -453,7 +453,7 @@ feature("a run payment declined by a NACHA return imported outside the run shows
             "7" + "99" + "R02" + "011000010000001" + "      " + "01100001" + pad("Account closed", 44) + "011000010000009",
             "9" + " ".repeat(93)
         ].join("\n")
-        helper().call("mantle.account.NachaServices.import#NachaReturn", {paymentMethodId: bankId, nachaString: text})
+        helper().call("mantle.ext.account.NachaServices.import#NachaReturn", {paymentMethodId: bankId, nachaString: text})
         return {item: runItem(run.paymentRunId, item.invoiceId)}
     },
     then({item}) {

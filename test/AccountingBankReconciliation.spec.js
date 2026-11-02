@@ -152,7 +152,7 @@ feature("the same BAI2 file imported twice adds nothing the second time, through
         const before = lines(f.bankId)
         const again = native("review#StatementImport", {paymentMethodId: f.bankId, formatEnumId: "SifBai2", statementText: text})
         native("commit#StatementImport", {statementImportId: again.statementImportId})
-        call("mantle.account.BaiServices.import#BaiVersion2", {paymentMethodId: f.bankId, baiString: text})
+        call("mantle.ext.account.BaiServices.import#BaiVersion2", {paymentMethodId: f.bankId, baiString: text})
         const other = rejected("review#StatementImport", {
             paymentMethodId: f.bankId,
             formatEnumId: "SifBai2",

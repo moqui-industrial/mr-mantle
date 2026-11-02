@@ -8,10 +8,10 @@
 // Groovy original.
 const vendorId = "ORG_ZIZI_RETAIL"
 const P = "mantle.account.PaymentServices."
-const T = "mantle.account.PayTraceServices."
+const T = "mantle.ext.account.gateway.PayTraceServices."
 const BASE = "https://api.sandbox.paytrace.com"
 const SECRETS = ["spec-api-password"]
-const TOKEN_CACHE = "mantle.account.PayTrace.accessToken"
+const TOKEN_CACHE = "mantle.ext.account.gateway.PayTrace.accessToken"
 const http = ec.factory.getTool("HttpFixtures")
 let customerId, productId, addressId
 let tokenCount = 0

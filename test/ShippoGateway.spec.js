@@ -6,7 +6,7 @@
 // remote and ignored for the other mode. The signature and URL token checks are the framework's (SmatHmacSha256Timestamp,
 // SmatUrlToken, with Rust tests in crates/moqui-core). New spec, no Groovy original.
 const T = "mantle.shipment.WarehouseTaskServices."
-const S = "mantle.shipment.carrier.ShippoServices."
+const S = "mantle.ext.shipment.ShippoServices."
 const org = "SHP_ORG",
     facility = "SHP_FAC",
     customer = "SHP_CUST",

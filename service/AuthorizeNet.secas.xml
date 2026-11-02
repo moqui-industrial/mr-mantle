@@ -24,7 +24,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="paymentGatewayConfigId" from="deletedMethod.paymentGatewayConfigId"/>
                 </entity-find-one>
                 <if condition="deletedMethodGateway?.paymentGatewayTypeEnumId == 'PgtAuthorizeNet'">
-                    <service-call name="mantle.account.AuthorizeNetServices.delete#CustomerPaymentProfile" in-map="{paymentMethodId:deletedMethod.paymentMethodId}"/>
+                    <service-call name="mantle.ext.account.gateway.AuthorizeNetServices.delete#CustomerPaymentProfile" in-map="{paymentMethodId:deletedMethod.paymentMethodId}"/>
                 </if>
             </if>
         </actions>

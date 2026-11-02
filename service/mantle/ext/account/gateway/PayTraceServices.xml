@@ -28,7 +28,7 @@ along with this software (see the LICENSE.md file). If not, see
             lookup searches after a lost answer.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('authorize', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('authorize', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="authorizeAndCapture" noun="Payment">
@@ -37,7 +37,7 @@ along with this software (see the LICENSE.md file). If not, see
             captureServiceName.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('sale', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('sale', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="capture" noun="Payment">
@@ -47,7 +47,7 @@ along with this software (see the LICENSE.md file). If not, see
             response: a rejection never undoes or repeats the capture, and send#EnhancedData sends them again.</description>
         <implements service="mantle.account.PaymentServices.capture#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('capture', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('capture', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="release" noun="Payment">
@@ -55,7 +55,7 @@ along with this software (see the LICENSE.md file). If not, see
             transaction is already voided is a success (ALREADY_VOIDED).</description>
         <implements service="mantle.account.PaymentServices.release#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('release', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('release', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="refund" noun="Payment">
@@ -66,7 +66,7 @@ along with this software (see the LICENSE.md file). If not, see
             sent.</description>
         <implements service="mantle.account.PaymentServices.refund#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('refund', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('refund', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="get" noun="PaymentGatewayDetails">
@@ -77,7 +77,7 @@ along with this software (see the LICENSE.md file). If not, see
             the lost request is older than lookupGraceSeconds; a search that could not be done leaves it unknown.</description>
         <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
         <actions>
-            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('details', context)"/>
+            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('details', context)"/>
             <set field="paymentGatewayResponseId" from="detailsOut.paymentGatewayResponseId"/>
             <set field="referenceNum" from="detailsOut.referenceNum"/>
             <set field="approvalCode" from="detailsOut.approvalCode"/>
@@ -116,7 +116,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
         </out-parameters>
         <actions>
-            <set field="enhancedOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('enhancedData', context)"/>
+            <set field="enhancedOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('enhancedData', context)"/>
             <set field="sent" from="enhancedOut.sent"/>
             <set field="accepted" from="enhancedOut.accepted"/>
             <set field="level" from="enhancedOut.level"/>
@@ -139,7 +139,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="failed" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="retryOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('retryEnhancedData', context)"/>
+            <set field="retryOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('retryEnhancedData', context)"/>
             <set field="retried" from="retryOut.retried"/>
             <set field="accepted" from="retryOut.accepted"/>
             <set field="failed" from="retryOut.failed"/>
@@ -168,7 +168,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
         </out-parameters>
         <actions>
-            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('storeProfile', context)"/>
+            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('storeProfile', context)"/>
             <set field="paymentMethodId" from="storeOut.paymentMethodId"/>
             <set field="gatewayCimId" from="storeOut.gatewayCimId"/>
             <set field="gatewayCustomerId" from="storeOut.gatewayCustomerId"/>
@@ -186,7 +186,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
         </out-parameters>
         <actions>
-            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('deleteProfile', context)"/>
+            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('deleteProfile', context)"/>
             <set field="deleted" from="deleteOut.deleted"/>
             <set field="paymentGatewayResponseId" from="deleteOut.paymentGatewayResponseId"/>
         </actions>
@@ -209,7 +209,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="amountText"/>
         </out-parameters>
         <actions>
-            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('browserConfig', context)"/>
+            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('browserConfig', context)"/>
             <set field="clientKey" from="configOut.clientKey"/>
             <set field="protectJsUrl" from="configOut.protectJsUrl"/>
             <set field="amount" from="configOut.amount"/>
@@ -242,7 +242,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentMethodId"/>
         </out-parameters>
         <actions>
-            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('submitToken', context)"/>
+            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/PayTrace.js').execute('submitToken', context)"/>
             <set field="state" from="submitOut.state"/>
             <set field="statusId" from="submitOut.statusId"/>
             <set field="paymentMethodId" from="submitOut.paymentMethodId"/>

@@ -1,4 +1,4 @@
-// Bank statement import (OFX 1 and BAI 2) and payment reconciliation (mantle.account.OfxServices, BaiServices,
+// Bank statement import (OFX 1 and BAI 2) and payment reconciliation (mantle.ext.account.OfxServices, BaiServices,
 // ReconciliationServices). New spec, no Groovy original.
 const organizationPartyId = "ORG_ZIZI_RETAIL"
 const effectiveTime = Date.now()
@@ -68,9 +68,9 @@ feature("create a vendor, a bank account and payments to reconcile", {
 
 feature("import an OFX file", {
     when() {
-        call("mantle.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: ofx })
+        call("mantle.ext.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: ofx })
         // a second import adds nothing
-        call("mantle.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: ofx })
+        call("mantle.ext.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: ofx })
         const list = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).list()
         const method = ec.entity.find("mantle.account.method.PaymentMethod").condition("paymentMethodId", bankId).one()
         return { list, method, first: trans("OFX1"), second: trans("OFX2") }
@@ -91,7 +91,7 @@ feature("import an OFX file", {
 feature("an OFX file for another account is refused", {
     when() {
         const wrong = ofx.replace(routing, "999999999")
-        return { error: errorOf("mantle.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: wrong }) }
+        return { error: errorOf("mantle.ext.account.OfxServices.import#OfxVersion1", { paymentMethodId: bankId, ofxString: wrong }) }
     },
     then({ error }) {
         error != null
@@ -171,11 +171,11 @@ feature("import a BAI 2 file", {
             "98,207000,1,7/",
             "99,207000,1,9/",
         ].join("\n")
-        call("mantle.account.BaiServices.import#BaiVersion2", { paymentMethodId: bankId, baiString: bai })
+        call("mantle.ext.account.BaiServices.import#BaiVersion2", { paymentMethodId: bankId, baiString: bai })
         const list = Array.from(ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).list())
                 .filter(t => t.fitId != null && t.refNumber != null && (t.transCode == "108" || t.transCode == "475") && t.transName == null)
         const method = ec.entity.find("mantle.account.method.PaymentMethod").condition("paymentMethodId", bankId).one()
-        const mismatch = errorOf("mantle.account.BaiServices.import#BaiVersion2", { paymentMethodId: bankId,
+        const mismatch = errorOf("mantle.ext.account.BaiServices.import#BaiVersion2", { paymentMethodId: bankId,
                 baiString: bai.replace("49,207000", "49,999900") })
         return { list, method, mismatch }
     },
@@ -199,14 +199,14 @@ feature("statements arrive as system messages and are consumed through the payme
                 isOutgoing: "N", statusId: "SmsgReceived", messageText: text, initDate: effectiveTime + offset }).systemMessageId
         const before = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
         const newOfx = ofx.replace("OFX1", "OFXMSG1").replace("OFX2", "OFXMSG2").replace("OFX3", "OFXMSG3")
-        call("mantle.account.OfxServices.consume#OfxV1SystemMessage", { systemMessageId: message(newOfx, 10) })
+        call("mantle.ext.account.OfxServices.consume#OfxV1SystemMessage", { systemMessageId: message(newOfx, 10) })
         const afterOfx = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
         // the BAI file type is not configured for this message type yet
         const bai = ["01,SENDER,RECEIVER,260314,1200,1,80,,2/", `02,${routing},ORIG,1,260314,2359,USD,2/`, `03,${account},USD,015,100000,,,045,100000,,/`,
                 "16,108,5000,S,2500,2500,Deposit memo,MSG-REF", "49,205000,4/", "98,205000,1,6/", "99,205000,1,8/"].join("\n")
-        const notConfigured = errorOf("mantle.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 20) })
+        const notConfigured = errorOf("mantle.ext.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 20) })
         call("create#mantle.account.method.PaymentMethodFileType", { paymentMethodId: bankId, fileTypeEnumId: "PmftBai2", systemMessageTypeId: "TestBankIn", systemMessageRemoteId: "TEST_BANK_IN" })
-        call("mantle.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 30) })
+        call("mantle.ext.account.BaiServices.consume#Bai2SystemMessage", { systemMessageId: message(bai, 30) })
         const afterBai = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
         return { before, afterOfx, notConfigured, afterBai }
     },
@@ -220,11 +220,11 @@ feature("statements arrive as system messages and are consumed through the payme
 feature("statement files are uploaded: OFX and BAI 2 files", {
     when() {
         const before = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
-        call("mantle.account.OfxServices.upload#OfxVersion1", { paymentMethodId: bankId, ofxFile: uploadedFile("stmt.ofx", ofx.replace("OFX1", "OFXUP1").replace("OFX2", "OFXUP2").replace("OFX3", "OFXUP3")) })
+        call("mantle.ext.account.OfxServices.upload#OfxVersion1", { paymentMethodId: bankId, ofxFile: uploadedFile("stmt.ofx", ofx.replace("OFX1", "OFXUP1").replace("OFX2", "OFXUP2").replace("OFX3", "OFXUP3")) })
         const afterOfx = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
         const bai = ["01,SENDER,RECEIVER,260314,1200,1,80,,2/", `02,${routing},ORIG,1,260314,2359,USD,2/`, `03,${account},USD,015,100000,,,045,100000,,/`,
                 "16,108,5000,S,2500,2500,Deposit memo,UP-REF", "49,205000,4/", "98,205000,1,6/", "99,205000,1,8/"].join("\n")
-        call("mantle.account.BaiServices.upload#BaiVersion2", { paymentMethodId: bankId, baiFile: uploadedFile("stmt.bai", bai) })
+        call("mantle.ext.account.BaiServices.upload#BaiVersion2", { paymentMethodId: bankId, baiFile: uploadedFile("stmt.bai", bai) })
         const afterBai = ec.entity.find("mantle.account.method.PaymentMethodTrans").condition("paymentMethodId", bankId).count()
         return { before, afterOfx, afterBai }
     },

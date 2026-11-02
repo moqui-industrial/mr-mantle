@@ -26,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
             lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('authorize', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorize', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="authorizeAndCapture" noun="Payment">
@@ -34,7 +34,7 @@ along with this software (see the LICENSE.md file). If not, see
             authorizeServiceName with no captureServiceName.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('sale', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('sale', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="capture" noun="Payment">
@@ -42,7 +42,7 @@ along with this software (see the LICENSE.md file). If not, see
             provider says was already done (reason 311) is a success.</description>
         <implements service="mantle.account.PaymentServices.capture#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('capture', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('capture', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="release" noun="Payment">
@@ -50,7 +50,7 @@ along with this software (see the LICENSE.md file). If not, see
             success.</description>
         <implements service="mantle.account.PaymentServices.release#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('release', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('release', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="refund" noun="Payment">
@@ -61,7 +61,7 @@ along with this software (see the LICENSE.md file). If not, see
             (REFUND_BEFORE_SETTLEMENT) and nothing is sent.</description>
         <implements service="mantle.account.PaymentServices.refund#Payment"/>
         <actions>
-            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('refund', context).paymentGatewayResponseId"/>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('refund', context).paymentGatewayResponseId"/>
         </actions>
     </service>
     <service verb="get" noun="PaymentGatewayDetails">
@@ -73,7 +73,7 @@ along with this software (see the LICENSE.md file). If not, see
             is older than lookupGraceSeconds (and the duplicate window); a search that could not be done leaves it unknown.</description>
         <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
         <actions>
-            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('details', context)"/>
+            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('details', context)"/>
             <set field="paymentGatewayResponseId" from="detailsOut.paymentGatewayResponseId"/>
             <set field="referenceNum" from="detailsOut.referenceNum"/>
             <set field="approvalCode" from="detailsOut.approvalCode"/>
@@ -104,7 +104,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
         </out-parameters>
         <actions>
-            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('storeProfile', context)"/>
+            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('storeProfile', context)"/>
             <set field="paymentMethodId" from="storeOut.paymentMethodId"/>
             <set field="gatewayCimId" from="storeOut.gatewayCimId"/>
             <set field="gatewayCustomerId" from="storeOut.gatewayCustomerId"/>
@@ -123,7 +123,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
         </out-parameters>
         <actions>
-            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('deleteProfile', context)"/>
+            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('deleteProfile', context)"/>
             <set field="deleted" from="deleteOut.deleted"/>
             <set field="paymentGatewayResponseId" from="deleteOut.paymentGatewayResponseId"/>
         </actions>
@@ -141,7 +141,7 @@ along with this software (see the LICENSE.md file). If not, see
             </parameter>
         </out-parameters>
         <actions>
-            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('receiveWebhook', context)"/>
+            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('receiveWebhook', context)"/>
             <set field="systemMessageIdList" from="receiveOut.systemMessageIdList"/>
             <set field="duplicateOfId" from="receiveOut.duplicateOfId"/>
         </actions>
@@ -153,7 +153,7 @@ along with this software (see the LICENSE.md file). If not, see
             repeated, late and out-of-order events converge.</description>
         <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
         <actions>
-            <script>ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('consumeWebhook', context)</script>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('consumeWebhook', context)</script>
         </actions>
     </service>
     <!-- ========== Browser tokenization (Accept.js) ========== -->
@@ -176,7 +176,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="amountText"/>
         </out-parameters>
         <actions>
-            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('browserConfig', context)"/>
+            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('browserConfig', context)"/>
             <set field="apiLoginId" from="configOut.apiLoginId"/>
             <set field="clientKey" from="configOut.clientKey"/>
             <set field="acceptUiUrl" from="configOut.acceptUiUrl"/>
@@ -211,7 +211,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentMethodId"/>
         </out-parameters>
         <actions>
-            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('submitToken', context)"/>
+            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('submitToken', context)"/>
             <set field="state" from="submitOut.state"/>
             <set field="statusId" from="submitOut.statusId"/>
             <set field="paymentMethodId" from="submitOut.paymentMethodId"/>

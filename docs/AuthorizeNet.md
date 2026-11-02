@@ -1,6 +1,6 @@
 # Authorize.Net payment gateway
 
-Mantle's Authorize.Net gateway: `service/mantle/account/AuthorizeNetServices.xml` and `AuthorizeNet.js`, on the gateway
+Mantle's Authorize.Net gateway: `service/mantle/ext/account/gateway/AuthorizeNetServices.xml` and `AuthorizeNet.js`, on the gateway
 interfaces of `PaymentServices.xml` (authorize, capture, release, refund, details), with what it shares with the
 [PayTrace](PayTrace.md) gateway (the response record, the browser endpoints' checks) in `GatewayLib.js`. It uses the
 current Authorize.Net JSON API (`createTransactionRequest`, customer profiles, transaction reporting) with the framework
@@ -13,7 +13,7 @@ implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipp
 
 | Record | What goes there |
 | --- | --- |
-| `PaymentGatewayConfig` | `paymentGatewayTypeEnumId` `PgtAuthorizeNet`, the service names (`mantle.account.AuthorizeNetServices.authorize#Payment`, `capture#`, `release#`, `refund#Payment`, `get#PaymentGatewayDetails`; for a sale `authorizeAndCapture#Payment` with no capture service), and `systemMessageRemoteId` |
+| `PaymentGatewayConfig` | `paymentGatewayTypeEnumId` `PgtAuthorizeNet`, the service names (`mantle.ext.account.gateway.AuthorizeNetServices.authorize#Payment`, `capture#`, `release#`, `refund#Payment`, `get#PaymentGatewayDetails`; for a sale `authorizeAndCapture#Payment` with no capture service), and `systemMessageRemoteId` |
 | `SystemMessageRemote` | `sendUrl` the API endpoint (`https://apitest.authorize.net/xml/v1/request.api` sandbox, `https://api.authorize.net/xml/v1/request.api` production), `usageCode` `T` or `P` (it picks the Accept.js host), `username` the API login id, `password` the transaction key, `sharedSecret` the webhook signature key, `messageAuthEnumId` `SmatHmacSha512`, `authHeaderName` `X-ANET-Signature`. The secrets are encrypted fields |
 | `PaymentGatewayAuthorizeNet` | Non-secret options: `publicClientKey` (Accept.js), `validationMode` for new payment profiles, `duplicateWindow`, `lookupGraceSeconds` |
 

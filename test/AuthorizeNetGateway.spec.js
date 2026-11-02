@@ -7,7 +7,7 @@
 // Rust test in crates/moqui-core). New spec, no Groovy original.
 const vendorId = "ORG_ZIZI_RETAIL"
 const P = "mantle.account.PaymentServices."
-const A = "mantle.account.AuthorizeNetServices."
+const A = "mantle.ext.account.gateway.AuthorizeNetServices."
 const URL = "https://apitest.authorize.net/xml/v1/request.api"
 const SECRETS = ["spec-transaction-key", "spec-signature-key"]
 const http = ec.factory.getTool("HttpFixtures")

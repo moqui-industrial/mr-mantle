@@ -22,7 +22,7 @@
 // refId and order.invoiceNumber, and a lookup finds the transaction by them. Card data, tokens and credentials are never
 // recorded or logged; the request bodies are not logged at all.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const G = ec.resource.script("component://mr-mantle/service/mantle/account/GatewayLib.js")
+const G = ec.resource.script("component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js")
 const {one, rows, find, call} = lib
 const {clip, record, refuse, describe, isRefund, authorizedTransaction} = G
 const P = "mantle.account.payment.Payment",

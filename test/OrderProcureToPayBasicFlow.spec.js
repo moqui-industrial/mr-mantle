@@ -568,7 +568,7 @@ feature("send Purchase Invoice Payment", {
             effectiveDate: new Date(effectiveTime), amount: 24000.0 })
 
         // generate NACHA file, mark payment delivered (done automatically when file generated)
-        call("mantle.account.NachaServices.generate#NachaFile", { paymentMethodId: "ZIRET_BA", addOffsetRecord: true })
+        call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: "ZIRET_BA", addOffsetRecord: true })
 
         // find PaymentApplication for validation
         const pappList = ec.entity.find("mantle.account.payment.PaymentApplication")

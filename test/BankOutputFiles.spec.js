@@ -1,4 +1,4 @@
-// Outgoing bank files: NACHA (mantle.account.NachaServices) and Positive Pay in each supported format
+// Outgoing bank files: NACHA (mantle.ext.account.NachaServices) and Positive Pay in each supported format
 // (PositivePayServices). New spec, no Groovy original.
 const organizationPartyId = "ORG_ZIZI_RETAIL"
 const effectiveTime = Date.now()
@@ -47,7 +47,7 @@ feature("set up a company bank account with NACHA settings, a payee and ACH paym
 
 feature("generate a NACHA file", {
     when() {
-        nachaOut = call("mantle.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId, addNewLine: true, addOffsetRecord: true,
+        nachaOut = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId, addNewLine: true, addOffsetRecord: true,
                 effectiveEntryDate: "2026-12-15" })
         const lines = nachaOut.fileText.split("\n").filter(l => l.length)
         const file = ec.entity.find("mantle.account.method.PaymentMethodFile").condition("paymentMethodFileId", nachaOut.paymentMethodFileId).one()
@@ -77,8 +77,8 @@ feature("generate a NACHA file", {
 
 feature("a second NACHA run has nothing to send, and bad configuration is refused", {
     when() {
-        const again = call("mantle.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId })
-        const missing = errorOf("mantle.account.NachaServices.generate#NachaFile", { paymentMethodId: "NO_SUCH_METHOD" })
+        const again = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId })
+        const missing = errorOf("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: "NO_SUCH_METHOD" })
         return { again, missing }
     },
     then({ again, missing }) {
@@ -100,7 +100,7 @@ feature("generate Positive Pay files #format", {
                     paymentMethodId: bankId, paymentRefNum: String(2001 + index), paymentInstrumentEnumId: "PiCompanyCheck",
                     statusId: "PmntDelivered", effectiveDate: effectiveTime - 3600000 })
         }
-        const out = call("mantle.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: bankId })
+        const out = call("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: bankId })
         const payments = ec.entity.find("mantle.account.payment.Payment").condition("paymentMethodId", bankId).list()
         return { out, payments }
     },
@@ -115,7 +115,7 @@ feature("generate Positive Pay files #format", {
 
 feature("Positive Pay is refused without a format", {
     when() {
-        const noFormat = errorOf("mantle.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: companyBankId })
+        const noFormat = errorOf("mantle.ext.account.PositivePayServices.generate#PositivePayFile", { paymentMethodId: companyBankId })
         return { noFormat }
     },
     then({ noFormat }) {
@@ -130,12 +130,12 @@ feature("import a NACHA return: a returned entry declines its payment and a bad 
                 pad("Pat Payee", 22) + "  " + "1" + "011000010000001"
         const returnAddenda = (reason, info) => "7" + "99" + reason + "011000010000001" + "      " + "01100001" + pad(info, 44) + "011000010000009"
         const text = [entry(achPaymentIds[0], 10025), returnAddenda("R01", "Insufficient funds"), "9" + " ".repeat(93)].join("\n")
-        call("mantle.account.NachaServices.import#NachaReturn", { paymentMethodId: companyBankId, nachaString: text })
+        call("mantle.ext.account.NachaServices.import#NachaReturn", { paymentMethodId: companyBankId, nachaString: text })
         const returned = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", achPaymentIds[0]).one()
         const responses = Array.from(ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", achPaymentIds[0]).list())
         // the service adds its errors to the message facade without stopping, so read them from there
         const errorsOf = (nachaString) => {
-            ec.service.sync().name("mantle.account.NachaServices.import#NachaReturn").parameters({ paymentMethodId: companyBankId, nachaString }).call()
+            ec.service.sync().name("mantle.ext.account.NachaServices.import#NachaReturn").parameters({ paymentMethodId: companyBankId, nachaString }).call()
             const text = ec.message.getErrorsString()
             ec.message.clearErrors()
             return text
@@ -154,7 +154,7 @@ feature("import a NACHA return: a returned entry declines its payment and a bad 
 feature("system messages carry the files: a return is consumed, a file is queued, and the positive pay job sends its file", {
     when() {
         call("create#moqui.service.message.SystemMessageType", { systemMessageTypeId: "TestAchReturn", description: "Test ACH return",
-                consumeServiceName: "mantle.account.NachaServices.consume#NachaReturnSystemMessage" })
+                consumeServiceName: "mantle.ext.account.NachaServices.consume#NachaReturnSystemMessage" })
         call("create#moqui.service.message.SystemMessageType", { systemMessageTypeId: "TestBankOut", description: "Test outgoing bank file" })
         call("create#moqui.service.message.SystemMessageRemote", { systemMessageRemoteId: "TEST_BANK", description: "Test bank", systemMessageTypeId: "TestBankOut" })
         call("create#mantle.account.method.PaymentMethodFileType", { paymentMethodId: companyBankId, fileTypeEnumId: "PmftNacha",
@@ -164,7 +164,7 @@ feature("system messages carry the files: a return is consumed, a file is queued
         const addenda = "7" + "99" + "R02" + "011000010000002" + "      " + "01100001" + pad("Account closed", 44) + "011000010000009"
         const messageId = call("create#moqui.service.message.SystemMessage", { systemMessageTypeId: "TestAchReturn", systemMessageRemoteId: "TEST_BANK", isOutgoing: "N",
                 statusId: "SmsgReceived", messageText: [entry, addenda, "9" + " ".repeat(93)].join("\n"), initDate: effectiveTime }).systemMessageId
-        call("mantle.account.NachaServices.consume#NachaReturnSystemMessage", { systemMessageId: messageId })
+        call("mantle.ext.account.NachaServices.consume#NachaReturnSystemMessage", { systemMessageId: messageId })
         const declined = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", achPaymentIds[1]).one()
         // queue the NACHA file that was generated earlier as an outgoing message, once
         const notFound = call("mantle.account.PaymentMethodServices.produce#PaymentMethodFileSystemMessage", { paymentMethodFileId: "NO_SUCH_FILE" })
@@ -192,10 +192,10 @@ feature("the positive pay job generates the file and queues it, and does nothing
                 posPayFormatEnumId: "PmftWachoviaAr", posPayBankNumber: "123" }).paymentMethodId
         call("create#mantle.account.method.PaymentMethodFileType", { paymentMethodId: bankId, fileTypeEnumId: "PmftWachoviaAr",
                 systemMessageTypeId: "TestBankOut", systemMessageRemoteId: "TEST_BANK" })
-        const empty = call("mantle.account.PositivePayServices.send#PositivePayJob", { paymentMethodId: bankId })
+        const empty = call("mantle.ext.account.PositivePayServices.send#PositivePayJob", { paymentMethodId: bankId })
         call("mantle.account.PaymentServices.create#Payment", { fromPartyId: organizationPartyId, toPartyId: payeeId, amount: "99.00", amountUomId: "USD",
                 paymentMethodId: bankId, paymentRefNum: "3001", paymentInstrumentEnumId: "PiCompanyCheck", statusId: "PmntDelivered", effectiveDate: effectiveTime - 3600000 })
-        const sent = call("mantle.account.PositivePayServices.send#PositivePayJob", { paymentMethodId: bankId, lookBackDays: 5 })
+        const sent = call("mantle.ext.account.PositivePayServices.send#PositivePayJob", { paymentMethodId: bankId, lookBackDays: 5 })
         return { empty, sent }
     },
     then({ empty, sent }) {

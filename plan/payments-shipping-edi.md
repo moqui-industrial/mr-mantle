@@ -146,6 +146,7 @@ and handle duplicates and ordering per the [webhook guide](https://docs.stripe.c
 
 The separate plan must include restart/timeout reconciliation and the browser-to-server completion contract. Connect,
 subscriptions, broad local-payment-method support and payout reconciliation are later work.
+The adapter goes beside the others in `service/mantle/ext/account/gateway/` (`mantle.ext.account.gateway.StripeServices`).
 
 ### Browser examples and application adoption
 
@@ -603,7 +604,7 @@ the signature key in `X-ANET-Signature`, up to 10 retries, no ordering or duplic
 
 **Changed artifacts.**
 
-- mr-mantle: `service/mantle/account/AuthorizeNetServices.xml` and `AuthorizeNet.js` (new: the five gateway services and
+- mr-mantle: `service/mantle/ext/account/gateway/AuthorizeNetServices.xml` and `AuthorizeNet.js` (new: the five gateway services and
   `authorizeAndCapture#Payment`, `store#`/`delete#CustomerPaymentProfile`, `receive#`/`consume#Webhook`,
   `get#BrowserPaymentConfig`, `submit#BrowserPaymentToken`), `service/AuthorizeNet.secas.xml` (new: a deleted method's
   profile), `entity/PaymentGatewayEntities.xml` (`PaymentGatewayAuthorizeNet`, non-secret options, and the `PgtAuthorizeNet`
@@ -735,17 +736,17 @@ Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Da
 
 **Changed artifacts.**
 
-- mr-mantle, new: `service/mantle/account/PayTrace.js` and `PayTraceServices.xml` (the five gateway services and
+- mr-mantle, new: `service/mantle/ext/account/gateway/PayTrace.js` and `PayTraceServices.xml` (the five gateway services and
   `authorizeAndCapture#Payment`, `send#`/`retry#EnhancedData`, `store#`/`delete#CustomerPaymentProfile`,
   `get#BrowserPaymentConfig`, `submit#BrowserPaymentToken`), `service/PayTrace.secas.xml` (a deleted method's vault
-  customer), `service/mantle/account/GatewayLib.js` (shared with P1, below), `data/PayTraceSeedData.xml` (seed:
+  customer), `service/mantle/ext/account/gateway/GatewayLib.js` (shared with P1, below), `data/PayTraceSeedData.xml` (seed:
   `PidtCommodityCode`), `data/PayTraceSetupData.xml` (seed-initial: the paused job `retry_PayTraceEnhancedData`),
   `data/PayTraceDemoData.xml` (demo: gateway `PayTraceDemo`, remote `PayTraceSandbox`, no credentials, merchant or
   integrator id), `docs/PayTrace.md`, `docs/examples/PayTraceProtect.html`, `test/PayTraceGateway.spec.js`.
 - mr-mantle, changed: `entity/PaymentGatewayEntities.xml` (`PaymentGatewayPayTrace`: `merchantId`, `integratorId`,
   `currencyUomId`, `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode`, `defaultUnitOfMeasure`,
   `customerLabelPrefix`; seed `PgtPayTrace`), `service/mantle.rest.xml` (`my/payments/{paymentId}/payTrace` GET and
-  POST), `service/mantle/account/AuthorizeNet.js` (onto `GatewayLib.js`, behavior unchanged), `docs/AuthorizeNet.md`
+  POST), `service/mantle/ext/account/gateway/AuthorizeNet.js` (onto `GatewayLib.js`, behavior unchanged), `docs/AuthorizeNet.md`
   (one line), `test/AuthorizeNetGateway.spec.js` (the cleanup below). `PaymentServices.xml` is unchanged.
 - mr-moqui: `crates/moqui-core/src/service/http_fixtures.rs` (the closed test run, `allowNetwork`, `reset`),
   `http_fixtures_tests.rs` (its test), `crates/moqui-core/src/outbound.rs` (the check in `send_inner` and `open_inner`),
@@ -759,7 +760,7 @@ Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Da
   browser endpoint checks (`browserPayment`: payer or treasury, gateway, method of the same gateway, open status), the
   page state, the operation id check, and `submitBrowserToken` (lock and recheck, `begin#PaymentGatewayOperation` before any
   profile, the payer's consent, a declined new card's profile deleted) and `dispatch`. P1's 15 features pass unchanged.
-- *Authentication.* The token is cached in the process cache `mantle.account.PayTrace.accessToken` by remote, endpoint
+- *Authentication.* The token is cached in the process cache `mantle.ext.account.gateway.PayTrace.accessToken` by remote, endpoint
   and user until a minute before `expires_in` (900 when absent, the documentation's smallest), sealed: XORed with a
   keystream of `ec.user.singleUseCodeHash` (the conf's hash type, SHA-256 by default) of the remote's password, a random
   nonce and a block counter, so the Tools cache screen (which lists values) shows hex no one can use without the
@@ -946,7 +947,7 @@ The versioning page carried "agent instructions" naming MCP servers; they were n
 
 **Changed artifacts.**
 
-- mr-mantle, new: `service/mantle/shipment/carrier/Shippo.js` and `ShippoServices.xml` (the eight carrier interfaces and
+- mr-mantle, new: `service/mantle/ext/shipment/Shippo.js` and `ShippoServices.xml` (the eight carrier interfaces and
   `receive#`/`consume#Webhook`), `data/ShippoSetupData.xml` (seed: the options group and SystemMessageType
   `ShippoWebhook`), `data/ShippoDemoData.xml` (demo: gateway `SHIPPO_DEMO` in test mode, remote `ShippoSandbox`, USPS,
   UPS, FedEx and DHL Express with empty carrier accounts, the USPS ground override `usps_ground_advantage`, three USPS
