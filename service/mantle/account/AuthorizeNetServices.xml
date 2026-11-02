@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Authorize.Net on its JSON API (https://developer.authorize.net/api/reference/index.html), ported from the Java
+        Moqui AuthorizeDotNet component (github.com/moqui/AuthorizeDotNet 1.2.5, commit eaa351c). Configuration: a
+        PaymentGatewayConfig of type PgtAuthorizeNet naming these services, its PaymentGatewayAuthorizeNet options and its
+        SystemMessageRemote (the endpoint and credentials); see docs/AuthorizeNet.md. The logic is AuthorizeNet.js. -->
+    <!-- ========== Gateway services (PaymentGatewayConfig) ========== -->
+    <service verb="authorize" noun="Payment">
+        <description>Authorize (authOnlyTransaction) with the single-use browser token (paymentToken: Accept.js opaqueData
+            dataDescriptor and dataValue), else with the payment method's customer payment profile (gatewayCustomerId and
+            gatewayCimId at this gateway). A payment with neither is refused (NO_PAYMENT_PROFILE): card numbers are not
+            sent from the server. The idempotency key's first 20 characters go in refId and order.invoiceNumber, which a
+            lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('authorize', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="authorizeAndCapture" noun="Payment">
+        <description>A sale (authCaptureTransaction): as authorize#Payment, captured at once. Configure it as the
+            authorizeServiceName with no captureServiceName.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('sale', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="capture" noun="Payment">
+        <description>Capture an authorization (priorAuthCaptureTransaction), the whole or a smaller amount. A capture the
+            provider says was already done (reason 311) is a success.</description>
+        <implements service="mantle.account.PaymentServices.capture#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('capture', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="release" noun="Payment">
+        <description>Void an authorization (voidTransaction). A void the provider says was already done (reason 310) is a
+            success.</description>
+        <implements service="mantle.account.PaymentServices.release#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('release', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="refund" noun="Payment">
+        <description>Refund linked to the captured transaction (refundTransaction with refTransId; never an unlinked
+            credit). The transaction's settlement decides, read first: settled, a refund of the amount (to its customer
+            payment profile, else to the card's last four digits); captured and not settled, a void of the whole amount
+            recorded as the refund (reasonCode VOID_BEFORE_SETTLEMENT); a partial refund before settlement is refused
+            (REFUND_BEFORE_SETTLEMENT) and nothing is sent.</description>
+        <implements service="mantle.account.PaymentServices.refund#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('refund', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PaymentGatewayDetails">
+        <description>The payment's transaction status (getTransactionDetails by its reference), as a Payment status. For a
+            lost operation (idempotencyKey given) answers operationFound: a capture or void on the authorization's
+            transaction status; an authorization, sale or refund by its reference (transrefId, then the invoice numbers of
+            the unsettled transactions held for review (pendingApproval) and of the others, then those of the batches
+            settled since). A PgoTxDetails response records a change only. None found answers false once the lost request
+            is older than lookupGraceSeconds (and the duplicate window); a search that could not be done leaves it unknown.</description>
+        <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
+        <actions>
+            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('details', context)"/>
+            <set field="paymentGatewayResponseId" from="detailsOut.paymentGatewayResponseId"/>
+            <set field="referenceNum" from="detailsOut.referenceNum"/>
+            <set field="approvalCode" from="detailsOut.approvalCode"/>
+            <set field="operationFound" from="detailsOut.operationFound"/>
+            <set field="gatewayStatusId" from="detailsOut.gatewayStatusId"/>
+            <set field="settlementDate" from="detailsOut.settlementDate"/>
+        </actions>
+    </service>
+    <!-- ========== Customer payment profiles ========== -->
+    <service verb="store" noun="CustomerPaymentProfile" allow-remote="false">
+        <description>Make a reusable customer payment profile from a single-use browser token, on the party's customer
+            profile at the gateway (made when none of its payment methods there has one). The payment method (the given one,
+            else a new credit card method) keeps gatewayCustomerId, gatewayCimId and the gateway, and only the masked
+            card; the token is not kept. Refuses a method of another party and a call without a token.</description>
+        <in-parameters>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="paymentToken" type="Map" required="true"/>
+            <parameter name="partyId">
+                <description>The owner; defaults to the method's</description>
+            </parameter>
+            <parameter name="paymentMethodId"/>
+            <parameter name="emailAddress"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentMethodId"/>
+            <parameter name="gatewayCimId"/>
+            <parameter name="gatewayCustomerId"/>
+            <parameter name="paymentGatewayResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('storeProfile', context)"/>
+            <set field="paymentMethodId" from="storeOut.paymentMethodId"/>
+            <set field="gatewayCimId" from="storeOut.gatewayCimId"/>
+            <set field="gatewayCustomerId" from="storeOut.gatewayCustomerId"/>
+            <set field="paymentGatewayResponseId" from="storeOut.paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="CustomerPaymentProfile" allow-remote="false">
+        <description>Delete the payment method's payment profile at its Authorize.Net gateway and clear gatewayCimId. A
+            failure is a warning and keeps the reference, to delete again; the customer profile is kept for the party's
+            other methods.</description>
+        <in-parameters>
+            <parameter name="paymentMethodId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="paymentGatewayResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('deleteProfile', context)"/>
+            <set field="deleted" from="deleteOut.deleted"/>
+            <set field="paymentGatewayResponseId" from="deleteOut.paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <!-- ========== Webhooks (SystemMessageType AuthorizeNetWebhook) ========== -->
+    <service verb="receive" noun="Webhook" allow-remote="false">
+        <description>The receive service of AuthorizeNetWebhook. The endpoint /rest/sm/AuthorizeNetWebhook/{remote}
+            checked X-ANET-Signature (the remote's SmatHmacSha512 and sharedSecret, the signature key) over this body; this
+            keeps the notification once per remote and notificationId (store#ReceivedSystemMessage), so a repeated
+            delivery answers success and is not consumed again.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.receive#SystemMessage"/>
+        <out-parameters>
+            <parameter name="duplicateOfId">
+                <description>The message already kept for this notification</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('receiveWebhook', context)"/>
+            <set field="systemMessageIdList" from="receiveOut.systemMessageIdList"/>
+            <set field="duplicateOfId" from="receiveOut.duplicateOfId"/>
+        </actions>
+    </service>
+    <service verb="consume" noun="Webhook" allow-remote="false">
+        <description>The consume service of AuthorizeNetWebhook: a transaction event leads to get#SinglePaymentGatewayDetails
+            of the payment it is about, among the payments of the gateways on the message's remote (by transaction id, else
+            the refId of a lost operation). The provider's status is read by the lookup, not taken from the payload, so
+            repeated, late and out-of-order events converge.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('consumeWebhook', context)</script>
+        </actions>
+    </service>
+    <!-- ========== Browser tokenization (Accept.js) ========== -->
+    <service verb="get" noun="BrowserPaymentConfig">
+        <description>The public values a browser needs to tokenize a card for this payment with Accept.js: the API login id,
+            the public client key and the script addresses of the connection's environment, and the amount to show. Only
+            the payer, or a user with treasury authority over the organization paid; only an open (promised or declined)
+            payment of an Authorize.Net gateway.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="apiLoginId"/>
+            <parameter name="clientKey"/>
+            <parameter name="acceptUiUrl"/>
+            <parameter name="acceptJsUrl"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="amountText"/>
+        </out-parameters>
+        <actions>
+            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('browserConfig', context)"/>
+            <set field="apiLoginId" from="configOut.apiLoginId"/>
+            <set field="clientKey" from="configOut.clientKey"/>
+            <set field="acceptUiUrl" from="configOut.acceptUiUrl"/>
+            <set field="acceptJsUrl" from="configOut.acceptJsUrl"/>
+            <set field="amount" from="configOut.amount"/>
+            <set field="currencyUomId" from="configOut.currencyUomId"/>
+            <set field="amountText" from="configOut.amountText"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="BrowserPaymentToken">
+        <description>Authorize the payment with the browser's single-use Accept.js opaque data; with savePaymentMethod (the
+            payer's consent to keep the card; ignored for anyone but the payer), first make a customer payment profile from
+            it, put that method on the payment and authorize with the profile, and delete it again when the card is declined.
+            The payment is locked and checked again; a replay, or an earlier authorization still pending or unknown, sends
+            nothing and makes no profile (state pending or unknown). A payment method of another gateway is refused. The payment decides the organization, gateway, amount and currency;
+            the browser gives only the token, the consent and an operation id (a retry with the same id is answered from
+            the first response). The answer is the gateway response's state: approved, declined, pending, unknown or
+            error. Access as get#BrowserPaymentConfig.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+            <parameter name="dataDescriptor" required="true"/>
+            <parameter name="dataValue" required="true"/>
+            <parameter name="savePaymentMethod" type="Boolean" default="false"/>
+            <parameter name="operationId">
+                <description>8 to 40 letters, digits, - or _, made once per page</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="state"/>
+            <parameter name="statusId"/>
+            <parameter name="paymentMethodId"/>
+        </out-parameters>
+        <actions>
+            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/AuthorizeNet.js').execute('submitToken', context)"/>
+            <set field="state" from="submitOut.state"/>
+            <set field="statusId" from="submitOut.statusId"/>
+            <set field="paymentMethodId" from="submitOut.paymentMethodId"/>
+        </actions>
+    </service>
+</services>

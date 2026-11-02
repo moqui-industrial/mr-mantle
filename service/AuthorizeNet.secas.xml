@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <!-- A deleted (expired) payment method's Authorize.Net payment profile is deleted at the gateway too, as the
+        AuthorizeDotNet component's delete#PaymentMethod SECA did; a method with active payments is deleted later
+        (checkDelete#PaymentPaymentMethods), and this runs then. A gateway failure is a warning, not the delete's. -->
+    <seca id="AuthorizeNetDeletePaymentProfile" service="mantle.account.PaymentMethodServices.delete#PaymentMethod" when="post-service" run-on-error="false">
+        <actions>
+            <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="deletedMethod"/>
+            <if condition="deletedMethod?.thruDate &amp;&amp; deletedMethod.gatewayCimId &amp;&amp; deletedMethod.paymentGatewayConfigId">
+                <entity-find-one entity-name="mantle.account.method.PaymentGatewayConfig" value-field="deletedMethodGateway" cache="true">
+                    <field-map field-name="paymentGatewayConfigId" from="deletedMethod.paymentGatewayConfigId"/>
+                </entity-find-one>
+                <if condition="deletedMethodGateway?.paymentGatewayTypeEnumId == 'PgtAuthorizeNet'">
+                    <service-call name="mantle.account.AuthorizeNetServices.delete#CustomerPaymentProfile" in-map="{paymentMethodId:deletedMethod.paymentMethodId}"/>
+                </if>
+            </if>
+        </actions>
+    </seca>
+</secas>

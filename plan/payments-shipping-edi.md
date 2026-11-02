@@ -553,3 +553,146 @@ GatewayContracts,PaymentGateway,AccountingPaymentGateway,AccountingPaymentRefund
   its own status meanwhile).
 - XML files were edited in their existing layout; they were not passed through `xmllint --format`, which would reformat
   their unrelated content (none of them were in that form at HEAD).
+
+**Amended by P1 (the common contracts).**
+
+- `begin#PaymentGatewayOperation` also blocks an authorization (`blocked`, reasonCode **`GATEWAY_OUTCOME_PENDING`**,
+  without an error) of a promised payment whose latest authorization answer is pending (no result flag: held for review,
+  a hosted page), after the keyed replay; `authorize#SinglePayment` answers that reasonCode. The details lookup or the
+  provider's callback finishes it.
+- `authorize#SinglePayment` puts a pending answer's reference on the payment, replacing an older one (a re-authorization).
+- `get#SinglePaymentGatewayDetails`: a promised or declined (non-refund) payment the gateway reports authorized, captured
+  or settled goes through `record#PaymentAuthorized` (captured for the last two), so it gets its approval code and the
+  security code is cleared; a lost void found done makes the payment promised without its references, as
+  `release#SinglePayment` does.
+- `refund#SinglePayment` puts a successful refund's `referenceNum` on the refund payment (so its settlement is polled
+  and its callbacks find it); an adapter that has no transaction of the refund's own leaves `referenceNum` empty.
+- `poll#PaymentGatewayDetails` no longer needs a `paymentMethodId`: a reference and a gateway, so token-only payments are
+  polled.
+
+### P1 — Authorize.Net (implementation record, 2026-11-02)
+
+The Authorize.Net gateway on the Phase 0 contracts. Nothing is committed yet; the record names the artifacts per
+repository.
+
+**Source and API baseline.** Ported from [AuthorizeDotNet](https://github.com/moqui/AuthorizeDotNet/tree/eaa351c) 1.2.5,
+commit `eaa351c` (CC0 with the patent grant, the license of Mantle; its authors are in Mantle's `AUTHORS`): the CIM
+payment operations, the profile mapping (`billTo`, customer type, `merchantCustomerId`), the configuration fields, the
+AIM reason-code mapping (6/37 card number, 7/8 expiry) and the transaction-status map. Not ported: AIM `x_` requests,
+raw-card CIM requests, the `create#`/`update#CreditCard` SECAs that sent card numbers, the user-preference gateway
+selection and the request/response logging. Wire protocol: the Authorize.Net JSON API at `/xml/v1/request.api`
+(`createTransactionRequest` with `authOnlyTransaction`, `authCaptureTransaction`, `priorAuthCaptureTransaction`,
+`voidTransaction`, `refundTransaction`; `createCustomerProfileRequest`, `createCustomerPaymentProfileRequest`,
+`getCustomerPaymentProfileRequest`, `deleteCustomerPaymentProfileRequest`; `getTransactionDetailsRequest` by `transId` or
+`transrefId`, `getUnsettledTransactionListRequest`, `getSettledBatchListRequest`, `getTransactionListRequest`), with field
+order from `AnetApiSchema.xsd` as read on 2026-11-02 (the JSON API is checked as XML, so order matters; answers start
+with a byte order mark). References checked 2026-11-02: the [API reference](https://developer.authorize.net/api/reference/index.html),
+the [webhooks guide](https://developer.authorize.net/api/reference/features/webhooks.html) (HMAC-SHA512 of the body with
+the signature key in `X-ANET-Signature`, up to 10 retries, no ordering or duplicate guarantee), Accept.js/AcceptUI
+(`jstest.authorize.net` / `js.authorize.net`, `v1/Accept.js`, `v3/AcceptUI.js`) and Accept Hosted.
+
+**Changed artifacts.**
+
+- mr-mantle: `service/mantle/account/AuthorizeNetServices.xml` and `AuthorizeNet.js` (new: the five gateway services and
+  `authorizeAndCapture#Payment`, `store#`/`delete#CustomerPaymentProfile`, `receive#`/`consume#Webhook`,
+  `get#BrowserPaymentConfig`, `submit#BrowserPaymentToken`), `service/AuthorizeNet.secas.xml` (new: a deleted method's
+  profile), `entity/PaymentGatewayEntities.xml` (`PaymentGatewayAuthorizeNet`, non-secret options, and the `PgtAuthorizeNet`
+  seed), `data/AuthorizeNetSetupData.xml` (seed: SystemMessageType `AuthorizeNetWebhook`), `data/AuthorizeNetDemoData.xml`
+  (demo: gateway `AuthorizeNetDemo` and remote `AuthorizeNetSandbox`, no credentials), `service/mantle.rest.xml`
+  (`my/payments/{paymentId}/authorizeNet` GET and POST), `service/mantle/account/PaymentServices.xml` (the common
+  contract amendments listed at the end of the Phase 0 record: `GATEWAY_OUTCOME_PENDING`, a pending answer's reference,
+  `record#PaymentAuthorized` for a pending authorization the lookup finds approved, a found void, the refund payment's
+  reference, the poll), `docs/AuthorizeNet.md` and `docs/examples/AuthorizeNetAcceptUI.html` (new), and
+  `test/AuthorizeNetGateway.spec.js` (new).
+- mr-moqui: `crates/moqui-core/src/service/system_sync/message.rs` (`SmatHmacSha512`: hex HMAC-SHA512 of the body, either
+  case, an optional `sha512=` prefix, on receive and send) and `tests.rs` (its test and the HMAC-SHA512 vector),
+  `framework/entity/ServiceEntities.xml` (the `SmatHmacSha512` enumeration), `SystemMessageServices.xml` (description),
+  `docs/security/Attack-Surface.md` (the receive table).
+
+**Design.**
+
+- *Card data.* The server sends no card number: an authorization uses the call's `paymentToken` (Accept.js opaqueData)
+  or the method's customer payment profile (`gatewayCustomerId` + `gatewayCimId` at this gateway), otherwise it is
+  refused (`NO_PAYMENT_PROFILE`, resultError). A tokenized method keeps the profile references and the masked card
+  (`XXXX1111`, type) only; a one-time token makes no method. Requests and answers are never logged; the module logs fixed
+  text and reason codes.
+- *Identity.* `refId` and `order.invoiceNumber` carry the first 20 characters of the idempotency key. A transport
+  failure, a non-200 server answer, unreadable JSON and the duplicate refusal (reason 11) are `resultUnknown`. The lookup
+  for a lost authorization, sale or refund tries `transrefId`, then the unsettled list's invoice numbers (the held ones,
+  `status` `pendingApproval`, and the others, which leave held ones out), then those of batches settled since the request
+  (bounded to 31 days, 5 pages of 1000 per list); a lost capture or void reads the authorization's transaction status.
+  Not found answers `operationFound` false only once the lost request is older than `lookupGraceSeconds` (default 300,
+  and never less than `duplicateWindow` plus 60, the provider's default window being 120); a failed search leaves it
+  unknown. A details lookup records a PgoTxDetails response only for a change (a status that differs from the payment's,
+  or a transaction status other than the last recorded). "Already captured" (311) and "already voided"
+  (310) on a retry are successes.
+- *Outcomes.* Response code 1 approved, 2 declined, 3 error (card number and expiry codes flagged), 4 held for review:
+  pending with its transaction id, and not authorized again while pending (`GATEWAY_OUTCOME_PENDING`), finished by the
+  details lookup or the fraud webhook through `record#PaymentAuthorized`. `expired` maps to Promised (the
+  capture re-authorizes), `failedReview` to Declined, a voided authorization to Void.
+- *Void versus refund.* Refunds are always linked (`refTransId`, to the profile or the card's last four digits; no
+  unlinked credit). The original's settlement state is read first: settled, refund; captured and unsettled, a whole
+  refund is a void recorded as the refund (`VOID_BEFORE_SETTLEMENT`, the void's transaction id, the original's, in
+  `altReference`, so the refund payment gets no reference; the refund payment is Delivered and applied, the
+  original stays Delivered and is never Confirmed, and a details lookup of the voided original changes nothing), a partial
+  one is refused (`REFUND_BEFORE_SETTLEMENT`, nothing sent, no refund payment).
+- *Webhooks.* `/rest/sm/AuthorizeNetWebhook/{remote}` with the remote's `SmatHmacSha512`; `receive#Webhook` keeps each
+  `notificationId` once (`store#ReceivedSystemMessage`); `consume#Webhook` finds the payment among the payments of the
+  gateways on that remote (by transaction id, else by the lost operation's refId, used only when it has the key's form)
+  and runs `get#SinglePaymentGatewayDetails` for each in its own transaction: one that fails is logged and the others go
+  on, and the message is then failed so it is retried. The payload's status is never applied. A settled refund's
+  `refund.created` event finds its refund payment by the reference it now keeps.
+- *Browser.* `get#BrowserPaymentConfig` / `submit#BrowserPaymentToken` under `/rest/s1/mantle/my`: the payment picks the
+  organization, gateway, amount and currency; only its payer, or a user with treasury authority over the organization paid
+  (`check#PaymentGatewayAccess`), may use them; `savePaymentMethod` is the payer's explicit consent and is ignored for
+  anyone else; the browser's `operationId` becomes the operation key, and the page makes a new one after a decline or an
+  error. The submit locks the payment and checks it again, then asks `begin#PaymentGatewayOperation` first: a replay, or
+  a pending or unknown earlier authorization, sends nothing and makes no profile. A profile made for a card that is then
+  declined is deleted and its method expired. A payment method of another gateway is refused (`METHOD_OTHER_GATEWAY`), so
+  the token cannot be sent elsewhere. The example is a static page (AcceptUI hosted form), not a screen, so it adds no
+  qvt/tui surface; Accept Hosted is documented as the alternative and not built.
+
+**Fast checks run** (after the review fixes). `cargo test -p moqui-core --lib system_sync` (10 passed, the new
+`an_hmac_sha512_receive_checks_the_hex_signature_in_either_case_with_or_without_its_prefix` included) and `cargo test -p
+moqui-core` (1301 + 16 passed, 5 ignored); `cargo clippy -p moqui-core --all-targets -- -D warnings` (clean); `./moq
+build`; `./moq test mr-mantle --spec AuthorizeNetGateway` (15 features passed, each 0.02–0.11 s: approval and capture,
+decline, bad card and held, release, settled refund, void before settlement and the refused partial refund, profile
+create/use/delete, a lost authorization found in the unsettled list, a duplicate refusal (11) found by `transrefId`, 311
+and 310 on a retry, a lost sale found in a settled batch and a lost authorization found nowhere (not done, sent again
+with the same key), a lost capture and a lost void, a lost refund found through the voided original, the webhook kept
+once and reconciled with its approval code, the browser endpoints (REST path, payer, refused customer), a held
+authorization resubmitted with a new operation id sending nothing, a treasury user's save ignored, a declined kept card
+deleted, and a self-contained check that no token, card number or secret is in a gateway response, system message or
+card record; the last two features also pass alone with `--feature`); `./moq test mr-mantle --spec
+GatewayContracts,PaymentGateway,AccountingPaymentGateway,AccountingPaymentRefunds,AccountingPortals,AuthorizeNetGateway,PaymentMethodServices,AccountingReturns,AccountingPaymentLifecycle,OrderToCashBasicFlow,ReturnToResponseBasicFlow,InvoicePaymentMisc,FinancialAccountServices,AccountingSettlement`
+(17 specs with their dependencies, 185 features passed); `./moq test mr-boss --spec
+AccountingPaymentGateway,AccountingPaymentRefunds` (8 passed). The spec's console at `--log-level debug` contains none of
+the browser tokens or the spec's transaction or signature key. `moqui lint` of the changed service files: clean.
+Prettier with the repository's `.prettierrc.json` on the module and spec (run with `--ignore-path=`: Prettier 3 skips
+files the mr-moqui `.gitignore` lists, which includes `runtime/component/`, so the first pass formatted nothing; the one
+line left over 130 is a string). `xmllint --format` on the new XML files with a canonical comparison. No slow test was
+run.
+
+**Known limits.**
+
+- The webhook signature key is used as its text (as the published examples do), not hex-decoded; confirm against a
+  sandbox delivery before production. `SmatHmacSha512` has no timestamp, so no replay window: a replayed signed body is a
+  duplicate notification, kept once.
+- `transrefId` lookups are in the schema but reported unreliable; the list searches back them up.
+- Two tabs submitting at once are serialized by the payment lock; that is not exercised by a spec (one thread).
+- A pending authorization the provider never finishes (an abandoned hosted page) keeps its payment blocked for a new
+  authorization until a lookup or an operator changes the payment's status.
+- The response is written in the caller's transaction (Phase 0 limit); Authorize.Net's duplicate window is the only
+  provider guard against a second request after a local rollback, and a lookup by reference finds the first.
+- A legacy method with a full card number and no profile is refused rather than migrated; migration needs the payer
+  to tokenize again.
+- No eCheck/ACH, Level 2/3 data, split tender, or Accept Hosted page; Customer Information Manager updates (a new expiry)
+  go through a new token. Not ported from the source's mapping: `poNumber` (the buyer's purchase order, not Mantle's
+  order id, which goes in `order.description`) and the customer email and `billTo` on token transactions (a payment made
+  from a token has no method to take them from; a stored profile carries `billTo`).
+- No operator screen; the existing gateway actions (lookup, capture, refund) and System Message screens cover it.
+
+**Deployment gate.** Sandbox credentials and a public client key on the remote and options; a webhook pointed at the
+endpoint with the signature key, and one real signed delivery verified; a sandbox run of authorize, capture, void,
+settled refund (after the nightly batch), a held transaction and profile use; the production remote (`usageCode` P,
+production endpoint) entered by an administrator; PCI scope review of the page serving AcceptUI.

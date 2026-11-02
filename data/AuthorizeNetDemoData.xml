@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="demo">
+    <!-- An Authorize.Net sandbox gateway, with no credentials: enter the API login id (username), transaction key
+        (password) and signature key (sharedSecret) on the remote in the System Message Remote screen, or in a data file
+        of the deployment's own, and the public client key on PaymentGatewayAuthorizeNet. For production use another
+        remote with sendUrl https://api.authorize.net/xml/v1/request.api and usageCode P. To take cards for a store add a
+        ProductStorePaymentGateway (paymentInstrumentEnumId PiCreditCard, paymentGatewayConfigId AuthorizeNetDemo). For a
+        sale instead of authorize then capture, set authorizeServiceName to
+        mantle.account.AuthorizeNetServices.authorizeAndCapture#Payment and leave captureServiceName empty. -->
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="AuthorizeNetSandbox" description="Authorize.Net sandbox" sendUrl="https://apitest.authorize.net/xml/v1/request.api" usageCode="T" messageAuthEnumId="SmatHmacSha512" authHeaderName="X-ANET-Signature"/>
+    <mantle.account.method.PaymentGatewayConfig paymentGatewayConfigId="AuthorizeNetDemo" paymentGatewayTypeEnumId="PgtAuthorizeNet" description="Authorize.Net sandbox" systemMessageRemoteId="AuthorizeNetSandbox" authorizeServiceName="mantle.account.AuthorizeNetServices.authorize#Payment" captureServiceName="mantle.account.AuthorizeNetServices.capture#Payment" releaseServiceName="mantle.account.AuthorizeNetServices.release#Payment" refundServiceName="mantle.account.AuthorizeNetServices.refund#Payment" detailsServiceName="mantle.account.AuthorizeNetServices.get#PaymentGatewayDetails"/>
+    <mantle.account.method.PaymentGatewayAuthorizeNet paymentGatewayConfigId="AuthorizeNetDemo" validationMode="none" lookupGraceSeconds="300"/>
+</entity-facade-xml>

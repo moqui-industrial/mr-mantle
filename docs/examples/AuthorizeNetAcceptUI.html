@@ -1,0 +1,108 @@
+<!doctype html>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!--
+A reusable example of paying a Mantle payment with the Authorize.Net Accept.js hosted payment form (AcceptUI). The card
+is typed into Authorize.Net's own form; this page gets back only single-use opaque data and posts it to Mantle's scoped
+endpoint. The payment (created by the order or invoice flow) decides the organization, gateway, amount and currency; the
+page sends only the token, the payer's choice to keep the card and an operation id. The answer is the gateway's state,
+which the page shows but does not decide. See ../AuthorizeNet.md. An app serves its own copy of this page for a signed-in
+payer (the session cookie, and its session token in X-CSRF-Token for the POST), with ?paymentId= set by the app.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Card payment</title>
+        <style>
+            body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 28rem; padding: 1rem; }
+            button { font: inherit; padding: 0.6rem 1rem; }
+            [hidden] { display: none; }
+        </style>
+    </head>
+    <body>
+        <h1>Card payment</h1>
+        <p id="amount">Loading the payment</p>
+        <label><input type="checkbox" id="save" /> Keep this card for later payments</label>
+        <p>
+            <!-- AcceptUI reads these data attributes when its script loads, so the button exists before the script -->
+            <button type="button" id="pay" class="AcceptUI" hidden
+                    data-billingAddressOptions='{"show":true, "required":false}'
+                    data-paymentOptions='{"showCreditCard": true, "showBankAccount": false}'
+                    data-acceptUIFormBtnTxt="Pay" data-acceptUIFormHeaderTxt="Card details"
+                    data-responseHandler="acceptResponse">Pay by card</button>
+        </p>
+        <p id="result" role="status"></p>
+        <script>
+            const paymentId = new URLSearchParams(location.search).get("paymentId")
+            const endpoint = "/rest/s1/mantle/my/payments/" + encodeURIComponent(paymentId) + "/authorizeNet"
+            // one id per attempt: a repeated submit of the same attempt is answered from its first response, and a new
+            // card after a decline or an error is a new attempt
+            const newOperationId = () => "page-" + Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, "0")).join("")
+            let operationId = newOperationId()
+            const show = text => (document.getElementById("result").textContent = text)
+            const sessionToken = () => document.querySelector("meta[name=moquiSessionToken]")?.content || sessionStorage.getItem("moquiSessionToken") || ""
+
+            async function start() {
+                const response = await fetch(endpoint, {credentials: "same-origin", headers: {Accept: "application/json"}})
+                if (!response.ok) return show("This payment is not available")
+                const config = await response.json()
+                if (!config.clientKey) return show("Card payments are not set up")
+                document.getElementById("amount").textContent = "Amount: " + config.amountText
+                const button = document.getElementById("pay")
+                button.setAttribute("data-apiLoginID", config.apiLoginId)
+                button.setAttribute("data-clientKey", config.clientKey)
+                button.hidden = false
+                // the provider's script, from its documented origin (sandbox or production, chosen by the server)
+                const script = document.createElement("script")
+                script.src = config.acceptUiUrl
+                script.charset = "utf-8"
+                document.body.appendChild(script)
+            }
+
+            // AcceptUI calls this with opaqueData (never the card number) or its error messages
+            window.acceptResponse = async function (answer) {
+                if (answer.messages?.resultCode === "Error") return show(answer.messages.message.map(m => m.text).join(" "))
+                show("Sending")
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {"Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": sessionToken()},
+                    body: JSON.stringify({
+                        dataDescriptor: answer.opaqueData.dataDescriptor,
+                        dataValue: answer.opaqueData.dataValue,
+                        savePaymentMethod: document.getElementById("save").checked,
+                        operationId
+                    })
+                })
+                if (!response.ok) return show("The payment could not be sent; reload the page and try again")
+                // (a failed request keeps its operation id: a retry of it is answered from the first answer, if any)
+                const result = await response.json()
+                const words = {
+                    approved: "Paid. Thank you.",
+                    pending: "The payment is being reviewed; you will be told when it is done.",
+                    declined: "The card was declined. Try another card.",
+                    unknown: "We could not confirm the payment yet. Do not pay again; we will check with the bank.",
+                    error: "The payment could not be taken. Try again later."
+                }
+                show(words[result.state] || words.error)
+                if (result.state === "declined" || result.state === "error") operationId = newOperationId()
+                if (result.state === "approved" || result.state === "pending" || result.state === "unknown")
+                    document.getElementById("pay").hidden = true
+            }
+
+            start().catch(() => show("This payment is not available"))
+        </script>
+    </body>
+</html>

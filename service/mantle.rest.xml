@@ -38,6 +38,12 @@ along with this software (see the LICENSE.md file). If not, see
             <service name="mantle.party.PartyServices.get#UserNoticeCounts"/></method></resource>
         <resource name="tasks"><method type="get">
             <service name="mantle.work.TaskServices.get#MyTasks"/></method></resource>
+        <!-- A card payment in a browser with Accept.js (docs/AuthorizeNet.md): the payment's public configuration, then its
+            single-use token. The payment picks the organization, gateway, amount and currency. -->
+        <resource name="payments"><id name="paymentId"><resource name="authorizeNet">
+            <method type="get"><service name="mantle.account.AuthorizeNetServices.get#BrowserPaymentConfig"/></method>
+            <method type="post"><service name="mantle.account.AuthorizeNetServices.submit#BrowserPaymentToken"/></method>
+        </resource></id></resource>
     </resource>
 
     <!-- ========== Parties ========== -->

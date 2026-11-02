@@ -51,6 +51,31 @@ along with this software (see the LICENSE.md file). If not, see
             paymentGatewayConfigId. Kept on the method, not the Party, so two gateways' profiles of one party do not
             collide; a new method of the same party and gateway reuses it.</description></field>
     </extend-entity>
+    <entity entity-name="PaymentGatewayAuthorizeNet" package="mantle.account.method">
+        <description>The non-secret options of an Authorize.Net gateway (PaymentGatewayConfig with
+            paymentGatewayTypeEnumId PgtAuthorizeNet, shared key). The connection is the config's SystemMessageRemote: sendUrl
+            the API endpoint (https://apitest.authorize.net/xml/v1/request.api for the sandbox,
+            https://api.authorize.net/xml/v1/request.api for production), usageCode T or P, username the API login id,
+            password the transaction key, sharedSecret the webhook signature key (messageAuthEnumId SmatHmacSha512,
+            authHeaderName X-ANET-Signature). Ported from the AuthorizeDotNet component's PaymentGatewayAuthorizeNet, whose
+            login and transaction key move to the remote's encrypted fields.</description>
+        <field name="paymentGatewayConfigId" type="id" is-pk="true"/>
+        <field name="publicClientKey" type="text-medium"><description>The public client key for Accept.js (Account,
+            Settings, Manage Public Client Key). Public: the browser gets it with the API login id.</description></field>
+        <field name="validationMode" type="text-short"><description>For a new customer payment profile: none (the
+            default), testMode or liveMode (a zero or small authorization that validates the card).</description></field>
+        <field name="duplicateWindow" type="number-integer"><description>Seconds for the provider's duplicate transaction
+            check (transactionSettings duplicateWindow); empty for the provider's default. Not Mantle's idempotency: a
+            retry after a lost answer is looked up by its reference first.</description></field>
+        <field name="lookupGraceSeconds" type="number-integer"><description>How old a lost answer must be
+            before a lookup that finds no transaction for its reference answers that the provider has none (not
+            done); a younger one stays unknown, as the provider may still be processing it. Empty is 300; it is always at
+            least duplicateWindow plus 60, as a resend inside the duplicate window would be refused.</description></field>
+        <relationship type="one" related="mantle.account.method.PaymentGatewayConfig"/>
+        <seed-data>
+            <moqui.basic.Enumeration description="Authorize.Net" enumId="PgtAuthorizeNet" enumTypeId="PaymentGatewayType"/>
+        </seed-data>
+    </entity>
     <view-entity entity-name="PaymentGatewayResponseFinance" package="mantle.account.method" cache="never">
         <description>Gateway responses with the parties of their payment, for organization and privacy conditions.</description>
         <member-entity entity-alias="R" entity-name="mantle.account.method.PaymentGatewayResponse"/>

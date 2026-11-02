@@ -1490,8 +1490,10 @@ along with this software (see the LICENSE.md file). If not, see
             (a response with resultUnknown Y and no outcomeResolvedDate, of the payment or of its refund payment) is
             blocked (blocked true, reasonCode GATEWAY_OUTCOME_UNKNOWN), without an error, so a caller going through many
             payments goes on with the others: a lost answer is looked up (get#SinglePaymentGatewayDetails), not sent again
-            as a new charge or refund. Reviewed actions are refused before this (get#PaymentGatewayActions offers only the
-            lookup).</description>
+            as a new charge or refund. An authorization of a promised payment whose latest authorization answer is pending
+            (held for review, a hosted page: no result flag) is blocked too (reasonCode GATEWAY_OUTCOME_PENDING): the
+            provider is still deciding the first, and its details lookup or callback finishes it. Reviewed actions are
+            refused before this (get#PaymentGatewayActions offers only the lookup).</description>
         <in-parameters>
             <parameter name="paymentId" required="true"/>
             <parameter name="operation" required="true"><description>authorize, capture, release or refund</description>
@@ -1543,6 +1545,22 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="unknownCount &gt; 0">
                 <set field="blocked" from="true"/>
                 <set field="reasonCode" value="GATEWAY_OUTCOME_UNKNOWN"/>
+                <return/>
+            </if>
+            <if condition="operation == 'authorize' &amp;&amp; lockedPayment?.statusId == 'PmntPromised'">
+                <entity-find entity-name="mantle.account.method.PaymentGatewayResponse" list="latestAuthList" limit="1">
+                    <econdition field-name="paymentId"/>
+                    <econdition field-name="paymentOperationEnumId" operator="in" value="PgoAuthorize,PgoAuthAndCapture"/>
+                    <order-by field-name="-transactionDate"/>
+                    <order-by field-name="-paymentGatewayResponseId"/>
+                </entity-find>
+                <set field="latestAuth" from="latestAuthList.length ? latestAuthList[0] : null"/>
+                <if condition="latestAuth != null &amp;&amp; ![latestAuth.resultSuccess, latestAuth.resultDeclined,
+                        latestAuth.resultError, latestAuth.resultUnknown, latestAuth.resultNsf, latestAuth.resultBadExpire,
+                        latestAuth.resultBadCardNumber].includes('Y')">
+                    <set field="blocked" from="true"/>
+                    <set field="reasonCode" value="GATEWAY_OUTCOME_PENDING"/>
+                </if>
             </if>
         </actions>
     </service>
@@ -1698,12 +1716,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentGatewayResponseId"/>
             <parameter name="paymentGatewayResponse" type="EntityValue"/>
             <parameter name="reasonCode"><description>GATEWAY_OUTCOME_UNKNOWN when it sent nothing because an earlier
-                operation of the payment has an unknown outcome</description></parameter>
+                operation of the payment has an unknown outcome, GATEWAY_OUTCOME_PENDING because its earlier authorization
+                is still pending at the gateway</description></parameter>
         </out-parameters>
         <actions>
             <if condition="payment == null"><entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/></if>
             <if condition="payment == null"><return message="Payment ${paymentId} not found"/></if>
-            <!-- a retry with the same operation key answers the first gateway response; an unknown outcome stops a new one -->
+            <!-- a retry with the same operation key answers the first gateway response; an unknown or pending outcome
+                stops a new one -->
             <service-call name="mantle.account.PaymentServices.begin#PaymentGatewayOperation" out-map="beginOut"
                     in-map="{paymentId:payment.paymentId, operation:'authorize', operationKey:operationKey,
                         amount:payment.amount}"/>
@@ -1714,6 +1734,9 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <if condition="beginOut.blocked">
                 <set field="reasonCode" from="beginOut.reasonCode"/>
+                <if condition="reasonCode == 'GATEWAY_OUTCOME_PENDING'">
+                    <return message="Not sending Payment ${paymentId} to the gateway again: its authorization is pending at the gateway; look up its gateway details (${reasonCode})"/>
+                </if>
                 <return message="Not sending Payment ${paymentId} to the gateway: a gateway operation of it has an unknown outcome; look up its gateway details first (${reasonCode})"/>
             </if>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
@@ -1801,6 +1824,14 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else-if condition="paymentGatewayResponse?.resultDeclined == 'Y'">
                 <service-call name="update#mantle.account.payment.Payment" in-map="{paymentId:payment.paymentId,
                         statusId:'PmntDeclined', paymentGatewayConfigId:paymentGatewayConfigId}"/>
+            </else-if><else-if condition="paymentGatewayResponse?.referenceNum
+                    &amp;&amp; ![paymentGatewayResponse.resultError, paymentGatewayResponse.resultUnknown,
+                        paymentGatewayResponse.resultNsf, paymentGatewayResponse.resultBadExpire,
+                        paymentGatewayResponse.resultBadCardNumber].includes('Y')">
+                <!-- pending (such as held for review): the payment keeps this answer's gateway reference (a new one
+                    after a re-authorization), so its details lookup and the provider's callbacks find it -->
+                <service-call name="update#mantle.account.payment.Payment"
+                        in-map="{paymentId:payment.paymentId, paymentRefNum:paymentGatewayResponse.referenceNum}"/>
             </else-if></if>
         </actions>
     </service>
@@ -2320,6 +2351,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <!-- update status on refundPayment, and set amount if differs, set data to match, etc -->
                     <service-call name="update#mantle.account.payment.Payment"
                             in-map="{paymentId:refundPayment.paymentId, statusId:'PmntDelivered', amount:amount,
+                                paymentRefNum:(paymentGatewayResponse.referenceNum || refundPayment.paymentRefNum),
                                 effectiveDate:(refundPayment.effectiveDate || ec.user.nowTimestamp),
                                 paymentMethodId:payment.toPaymentMethodId, toPaymentMethodId:payment.paymentMethodId,
                                 paymentInstrumentEnumId:payment.paymentInstrumentEnumId, refundForPaymentId:paymentId,
@@ -2338,7 +2370,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <service-call name="mantle.account.PaymentServices.create#RefundPayment" out-map="refundOut" in-map="{
                         paymentId:paymentId, amount:amount, statusId:'PmntDelivered', paymentMethodId:payment.toPaymentMethodId,
                         toPaymentMethodId:payment.paymentMethodId, paymentInstrumentEnumId:payment.paymentInstrumentEnumId,
-                        paymentGatewayConfigId:payment.paymentGatewayConfigId}"/>
+                        paymentGatewayConfigId:payment.paymentGatewayConfigId, paymentRefNum:paymentGatewayResponse.referenceNum}"/>
                     <set field="refundPaymentId" from="refundOut.paymentId"/>
                 </else></if>
             </then><else-if condition="refundPayment != null &amp;&amp; paymentGatewayResponse?.resultDeclined == 'Y'">
@@ -2438,10 +2470,20 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- a lost answer is resolved only when the gateway tells whether it did the operation (operationFound); the
                 reference it found is the payment's, and a found authorization does what an approved answer does -->
             <set field="operationFound" from="detailOut.operationFound == null ? null : String(detailOut.operationFound) == 'true'"/>
+            <set field="released" from="false"/>
             <if condition="unknownResponse != null &amp;&amp; operationFound != null">
                 <service-call name="update#mantle.account.method.PaymentGatewayResponse"
                         in-map="{paymentGatewayResponseId:unknownResponse.paymentGatewayResponseId,
                             outcomeResolvedDate:ec.user.nowTimestamp, outcomeFound:(operationFound ? 'Y' : 'N')}"/>
+                <!-- a found void is what an approved release does: promised again, without the authorization's
+                    references -->
+                <if condition="operationFound &amp;&amp; unknownResponse.paymentOperationEnumId == 'PgoRelease'
+                        &amp;&amp; payment.statusId == 'PmntAuthorized'">
+                    <service-call name="update#mantle.account.payment.Payment"
+                            in-map="{paymentId:paymentId, statusId:'PmntPromised', paymentAuthCode:null, paymentRefNum:null}"/>
+                    <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+                    <set field="released" from="true"/>
+                </if>
                 <if condition="operationFound &amp;&amp; ['PgoAuthorize', 'PgoAuthAndCapture'].includes(unknownResponse.paymentOperationEnumId)
                         &amp;&amp; ['PmntAuthorized', 'PmntDelivered'].includes(detailOut.gatewayStatusId)
                         &amp;&amp; ['PmntPromised', 'PmntDeclined'].includes(payment.statusId)">
@@ -2452,9 +2494,20 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
                 </if>
             </if>
-            <if condition="detailOut.referenceNum &amp;&amp; !payment.paymentRefNum">
+            <if condition="detailOut.referenceNum &amp;&amp; !payment.paymentRefNum &amp;&amp; !released">
                 <service-call name="update#mantle.account.payment.Payment"
                         in-map="{paymentId:paymentId, paymentRefNum:detailOut.referenceNum}"/>
+            </if>
+            <!-- a pending authorization (held for review, a hosted page) the gateway now reports approved or captured: what
+                an approved answer does (record#PaymentAuthorized: approval code, reference, security code cleared) -->
+            <if condition="['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'].includes(detailOut.gatewayStatusId)
+                    &amp;&amp; ['PmntPromised', 'PmntDeclined'].includes(payment.statusId)
+                    &amp;&amp; payment.paymentTypeEnumId != 'PtRefund' &amp;&amp; !payment.refundForPaymentId">
+                <service-call name="mantle.account.PaymentServices.record#PaymentAuthorized"
+                        in-map="{paymentId:paymentId, paymentGatewayConfigId:paymentGatewayConfigId,
+                            approvalCode:detailOut.approvalCode, referenceNum:detailOut.referenceNum,
+                            captured:detailOut.gatewayStatusId != 'PmntAuthorized'}"/>
+                <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
             </if>
 
             <!-- do status update if needed -->
@@ -2510,7 +2563,6 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="statusId" operator="in" from="statusIds"/>
                 <econdition field-name="paymentRefNum" operator="is-not-null"/>
                 <econdition field-name="paymentGatewayConfigId" operator="is-not-null"/>
-                <econdition field-name="paymentMethodId" operator="is-not-null"/>
                 <econdition field-name="effectiveDate" operator="greater" from="basisTimestamp" or-null="true"/>
                 <select-field field-name="paymentId,paymentGatewayConfigId"/>
             </entity-find>
