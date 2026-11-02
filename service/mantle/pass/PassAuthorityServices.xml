@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- No copyright or license for configuration file, details here are not considered a creative work. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+  <!-- One PASS operation for the host's PassAuthority gRPC service (mr-moqui plans/Edge-Node.md §5.5), which has checked
+       the client (clientVerified): its secret on the gRPC listener, or the edge link. The REST servlet (script/PassApi.js)
+       calls the same function. No transaction of its own: each operation's service has its own, as under the servlet, so
+       a refusal is its error envelope rather than a rolled-back call. -->
+  <service verb="handle" noun="Call" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+    <in-parameters>
+      <parameter name="operation" required="true"/>
+      <parameter name="siteId"/>
+      <parameter name="input" type="Map"/>
+      <parameter name="delegation"/>
+      <parameter name="clientId"/>
+      <parameter name="clientVerified" type="Boolean"/>
+      <parameter name="visitorAddress"/>
+      <parameter name="operationId"/>
+      <parameter name="file" type="org.apache.commons.fileupload2.core.FileItem"/>
+    </in-parameters>
+    <out-parameters>
+      <parameter name="result" type="Map"/>
+      <parameter name="download" type="Map"/>
+      <parameter name="error" type="Map"/>
+    </out-parameters>
+    <actions>
+      <script><![CDATA[
+            const answer = ec.resource.script('component://mr-mantle/script/PassAuthority.js').handle({operation, siteId,
+                input: input || {}, delegation, clientId, clientVerified: clientVerified === true, visitorAddress, file})
+            result = answer.result || null
+            download = answer.download || null
+            error = answer.error || null
+        ]]></script>
+    </actions>
+  </service>
+</services>
