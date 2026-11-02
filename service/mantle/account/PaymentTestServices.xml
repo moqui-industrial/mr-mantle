@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'Y', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -32,7 +32,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'Y', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -49,7 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'Y'}"/>
         </actions>
     </service>
@@ -60,7 +60,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'Y', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -71,7 +71,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'Y', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -83,7 +83,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoCapture',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'Y', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -94,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoCapture',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'Y', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -106,7 +106,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRelease',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'Y', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -117,7 +117,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRefund',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'Y', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -131,7 +131,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         transactionStatus:'Pending', resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N',
                         resultBadCardNumber:'N'}"/>
         </actions>
@@ -145,7 +145,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoCapture',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         transactionStatus:'Pending', resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N',
                         resultBadCardNumber:'N'}"/>
         </actions>
@@ -157,7 +157,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRelease',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'Y', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -168,7 +168,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRefund',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         resultSuccess:'N', resultDeclined:'Y', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
@@ -181,9 +181,57 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRefund',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
-                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST-PENDING', transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
                         transactionStatus:'Pending', resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N',
                         resultBadCardNumber:'N'}"/>
+        </actions>
+    </service>
+
+    <service verb="alwaysUnknown" noun="PaymentAuthorization">
+        <description>The answer is lost after the request went out (a timeout): resultUnknown, no reference, so only a details
+            lookup by the idempotency key tells what the gateway did (alwaysApprove#PaymentDetails finds it approved,
+            notFound#PaymentDetails finds nothing done).</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
+                    in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
+                        paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
+                        amountUomId:payment.amountUomId, transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
+                        reasonCode:'TIMEOUT', reasonMessage:'The test gateway did not answer', resultSuccess:'N',
+                        resultDeclined:'N', resultError:'N', resultUnknown:'Y', resultNsf:'N', resultBadExpire:'N',
+                        resultBadCardNumber:'N'}"/>
+        </actions>
+    </service>
+    <service verb="alwaysUnknown" noun="PaymentRefund">
+        <description>The answer of a refund is lost after the request went out: resultUnknown, no reference.</description>
+        <implements service="mantle.account.PaymentServices.refund#Payment"/>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
+                    in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRefund',
+                        paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:(amount || payment.amount),
+                        amountUomId:payment.amountUomId, transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey,
+                        reasonCode:'TIMEOUT', reasonMessage:'The test gateway did not answer', resultSuccess:'N',
+                        resultDeclined:'N', resultError:'N', resultUnknown:'Y', resultNsf:'N', resultBadExpire:'N',
+                        resultBadCardNumber:'N'}"/>
+        </actions>
+    </service>
+    <service verb="notFound" noun="PaymentDetails">
+        <description>Answers that the gateway has no operation of the idempotency key looked up: it did nothing, so the
+            payment's status stands (a refund payment it never received is cancelled).</description>
+        <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <set field="gatewayStatusId" from="payment.refundForPaymentId &amp;&amp; payment.statusId == 'PmntPromised'
+                    ? 'PmntCancelled' : payment.statusId"/>
+            <set field="operationFound" from="false"/>
+            <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
+                    in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoTxDetails',
+                        paymentId:payment.paymentId, amount:payment.amount, amountUomId:payment.amountUomId,
+                        transactionDate:ec.user.nowTimestamp, transactionStatus:'NotFound', reasonMessage:'No transaction of '
+                        + (idempotencyKey || 'the payment'), resultSuccess:'N', resultDeclined:'N', resultNsf:'N',
+                        resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
 
@@ -207,10 +255,14 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="operationStatusIds" from="{PgoAuthorize:'PmntAuthorized', PgoCapture:'PmntDelivered',
                     PgoAuthAndCapture:'PmntDelivered', PgoRelease:'PmntPromised', PgoRefund:'PmntDelivered'}"/>
             <set field="gatewayStatusId" from="operationStatusIds[operationEnumId] || payment.statusId"/>
+            <!-- an operation whose answer was lost is found by its idempotency key, with the reference it got -->
+            <set field="referenceNum" from="idempotencyKey ? 'TEST-' + idempotencyKey.slice(0, 12) : null"/>
+            <set field="operationFound" from="idempotencyKey ? true : null"/>
+            <set field="approvalCode" from="idempotencyKey ? 'TESTFOUND' : null"/>
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoTxDetails',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
-                        amountUomId:payment.amountUomId, referenceNum:payment.paymentRefNum,
+                        amountUomId:payment.amountUomId, referenceNum:(payment.paymentRefNum || referenceNum),
                         transactionDate:ec.user.nowTimestamp, transactionStatus:gatewayStatusId, resultSuccess:'Y',
                         resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
             <set field="effectiveDate" from="ec.user.nowTimestamp"/>
@@ -230,7 +282,7 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthAndCapture',
                         paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
                         amountUomId:payment.amountUomId, referenceNum:'TEST-HOSTED-' + payment.paymentId,
-                        transactionDate:ec.user.nowTimestamp, transactionStatus:'Pending', redirectUrl:redirectUrl,
+                        transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey, transactionStatus:'Pending', redirectUrl:redirectUrl,
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>

@@ -84,6 +84,7 @@ spec({
         gateway("ACCT_PORTAL_HOSTED", "hostedPending", "alwaysApprove")
         gateway("ACCT_PORTAL_WAIT", "hostedPending", "alwaysPending")
         gateway("ACCT_PORTAL_DECLINE", "alwaysDecline", "alwaysApprove")
+        gateway("ACCT_PORTAL_LOST", "alwaysUnknown", "alwaysApprove")
         capture.enable()
     },
     setup() {
@@ -554,6 +555,34 @@ feature("pending attempts resolve: the invoice page asks the gateway, the job se
         stuckStatus == "PmntCancelled"
         stuckView.attempt == null
         stuckView.capabilities.canPay == true
+    }
+})
+
+feature("a lost authorization answer stays pending, never cancelled, and the invoice page's lookup finds and captures it", {
+    when() {
+        const invoiceId = invoice("47")
+        login(f.users.ar)
+        const token = access("create#AccessCapability", {recordType: "Invoice", recordId: invoiceId, scopes: "InvoicePay"}).token
+        login("john.doe")
+        payThrough("ACCT_PORTAL_LOST")
+        logout()
+        const started = portal("start#InvoicePayment", {siteId: site, token, operationId: "portal-lost-0001", confirm: true})
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        const status = () => one("mantle.account.payment.Payment", {paymentId: started.attempt.attemptId}).statusId
+        const whileLost = status()
+        logout()
+        const view = portal("get#Invoice", {siteId: site, token})
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        return {started, whileLost, view, after: status()}
+    },
+    then({started, whileLost, view, after}) {
+        started.attempt.state == "pending"
+        started.attempt.nextAction == "wait"
+        whileLost == "PmntPromised"
+        after == "PmntDelivered"
+        view.invoice.statusText == "Paid"
     }
 })
 

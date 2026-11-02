@@ -402,3 +402,154 @@ Create separate plans only when scheduling these larger efforts:
 Keep the per-phase implementation record here until a separate plan owns that effort: changed artifacts, source/API
 baseline, fast checks run, known limits and the deployment gate still outstanding. Commit in the repository that owns
 each change; update this plan's completion record without turning component READMEs into status logs.
+
+### Phase 0 — common contracts (implementation record, 2026-11-02)
+
+Step 0's small common changes, so P1 Authorize.Net, P2 PayTrace, S1 Shippo and E1 build on explicit contracts. The SPS
+worksheet, E2 and Stripe are not part of it. Nothing is committed yet; the record names the artifacts per repository.
+
+**Changed artifacts.**
+
+- mr-mantle: `entity/PaymentGatewayEntities.xml` (PaymentGatewayResponse `idempotencyKey`, `resultUnknown`,
+  `outcomeResolvedDate`, `outcomeFound`; PaymentMethod `gatewayCustomerId`), `entity/ShippingGatewayEntities.xml` (ShippingGatewayConfig
+  `systemMessageRemoteId`), `service/mantle/account/PaymentServices.xml` (the gateway interfaces, `begin#PaymentGatewayOperation`,
+  `make#GatewayIdempotencyKey`, `record#PaymentAuthorized`, the four `*#SinglePayment` services, `get#SinglePaymentGatewayDetails`,
+  `poll#PaymentGatewayDetails`, `get#PaymentGatewayActions`, `execute#PaymentGatewayAction`,
+  `find#PaymentGatewayTransactions`), `PaymentTestServices.xml` (keys recorded; `alwaysUnknown#PaymentAuthorization`,
+  `alwaysUnknown#PaymentRefund`, `notFound#PaymentDetails`), `PaymentMethodServices.xml` (`update#PaymentMethodMutable`
+  takes `gatewayCustomerId`), `service/mantle/order/ReturnSettlement.js` (an unknown refund stays pending), `Portal.js` (an unknown answer stays
+  pending and is looked up),
+  `service/mantle/shipment/CarrierServices.xml` and `Shipping.js` (`pending`), the test carrier (`TestCarrier.js`,
+  `TestGatewayServices.xml`: postal codes 99904, 99905), specs `test/GatewayContracts.spec.js` (new),
+  `AccountingPaymentGateway.spec.js`, `AccountingPortals.spec.js` and `WarehouseShipping.spec.js` (a feature each).
+- mr-moqui: `crates/moqui-core/src/service/http_fixtures.rs` and `http_fixtures_tests.rs` (new), `outbound.rs` (the
+  fixtures answer before any transport), `service/mod.rs`, `native.rs`, `crates/moqui-host/src/test_cmd/mod.rs` (the test
+  runner allows the fixtures), `framework/conf/MoquiDefaultConf.xml` (the `HttpFixtures` tool),
+  `framework/service/org/moqui/impl/SystemMessageServices.xml` (`store#ReceivedSystemMessage`), `docs/Build-Test.md`
+  ("HTTP fixtures").
+
+**Payment operation identity (§3.2).** The lifecycle is unchanged; the identity now reaches the adapter.
+
+- Every `authorize#`, `capture#`, `release#` and `refund#Payment` interface takes `operationKey` (the caller's, when it gave
+  one) and `idempotencyKey`, always given. `make#GatewayIdempotencyKey` makes it: `mq` and 30 hex characters of a hash of
+  the gateway, the operation name, the payment and its two parties, the amount and currency, and the operation key (a random
+  nonce without one). The same keyed input gives the same key after a crash or rollback; another payment, gateway,
+  operation or amount gives another. The hash is `ec.user.singleUseCodeHash`, whose digest follows the conf's password
+  hash type (SHA-256 by default): changing that type changes the keys of operations retried across the change. Scripts
+  have no plain SHA-256 of a text yet; an `ec.user` digest is a small framework addition when it matters. The adapter sends it as the provider's idempotency key (PayTrace and Stripe where
+  supported) or, where there is none, as a searchable reference (Authorize.Net `refId`, limited to 20 characters: send its
+  first 20, and the `order.invoiceNumber` the adapter can search by), and records it on its PaymentGatewayResponse.
+  `refund#Payment` also gets `refundPaymentId`.
+- `begin#PaymentGatewayOperation` replaces the four copies of the keyed replay check. It always locks the payment. With a
+  key, the key's latest response replays; one of another operation, amount or refund payment is `OPERATION_KEY_CONFLICT`
+  (`refund#SinglePayment` compares the amount given, else its refund payment's, before defaulting it); an unknown
+  response a lookup resolved as not done (`outcomeFound` N) does not replay, so the operation runs again with the same
+  idempotency key. Then a payment with an unresolved unknown outcome (its own, or one of its refund payments) is
+  **blocked without an error**: `blocked`, `reasonCode` `GATEWAY_OUTCOME_UNKNOWN`, and each `*#SinglePayment` returns a
+  message and that `reasonCode`, so `apply#OrderPaymentsToInvoice`, `capture#InvoicePayments` and other loops go on with
+  their other payments and roll nothing back. A reviewed action is refused before that: `get#PaymentGatewayActions`
+  offers only `lookup`, so `execute#PaymentGatewayAction` answers `STALE_PREVIEW`.
+- The response contract (the description of `authorize#Payment`): the adapter records one PaymentGatewayResponse per call
+  and changes no Payment. `resultSuccess` approved; `resultDeclined` (or NSF, expiry, card number) refused; `resultError`
+  not done (refused before the provider acted: validation, a connect failure), safe to send again; **`resultUnknown`** the
+  answer was lost after the request may have gone (a timeout, a reset, an unreadable body); none of them, pending (with its
+  `referenceNum`, and `redirectUrl` for a hosted page). A transport failure is recorded as `resultUnknown`, not thrown: a
+  throw rolls the evidence back with the caller's transaction. When the transport cannot tell connect from timeout, record
+  unknown.
+- Resolution: `get#PaymentGatewayDetails` takes `operationKey`, `idempotencyKey` and `paymentOperationEnumId` of the
+  latest unresolved unknown response of the payment (for a refund payment, the response whose `refundPaymentId` it is) and
+  answers **`operationFound`**: true when the provider did it (`gatewayStatusId` the status it led to, with
+  `referenceNum` and `approvalCode`), false when the provider has no such operation (`gatewayStatusId` the payment's own
+  status, `PmntCancelled` for a refund payment it never received), absent when it still cannot tell. Only
+  `operationFound` resolves the unknown response (`outcomeResolvedDate`, `outcomeFound` Y or N); a status alone does not.
+  The reference becomes the payment's `paymentRefNum`. A found authorization goes through `record#PaymentAuthorized`,
+  shared with `authorize#SinglePayment`'s approved answer: Authorized with the approval code and reference, Delivered for
+  an authorization and capture, and the card's security code cleared. `get#SinglePaymentGatewayDetails` no longer
+  needs a `paymentRefNum` when an unknown response is open, and `poll#PaymentGatewayDetails` also polls the open unknowns,
+  however old and newest first up to `checkLimit` (each in its own transaction, an error logged and the rest going on). `get#PaymentGatewayActions` offers only `lookup`
+  while one is open (`outcomeUnknown`, `GATEWAY_OUTCOME_UNKNOWN`); `execute#PaymentGatewayAction` and
+  `find#PaymentGatewayTransactions` have the outcome `unknown`.
+- A refund whose answer is unknown, or pending with a reference to look up, and that has no refund payment yet (a direct
+  `refund#SinglePayment`) now gets a promised one, so it counts against the refundable amount and the lookup completes
+  it; a refusal (declined, error, NSF, expiry, card number) or a pending answer with no reference gets none. A return's
+  gateway refund with an unknown answer stays pending instead of being declined.
+- The invoice pay pages (`Portal.js`) keep an attempt with an unresolved unknown answer pending (never cancelled as
+  "nothing to ask") and look it up even with no `paymentRefNum`; a found authorization is then captured.
+
+**Token input and provider references.** `authorize#Payment` (and `authorize#SinglePayment`) take `paymentToken`, a Map of
+the provider's single-use tokenization output (Accept.js `opaqueData`, Protect.js `hpf_token`/`enc_key`), passed for that
+call only, never stored or logged. Reusable references are on the PaymentMethod: `gatewayCimId` the provider payment
+profile, the new `gatewayCustomerId` its customer profile, with `paymentGatewayConfigId` the gateway they belong to.
+`Party.gatewayCimId` is not used by the new adapters (two gateways' customers of one party would collide). A tokenized card's
+CreditCard keeps display metadata only: the masked number the provider returns, type and expiry; never the PAN or CVV.
+
+**Shipping.** The durable attempts already exist: ShippingGatewayRequest, recorded and committed before the call,
+`claim#ShippingGatewayRequest`, Unknown after a lost answer, and `find#ShippingLabels` asked before any retry (warehouse
+P13; `WarehouseTaskServices.request#PackageLabels` / `refund#PackageLabels`). The gap was pending label completion:
+`request#` and `refund#ShippingLabels` now answer `pending` (an accepted purchase whose label is not finished, Shippo
+QUEUED), and `find#ShippingLabels` answers `pending` too; `Shipping.js` keeps such a request Unknown with `LABEL_PENDING`
+and asks again on the next request, never buying again. S1 adapters: send `requestReference` to Shippo (transaction
+`metadata`) so `find#ShippingLabels` can search for it; a refusal throws its reason code (`LABEL_REFUSED`,
+`ADDRESS_INVALID`, ...), anything else thrown is a lost answer; leave `gatewayRefundStatus` empty until a refund is
+decided. Drive labels through the WarehouseTaskServices entry points; `CarrierServices.request#ShipmentLabels` alone
+records no attempt. Nothing finishes a pending label by itself yet: today it completes when a person requests the labels
+again. S1 adds the driver, a ServiceJob that re-runs `request#PackageLabels` / `refund#PackageLabels` (by the recorded
+ShippingGatewayRequest) for requests Unknown with `LABEL_PENDING`, and its Shippo transaction webhook consumer, which
+does the same for the event's request; both go through `find#ShippingLabels`, never a new purchase.
+
+**Credentials and configuration.** A provider connection is a SystemMessageRemote, one per environment:
+`PaymentGatewayConfig.systemMessageRemoteId` (existing) and the new `ShippingGatewayConfig.systemMessageRemoteId`, and for
+EDI the remote itself. `sendUrl` is the API base (the sandbox or the production host), `usageCode` `T` or `P`, `username`
+the API login or client id, and the secrets in the remote's encrypted fields: `password` (transaction key, client secret,
+API token), `sharedSecret` (the webhook signature key), `sendSharedSecret`, `privateKey`. The provider's own gateway entity
+(shared PK with the config) holds only non-secret options. Seed and demo data name the configs and remotes without
+credentials; credentials are entered in the System Message Remote screen or a deployment's own data file. Never a
+ShippingGatewayOption or any unencrypted field.
+
+**Callback receipt.** A provider webhook posts to the framework endpoint `/rest/sm/{systemMessageTypeId}/{systemMessageRemoteId}`,
+whose remote's `messageAuthEnumId` authenticates the body before anything is kept (`SmatHmacSha256`,
+`SmatHmacSha256Timestamp` with its replay window, or `SmatLogin`). The type's `receiveServiceName` is the provider's own
+receive service: it parses the event id from the authenticated body and calls the new
+`org.moqui.impl.SystemMessageServices.store#ReceivedSystemMessage` (`systemMessageTypeId`, `systemMessageRemoteId`,
+`messageId` the provider event id, `messageText`, ...), which locks the remote and keeps the event once per remote, type and
+event id; a duplicate answers an empty `systemMessageIdList` and `duplicateOfId`, so the endpoint answers success and
+nothing is consumed twice. The type's `consumeServiceName` applies it through the existing Mantle services and converges
+on provider state by lookup (details service, `find#ShippingLabels`), not on the payload's order. The remote, so the
+organization and gateway, comes from the endpoint path, never from the payload. Authorize.Net signs with HMAC-SHA512 in
+`X-ANET-Signature` (`sha512=` and hex), which no `messageAuthEnumId` checks yet: P1 adds that scheme to
+`crates/moqui-core/src/service/system_sync/message.rs` with a Rust test. S1 checks whether Shippo's signature matches
+`SmatHmacSha256Timestamp` and otherwise adds its scheme the same way.
+
+**HTTP test seam.** The framework's HTTP fixtures (`ec.factory.getTool("HttpFixtures")`, docs/Build-Test.md "HTTP
+fixtures"): while a spec has them enabled, every outbound request of the process is answered by the first matching
+fixture (method, exact or `*` prefix URL, body text) and recorded, credentials redacted (Authorization,
+Proxy-Authorization, Cookie, `*Api-Key`); `error` simulates a lost answer after the request was sent; an unmatched
+request fails and never reaches the network. The switch is process-wide, so a request with no execution context fails
+closed too, and `enable()` is refused unless the `moqui test` runner allowed it (`http_fixtures::allow()` before boot). An adapter keeps its sandbox URL from its remote and has no test
+branch; its spec adds the provider's sanitized answers, calls the Mantle service, and checks `requests()` (the
+idempotency key header, no card data in the body). Production services load no spec files.
+
+**Fast checks run** (after the review fixes). `cargo test -p moqui-core --lib http_fixtures` (2 passed); `cargo clippy
+-p moqui-core -p moqui-host --all-targets -- -D warnings` (clean); `./moq test mr-mantle --spec
+GatewayContracts,PaymentGateway,AccountingPaymentGateway,AccountingPaymentRefunds,AccountingReturns,AccountingPortals,AccountingPaymentLifecycle,FinancialAccountServices,PaymentMethodServices,CarrierServices,WarehouseShipping,OrderToCashBasicFlow,ReturnToResponseBasicFlow,InvoicePaymentMisc`
+(17 specs with their dependencies, 172 features passed); `./moq test mr-boss --spec AccountingPaymentGateway,AccountingPaymentRefunds`
+(8 passed). No slow test was run.
+
+**Known limits, for the ports and the payment-lifecycle plan.**
+
+- The adapter writes its response in the caller's transaction. A remote success followed by a local rollback loses that
+  response; a keyed retry sends the same idempotency key, which a provider with idempotency answers with the first result,
+  but a provider without it (Authorize.Net) gets a second request, which only its duplicate window or a reference search
+  can catch. Writing the response in its own transaction would need a replay that re-applies the payment status: that is
+  the durable attempt record of the payment-lifecycle plan, not a processor port.
+- Callers without an operation key (`authorize#OrderPayments`, order and invoice flows) get a random key per call, so
+  they have no rollback recovery; they are protected by the unknown-outcome guard only.
+- There is no operator action to close an unknown outcome the provider cannot be asked about (a details service that
+  never answers a status); such a payment waits for a lookup. A reviewed "resolve as not done / done" action belongs to the
+  payment-lifecycle plan.
+- A return settlement's gateway refund that is blocked by an open unknown outcome sends nothing, so its refund payment
+  is declined as one with no answer; the return is settled again after the lookup.
+- An unknown refund is resolved by looking up the refund payment, not the original (the original shows only `lookup` of
+  its own status meanwhile).
+- XML files were edited in their existing layout; they were not passed through `xmllint --format`, which would reformat
+  their unrelated content (none of them were in that form at HEAD).

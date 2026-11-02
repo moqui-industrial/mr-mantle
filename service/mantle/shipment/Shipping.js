@@ -601,6 +601,14 @@ function sendOne(plan, item) {
         })
         return Object.assign(out, {state: "done", recovered: !!asked, trackingCode: value("trackingCode")})
     }
+    // the gateway accepted the request and has not finished it (an asynchronous label or refund): no answer yet
+    const pendingAnswer = () => {
+        settleRequest(item.requestId, "SgrqUnknown", {
+            reasonCode: "LABEL_PENDING",
+            resultMessage: "The gateway accepted the request and has not finished it"
+        })
+        return Object.assign(out, {state: "pending", reasonCode: "LABEL_PENDING"})
+    }
     // ask first: the earlier request may have been done by the gateway though its answer was lost
     if (item.mode === "ask" && gateway?.findLabelServiceName) {
         try {
@@ -612,6 +620,8 @@ function sendOne(plan, item) {
                     getReturnLabels: kind.returnLabels
                 })
             )
+            // the provider has it and is still working on it: asked again later, never bought again
+            if (found.pending) return pendingAnswer()
             if (plan.kind === "refund" ? found.refunded : found.found && !found.refunded) {
                 if (plan.kind === "refund")
                     probe("update#" + ROUTE_SEG, Object.assign({}, key, {gatewayRefundStatus: "refunded"}))
@@ -632,15 +642,16 @@ function sendOne(plan, item) {
             return Object.assign(out, {state: "unknown", reasonCode: reasonOf(message), message})
         }
     }
+    let answer
     try {
         // the recorded gateway's own service, so the call goes where the request was recorded (A1)
         const base = Object.assign({}, key, {
             shippingGatewayConfigId: gateway.shippingGatewayConfigId,
             requestReference: item.requestId
         })
-        if (plan.kind === "refund") probe(gateway.refundLabelsServiceName, base)
+        if (plan.kind === "refund") answer = probe(gateway.refundLabelsServiceName, base)
         else
-            probe(
+            answer = probe(
                 gateway.requestLabelsServiceName,
                 Object.assign(base, {getReturnLabels: kind.returnLabels, shipmentMethodEnumId: plan.shipmentMethodEnumId})
             )
@@ -651,6 +662,7 @@ function sendOne(plan, item) {
         settleRequest(item.requestId, definite ? "SgrqFailed" : "SgrqUnknown", {reasonCode, resultMessage: message})
         return Object.assign(out, {state: definite ? "failed" : "unknown", reasonCode, message})
     }
+    if (answer?.pending) return pendingAnswer()
     if (done()) return succeed(false)
     settleRequest(item.requestId, "SgrqFailed", {reasonCode: "NO_ANSWER", resultMessage: "The gateway answered with no label"})
     return Object.assign(out, {state: "failed", reasonCode: "NO_ANSWER", message: "The gateway answered with no label"})

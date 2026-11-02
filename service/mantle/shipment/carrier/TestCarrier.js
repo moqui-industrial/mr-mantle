@@ -7,6 +7,8 @@
 //   99901  the label is issued but the answer is lost (CARRIER_TIMEOUT); the carrier has it when asked later
 //   99902  the label is refused (LABEL_REFUSED)
 //   99903  the address is invalid (ADDRESS_INVALID; validation marks it CmtlInvalid)
+//   99904  the label is queued (pending, as an asynchronous carrier's transaction); it is finished when asked about
+//   99905  the label is queued and stays queued: asking about it answers pending again
 // A request that repeats a reference the carrier already issued a label for answers that label and buys no second one.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, probe} = lib
@@ -16,7 +18,7 @@ const LABEL = "mantle.shipment.carrier.TestCarrierLabel",
     SEGMENT = "mantle.shipment.ShipmentRouteSegment",
     PACKAGE = "mantle.shipment.ShipmentPackage",
     POSTAL = "mantle.party.contact.PostalAddress"
-const reserved = {timeout: "99901", refused: "99902", invalid: "99903"}
+const reserved = {timeout: "99901", refused: "99902", invalid: "99903", queued: "99904", stuck: "99905"}
 // the service of each method: a base charge, a charge per pound (rounded up), and the days in zone 1
 const methods = {
     ShMthGround: {base: 6, perPound: 0.5, days: 3},
@@ -241,6 +243,9 @@ function requestLabels(p) {
     const unweighed = packages.filter(row => !(number(row.weight) > 0)).map(row => row.shipmentPackageSeqId)
     if (unweighed.length) denied("WEIGHT_REQUIRED", "Package " + unweighed.join(", ") + " has no weight")
     let timedOut = false
+    // an asynchronous label: recorded as queued (no issuedDate) and not filled in until it is asked about
+    const queued = reservedHit(ends, "queued") || reservedHit(ends, "stuck")
+    let pending = false
     for (const packageRow of packages) {
         const reference = blank(p.requestReference)
             ? null
@@ -267,7 +272,7 @@ function requestLabels(p) {
                 amountUomId: "USD",
                 zone: ends.zone,
                 weight,
-                issuedDate: ec.user.nowTimestamp
+                issuedDate: queued ? null : ec.user.nowTimestamp
             })
             probe("update#" + LABEL, {
                 testCarrierLabelId: made.testCarrierLabelId,
@@ -283,10 +288,14 @@ function requestLabels(p) {
                 continue
             }
         }
+        if (label.issuedDate == null) {
+            pending = true
+            continue
+        }
         fillPackage(segment, label, true)
     }
     if (timedOut) denied("CARRIER_TIMEOUT", "The test carrier did not answer in time (postal code " + reserved.timeout + ")")
-    return {}
+    return {pending}
 }
 // find#ShippingLabels: the label of the reference (or the package's newest), filled in when found and not refunded
 function findLabels(p) {
@@ -307,6 +316,12 @@ function findLabels(p) {
         )[0]
     }
     if (!label) return {found: false, refunded: false}
+    // a queued label: still queued (99905) answers pending, else it is finished now
+    if (label.issuedDate == null) {
+        if (reservedHit(endsOf(segment), "stuck")) return {found: true, refunded: false, pending: true}
+        probe("update#" + LABEL, {testCarrierLabelId: label.testCarrierLabelId, issuedDate: ec.user.nowTimestamp})
+        label = one(LABEL, {testCarrierLabelId: label.testCarrierLabelId})
+    }
     const refunded = label.refundedDate != null
     if (!refunded) fillPackage(segment, label, true)
     return {found: true, refunded, trackingCode: label.trackingCode, gatewayLabelId: label.testCarrierLabelId}

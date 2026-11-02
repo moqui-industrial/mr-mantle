@@ -699,10 +699,11 @@ function gatewayRefund(gateway) {
         ec.logger.error("Gateway refund " + gateway.refundPaymentId + " did not finish: " + error.message)
         return
     }
-    // a gateway that gave no answer to look up (no refund service, no response) refunded nothing
+    // a gateway that gave no answer to look up (no refund service, no response) refunded nothing; one whose answer was
+    // lost (resultUnknown) may have refunded, so its refund stays pending for the details lookup
     const refund = one(PAY, {paymentId: gateway.refundPaymentId})
     const answered = rows("mantle.account.method.PaymentGatewayResponse", {refundPaymentId: gateway.refundPaymentId}).some(
-        row => row.referenceNum
+        row => row.referenceNum || row.resultUnknown === "Y"
     )
     if (["PmntPromised", "PmntAuthorized"].includes(refund.statusId) && !answered)
         entityLib.probe("update#" + PAY, {paymentId: gateway.refundPaymentId, statusId: "PmntDeclined"})

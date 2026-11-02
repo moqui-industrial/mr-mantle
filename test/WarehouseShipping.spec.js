@@ -205,6 +205,8 @@ spec({
         address("WSH_TIMEOUT", "99901", {partyId: customer})
         address("WSH_REFUSED", "99902", {partyId: customer})
         address("WSH_INVALID", "99903", {partyId: customer})
+        address("WSH_QUEUED", "99904", {partyId: customer})
+        address("WSH_STUCK", "99905", {partyId: customer})
         call("create#mantle.product.Product", {
             productId: "WSH_A",
             productName: "WSH_A",
@@ -631,6 +633,53 @@ feature("a gateway that cannot be asked after a timeout is sent again only when 
         labels.length == 1
         requests.length == 1
         requests[0].statusId == "SgrqSucceeded"
+    }
+})
+
+feature("a queued label is pending; the next request asks the carrier and completes it, buying no second label", {
+    when() {
+        const sh = packedShipment("WSH_QUEUED", [1])
+        const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
+        const first = run("wsh_shipper", T + "request#PackageLabels", request)
+        const afterFirst = {
+            labels: carrierLabels(sh.shipmentId).length,
+            tracked: routeSegs(sh.shipmentId).filter(row => row.trackingCode).length,
+            requests: gatewayRequests(sh.shipmentId).map(row => row.statusId + ":" + row.reasonCode)
+        }
+        const retry = run("wsh_shipper", T + "request#PackageLabels", request)
+        // a label the carrier keeps queued stays pending when asked, and is not bought again
+        const stuck = packedShipment("WSH_STUCK", [1])
+        const stuckRequest = labelRequest(stuck.shipmentId, {shippingGatewayConfigId: gateway})
+        run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
+        const stuckRetry = run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
+        return {
+            first,
+            afterFirst,
+            retry,
+            labels: carrierLabels(sh.shipmentId),
+            requests: gatewayRequests(sh.shipmentId),
+            tracked: routeSegs(sh.shipmentId).filter(row => row.trackingCode).length,
+            stuckRetry,
+            stuckLabels: carrierLabels(stuck.shipmentId).length
+        }
+    },
+    then({first, afterFirst, retry, labels, requests, tracked, stuckRetry, stuckLabels}) {
+        first.error == ""
+        first.result.resultCode == "PENDING"
+        first.result.packages[0].state == "pending"
+        first.result.packages[0].reasonCode == "LABEL_PENDING"
+        afterFirst.labels == 1
+        afterFirst.tracked == 0
+        afterFirst.requests.join() == "SgrqUnknown:LABEL_PENDING"
+        retry.result.resultCode == "LABELED"
+        retry.result.packages[0].recovered == true
+        labels.length == 1
+        requests.length == 1
+        requests[0].statusId == "SgrqSucceeded" && n(requests[0].attemptCount) == 2
+        tracked == 1
+        stuckRetry.result.resultCode == "PENDING"
+        stuckRetry.result.packages[0].reasonCode == "LABEL_PENDING"
+        stuckLabels == 1
     }
 })
 

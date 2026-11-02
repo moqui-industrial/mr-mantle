@@ -17,7 +17,8 @@ along with this software (see the LICENSE.md file). If not, see
     ShippingGatewayConfig TEST_SHIPPING (carrier TEST_CARRIER). The rules are TestCarrier.js's: rates by weight and a zone
     table, a PDF label with a Code 128 tracking number, its own record of issued labels (TestCarrierLabel), refund,
     tracking and address validation; postal code 99901 times out after issuing the label, 99902 refuses the label, 99903
-    is an invalid address. Real carriers are their own gateways. -->
+    is an invalid address, 99904 queues the label until it is asked about and 99905 keeps it queued. Real carriers are
+    their own gateways. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="ShippingRatesBulk">
@@ -46,12 +47,14 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A label per package: recorded in TestCarrierLabel in its own transaction, then its PDF, tracking code,
             charge and label id filled in on ShipmentPackageRouteSeg (the return fields for a return label). A request
             reference already issued answers that label again. Postal code 99901 issues the label and then fails with
-            CARRIER_TIMEOUT (the answer is lost); 99902 is LABEL_REFUSED; 99903 ADDRESS_INVALID; a package with no weight
-            WEIGHT_REQUIRED.</description>
+            CARRIER_TIMEOUT (the answer is lost); 99902 is LABEL_REFUSED; 99903 ADDRESS_INVALID; 99904 and 99905 queue the
+            label and answer pending (find#ShippingLabels finishes a 99904 label, a 99905 one stays queued); a package with
+            no weight WEIGHT_REQUIRED.</description>
         <implements service="mantle.shipment.CarrierServices.request#ShippingLabels"/>
         <actions>
-            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
-                    .execute('requestLabels', context)</script>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/TestCarrier.js')
+                    .execute('requestLabels', context)"/>
+            <set field="pending" from="!!answer.pending"/>
         </actions>
     </service>
     <service verb="find" noun="ShippingLabels">

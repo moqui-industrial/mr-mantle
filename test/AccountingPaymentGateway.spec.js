@@ -10,12 +10,19 @@ spec({
         ec.artifactExecution.disableAuthz()
         const h = helper()
         f = h.fixtures("ACCT_GW")
-        // one test gateway per kind of answer: approve everything, leave capture and refund pending, decline refunds
-        f.gateways = {approve: "ACCT_GW_APPROVE", pending: "ACCT_GW_PENDING", decline: "ACCT_GW_DECLINE"}
+        // one test gateway per kind of answer: approve everything, leave capture and refund pending, decline refunds,
+        // lose the authorization's answer
+        f.gateways = {
+            approve: "ACCT_GW_APPROVE",
+            pending: "ACCT_GW_PENDING",
+            decline: "ACCT_GW_DECLINE",
+            unknown: "ACCT_GW_UNKNOWN"
+        }
         for (const [kind, services] of Object.entries({
             approve: ["alwaysApprove", "alwaysApprove", "alwaysApprove", "alwaysApprove"],
             pending: ["alwaysApprove", "alwaysPending", "alwaysApprove", "alwaysPending"],
-            decline: ["alwaysApprove", "alwaysApprove", "alwaysDecline", "alwaysDecline"]
+            decline: ["alwaysApprove", "alwaysApprove", "alwaysDecline", "alwaysDecline"],
+            unknown: ["alwaysUnknown", "alwaysApprove", "alwaysApprove", "alwaysApprove"]
         }))
             h.call("create#mantle.account.method.PaymentGatewayConfig", {
                 paymentGatewayConfigId: f.gateways[kind],
@@ -240,6 +247,40 @@ feature("pending answers leave the payment and the refund as they were until a l
         toDecimal(heldBack.refundableAmount).eq(50)
         refundLookup.statusId == "PmntDelivered"
         applied.length == 1 && toDecimal(applied[0].amountApplied).eq(10)
+    }
+})
+
+feature("a lost answer is unknown: only a lookup is offered until it resolves the payment", {
+    when() {
+        const h = helper()
+        login(f.users.treasury)
+        const paymentId = promised("unknown"),
+            lost = act(paymentId, "authorize"),
+            whileUnknown = actions(paymentId),
+            refused = h.rejected("preview#PaymentGatewayAction", {
+                organizationPartyId: f.org,
+                paymentId,
+                action: "authorize",
+                reason: "Try again"
+            }),
+            listed = h.native("find#PaymentGatewayTransactions", {organizationPartyId: f.org, paymentId, outcome: "unknown"}),
+            lookedUp = h.native("lookup#PaymentGatewayDetails", {organizationPartyId: f.org, paymentId}),
+            afterLookup = actions(paymentId)
+        return {lost, whileUnknown, refused, listed, lookedUp, afterLookup}
+    },
+    then({lost, whileUnknown, refused, listed, lookedUp, afterLookup}) {
+        lost.outcome == "unknown"
+        lost.reasonCode == "GATEWAY_UNKNOWN"
+        lost.statusId == "PmntPromised"
+        whileUnknown.outcomeUnknown == true
+        whileUnknown.actionList.join() == "lookup"
+        whileUnknown.reasonCode == "GATEWAY_OUTCOME_UNKNOWN"
+        refused.includes("GATEWAY_ACTION_UNAVAILABLE")
+        listed.rows.length == 1 && listed.rows[0].outcome == "unknown" && listed.rows[0].idempotencyKey.length == 32
+        lookedUp.previousStatusId == "PmntPromised"
+        lookedUp.statusId == "PmntAuthorized"
+        afterLookup.outcomeUnknown == false
+        afterLookup.actionList.includes("capture")
     }
 })
 

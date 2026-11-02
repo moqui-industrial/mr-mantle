@@ -92,6 +92,14 @@ function attempts(invoiceId) {
         .filter(Boolean)
 }
 const pending = row => ["PmntPromised", "PmntAuthorized"].includes(row.statusId)
+// A gateway answer of the payment that was lost and not looked up yet: the gateway may have charged it, so it is pending
+// and looked up, never cancelled or tried again.
+const unknownOpen = paymentId =>
+    find(R)
+        .condition("paymentId", paymentId)
+        .condition("resultUnknown", "Y")
+        .condition("outcomeResolvedDate", "is-null", null)
+        .count() > 0
 const redirectOf = paymentId =>
     Array.from(find(R, {paymentId}).orderBy("-transactionDate").limit(10).list()).find(row => row.redirectUrl)?.redirectUrl || null
 function attemptView(payment) {
@@ -139,6 +147,7 @@ const STARTING_MS = 5 * 60000,
 // or pending past the abandonment cutoff.
 function failedWithoutAnswer(payment, attempt) {
     const age = Date.now() - (lib.ms(attempt?.createdDate) ?? 0)
+    if (unknownOpen(payment.paymentId)) return false
     if (age > ABANDONED_MS) return true
     return !payment.paymentRefNum && !redirectOf(payment.paymentId) && age > STARTING_MS
 }
@@ -159,7 +168,7 @@ function refresh(paymentId) {
         call("update#" + P, {paymentId, statusId: "PmntCancelled"})
         return settle(paymentId)
     }
-    if (!payment.paymentRefNum) return payment
+    if (!payment.paymentRefNum && !unknownOpen(paymentId)) return payment
     asPortalPayment(paymentId, () => {
         try {
             call("mantle.account.PaymentServices.get#SinglePaymentGatewayDetails", {paymentId})
@@ -335,7 +344,8 @@ function startInvoicePayment(p) {
     })
     // pending with nothing to look up and no page to go to: failed, not left to be resumed
     const after = one(P, {paymentId})
-    if (pending(after) && !after.paymentRefNum && !redirectOf(paymentId)) call("update#" + P, {paymentId, statusId: "PmntCancelled"})
+    if (pending(after) && !after.paymentRefNum && !redirectOf(paymentId) && !unknownOpen(paymentId))
+        call("update#" + P, {paymentId, statusId: "PmntCancelled"})
     return {attempt: attemptView(settle(paymentId)), resumed: false}
 }
 // An attempt's outcome, for its invoice's link or contact, or for the reference its gateway return carries (returnKey),

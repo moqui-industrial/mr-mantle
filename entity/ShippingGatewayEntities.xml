@@ -26,6 +26,14 @@ along with this software (see the LICENSE.md file). If not, see
             issued (or refunded) the label of a request reference, before any retry.</description></field>
         <field name="testMode" type="text-indicator"><description>Y: a test or sandbox gateway; its labels are not
             bought.</description></field>
+        <field name="systemMessageRemoteId" type="id"><description>The provider connection, as
+            PaymentGatewayConfig.systemMessageRemoteId: its sendUrl the API base of this environment (test or
+            production), its usageCode T or P, and its credentials in the remote's encrypted fields (password for an API
+            token, sharedSecret for the webhook signature). Never an unencrypted ShippingGatewayOption or seed
+            data.</description></field>
+        <relationship type="one" title="SystemMessageRemote" related="moqui.service.message.SystemMessageRemote"
+                short-alias="remote">
+            <key-map field-name="systemMessageRemoteId"/></relationship>
     </extend-entity>
     <entity entity-name="ShippingGatewayRequest" package="mantle.shipment.carrier" cache="never">
         <description>One request to a shipping gateway for a package of a shipment's route segment, recorded and committed

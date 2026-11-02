@@ -18,6 +18,19 @@ along with this software (see the LICENSE.md file). If not, see
             refund#SinglePayment call that got this response; a retry with the key answers this response.</description></field>
         <field name="refundPaymentId" type="id"><description>The refund Payment a refund response created or
             completed.</description></field>
+        <field name="idempotencyKey" type="text-short"><description>The key Mantle gave the gateway for this operation
+            (make#GatewayIdempotencyKey: the operation key bound to the payment, gateway, operation and amount), which
+            the adapter sends as the provider's idempotency key or a searchable reference and records here. A details
+            lookup after a lost answer looks the operation up by it.</description></field>
+        <field name="resultUnknown" type="text-indicator"><description>Y: the adapter cannot tell whether the provider
+            did the operation (the answer was lost after the request may have been sent). Neither approved nor declined;
+            the payment's next gateway mutation is refused until a details lookup resolves it
+            (outcomeResolvedDate).</description></field>
+        <field name="outcomeResolvedDate" type="date-time"><description>When a details lookup
+            (get#SinglePaymentGatewayDetails) told the outcome of an unknown response.</description></field>
+        <field name="outcomeFound" type="text-indicator"><description>The resolved outcome of an unknown response: Y the
+            provider did the operation, N it has none (a retry with the operation key sends it again, with the same
+            idempotency key).</description></field>
         <relationship type="one" title="Refund" related="mantle.account.payment.Payment" short-alias="refundPayment">
             <key-map field-name="refundPaymentId" related="paymentId"/>
         </relationship>
@@ -28,6 +41,15 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="PMT_GTWR_REFUND">
             <index-field name="refundPaymentId"/>
         </index>
+        <index name="PMT_GTWR_IDEMPOTENCY">
+            <index-field name="idempotencyKey"/>
+        </index>
+    </extend-entity>
+    <extend-entity entity-name="PaymentMethod" package="mantle.account.method">
+        <field name="gatewayCustomerId" type="text-short" enable-audit-log="update"><description>The provider's customer
+            (profile) reference that gatewayCimId, the reusable payment profile, belongs to at the gateway in
+            paymentGatewayConfigId. Kept on the method, not the Party, so two gateways' profiles of one party do not
+            collide; a new method of the same party and gateway reuses it.</description></field>
     </extend-entity>
     <view-entity entity-name="PaymentGatewayResponseFinance" package="mantle.account.method" cache="never">
         <description>Gateway responses with the parties of their payment, for organization and privacy conditions.</description>

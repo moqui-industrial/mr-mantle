@@ -120,8 +120,17 @@ along with this software (see the LICENSE.md file). If not, see
                 <description>Get return labels for the shipment INSTEAD of standard outbound labels; populate the return* fields on ShipmentPackageRouteSeg</description></parameter>
             <parameter name="requestReference"><description>The caller's durable reference of this request
                 (ShippingGatewayRequest): a gateway that keeps it answers a repeated request with the label it already
-                issued instead of buying another</description></parameter>
+                issued instead of buying another. An adapter sends it to the provider (an idempotency key, or metadata
+                its find#ShippingLabels can search by), since the gateway is asked by it after a lost answer.</description>
+            </parameter>
         </in-parameters>
+        <out-parameters>
+            <parameter name="pending" type="Boolean"><description>true: the provider accepted the purchase but has not
+                finished the label (an asynchronous transaction, such as Shippo's QUEUED); nothing is filled in yet. The
+                request stays without an answer (LABEL_PENDING) and the next request asks find#ShippingLabels, which
+                completes it, instead of buying again. A refusal throws its reason code (LABEL_REFUSED, ADDRESS_INVALID,
+                ...); a transport failure throws any other message and is a lost answer.</description></parameter>
+        </out-parameters>
     </service>
     <service verb="refund" noun="ShippingLabels" type="interface">
         <in-parameters>
@@ -132,6 +141,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestReference"><description>The caller's durable reference of this refund</description>
             </parameter>
         </in-parameters>
+        <out-parameters>
+            <parameter name="pending" type="Boolean"><description>true: the provider accepted the refund but has not
+                decided it (gatewayRefundStatus is left empty until it has); find#ShippingLabels answers refunded
+                later.</description></parameter>
+        </out-parameters>
     </service>
     <service verb="find" noun="ShippingLabels" type="interface">
         <description>Ask the gateway what it did for a request whose answer was lost (a timeout): whether it issued the
@@ -148,6 +162,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="found" type="Boolean"/>
             <parameter name="refunded" type="Boolean"/>
+            <parameter name="pending" type="Boolean"><description>true: the provider has the request but has not finished
+                the label or the refund yet; it is asked again later and nothing is bought.</description></parameter>
             <parameter name="trackingCode"/>
             <parameter name="gatewayLabelId"/>
         </out-parameters>
