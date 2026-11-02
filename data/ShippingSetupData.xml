@@ -22,4 +22,10 @@ along with this software (see the LICENSE.md file). If not, see
         (P13 review A2); off by default -->
     <mantle.party.PartySettingType partySettingTypeId="ShippingTestGatewayAllowed" defaultValue="N"
             description="Shipping test gateways may buy labels"/>
+    <!-- the driver of labels and refunds a gateway accepted and has not finished (Shippo's QUEUED; plan S1): each request
+        left Unknown with LABEL_PENDING is run again as its user, asking the gateway first and never buying again
+        (WarehouseTaskServices.finish#PendingLabelRequests). Paused by default; every 10 minutes when enabled. -->
+    <moqui.service.job.ServiceJob jobName="finish_PendingLabelRequests" description="Finish pending shipping labels"
+            serviceName="mantle.shipment.WarehouseTaskServices.finish#PendingLabelRequests" cronExpression="0 */10 * * * ?"
+            paused="Y" transactionTimeout="1800"/>
 </entity-facade-xml>

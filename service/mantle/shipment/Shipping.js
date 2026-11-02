@@ -32,7 +32,22 @@ const notOutgoing = ["ShpTpPurchase", "ShpTpSalesReturn", "ShpTpDrop"]
 const shippedElsewhere = {ShpTpTransfer: "ship#Transfer (Transfers)", ShpTpPurchaseReturn: "ship#SupplierReturn (Returns)"}
 const finalStatuses = ["ShipShipped", "ShipDelivered", "ShipCancelled", "ShipRejected"]
 // an answer a gateway gives for certain: the request failed and may be sent again; anything else is no answer
-const refusals = ["LABEL_REFUSED", "ADDRESS_INVALID", "WEIGHT_REQUIRED", "METHOD_UNAVAILABLE", "NO_PACKAGES", "NO_LABEL"]
+const refusals = [
+    "LABEL_REFUSED",
+    "ADDRESS_INVALID",
+    "WEIGHT_REQUIRED",
+    "METHOD_UNAVAILABLE",
+    "NO_PACKAGES",
+    "NO_LABEL",
+    // a gateway's refusals before it bought anything (S1 Shippo): its configuration, the parcel, a stale rate, a refund it
+    // turned down, a request it would not take now, rates it did not answer
+    "CONFIG_INVALID",
+    "PARCEL_INVALID",
+    "RATE_EXPIRED",
+    "REFUND_REFUSED",
+    "RATE_LIMITED",
+    "RATES_NO_ANSWER"
+]
 // a Requested row younger than this is a call still under way (another session's)
 const inFlightMs = 120000
 const kinds = {
@@ -467,7 +482,16 @@ function recordRequests(p) {
         if (unweighed.length) denied("WEIGHT_REQUIRED", "Weigh package " + unweighed.join(", ") + " before buying its label")
     }
     const plan = packages.map(packageRow =>
-        planPackage(p.kind, sh.shipmentId, segment, gateway, packageRow, p.operationKey, truthy(p.sendAgain))
+        planPackage(
+            p.kind,
+            sh.shipmentId,
+            segment,
+            gateway,
+            packageRow,
+            p.operationKey,
+            truthy(p.sendAgain),
+            truthy(p.lookupOnly)
+        )
     )
     return {
         kind: p.kind,
@@ -478,13 +502,15 @@ function recordRequests(p) {
         shippingGatewayConfigId: gateway.shippingGatewayConfigId,
         shipmentMethodEnumId: segment.shipmentMethodEnumId || null,
         statusId: status,
+        lookupOnly: truthy(p.lookupOnly),
         packages: plan
     }
 }
 // One package's place in a request: answered at once (its label is there, or for a refund is not; a call under way), the
 // earlier request that got no answer to ask about first ('ask'), or a new request row ('send'). Inside the recording
-// transaction, under the shipment's lock.
-function planPackage(kindName, shipmentId, segment, gateway, packageRow, operationKey, sendAgain = false) {
+// transaction, under the shipment's lock. lookupOnly (the pending-label driver, no person involved) only asks about a
+// request that got no answer: it makes no new request and sends nothing.
+function planPackage(kindName, shipmentId, segment, gateway, packageRow, operationKey, sendAgain = false, lookupOnly = false) {
     const kind = kinds[kindName]
     const routeSeg = routeSegOf(shipmentId, packageRow.shipmentPackageSeqId, segment.shipmentRouteSegmentSeqId)
     const item = {shipmentPackageSeqId: packageRow.shipmentPackageSeqId, requestId: null, mode: null, skipCode: null}
@@ -509,7 +535,7 @@ function planPackage(kindName, shipmentId, segment, gateway, packageRow, operati
         // the earlier request got no answer: the gateway is asked about it first; a gateway that cannot be asked is sent
         // the same request again only when a person says so (sendAgain, B1)
         const askable = !blank(gateway.findLabelServiceName)
-        if (!askable && !sendAgain) {
+        if (!askable && (!sendAgain || lookupOnly)) {
             if (last.statusId === "SgrqRequested")
                 call("update#" + REQUEST, {shippingGatewayRequestId: last.shippingGatewayRequestId, statusId: "SgrqUnknown"})
             item.requestId = last.shippingGatewayRequestId
@@ -529,6 +555,10 @@ function planPackage(kindName, shipmentId, segment, gateway, packageRow, operati
             mode: askable ? "ask" : "send",
             attemptCount: number(last.attemptCount) + 1
         })
+    }
+    if (lookupOnly) {
+        item.skipCode = "NOTHING_PENDING"
+        return item
     }
     // a refunded label is replaced: its fields leave the package before the new one is bought
     if (kindName === "label" && !blank(routeSeg.gatewayRefundStatus))
@@ -596,6 +626,7 @@ function sendOne(plan, item) {
             trackingCode: value("trackingCode"),
             gatewayLabelId: value("gatewayLabelId"),
             amount: kind.returnLabels ? routeSeg?.returnEstimatedAmount : (routeSeg?.actualAmount ?? routeSeg?.estimatedAmount),
+            amountUomId: value("gatewayAmountUomId"),
             reasonCode: null,
             resultMessage: asked ? "Found at the gateway after an earlier request got no answer" : null
         })
@@ -632,6 +663,14 @@ function sendOne(plan, item) {
                     resultMessage: "The gateway reports the label but did not give it"
                 })
                 return Object.assign(out, {state: "unknown", reasonCode: "FOUND_NOT_FILLED"})
+            }
+            // nobody is here to decide on buying again (the pending-label driver): the request stays without an answer
+            if (plan.lookupOnly && plan.kind !== "refund") {
+                settleRequest(item.requestId, "SgrqUnknown", {
+                    reasonCode: "NOT_FOUND",
+                    resultMessage: "The gateway has no record of the request; request the label again to buy it"
+                })
+                return Object.assign(out, {state: "unknown", reasonCode: "NOT_FOUND"})
             }
         } catch (error) {
             const message = String(error?.message || error).replace(/^(Error: )+/, "")
@@ -705,7 +744,8 @@ function gatewayRequest(p, kindName, operationType) {
         "shipmentMethodEnumId",
         "shippingGatewayConfigId",
         "returnLabels",
-        "sendAgain"
+        "sendAgain",
+        "lookupOnly"
     ])
     if (begun.previous) return begun.previous
     const plan = probe(T + "record#ShippingGatewayRequests", Object.assign({}, p, {kind: kindName})).plan
@@ -751,7 +791,12 @@ function claimRequest(p) {
     const row = find(REQUEST, {shippingGatewayRequestId: p.shippingGatewayRequestId}).forUpdate(true).one()
     if (!row || row.statusId !== "SgrqRequested" || row.sentDate != null || number(row.attemptCount) !== number(p.attemptCount))
         return {claimed: false}
-    call("update#" + REQUEST, {shippingGatewayRequestId: row.shippingGatewayRequestId, sentDate: ec.user.nowTimestamp})
+    // firstSentDate stays the first attempt's: a lookup's grace and search window and the driver's age limit run from it
+    call("update#" + REQUEST, {
+        shippingGatewayRequestId: row.shippingGatewayRequestId,
+        sentDate: ec.user.nowTimestamp,
+        firstSentDate: row.firstSentDate ?? ec.user.nowTimestamp
+    })
     return {claimed: true}
 }
 function finishRequests(p) {
@@ -1136,7 +1181,119 @@ function shipReadiness(p) {
     }
 }
 
+// ===== pending requests (finish#PendingLabelRequests) =====
+// The driver of requests left without an answer (S1): each label, return label or refund request Unknown with one of the
+// reasons (LABEL_PENDING, CARRIER_TIMEOUT, CARRIER_NO_ANSWER by default; for one request named, any reason) is run again
+// through request#PackageLabels or refund#PackageLabels as the user who made it, lookup only: the gateway is asked
+// (find#ShippingLabels), nothing is bought, and a label the gateway has no record of ends Unknown with NOT_FOUND for a
+// person to request again. It runs only outside a web request (the ServiceJob and a webhook's consume, on a worker
+// thread), as it signs in as that user and out again; each request on its own: one that fails is named and the others
+// go on.
+const pendingTypes = {
+    SgrLabel: "request#PackageLabels",
+    SgrReturnLabel: "request#PackageLabels",
+    SgrRefund: "refund#PackageLabels"
+}
+const pendingReasons = ["LABEL_PENDING", "CARRIER_TIMEOUT", "CARRIER_NO_ANSWER"]
+function finishPending(p) {
+    if (ec.web?.request)
+        denied("NOT_ALLOWED", "Pending shipping requests are finished by the job or a gateway's webhook, not a web request")
+    const now = lib.ms(ec.user.nowTimestamp)
+    let query = find(REQUEST, {statusId: "SgrqUnknown"}).condition("requestTypeEnumId", "in", Object.keys(pendingTypes))
+    if (!blank(p.shippingGatewayRequestId))
+        query = query.condition("shippingGatewayRequestId", "equals", p.shippingGatewayRequestId)
+    else {
+        if (!truthy(p.anyReason)) {
+            const reasons = Array.from(p.reasonCodes || [])
+            query = query.condition("reasonCode", "in", reasons.length ? reasons : pendingReasons)
+        }
+        const minAge = p.minAgeSeconds == null || p.minAgeSeconds === "" ? 60 : number(p.minAgeSeconds)
+        const maxAgeDays = p.maxAgeDays == null || p.maxAgeDays === "" ? 30 : number(p.maxAgeDays)
+        // the age from the first attempt, which later asks do not move; a request never sent has nothing to finish
+        query = query
+            .condition("responseDate", "less-equals", new Date(now - minAge * 1000))
+            .condition("firstSentDate", "greater-equals", new Date(now - maxAgeDays * 86400000))
+        if (!blank(p.shippingGatewayConfigId))
+            query = query.condition("shippingGatewayConfigId", "equals", p.shippingGatewayConfigId)
+    }
+    const requests = Array.from(
+        query
+            .orderBy("responseDate")
+            .limit(number(p.limit) || 100)
+            .list()
+    )
+    const results = []
+    for (const request of requests) {
+        try {
+            results.push(finishOne(request))
+        } catch (error) {
+            const message = String(error?.message || error).replace(/^(Error: )+/, "")
+            ec.logger.error("Pending shipping gateway request " + request.shippingGatewayRequestId + ": " + message)
+            results.push({
+                shippingGatewayRequestId: request.shippingGatewayRequestId,
+                ok: false,
+                reasonCode: reasonOf(message),
+                message
+            })
+        }
+    }
+    return {results, okCount: results.filter(row => row.ok).length, failedCount: results.filter(row => !row.ok).length}
+}
+// One request run again as its own user: refused (USER_UNAVAILABLE) unless that user signs in (an account disabled or
+// gone does not), so it never runs with the caller's own permissions.
+function finishOne(request) {
+    const account = request.userId ? one("moqui.security.UserAccount", {userId: request.userId}) : null
+    if (!account?.username)
+        denied("USER_UNAVAILABLE", "Request " + request.shippingGatewayRequestId + " has no user to run it as")
+    const previous = ec.user.username
+    ec.message.pushErrors()
+    try {
+        const signedIn = ec.user.internalLoginUser(account.username) === true && ec.user.userId === request.userId
+        if (!signedIn)
+            denied(
+                "USER_UNAVAILABLE",
+                "User " + request.userId + " of request " + request.shippingGatewayRequestId + " cannot sign in"
+            )
+        const parameters = {
+            // a key of its own per attempt: the request's original operation stays the user's
+            operationKey: "pending-" + request.shippingGatewayRequestId + "-" + (number(request.attemptCount) + 1),
+            shipmentId: request.shipmentId,
+            shipmentPackageSeqId: request.shipmentPackageSeqId,
+            shipmentRouteSegmentSeqId: request.shipmentRouteSegmentSeqId,
+            lookupOnly: "Y"
+        }
+        if (request.requestTypeEnumId === "SgrReturnLabel") parameters.returnLabels = "Y"
+        const out =
+            ec.service
+                .sync()
+                .name(T + pendingTypes[request.requestTypeEnumId])
+                .parameters(parameters)
+                .disableAuthz()
+                .call() || {}
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        const item = Array.from(out.result?.packages || []).find(row => row.shipmentPackageSeqId === request.shipmentPackageSeqId)
+        const after = one(REQUEST, {shippingGatewayRequestId: request.shippingGatewayRequestId})
+        return {
+            shippingGatewayRequestId: request.shippingGatewayRequestId,
+            ok: true,
+            state: item?.state || null,
+            reasonCode: item?.reasonCode || null,
+            statusId: after?.statusId || null
+        }
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        // back to the caller (the job's or the consume's own user, or none); never used in a web request
+        if (ec.user.username !== previous) {
+            ec.user.logoutUser()
+            if (previous && !ec.user.internalLoginUser(previous))
+                ec.logger.error("Pending shipping requests: could not sign " + previous + " in again")
+        }
+    }
+}
+
 const operations = {
+    finishPending,
     rates,
     recordRequests,
     claimRequest,

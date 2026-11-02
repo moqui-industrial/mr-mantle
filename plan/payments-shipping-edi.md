@@ -912,3 +912,216 @@ above (decline HTTP status, `action` values and the status after a capture, the 
 refund authorization brands, the level 3 balancing rule, token lifetime). The production remote (`usageCode` P,
 `https://api.paytrace.com`) entered by an administrator; enable `retry_PayTraceEnhancedData`; PCI scope review of the
 page serving Protect.js. Passing these specs is not PayTrace certification.
+
+### S1 — Shippo (implementation record, 2026-11-02)
+
+The Shippo shipping gateway on the Phase 0 shipping contract and the P1/P2 patterns. Nothing is committed yet; the
+record names the artifacts per repository.
+
+**Source and API baseline.** Ported from [mantle-shippo](https://github.com/moqui/mantle-shippo/tree/2356f07) 1.2.1,
+commit `2356f07` (CC0 with the patent grant, written by David E. Jones and Michael Jones; the new files keep the
+dedication and name them): the address map (name and company from attnName/toName or the party, street1 with the unit,
+ISO alpha-2 state and country, ZIP+4, the address's or the party's shipping phone and email, the shipper's phone for a
+destination with none), the parcel (box dimensions and their unit, the gateway's box template override, the package's
+weight else the box's default), carrier accounts (`ShippingGatewayCarrier.gatewayAccountId`) and service levels
+(`ShippingGatewayMethod` over `CarrierShipmentMethod.gatewayServiceCode`), one Shippo shipment per package with the
+cheapest rate of the service level, the store's label name and company, the return address (`address_return`, and
+`is_return` from it for a return label), `reference_1`/`reference_2`, signature confirmation, third-party billing,
+insurance and its estimate, and the tracking status map. Not ported: the `SgoApiToken` option (the token is the remote's
+encrypted password), the hard-coded `api.goshippo.com` host, the FedEx-only rate path (every label is now bought by a
+fresh rate), the anonymous `/rest/s1/shippo/track` endpoint and its full-context logging, request and response logging,
+the `'USD'` insurance default, the reuse of `PostalAddress.shipGatewayAddressId` as the shipment's address (not scoped to
+an account or mode) and the rewrite of a validated address. Wire protocol: the Shippo REST API with
+`Shippo-API-Version: 2018-02-08` on every request and `Authorization: ShippoToken <token>`: `POST /shipments`
+(`async: false`, read again once with `GET /shipments/{id}` while QUEUED/WAITING), `POST /transactions` (`rate`,
+`label_file_type`, `metadata`, `async: false`), `GET /transactions/{id}`, `GET /transactions?rate=` and
+`?object_created_gte=` (UTC, no offset; `results` 100, `next` followed up to five pages and only on the configured
+base), `GET /rates/{id}`, `POST /refunds` (`async: false`) and `GET /refunds/{id}`, `POST /addresses` (`validate: true`).
+References read 2026-11-02: the [API reference](https://docs.goshippo.com/api-reference/overview) (transactions,
+refunds, tracking status, shipments), [versioning](https://docs.goshippo.com/api-concepts/api-versioning) (the header
+sets the API and webhook behavior; the account default otherwise), [asynchronous calls](https://docs.goshippo.com/api-concepts/asynchronus-api-call),
+[webhooks](https://docs.goshippo.com/docs/tracking/webhooks) (`event`, `test`, `data`; no event id; two retries on 408,
+429 or 5xx; a 2xx within three seconds) and [webhook security](https://docs.goshippo.com/tracking/webhook-security).
+The versioning page carried "agent instructions" naming MCP servers; they were not followed.
+
+**Changed artifacts.**
+
+- mr-mantle, new: `service/mantle/shipment/carrier/Shippo.js` and `ShippoServices.xml` (the eight carrier interfaces and
+  `receive#`/`consume#Webhook`), `data/ShippoSetupData.xml` (seed: the options group and SystemMessageType
+  `ShippoWebhook`), `data/ShippoDemoData.xml` (demo: gateway `SHIPPO_DEMO` in test mode, remote `ShippoSandbox`, USPS,
+  UPS, FedEx and DHL Express with empty carrier accounts, the USPS ground override `usps_ground_advantage`, three USPS
+  flat-rate box templates; no token, secret or account id), `docs/Shippo.md`, `test/ShippoGateway.spec.js`.
+- mr-mantle, changed: `entity/ShippingGatewayEntities.xml` (seed `ShGtwyShippo`, `SgoLookupGraceSeconds`; on
+  ShipmentPackageRouteSeg `gatewayShipmentId`, `gatewayAmountUomId`, `labelFileType` and their `return*` fields),
+  `service/mantle/shipment/Shipping.js` (`finishPending`; the refusals `CONFIG_INVALID`, `PARCEL_INVALID`,
+  `RATE_EXPIRED`, `REFUND_REFUSED`, `RATE_LIMITED`, `RATES_NO_ANSWER`; a succeeded request's `amountUomId`),
+  `WarehouseTaskServices.xml` (`finish#PendingLabelRequests`), `CarrierServices.xml` (`remove#ShipmentLabelInfo` and
+  `remove#ShipmentReturnLabelInfo` clear the new fields), `data/ShippingSetupData.xml` (the paused ServiceJob
+  `finish_PendingLabelRequests`, every ten minutes).
+- mr-moqui: `crates/moqui-core/src/service/system_sync/message.rs` (`SmatUrlToken`: exactly one query parameter,
+  `authHeaderName` else `token`, equal to `sharedSecret` in constant time; refused with an empty secret; and, after the
+  review, a timestamped HMAC's replay key given back when the message is not kept) and `tests.rs` (their tests), `runtime/base-component/framework/entity/ServiceEntities.xml` (the enumeration),
+  `docs/security/Attack-Surface.md` (the receive table).
+
+**Design.**
+
+- *Webhook authentication.* Shippo's HMAC (`Shippo-Auth-Signature: t=<seconds>,v1=<hex>`, lower-case hex HMAC-SHA256 of
+  `<t>.<raw body>` with the shared secret) is exactly `SmatHmacSha256Timestamp`, which adds the five minute window and
+  replay cache Shippo's own script leaves out; no new HMAC scheme. Because HMAC is set up through Shippo's team (up to ten
+  business days) and not every account has it, the self-serve URL token got the small generic scheme `SmatUrlToken`.
+  IP allowlisting is a network-edge setting, not checked by Mantle. `receive#Webhook` refuses a remote that has neither
+  scheme or no secret (`WEBHOOK_UNAUTHENTICATED`), so the endpoint cannot be left open; polling works without webhooks.
+- *Receipt.* Shippo sends no event id: each event is kept once per remote and body (`messageId` `shippo-` and the
+  conf's single-use hash of the body, `store#ReceivedSystemMessage`). `consume#Webhook` finds the packages among the
+  shipments of the Shippo gateways on the message's remote (the transaction id, the rate, the request id in the
+  metadata, else the tracking number), finishes a package's open request through `finish#PendingLabelRequests` (any
+  reason, so a lost purchase the event proves is resolved too) and otherwise tracks the package from its transaction.
+  The payload is never applied: a `track_updated` event of the status read adds only its substatus and date. An event
+  whose `test` flag differs from the remote's `usageCode` is ignored. One package that fails is logged and the message
+  fails, to be retried.
+- *Identity.* Shippo has no idempotency key for transactions (the transaction reference lists none; only the
+  Automations label endpoint takes `Idempotency-Key`). The request id is sent in the transaction's (and shipment's)
+  `metadata` with the package; the rate is recorded on the package before the purchase in its own transaction. A lost
+  purchase (timeout, reset, 408, 5xx, unreadable answer) throws `CARRIER_TIMEOUT`, which Shipping.js keeps Unknown; the
+  lookup searches by the recorded rate, then by creation date from 15 minutes before the request was first sent,
+  matching the metadata. Not found within `SgoLookupGraceSeconds` (300) of the first attempt (`firstSentDate`, new on
+  ShippingGatewayRequest, set at the first claim and never moved by later asks) is pending; after it, found false, and a
+  person's next request buys (the driver never does). A send that finds the
+  package RATED or QUEUED at a rate with a transaction takes that transaction instead of buying (also for `sendAgain`).
+  A rate request that gets no answer bought nothing: `RATES_NO_ANSWER`, a refusal.
+- *Outcomes.* SUCCESS fills the label in its own transaction (Shipping.js reads it after); QUEUED/WAITING is pending
+  (`gatewayStatus` QUEUED); ERROR is `ADDRESS_INVALID` when Shippo's messages are about the address, `RATE_EXPIRED` for a
+  stale rate, else `LABEL_REFUSED`; 400 the same codes, 429 `RATE_LIMITED`. A service with no rate is
+  `METHOD_UNAVAILABLE`, a missing carrier account `CONFIG_INVALID`, a parcel with no weight, dimensions or unit
+  `PARCEL_INVALID`. Several packages in one call (the direct `CarrierServices` path) each run on their own, the first
+  refusal thrown after the others; Shipping.js calls one package at a time.
+- *Charge and currency.* The bought rate's `amount` is the estimated, base and actual amount and its `currency` is
+  `gatewayAmountUomId` (and the request's `amountUomId`); a currency other than the segment's or shipment's cost currency
+  is noted (`CURRENCY_DIFFERS`) on the package, not converted. An order rate in another currency than the order's is
+  refused (`CURRENCY_MISMATCH`). Insurance is stated in the shipment's cost currency, else left out with a warning.
+- *Label files.* The label is downloaded from `label_url` with no Shippo credentials (the token goes only to the
+  remote's base, also when following `next`); a link that fails is asked for again from the transaction; a label not
+  downloaded keeps its link and `LABEL_IMAGE_MISSING`, and tracking downloads it later.
+- *Pending driver.* `finish#PendingLabelRequests` (Shipping.js `finishPending`) runs each request Unknown with
+  `LABEL_PENDING`, `CARRIER_TIMEOUT` or `CARRIER_NO_ANSWER` (answered more than `minAgeSeconds` ago, first sent within
+  `maxAgeDays`) again through `request#`/`refund#PackageLabels` with the new `lookupOnly`: only a request without an
+  answer is asked about, no request is made and nothing is sent, and a label the gateway has no record of ends Unknown
+  with `NOT_FOUND` (not one of the job's reasons) for a person to request again. It runs as the request's own user
+  (`internalLoginUser`; `USER_UNAVAILABLE` unless that sign-in succeeds and is that user), with an operation key per
+  attempt (`pending-<request>-<attempt>`), so the user's permission and facility scope apply. The framework's `as_user`
+  (a context of its own) is Rust-only, so the run signs in and out on the caller's context: the service refuses a web
+  request (`NOT_ALLOWED`) and is meant for the job and the webhook's consume, both on worker threads with no session.
+  The job is paused by default, as the payment polls are.
+- *Rates.* `get#ShippingRatesBulk` (Warehouse's RateOptions), `get#OrderShippingRate` and `get#ShippingRate`: one
+  shipment per package, a method kept only when every package has a rate for it in one currency (the source summed
+  partial rates).
+- *Addresses.* `validate#ShippingPostalAddress` sets the trust level (valid, invalid, incomplete), the validation
+  messages and `shipGatewayAddressId`; a provider failure is a warning, so order entry does not depend on Shippo.
+
+**Not verifiable from public documentation** (built on the documented shape, to confirm in test mode):
+
+- The 400 error body's shape (the schema is an open object); refusal text is read from it and from `messages`.
+- Whether `async: false` can still answer QUEUED/WAITING (handled), and how long a synchronous purchase may take
+  (the client timeout is 40 seconds; a longer one is a lost answer, looked up).
+- Rate expiry and its message (the refusal code comes from the text), and whether a refund of a refunded label is a
+  400 (the label's transaction status is read then).
+- Whether a parcel with only a `template` needs dimensions too; the transaction list's ordering and how soon a new
+  transaction is listed (hence the grace); whether Shippo's webhook retries are signed again with a new timestamp (a
+  retry older than five minutes with the first signature would be refused and need the poll).
+- Service level tokens of the demo data (`usps_ground_advantage` replaces the retired `usps_first`).
+
+**Fast checks run.** `cargo test -p moqui-core --lib system_sync` (11 passed, the new
+`a_url_token_receive_needs_the_one_query_token_equal_to_the_shared_secret` included); `./moq build`; `./moq test mr-mantle
+--spec ShippoGateway` (9 features passed, each 0.03–0.34 s): address validation (valid with Shippo's id, rejected with
+its message; the version header and the redacted token); a two-package rate with a service one package lacks left out,
+and an order part's rate; two labels bought with every id, the label file, charge and currency and the metadata,
+tracked to transit by the poll and to delivered by a `track_updated` webhook kept once; one package's refused label
+(`ADDRESS_INVALID`) beside the other's label (PARTIAL); a queued label retrieved by the job with an expired label link
+asked again, one purchase; a waiting label finished by the transaction webhook, the duplicate delivery kept once, a
+`SmatNone` remote refused and an event of the other mode ignored; a lost purchase found by its rate and metadata (one
+purchase) and one not listed yet pending within the grace; a queued refund finished by the job and an immediate one; no
+token or secret in a package, request or message. `./moq test mr-mantle --spec
+ShippoGateway,CarrierServices,WarehouseShipping,WarehousePacking,ShipmentReturnMisc,WarehouseReturns,ShipmentPick` (10
+specs with their dependencies, 97 features passed); `./moq test mr-mantle` (157 specs, 1430 features passed, no data
+file skipped, no request refused by the closed test run). `cargo test -p moqui-core` (1303 + 4 + 12 passed, 3 + 2
+ignored; two earlier runs under load each failed one unrelated timing-sensitive test, `chat_tests` and
+`load_feed_tests`, which pass alone and in the third run); `cargo clippy -p moqui-core --all-targets -- -D warnings`
+(clean). `moqui lint` of `ShippoServices.xml`, `WarehouseTaskServices.xml` and `CarrierServices.xml`: clean. Prettier (with
+`--ignore-path=`) on `Shippo.js`, `Shipping.js` and the spec; `xmllint --format` with a canonical comparison on the new
+XML files. No slow test was run.
+
+**Known limits.**
+
+- No customs declarations, manifests, pickups, batches or multi-piece shipments (one Shippo shipment per package); these
+  are the plan's extensions.
+- No idempotency at Shippo: two Mantle requests with different references for one package (a person's `sendAgain` after
+  a failed lookup) can buy twice; the rate guard catches the common case only.
+- The lookup's date search covers five pages of 100 transactions from 15 minutes before the request; a busier account
+  needs the rate search (always tried first) to find it.
+- The dedup key is a hash of the body, so a delivery whose body differs (a re-sent event with a new `object_updated`)
+  is a new message; consuming converges by lookup, so it repeats no effect.
+- The URL token is in the URL, so it can reach a proxy's access log; HMAC is preferred where Shippo enables it.
+- Webhook bodies are kept as SystemMessages (addresses and tracking); their retention is the deployment's SystemMessage
+  schedule (docs/Shippo.md).
+- Tracking reads the transaction's status, not the Track object (`GET /tracks/{carrier}/{number}` needs Shippo's carrier
+  token, which Mantle does not keep); substatus and details come only from a matching webhook.
+- A validated address is not rewritten with Shippo's corrections (the source cloned it); only its trust level and message
+  change.
+- The pending-label job is paused by default; a request whose user cannot sign in or lost the permission stays without
+  an answer and is named in the job's result each run until `maxAgeDays`.
+- The driver's web refusal reads `ec.web.request`: a script calling it on a thread that holds a web request is refused,
+  others are trusted to be the job or the consume (the service is `allow-remote="false"`).
+
+**Review fixes (after an independent review, 2026-11-02).** All must-fix and should-fix findings were taken:
+
+1. The lookup's grace and date window, and the driver's `maxAgeDays`, run from the new `firstSentDate` (the first claim),
+   not from `requestDate`/`sentDate`, which every ask moved: a lost purchase Shippo never made no longer stays pending
+   forever. Spec: a lost purchase past a grace of 0 (`SgoLookupGraceSeconds`), its `firstSentDate` unchanged by the asks.
+2. The webhook consume finds a package's gateway as the label flow does: the gateway of its latest label, return label or
+   refund request, else Shipping.js `gatewayOf` (the store's ProductStoreShippingGateway first), not the segment's field
+   alone. Spec: a store-bound shipment whose segment names no gateway is tracked by its webhook.
+3. `finishOne` refuses (`USER_UNAVAILABLE`) unless `internalLoginUser` succeeds and the user is the request's (a disabled
+   account no longer runs as the caller), inside its own error frame; the run restores the caller's user. Spec: a disabled
+   user's request is left alone and the caller stays signed in.
+4. The driver and the webhook are lookup only (`lookupOnly`): no purchase without a person; not found is `NOT_FOUND`.
+5. `finish#PendingLabelRequests` refuses a web request (`NOT_ALLOWED`); with `allow-remote="false"` that leaves the job and
+   the consume.
+6. Only `ERROR` is a refusal; another status of a 2xx transaction answer is `CARRIER_NO_ANSWER`, looked up.
+7. `remove#ShipmentLabelInfo` also clears the charge, insurance, label date, substatus and estimates, and both removes the
+   return equivalents (no caller relies on them: Shipping.js replaces a refunded label, Marble's screens remove one).
+8. Every spec feature makes its own shipments (the refund and secrets features no longer use earlier features' state;
+   the job features run on gateways of their own); each passes alone with `--feature`.
+9. `SmatUrlToken`'s parameter is `authHeaderName` (else `token`): the demo comment, docs/Shippo.md and Attack-Surface.md
+   say to set it to `token` (or clear it) and to use a URL-safe token.
+10. An order rate in another currency than the order's is refused (`CURRENCY_MISMATCH`) whether or not an item is made.
+11. The driver's default reasons are `LABEL_PENDING`, `CARRIER_TIMEOUT` and `CARRIER_NO_ANSWER`.
+12. The direct several-package path throws a lost answer before a refusal, and `LABEL_PENDING` when a package is pending
+   beside a failure (labels and refunds).
+13. Framework: a timestamped HMAC delivery whose receive fails gives its replay key back (`message.rs`), so the
+   provider's retry is taken; Rust test
+   `a_timestamp_hmac_message_not_kept_gives_its_replay_key_back_so_the_retry_is_taken` (a Shippo-shaped
+   `Shippo-Auth-Signature`).
+14. A lookup whose `GET /rates` fails keeps the recorded charge and currency (the amounts are written only when the rate
+   was read); insurance values are untouched there.
+15. The insurance estimate is rounded to its currency (`lib.money`).
+16. `object_created_gte` is sent with `Z`.
+17. `ShippoServices.xml` lost the runs of spaces that `xmllint --format` had left in the `from` attributes.
+18. An event with no boolean `test` flag is consumed (authenticated, and consuming only reads the account's own state);
+   documented, with the retention note.
+
+Checks after the fixes: `cargo test -p moqui-core --lib system_sync` (12 passed); `cargo fmt -p moqui-core --check` shows
+nothing in `system_sync` (P1's two leftover hunks in `tests.rs` fixed); `cargo clippy -p moqui-core --all-targets -- -D
+warnings` (clean); `./moq test mr-mantle --spec ShippoGateway` (12 features passed, each under 0.35 s; the refund, secrets
+and grace features also pass alone with `--feature`); `./moq test mr-mantle --spec
+ShippoGateway,CarrierServices,WarehouseShipping,WarehousePacking,ShipmentReturnMisc,WarehouseReturns,ShipmentPick` (10
+specs, 100 features passed); `./moq test mr-mantle` (157 specs, 1433 features passed, no data file skipped); `cargo test
+-p moqui-core` (1304 + 4 + 12 passed, 5 ignored); `moqui lint` of the three service files and Prettier (with
+`--ignore-path=`): clean. No slow test was run.
+
+**Deployment gate (go-live).** A Shippo account with production capability (billing set up) and the carriers' approval
+on Shippo for each carrier account used (UPS, FedEx and others need the shipper's own account connected and approved;
+USPS needs its terms accepted); the live token on a production remote (`usageCode` P) entered by an administrator and
+the gateway's `testMode` N; the carrier accounts' `object_id`s on `ShippingGatewayCarrier`; the webhook pointed at the
+endpoint with HMAC enabled by Shippo (or a URL token) and one real delivery of each event verified; a test-mode run of
+rate, label, return label, print, track, refund and a lost answer looked up, checking the points above; enable
+`finish_PendingLabelRequests`. Passing these specs is not carrier certification.

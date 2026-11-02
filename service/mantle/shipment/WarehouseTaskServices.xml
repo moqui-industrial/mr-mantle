@@ -3001,6 +3001,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sendAgain"><description>Y: a person sends again a request that got no answer from a gateway that
                 cannot be asked what it did (no find#ShippingLabels); without it such a package answers
                 SEND_AGAIN_REQUIRED</description></parameter>
+            <parameter name="lookupOnly"><description>Y (finish#PendingLabelRequests): only ask the gateway about a request that
+                got no answer; no new request, nothing sent or bought</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (LABELED, PARTIAL, FAILED, PENDING), shipmentId,
@@ -3027,6 +3029,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>
             <parameter name="shipmentRouteSegmentSeqId"/>
+            <parameter name="lookupOnly"><description>Y (finish#PendingLabelRequests): only ask the gateway about a request that
+                got no answer; no new request, nothing sent or bought</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (REFUNDED, PARTIAL, FAILED, PENDING), shipmentId,
@@ -3038,6 +3042,40 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('refundLabels', context)"/>
         </actions>
     </service>
+    <service verb="finish" noun="PendingLabelRequests" allow-remote="false" transaction="ignore">
+        <description>The driver of label, return label and refund requests left without an answer (ServiceJob
+            finish_PendingLabelRequests, and a gateway's webhook for one request): each ShippingGatewayRequest Unknown with
+            one of reasonCodes (LABEL_PENDING, CARRIER_TIMEOUT and CARRIER_NO_ANSWER by default) whose answer is older than
+            minAgeSeconds and whose first attempt (firstSentDate) is younger than maxAgeDays is run again through
+            request#PackageLabels or refund#PackageLabels with lookupOnly, as the user who made it (USER_UNAVAILABLE when
+            that user cannot sign in), under an operation key of its own: the gateway is asked (find#ShippingLabels),
+            nothing is bought, and a label it has no record of ends Unknown with NOT_FOUND for a person to request again.
+            The user's permission and facility checks apply. With shippingGatewayRequestId only that request, whatever its
+            reason. Only outside a web request (the job, a webhook's consume): it signs in as each request's user and out
+            again, so a web caller is refused (NOT_ALLOWED). Each request on its own: one that fails is named and the
+            others go on.</description>
+        <in-parameters>
+            <parameter name="shippingGatewayRequestId"/>
+            <parameter name="shippingGatewayConfigId"/>
+            <parameter name="reasonCodes" type="List"><description>Default LABEL_PENDING, CARRIER_TIMEOUT,
+                CARRIER_NO_ANSWER</description></parameter>
+            <parameter name="anyReason" type="Boolean" default="false"/>
+            <parameter name="minAgeSeconds" type="Integer" default="60"/>
+            <parameter name="maxAgeDays" type="Integer" default="30"/>
+            <parameter name="limit" type="Integer" default="100"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>shippingGatewayRequestId, ok, state, reasonCode, statusId
+                (the request's after the run), message</description></parameter>
+            <parameter name="okCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js')
+                    .execute('finishPending', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
     <service verb="record" noun="ShippingGatewayRequests" allow-remote="false">
         <description>Internal to request#PackageLabels and refund#PackageLabels, in its own transaction: the shipment
             locked, the checks, the carrier and method chosen, and a ShippingGatewayRequest per package that needs the
@@ -3045,6 +3083,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="kind" required="true"><description>label, returnLabel or refund</description></parameter>
             <parameter name="sendAgain"/>
+            <parameter name="lookupOnly"/>
             <parameter name="operationKey"/>
             <parameter name="shipmentId" required="true"/>
             <parameter name="shipmentPackageSeqId"/>

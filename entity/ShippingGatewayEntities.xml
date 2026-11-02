@@ -34,6 +34,12 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="SystemMessageRemote" related="moqui.service.message.SystemMessageRemote"
                 short-alias="remote">
             <key-map field-name="systemMessageRemoteId"/></relationship>
+        <seed-data>
+            <!-- the Shippo gateway (ShippoServices.xml, plan S1) and its lookup grace option -->
+            <moqui.basic.Enumeration description="Shippo REST API" enumId="ShGtwyShippo" enumTypeId="ShippingGatewayType"/>
+            <moqui.basic.Enumeration description="Lookup Grace Seconds" enumId="SgoLookupGraceSeconds"
+                    enumTypeId="ShippingGatewayOption"/>
+        </seed-data>
     </extend-entity>
     <entity entity-name="ShippingGatewayRequest" package="mantle.shipment.carrier" cache="never">
         <description>One request to a shipping gateway for a package of a shipment's route segment, recorded and committed
@@ -58,6 +64,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="sentDate" type="date-time"><description>When the gateway was called for this attempt; set when the
             row is claimed for sending (claim#ShippingGatewayRequest), so a parallel retry cannot send it too.</description>
         </field>
+        <field name="firstSentDate" type="date-time"><description>When the gateway was first called for this request; later
+            attempts and asks do not move it, so a lookup's grace and search window and the pending-label driver's age
+            limit run from it.</description></field>
         <field name="responseDate" type="date-time"/>
         <field name="attemptCount" type="number-integer"><description>How many times the gateway was called or asked for
             this request.</description></field>
@@ -121,6 +130,15 @@ along with this software (see the LICENSE.md file). If not, see
             hand.</description></field>
         <field name="deliveryRecordedByUserId" type="id"/>
         <field name="deliveryRecordedDate" type="date-time"/>
+        <field name="gatewayShipmentId" type="text-short"><description>The gateway's shipment of the label (Shippo's
+            shipment object_id, whose rates gatewayRateId is one of).</description></field>
+        <field name="gatewayAmountUomId" type="id"><description>The currency of the label's charge (estimatedAmount,
+            baseAmount, actualAmount) as the gateway gave it.</description></field>
+        <field name="labelFileType" type="text-short"><description>The label's file format as the gateway gave it
+            (Shippo's label_file_type: PDF_4x6, ZPLII, ...).</description></field>
+        <field name="returnGatewayShipmentId" type="text-short"/>
+        <field name="returnGatewayAmountUomId" type="id"/>
+        <field name="returnLabelFileType" type="text-short"/>
     </extend-entity>
     <extend-entity entity-name="FacilityPrinter" package="mantle.facility">
         <field name="copies" type="number-integer"><description>The copies a document of this purpose prints here;

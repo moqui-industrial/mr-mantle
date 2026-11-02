@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A Shippo test-mode gateway (docs/Shippo.md), with no credentials: enter the Shippo test API token as the password of
+    the remote ShippoSandbox, and the webhook secret as its sharedSecret (Shippo's HMAC secret with
+    SmatHmacSha256Timestamp, or a self-generated URL token with SmatUrlToken), in the System Message Remote screen or a
+    deployment's own data file, never here. For SmatUrlToken also set authHeaderName to token (the query parameter's name;
+    Shippo-Auth-Signature would refuse every delivery) and use a URL-safe token (letters, digits, - and _: a + decodes to a
+    space). Fill each carrier's gatewayAccountId with the object_id of its Shippo carrier
+    account (GET /carrier_accounts with the token). A test gateway buys labels only for an organization whose
+    ShippingTestGatewayAllowed party setting is Y; bind the gateway to a store's carrier (ProductStoreShippingGateway) or a
+    route segment, then request, track, refund and print labels through the Warehouse shipping flow. For production use
+    another remote with the live token, usageCode P, and a gateway with testMode N. -->
+<entity-facade-xml type="demo">
+    <!-- Shippo parcel templates (see Shippo's parcel templates) as box types, from mantle-shippo's demo data -->
+    <mantle.shipment.ShipmentBoxType shipmentBoxTypeId="USPS_SmFlat" description="USPS Small Flat Rate Box" dimensionUomId="LEN_in" boxLength="8.69" boxWidth="5.44" boxHeight="1.75" gatewayBoxId="USPS_SmallFlatRateBox"/>
+    <mantle.shipment.ShipmentBoxType shipmentBoxTypeId="USPS_MdFlat1" description="USPS Medium Flat Rate Box 1" dimensionUomId="LEN_in" boxLength="11.25" boxWidth="8.75" boxHeight="6" gatewayBoxId="USPS_MediumFlatRateBox1"/>
+    <mantle.shipment.ShipmentBoxType shipmentBoxTypeId="USPS_LgFlat" description="USPS Large Flat Rate Box" dimensionUomId="LEN_in" boxLength="12.25" boxWidth="12.25" boxHeight="6" gatewayBoxId="USPS_LargeFlatRateBox"/>
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="ShippoSandbox" description="Shippo (test token)" sendUrl="https://api.goshippo.com" usageCode="T" messageAuthEnumId="SmatHmacSha256Timestamp" authHeaderName="Shippo-Auth-Signature"/>
+    <mantle.shipment.carrier.ShippingGatewayConfig shippingGatewayConfigId="SHIPPO_DEMO" shippingGatewayTypeEnumId="ShGtwyShippo" description="Shippo (test mode)" testMode="Y" systemMessageRemoteId="ShippoSandbox" getOrderRateServiceName="mantle.shipment.carrier.ShippoServices.get#OrderShippingRate" getShippingRatesBulkName="mantle.shipment.carrier.ShippoServices.get#ShippingRatesBulk" getRateServiceName="mantle.shipment.carrier.ShippoServices.get#ShippingRate" requestLabelsServiceName="mantle.shipment.carrier.ShippoServices.request#ShippingLabels" findLabelServiceName="mantle.shipment.carrier.ShippoServices.find#ShippingLabels" refundLabelsServiceName="mantle.shipment.carrier.ShippoServices.refund#ShippingLabels" trackLabelsServiceName="mantle.shipment.carrier.ShippoServices.track#ShippingLabels" validateAddressServiceName="mantle.shipment.carrier.ShippoServices.validate#ShippingPostalAddress">
+        <!-- the Shippo carrier account object_ids of this Shippo account, to fill in -->
+        <carriers carrierPartyId="USPS" gatewayAccountId=""/>
+        <carriers carrierPartyId="UPS" gatewayAccountId=""/>
+        <carriers carrierPartyId="FedEx" gatewayAccountId=""/>
+        <carriers carrierPartyId="DHLX" gatewayAccountId=""/>
+        <options optionEnumId="SgoLabelType" optionValue="PDF_4x6"/>
+        <options optionEnumId="SgoLookupGraceSeconds" optionValue="300"/>
+        <!-- USPS First-Class Package (usps_first, CarrierData.xml) became Ground Advantage -->
+        <methods carrierPartyId="USPS" shipmentMethodEnumId="ShMthGround" gatewayServiceCode="usps_ground_advantage"/>
+        <boxTypes shipmentBoxTypeId="USPS_SmFlat" gatewayBoxId="USPS_SmallFlatRateBox"/>
+    </mantle.shipment.carrier.ShippingGatewayConfig>
+</entity-facade-xml>

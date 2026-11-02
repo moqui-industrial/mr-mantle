@@ -856,7 +856,11 @@ along with this software (see the LICENSE.md file). If not, see
                     'labelUrl', 'labelImage', 'labelIntlSignImage', 'labelHtml', 'labelPrinted', 'internationalInvoice',
                     'returnTrackingCode', 'returnTrackingUrl', 'returnTrackingStatusEnumId', 'returnLabelDate', 'returnLabelUrl',
                     'returnLabelImage', 'returnGatewayStatus', 'returnGatewayMessage', 'returnGatewayLabelId',
-                    'returnGatewayRateId', 'returnEstimatedAmount']"/>
+                    'returnGatewayRateId', 'returnEstimatedAmount', 'gatewayShipmentId', 'gatewayAmountUomId', 'labelFileType',
+                    'returnGatewayShipmentId', 'returnGatewayAmountUomId', 'returnLabelFileType',
+                    'estimatedAmount', 'baseAmount', 'actualAmount', 'insuredAmount', 'insuranceAmount', 'labelDate',
+                    'trackingSubStatus', 'trackingEta', 'trackingOrigEta', 'returnBaseAmount', 'returnActualAmount',
+                    'returnTrackingSubStatus', 'returnTrackingStatusDate', 'returnGatewayRefundStatus']"/>
             <iterate list="clearFields" entry="fieldName"><script>packageRouteSeg[fieldName] = null</script></iterate>
             <entity-update value-field="packageRouteSeg"/>
         </actions>
@@ -871,7 +875,9 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.shipment.ShipmentPackageRouteSeg" value-field="packageRouteSeg"/>
             <set field="clearFields" from="['returnTrackingCode', 'returnTrackingUrl', 'returnTrackingStatusEnumId',
                     'returnLabelDate', 'returnLabelUrl', 'returnLabelImage', 'returnGatewayStatus', 'returnGatewayMessage',
-                    'returnGatewayLabelId', 'returnGatewayRateId', 'returnEstimatedAmount']"/>
+                    'returnGatewayLabelId', 'returnGatewayRateId', 'returnEstimatedAmount', 'returnGatewayShipmentId',
+                    'returnGatewayAmountUomId', 'returnLabelFileType', 'returnBaseAmount', 'returnActualAmount',
+                    'returnTrackingSubStatus', 'returnTrackingStatusDate', 'returnGatewayRefundStatus']"/>
             <iterate list="clearFields" entry="fieldName"><script>packageRouteSeg[fieldName] = null</script></iterate>
             <entity-update value-field="packageRouteSeg"/>
         </actions>

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Shippo shipping gateway (plan/payments-shipping-edi.md S1; docs/Shippo.md): the carrier interfaces of
+    mantle.shipment.CarrierServices on the Shippo REST API (version 2018-02-08), ported from the Java Moqui mantle-shippo
+    component (1.2.1, commit 2356f07). The rules are Shippo.js's. A gateway is a ShippingGatewayConfig of type ShGtwyShippo
+    whose SystemMessageRemote holds the API base (sendUrl), the API token (password) and the webhook secret
+    (sharedSecret); labels go through WarehouseTaskServices.request#PackageLabels and refund#PackageLabels, which record
+    each attempt before calling these. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="ShippingRatesBulk" allow-remote="false">
+        <description>Shippo's rates of the asked methods for the packages given: one Shippo shipment per package, each
+            method's cheapest rate of its service level and carrier account per package, summed for a method rated for
+            every package in one currency. Refuses a package with no weight or box dimensions (PARCEL_INVALID) and an
+            address Shippo rejects (ADDRESS_INVALID).</description>
+        <implements service="mantle.shipment.CarrierServices.get#ShippingRatesBulk"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('ratesBulk', context)"/>
+            <set field="shippingRateInfoList" from="answer.shippingRateInfoList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="OrderShippingRate" allow-remote="false">
+        <description>An order part's Shippo rate for its carrier and method (or those given) and the packages given, and
+            with createOrderItem its shipping item. Refuses no package information (PARCEL_INVALID), no carrier
+            (METHOD_REQUIRED), no rate (METHOD_UNAVAILABLE) and a rate in another currency than the order's
+            (CURRENCY_MISMATCH).</description>
+        <implements service="mantle.shipment.CarrierServices.get#OrderShippingRate"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('orderRate', context)"/>
+            <set field="shippingTotal" from="answer.shippingTotal"/>
+            <set field="orderItemSeqId" from="answer.orderItemSeqId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ShippingRate" allow-remote="false">
+        <description>The Shippo rate of a shipment's packages (or one) at the route segment's method or the one
+            given.</description>
+        <implements service="mantle.shipment.CarrierServices.get#ShippingRate"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('rate', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="request" noun="ShippingLabels" allow-remote="false">
+        <description>A label per package (the return label with getReturnLabels): a fresh Shippo shipment, the rate of the
+            method's service level recorded on the package before it is bought synchronously with the request reference
+            in the transaction's metadata. A finished label is filled in (transaction, rate and shipment ids, label format,
+            link and file, tracking number, charge and currency); a QUEUED or WAITING one answers pending and is retrieved
+            later, never bought again; a package whose rate already has a transaction gets that one. Refusals throw their
+            code: CONFIG_INVALID, PARCEL_INVALID, ADDRESS_INVALID, METHOD_UNAVAILABLE, RATE_EXPIRED, LABEL_REFUSED,
+            RATE_LIMITED, RATES_NO_ANSWER (nothing bought); a purchase with no answer throws CARRIER_TIMEOUT and a status
+            not understood CARRIER_NO_ANSWER, lost answers find#ShippingLabels resolves. With several packages each one is on its own, and a lost answer or a pending
+            package is thrown before a refusal.</description>
+        <implements service="mantle.shipment.CarrierServices.request#ShippingLabels"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('requestLabels', context)"/>
+            <set field="pending" from="!!answer.pending"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ShippingLabels" allow-remote="false">
+        <description>What Shippo did for a request whose answer was lost or pending: the transaction with the request's
+            metadata (by the package's rate, then the transactions created since the request), filled in when finished,
+            pending while QUEUED or WAITING or while a lost request is younger than the lookup grace; for a refund request
+            the package's refund or its label's status. Nothing is bought.</description>
+        <implements service="mantle.shipment.CarrierServices.find#ShippingLabels"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('findLabels', context)"/>
+            <script>for (const field of Object.keys(answer)) context[field] = answer[field]</script>
+        </actions>
+    </service>
+    <service verb="refund" noun="ShippingLabels" allow-remote="false">
+        <description>Each labelled package's refund: SUCCESS sets gatewayRefundStatus refunded; QUEUED or PENDING keeps
+            the refund id with no status and answers pending (find#ShippingLabels reads it later); a refused refund is
+            REFUND_REFUSED unless the label's transaction is already refunded; NO_LABEL when no package has a Shippo
+            label.</description>
+        <implements service="mantle.shipment.CarrierServices.refund#ShippingLabels"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('refundLabels', context)"/>
+            <set field="pending" from="!!answer.pending"/>
+        </actions>
+    </service>
+    <service verb="track" noun="ShippingLabels" allow-remote="false">
+        <description>Each labelled package's tracking status, estimate and tracking number from its Shippo transaction
+            (outbound and return labels), and a label file not downloaded yet; a package that fails is logged and the
+            others go on.</description>
+        <implements service="mantle.shipment.CarrierServices.track#ShippingLabels"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('trackLabels', context)</script>
+        </actions>
+    </service>
+    <service verb="validate" noun="ShippingPostalAddress" allow-remote="false">
+        <description>Shippo's validation of the address: its trust level (CmtlValid, CmtlInvalid, CmtlIncomplete), the
+            validation messages and Shippo's address id. A provider failure is a warning and leaves the address as it
+            was.</description>
+        <implements service="mantle.shipment.CarrierServices.validate#ShippingPostalAddress"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('validateAddress', context)"/>
+            <set field="contactMechId" from="answer.contactMechId"/>
+        </actions>
+    </service>
+    <!-- ========== Webhooks (SystemMessageType ShippoWebhook) ========== -->
+    <service verb="receive" noun="Webhook" allow-remote="false">
+        <description>The receive service of ShippoWebhook. The endpoint /rest/sm/ShippoWebhook/{remote} checked the
+            remote's Shippo-Auth-Signature (SmatHmacSha256Timestamp) or URL token (SmatUrlToken) against its sharedSecret;
+            a remote with neither is refused (WEBHOOK_UNAUTHENTICATED). The event is kept once per remote and body
+            (store#ReceivedSystemMessage), so a repeated delivery answers success and is not consumed again.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.receive#SystemMessage"/>
+        <out-parameters>
+            <parameter name="duplicateOfId">
+                <description>The message already kept for this event</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="receiveOut" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('receiveWebhook', context)"/>
+            <set field="systemMessageIdList" from="receiveOut.systemMessageIdList"/>
+            <set field="duplicateOfId" from="receiveOut.duplicateOfId"/>
+        </actions>
+    </service>
+    <service verb="consume" noun="Webhook" allow-remote="false">
+        <description>The consume service of ShippoWebhook: the packages a transaction or tracking event is about, among the
+            shipments of the Shippo gateways on the message's remote. A package with a request still without an answer has
+            it finished through find#ShippingLabels (WarehouseTaskServices.finish#PendingLabelRequests), never bought
+            again; any other is tracked from its Shippo transaction. The payload's status is never applied as it is, so
+            repeated, late and out-of-order events converge; a test event on a production remote is ignored.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/shipment/carrier/Shippo.js').execute('consumeWebhook', context)</script>
+        </actions>
+    </service>
+</services>
