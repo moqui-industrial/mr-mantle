@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The generic sample X12 4010 profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md): the supplier side of a retail
+    order cycle (850 in; 855, 856, 810 out; 997 both ways) with the code subset the mappings support. It is not any
+    retailer's guide: a partner's profile is a copy with its own ID, revision and codes. -->
+<entity-facade-xml type="seed-initial">
+    <mantle.edi.EdiProfile ediProfileId="X12_4010_SAMPLE" profileRevision="1" x12Version="004010" description="Sample X12 4010 supplier profile (generic, not a retailer's guide)" generateFunctionalAck="Y" expectFunctionalAck="Y" ackOverdueMinutes="1440" requireSscc="N" asnPackagingCode="CTN" invoiceStatusId="InvoiceFinalized"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="850" directionEnumId="EdiDirIn" functionalIdCode="PO" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS850.js" mappingServiceName="mantle.edi.order.X12OrderServices.apply#PurchaseOrder"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="997" directionEnumId="EdiDirIn" functionalIdCode="FA" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS997.js" mappingServiceName="mantle.edi.EdiServices.apply#FunctionalAck"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="855" directionEnumId="EdiDirOut" functionalIdCode="PR" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS855.js" mappingServiceName="mantle.edi.order.X12OrderServices.produce#PurchaseOrderAck"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="856" directionEnumId="EdiDirOut" functionalIdCode="SH" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS856.js" mappingServiceName="mantle.edi.shipment.X12ShipmentServices.produce#ShipNotice"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="810" directionEnumId="EdiDirOut" functionalIdCode="IN" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS810.js" mappingServiceName="mantle.edi.account.X12InvoiceServices.produce#Invoice"/>
+    <mantle.edi.EdiProfileDocument ediProfileId="X12_4010_SAMPLE" transactionSetId="997" directionEnumId="EdiDirOut" functionalIdCode="FA" grammarLocation="component://mr-mantle/service/mantle/edi/x12/X12V4010TS997.js" mappingServiceName="mantle.edi.EdiServices.produce#FunctionalAck"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctUom" ediCode="EA" internalValue="OTH_ea" description="Each"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctWeightUom" ediCode="LB" internalValue="WT_lb" description="Pound"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctWeightUom" ediCode="KG" internalValue="WT_kg" description="Kilogram"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="VN" internalValue="productId" description="Vendor's item number: the product ID"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="UP" internalValue="PidtUpca" description="UPC consumer package code"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="EN" internalValue="PidtEan" description="EAN"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="BP" internalValue="buyer" description="Buyer's part number, kept on the line"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctProductId" ediCode="IN" internalValue="buyer" description="Buyer's item number, kept on the line"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctCharge" ediCode="D240" ediQualifier="C" internalValue="ItemShipping" description="Freight"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctCharge" ediCode="C310" ediQualifier="A" internalValue="ItemDiscount" description="Discount"/>
+    <mantle.edi.EdiProfileCode ediProfileId="X12_4010_SAMPLE" codeTypeEnumId="EdctTax" ediCode="ST" internalValue="ItemSalesTax" description="Sales tax"/>
+    <!-- Produces and sends the documents recorded and not sent yet (a connection that batches, or a send interrupted after
+        its business transaction committed): on by default, every 15 minutes, two indexed queries when there is nothing
+        to send. A document whose message is in error is not sent again by it; find#OverdueAcknowledgments lists it. -->
+    <moqui.service.job.ServiceJob jobName="send_EdiPendingDocuments" description="Send pending EDI documents" serviceName="mantle.edi.EdiServices.send#PendingDocuments" cronExpression="0 */15 * * * ?" paused="N" transactionTimeout="1800"/>
+</entity-facade-xml>

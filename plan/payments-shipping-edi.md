@@ -1125,3 +1125,196 @@ the gateway's `testMode` N; the carrier accounts' `object_id`s on `ShippingGatew
 endpoint with HMAC enabled by Shippo (or a URL token) and one real delivery of each event verified; a test-mode run of
 rate, label, return label, print, track, refund and a lost answer looked up, checking the points above; enable
 `finish_PendingLabelRequests`. Passing these specs is not carrier certification.
+
+### E1 — X12 business services (implementation record, 2026-11-02)
+
+The common X12 port on the Phase 0 contracts (SystemMessageRemote connections, `store#ReceivedSystemMessage`, the HTTP
+fixtures) and the P1/P2/S1 module patterns. Nothing is committed yet; the record names the artifacts per repository.
+E2 (SPS Commerce), its worksheet and any partner mapping are not part of it.
+
+**Source baseline.** Ported from [mantle-edi](https://github.com/moqui/mantle-edi/tree/134acb6) 1.1.5, commit `134acb6`
+(CC0 with the patent grant, written by David E. Jones; the new files keep the dedication and name the source):
+`EdiServices.xml` (receive, consume, 997 produce/consume, the X12 envelope), `order/X12OrderServices.xml` (850 consume,
+855 produce, N1 segments), `shipment/X12ShipmentServices.xml` (856), `account/X12InvoiceServices.xml` (810),
+`data/MantleEdiSetupData.xml` (the message type) and the `X12V4010TS{850,855,856,810,997}.groovy` grammars (as the
+framework's converted fixtures in `crates/moqui-core/src/edi/testdata/mantle`, copied into Mantle; the framework test
+files are not loaded at run time). Kept: the element positions, N1 roles and qualifiers, DTM qualifiers, the BAK/BSN/BIG
+layouts and the 997 codes. Not ported: the receive's split that took the first GS and ST, `OrderBulkServices.store#Order`
+for EDI (it creates parties and addresses from the payload), the remote chosen by `ISA06`, the framework ack per message
+(`produceAckOnConsumed`), the tare-per-line 856 without SSCCs, the 855/810 `CA` unit and `PE` constants, and the
+full-message logging. `X12Envelope.groovy` is not used: the envelope pass is X12.js's (below).
+
+**Changed artifacts.**
+
+- mr-mantle, new: `entity/EdiEntities.xml` (`EdiProfile`, `EdiProfileDocument`, `EdiProfileCode`, `EdiConnection`,
+  `EdiLocation`, `EdiControlSequence`, `EdiInterchange`, `EdiGroup`, `EdiDocument` with their statuses, transitions and
+  enumerations; `ShipmentPackage.sscc`), `service/mantle/edi/EdiServices.xml`, `X12.js`, `X12Lib.js`, `X12Documents.js`,
+  `order/X12OrderServices.xml`, `shipment/X12ShipmentServices.xml`, `account/X12InvoiceServices.xml`,
+  `x12/X12V4010TS{850,855,856,810,997}.js`, `service/Edi.secas.xml`, `data/EdiSetupData.xml` (seed: type `EdiX12`,
+  permission `EDI_ADMIN`), `data/EdiSampleProfileData.xml` (seed-initial: the generic profile `X12_4010_SAMPLE`, the
+  job `send_EdiPendingDocuments`, on), `docs/EdiX12.md`, `test/EdiX12.spec.js`.
+- mr-moqui: `crates/moqui-core/src/edi.rs` (MIN/MAX, order and leftover checks, positions per set, AK4's AK403) and
+  `edi/tests.rs`, `crates/moqui-core/src/script/runtime/edi.rs` (`setSegmentSuffix`, `setPaddingChar`),
+  `crates/moqui-core/src/service/system_sync/sftp.rs` and the new `sftp_tests.rs` (per-file poll), `tests.rs` (the
+  re-received file), `framework/service/org/moqui/sftp/SftpMessageServices.xml` (`failedFileList`, the description),
+  `framework/service/org/moqui/impl/SystemMessageServices.xml` (`duplicateOfId` on the `receive#SystemMessage`
+  interface), `plans/Parity-Diffs.md` (the rows of these differences), and after the review
+  `crates/moqui-core/src/service/pool.rs` (work counted active under the queue's lock, with its test).
+
+**Design.**
+
+- *Receipt before parsing.* `receive#X12Interchange` (the `EdiX12` type's receive service, behind `/rest/sm` or the SFTP
+  poll) keeps the exact text, once per remote and content hash (`x12-` and the conf's single-use hash). Consuming it
+  records every interchange; one that fails its envelope checks (ISA form and separators, ISA12 `00401`, ISA13, IEA01 and
+  IEA02, segments outside a group, sender/receiver/application codes/usage other than the connection's, a remote with
+  no `EdiConnection`) is quarantined with its text and reason, the receipt goes to SmsgError with a SystemMessageError,
+  and the trusted interchanges of the same receipt are still processed. The connection (the authenticated remote) gives
+  the organization (its store's), partner, profile and environment; payload IDs are only checked against it.
+- *Batches.* The envelope pass (X12.js `tokenize`) splits ISA/GS/ST itself and keeps each set's exact text, because the
+  handler's envelope-only parse puts body segments in the group's `originalList` with no set boundary. Each group and set
+  is recorded with its parent controls; group errors (AK905 1-6) reject that group, set errors (AK502 1-4, 6, 7, 23) that
+  set. Validation, the 997 and application then run per document or group, each in its own transaction, so one bad set
+  or failed mapping does not touch its siblings, and a second consume resumes from the statuses.
+- *Validation.* Each set is parsed on its Mantle grammar with `new EdiHandler(ec)` (the grammar as envelope and body,
+  `\u0000` as the escape character since X12 has none), whose segment errors now include order and `MIN`/`MAX`; then the
+  profile's element rules (required, type, length, code subset: AK4 codes 1-8), the N103/N104 and PO1 ID pairs, and the
+  850's CTT01/CTT02/AMT*TT totals (reported as AK3/AK4 on the total, code 7). X12 4010 only: another GS08 rejects the
+  group with AK905 2 (`UNSUPPORTED_VERSION`), another ISA12 quarantines the interchange.
+- *Identity.* Controls sent come from `EdiControlSequence` (organization, partner, usage, direction, level), locked and
+  incremented in the transaction that writes the outgoing SystemMessage, envelope and group; ST02 is `0001` (one set per
+  group). An 850's `businessKey` (PO and release) and `contentHash` (segments without ST/SE) in the same scope make a
+  resend a Duplicate (no order, linked) and changed content a Conflict (`PO_CONFLICT`, no change). The connection row is
+  locked while a document is applied, so concurrent deliveries serialize.
+- *Lifecycle.* Received: Stored, Validated/Rejected, Applied/Duplicate/Conflict/Exception. Sent: Pending (recorded by the
+  SECAs on `update#OrderHeader` approved/cancelled/rejected, `update#Shipment` shipped and `update#Invoice` at the
+  profile's `invoiceStatusId`, in the business transaction, with the record's next revision and older pending ones
+  superseded), then Produced (body by the mapping service in its own transaction and checked on its grammar; envelope,
+  controls and SystemMessage in one transaction) or Refused, Sent, and Accepted/AckRejected from the partner's 997 (which
+  also confirms or rejects the SystemMessage). `send#PendingDocuments` runs after the commit (`registerOnCommit`, unless
+  `sendOnCommit` is N) and as the job; it never queues through `queue#SystemMessage`, whose force-new create would
+  outlive a rollback. 997s: generated for each received group except FA groups (an acknowledgment is never acknowledged)
+  when `generateFunctionalAck` is Y, after validation, reporting syntax only (a business exception is still accepted);
+  `find#OverdueAcknowledgments` lists sent documents past `ackOverdueMinutes`; `retry#Document` (EDI_ADMIN) re-applies an
+  exception or re-produces a refusal with the same ID and revision.
+- *Mappings.* 850: one placed order through `create#Order`/`create#OrderItem`/`place#Order` (approval is the seller's
+  decision), the store's currency (CUR must match), ship-to by `EdiLocation`, products by the profile's `EdctProductId`
+  crosswalk (all IDs one product), units by `EdctUom`, SAC by `EdctCharge` with stated amounts, notes, and the applied
+  lines kept for the documents sent back; anything else is refused, never invented. 855: BAK AD/AC/RD and ACK
+  IA/IQ/IP/IC/IR per line from the order's current quantities and prices. 856: S/O/P/I from the actual packages and
+  contents, SSCC in MAN*GM (validated, required when the profile says), tracking in MAN*CP otherwise. 810: IT1 lines,
+  item and summary SAC, TXI, TDS, with the total checked against `get#InvoiceTotal`. The units and codes sent are the
+  purchase order's own or the profile's; no currency or unit is hard-coded.
+- *Framework.* The grammar loader reads `MIN`/`MAX`; a parse reports missing and excess segments and loops, segments out
+  of their level's order and the first segment left after the root (Java dropped it), with positions from each set's ST;
+  `makeAk4` puts the code in AK403 (Java put it in AK402); scripts can generate without a newline suffix and with space
+  padding. The SFTP poll isolates each file (a read, receive or removal failure is logged by name, left on the server, in
+  `failedFileList`, and the poll goes on), removes a file only after a durable receipt (a message kept, or
+  `duplicateOfId`, now on the receive interface), cleans up a file whose text a message already holds (a crash between
+  receipt and cleanup), and receives a reused file name with new text as a new file.
+
+**Parser limits and the supported subset** are in [docs/EdiX12.md](../docs/EdiX12.md) ("The sample profile's subset",
+"Parser limits"): element values are Mantle's rules for the segments the profile reads, not X12's data dictionary; no
+release character; separators from the first ISA; X12 4010 only; no TA1/999/824/860/865; one set per interchange sent.
+
+**Fast checks run.** `cargo test -p moqui-core --lib edi` (33 passed, the new `min_and_max_are_checked_on_each_level`,
+`segments_out_of_order_and_left_after_the_root_are_errors`, `positions_count_from_each_transaction_set` included) and
+`--lib system_sync` (14 passed, the new `each_file_is_on_its_own_and_removed_only_after_a_durable_receipt` and
+`a_file_left_on_the_server_is_not_received_twice_and_a_listing_failure_stops_the_poll`); `./moq build`; `./moq test
+mr-mantle --spec EdiX12` (12 features passed, each 0.03–0.43 s): the full cycle (850 to one placed order with its
+freight SAC, its 997, the 855 after approval, the 856 and 810 after the shipment and invoice, the partner's 997 in one
+interchange of three FA groups accepting them, no 997 back); the same bytes again kept once, a consume resumed, the
+same PO under new controls a Duplicate; a Conflict; a bad code and wrong totals Rejected with AK3/AK4; not X12, another
+sender, IEA control and count mismatches and an unconnected remote quarantined; two groups with a bad set and an unknown
+item (P and A 997s); an unsupported version (AK905 2); a rollback after the 855 was recorded leaving nothing, a batched
+document sent by the job, a failed send resent with the same bytes and controls, overdue acknowledgments; a SAC
+percentage, unknown ship-to, unsupported segment, missing SSCC (refused, then retried with its identity) and unmapped
+invoice charge refused; IQ/IR (AC) and RD; the on-commit send; a 997 rejecting a set and one for an unknown group.
+`./moq test mr-mantle --spec
+EdiX12,OrderToCashBasicFlow,OrderBulk,OrderLifecycle,OrderToCashTime,WarehouseShipping,WarehousePacking,ShipmentPick,ShipmentLoads,InvoicePaymentMisc,InvoiceOrderApply,InvoicePostOrder,AccountingReceivables,ReturnToResponseBasicFlow`
+(16 specs with their dependencies, 158 features passed); `./moq test mr-mantle` (158 specs, 1445 features passed; a first
+run failed PayTraceGateway's "rejected enhanced data" feature once, whose after-commit send runs on a worker thread; it
+passed with EdiX12 twice and in the second whole run). `cargo test -p moqui-core` (1309 + 4 + 12 passed, 5 ignored);
+`cargo clippy -p moqui-core --all-targets -- -D warnings` (clean); `rustfmt --check` on the changed Rust files.
+`moqui lint` of the four service files and `moqui lint --groovy`
+of `service/mantle/edi`: clean. Prettier (with `--ignore-path=`) on the three modules, the spec and the grammar files
+(each grammar literal under `// prettier-ignore`, keeping the converter's one-segment-per-line layout); `--list-different`
+clean after the review fixes. `xmllint --format` with a canonical comparison on the new XML files.
+No slow test was run.
+
+**Known limits.**
+
+- One set per interchange sent; no batching of sets or groups, which E2's SPS rules may need.
+- The element rules cover the segments the sample reads; a partner guide's other mandatory elements need its profile's
+  rules (today in X12.js `rulesFor`, keyed by set, not yet data).
+- The 997 reports syntax and the profile's code subset; business refusals are exceptions for an operator, with no
+  automatic 855 rejection (the order is never made, so there is nothing to acknowledge until a person acts).
+- The 855 does not acknowledge SAC lines or lines the seller added; the 856 supports one package level (no pallets or
+  tares), no package of two orders and no product of two order lines; the 810 one order per invoice and N2 amounts with
+  at most two decimals.
+- SSCCs are entered on the package; allocation and GS1-128 labels are the "Retail ASN and labeling" plan.
+- A consume interrupted by a crash leaves the receipt SmsgConsuming (the framework's state); an operator's reset and
+  consume resumes it without repeating anything.
+- The `EdiX12` type holds the SFTP paths, so two partners on SFTP need a type each (with the same services).
+- The poll's file name and content check runs on every poll for each remaining file (a download per file; the text is
+  compared in the query, newest 20).
+
+**What E2 still needs.** The SPS connection worksheet (account, retailer, format and transport decided); a partner profile
+(its own ID and revision) with the retailer's codes, element rules, location crosswalk and acknowledgment ownership
+(whether SPS or Mantle sends 997s); the SFTP remote and type (`receivePath`/`testout`, `sendPath`/`testin`, file name
+pattern, `MsgRrDelete` or move, pinned host key and explicit port) and the enabled poll and `send_EdiPendingDocuments`
+jobs; batching rules; the 856 packing, SSCC allocation and label workflow the retailer requires; any 860/865/824/TA1 the
+partner mandates; sanitized partner fixtures; and the certification cases.
+
+**Review fixes (after an independent review, 2026-11-02).**
+
+1. A quarantined interchange is recoverable: `retry#Receipt` (EDI_ADMIN, new) consumes a receipt in error again, and
+   `store#ReceivedInterchanges` on a stored receipt checks its quarantined interchanges again from the kept text; one now
+   trusted is stored and its quarantine becomes `EdinSuperseded` (new status), one still failing is updated. A resend of
+   the same bytes stays a duplicate receipt. Spec: CONNECTION_UNKNOWN, connection added, resend kept once, retry applies
+   the order, a second retry NOT_RETRYABLE.
+2. `find#OverdueAcknowledgments` filters in the query, per connection whose profile expects 997s (`EdocSent`, not 997,
+   `sentDate` before the connection's cutoff, newest-first limit per connection), so 997s and no-ack documents never fill
+   its window. Kept as Sent rather than a new terminal status: the query already leaves them out.
+3. A consume ends SmsgError with a SystemMessageError and `noStatusUpdate` when any document is left Stored or
+   Validated or a group owed a 997 has none, as for a quarantine; `retry#Receipt` resumes it.
+4. `recordEvent` locks and reads an earlier revision again before superseding it, and supersedes only one still Pending
+   or Refused (a Produced one is sent as it is). Not taken: catching every failure of the record services so the
+   business transaction never fails. With the race fixed no expected path fails, and committing a business change
+   whose document could not be recorded would lose the document silently, which the lifecycle exists to prevent.
+5. Framework: a service worker counts work active under the lock that takes it off the queue (`pool.rs` `next_work`),
+   so `waitWorkerPoolEmpty` no longer returns between the two; Rust test
+   `work_taken_off_the_queue_is_counted_active_under_the_same_lock`. PayTraceGateway's "rejected enhanced data" feature
+   then passed 10 runs out of 10.
+6. Identifiers sent are never altered (`ident`, not `clean`); an element holding a separator, terminator or NUL is
+   refused (`SEPARATOR_IN_DATA`) before controls are allocated; the remote's ISA/GS values are checked against their
+   widths (CONFIG_INVALID) and the generated ISA must be 106 characters. Spec: a buyer's part number holding the
+   connection's component separator refused, nothing sent.
+7. `send_EdiPendingDocuments` is on by default; `find#OverdueAcknowledgments` also returns `stuckList` (Pending or
+   Produced past `stuckMinutes`, a message in error, Refused); `retry#Document` resets a message in error and sends the
+   same bytes. The job does not resend messages the framework put in error.
+8. The PO release (BEG04) is kept with the applied lines and sent in BAK05, PRF02 and BIG05.
+9. Spec: `retry#Document` by a user without EDI_ADMIN is PERMISSION_DENIED with the parameters that then apply for
+   john.doe.
+10. Prettier: see the fast checks above.
+11. SFTP: `existing_messages` compares the text in the query and reads the newest 20 IDs and statuses only.
+12. Segments outside any interchange are a receipt-level quarantine row (receipt sequence 0), not interchange 1's.
+13. IT105 echoes the purchase order's basis (no `PE` default); TD101 is the profile's new `asnPackagingCode` (TD101/102
+    left out when empty).
+14. The invoice SECA takes every status change; the record service compares with the profile's `invoiceStatusId`.
+15. `EDI_GROUP_CONTROL` index; the 997's group is found with one `in` query of its candidates' interchanges; control
+    numbers and counts compare as numbers everywhere (IEA, GE, SE, AK1, AK2).
+16. Hash: no stable digest is available to scripts; documented in docs/EdiX12.md (as the Phase 0 record does).
+17. A receipt's 997s are sent after its consume commits (`registerOnCommit`).
+18. Only a refusal with a reason code makes a document Refused; another mapping failure leaves it Pending.
+19. `setSegmentSuffix` documented as one character (no CRLF); AK303 and the missing-segment position documented as
+    limits.
+21. Specs: two first control allocations of a new scope (the production remote of the partner) at once get 1 and 2
+    (the scope's row is made in a transaction of its own, then locked); two deliveries of one PO at once make one order and
+    a Duplicate.
+
+Checks after the fixes: `./moq test mr-mantle --spec EdiX12` (17 features passed, each under 0.5 s); the related set
+with PayTraceGateway (17 specs, 176 features passed); `./moq test mr-mantle` (158 specs, 1450 features passed); the
+PayTrace feature alone 10 times (10 passed); `cargo test -p moqui-core` (1310 + 4 + 12 passed, 5 ignored); `cargo clippy
+-p moqui-core --all-targets -- -D warnings` (clean); `./moq build`; rustfmt on the changed Rust files; `moqui lint` of
+`EdiServices.xml`; `xmllint --format` with a canonical comparison; Prettier `--list-different` clean. No slow test was
+run.

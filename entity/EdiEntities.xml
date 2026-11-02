@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 EDI (plan/payments-shipping-edi.md E1, docs/EdiX12.md): the trading partner connection and its versioned profile,
+    durable control numbers, and the envelope, group and document records of every interchange received or sent. The
+    transport is the connection's SystemMessageRemote (SFTP, REST); the business records stay Mantle's orders, shipments
+    and invoices. New in MR Mantle; the Java mantle-edi component kept only SystemMessage records. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="EdiProfile" package="mantle.edi" use="configuration" cache="true">
+        <description>A versioned set of partner rules for X12: the version, the documents and their mapping services, the
+            code crosswalks (EdiProfileCode), who acknowledges, and the packing and billing rules. A partner's changed
+            guide is a new profile (or revision), not an edit of the rules a running connection uses.</description>
+        <field name="ediProfileId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="profileRevision" type="number-integer"/>
+        <field name="x12Version" type="text-short">
+            <description>The functional group version (GS08) taken and sent, such as
+            004010; another version is rejected visibly.</description>
+        </field>
+        <field name="generateFunctionalAck" type="text-indicator">
+            <description>Y: this side answers each received group
+            (other than a 997 group) with a 997 after validation.</description>
+        </field>
+        <field name="expectFunctionalAck" type="text-indicator">
+            <description>Y: the partner answers each group sent with a
+            997; one not answered in ackOverdueMinutes is overdue.</description>
+        </field>
+        <field name="ackOverdueMinutes" type="number-integer"/>
+        <field name="requireSscc" type="text-indicator">
+            <description>Y: each package of an 856 needs its SSCC
+            (ShipmentPackage.sscc); a ship notice with a package without one is refused.</description>
+        </field>
+        <field name="asnPackagingCode" type="text-short">
+            <description>TD101 of an 856's shipment level (such as CTN), the partner's packaging code; TD1 is sent with
+                the package count only when set.</description>
+        </field>
+        <field name="invoiceStatusId" type="id">
+            <description>The invoice status that is the agreed billing event: an 810 is
+            recorded when a sales invoice of an EDI order reaches it.</description>
+        </field>
+        <relationship type="one" title="InvoiceTrigger" related="moqui.basic.StatusItem" short-alias="invoiceStatus">
+            <key-map field-name="invoiceStatusId"/>
+        </relationship>
+        <relationship type="many" related="mantle.edi.EdiProfileDocument" short-alias="documents">
+            <key-map field-name="ediProfileId"/>
+        </relationship>
+        <relationship type="many" related="mantle.edi.EdiProfileCode" short-alias="codes">
+            <key-map field-name="ediProfileId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="EDI Direction" enumTypeId="EdiDirection"/>
+            <moqui.basic.Enumeration description="Received" enumId="EdiDirIn" enumTypeId="EdiDirection"/>
+            <moqui.basic.Enumeration description="Sent" enumId="EdiDirOut" enumTypeId="EdiDirection"/>
+            <moqui.basic.EnumerationType description="EDI Code Type" enumTypeId="EdiCodeType"/>
+            <moqui.basic.Enumeration description="Unit of measure (X12 355 to Uom)" enumId="EdctUom" enumTypeId="EdiCodeType"/>
+            <moqui.basic.Enumeration description="Weight unit (X12 355 to Uom)" enumId="EdctWeightUom" enumTypeId="EdiCodeType"/>
+            <moqui.basic.Enumeration description="Product ID qualifier (X12 235 to productId, a ProductIdentification type, or buyer)" enumId="EdctProductId" enumTypeId="EdiCodeType"/>
+            <moqui.basic.Enumeration description="Charge or allowance (X12 1300 to item type)" enumId="EdctCharge" enumTypeId="EdiCodeType"/>
+            <moqui.basic.Enumeration description="Tax type (X12 963 to item type)" enumId="EdctTax" enumTypeId="EdiCodeType"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EdiProfileDocument" package="mantle.edi" use="configuration" cache="true">
+        <description>A transaction set a profile takes or sends, with its grammar and mapping service. An inbound mapping
+            service applies a validated document (ediDocumentId) through Mantle's services and sets its status; an outbound
+            one answers the transaction set's body (bodyEdiMap) for the document, or throws a refusal code.</description>
+        <field name="ediProfileId" type="id" is-pk="true"/>
+        <field name="transactionSetId" type="id" is-pk="true">
+            <description>ST01: 850, 855, 856, 810, 997</description>
+        </field>
+        <field name="directionEnumId" type="id" is-pk="true"/>
+        <field name="functionalIdCode" type="text-short">
+            <description>GS01: PO, PR, SH, IN, FA</description>
+        </field>
+        <field name="grammarLocation" type="text-medium"/>
+        <field name="mappingServiceName" type="text-medium"/>
+        <relationship type="one" related="mantle.edi.EdiProfile"/>
+        <relationship type="one" title="EdiDirection" related="moqui.basic.Enumeration" short-alias="direction">
+            <key-map field-name="directionEnumId"/>
+        </relationship>
+    </entity>
+    <entity entity-name="EdiProfileCode" package="mantle.edi" use="configuration" cache="true">
+        <description>A profile's crosswalk of an X12 code to a Mantle value: a unit to a Uom, a product ID qualifier to
+            productId, a ProductIdentification type or buyer (kept as the line's otherPartyProductId), an SAC02 code (with A
+            or C in ediQualifier) or a TXI01 tax type to an item type. A code not here is not supported.</description>
+        <field name="ediProfileId" type="id" is-pk="true"/>
+        <field name="codeTypeEnumId" type="id" is-pk="true"/>
+        <field name="ediCode" type="text-short" is-pk="true"/>
+        <field name="ediQualifier" type="text-short"/>
+        <field name="internalValue" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" related="mantle.edi.EdiProfile"/>
+        <relationship type="one" title="EdiCodeType" related="moqui.basic.Enumeration" short-alias="codeType">
+            <key-map field-name="codeTypeEnumId"/>
+        </relationship>
+    </entity>
+    <entity entity-name="EdiConnection" package="mantle.edi" use="configuration" cache="true">
+        <description>A trading partner connection in one environment: its SystemMessageRemote (shared key) is the
+            authenticated transport and holds the interchange IDs (internalId/remoteId and their types, ISA05-08), the
+            application codes (GS02/03), usageCode (ISA15, T or P), ackRequested (ISA14) and the separators. The product
+            store gives the organization, currency and facility of the orders received; the partner is the customer. A
+            received interchange is routed by the connection it came on, never by the IDs in it.</description>
+        <field name="systemMessageRemoteId" type="id" is-pk="true"/>
+        <field name="ediProfileId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="partnerPartyId" type="id"/>
+        <field name="sendOnCommit" type="text-indicator">
+            <description>N: documents recorded wait for the
+            send_EdiPendingDocuments job (batched sends); otherwise each goes once its business transaction
+            commits.</description>
+        </field>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" related="moqui.service.message.SystemMessageRemote" short-alias="remote"/>
+        <relationship type="one" related="mantle.edi.EdiProfile" short-alias="profile"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
+        <relationship type="one" title="Partner" related="mantle.party.Party" short-alias="partner">
+            <key-map field-name="partnerPartyId" related="partyId"/>
+        </relationship>
+    </entity>
+    <entity entity-name="EdiLocation" package="mantle.edi" cache="true">
+        <description>A partner's location code (N103/N104, such as a store number or GLN) for a party and its postal
+            address: the ship-to of a purchase order, and the code sent back for that address. An unknown code is an
+            exception, never a new party or address.</description>
+        <field name="partnerPartyId" type="id" is-pk="true"/>
+        <field name="idQualifier" type="text-short" is-pk="true"/>
+        <field name="idValue" type="text-short" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="Partner" related="mantle.party.Party" short-alias="partner">
+            <key-map field-name="partnerPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
+    </entity>
+    <entity entity-name="EdiControlSequence" package="mantle.edi" cache="never">
+        <description>The last control number sent at a level (ISA13, GS06, ST02) for an organization, partner, environment
+            (usage code) and direction, allocated under a row lock in the transaction that records the document's
+            envelope, so a number is never sent twice and a retry sends the recorded one again.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="partnerPartyId" type="id" is-pk="true"/>
+        <field name="usageCode" type="text-short" is-pk="true"/>
+        <field name="directionEnumId" type="id" is-pk="true"/>
+        <field name="controlLevel" type="text-short" is-pk="true">
+            <description>ISA, GS or ST</description>
+        </field>
+        <field name="lastNumber" type="number-integer"/>
+    </entity>
+    <entity entity-name="EdiInterchange" package="mantle.edi" cache="never">
+        <description>An interchange (ISA to IEA) received in a SystemMessage (several may share one receipt) or sent in one.
+            Received: Accepted when its envelope is trusted (controls, trailer counts, sender and receiver of its
+            connection), Quarantined otherwise with its text kept for review, Duplicate when the same interchange was
+            processed before, Superseded when a quarantine was checked again (retry#Receipt) and is now trusted. Receipt
+            sequence 0 is a receipt's segments outside any interchange.</description>
+        <field name="ediInterchangeId" type="id" is-pk="true"/>
+        <field name="directionEnumId" type="id"/>
+        <field name="systemMessageId" type="id"/>
+        <field name="receiptSeq" type="number-integer">
+            <description>Its order in the receipt</description>
+        </field>
+        <field name="systemMessageRemoteId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partnerPartyId" type="id"/>
+        <field name="usageCode" type="text-short"/>
+        <field name="senderQualifier" type="text-short"/>
+        <field name="senderId" type="text-short"/>
+        <field name="receiverQualifier" type="text-short"/>
+        <field name="receiverId" type="text-short"/>
+        <field name="controlNumber" type="text-short"/>
+        <field name="versionCode" type="text-short"/>
+        <field name="interchangeDate" type="date-time"/>
+        <field name="statusId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="errorText" type="text-long"/>
+        <field name="interchangeText" type="text-very-long"/>
+        <relationship type="one" title="EdiDirection" related="moqui.basic.Enumeration" short-alias="direction">
+            <key-map field-name="directionEnumId"/>
+        </relationship>
+        <relationship type="one" related="moqui.service.message.SystemMessage" short-alias="systemMessage"/>
+        <relationship type="one" title="EdiInterchange" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.edi.EdiGroup" short-alias="groups">
+            <key-map field-name="ediInterchangeId"/>
+        </relationship>
+        <index name="EDI_IC_CONTROL">
+            <index-field name="partnerPartyId"/>
+            <index-field name="controlNumber"/>
+        </index>
+        <seed-data>
+            <moqui.basic.StatusType description="EDI Interchange" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusItem description="Accepted" sequenceNum="10" statusId="EdinAccepted" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusItem description="Quarantined" sequenceNum="20" statusId="EdinQuarantined" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusItem description="Duplicate" sequenceNum="30" statusId="EdinDuplicate" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusItem description="Produced" sequenceNum="40" statusId="EdinProduced" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusItem description="Superseded" sequenceNum="50" statusId="EdinSuperseded" statusTypeId="EdiInterchange"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdinQuarantined" toStatusId="EdinSuperseded" transitionName="Supersede"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EdiGroup" package="mantle.edi" cache="never">
+        <description>A functional group (GS to GE) of an interchange. For a group received, ackCode is this side's AK901
+            result and ackDocumentId the 997 sent for it; for a group sent, ackCode and ackDocumentId are the partner's
+            997.</description>
+        <field name="ediInterchangeId" type="id" is-pk="true"/>
+        <field name="groupSeqId" type="id" is-pk="true"/>
+        <field name="functionalIdCode" type="text-short"/>
+        <field name="controlNumber" type="text-short"/>
+        <field name="versionCode" type="text-short"/>
+        <field name="appSenderCode" type="text-short"/>
+        <field name="appReceiverCode" type="text-short"/>
+        <field name="groupDate" type="date-time"/>
+        <field name="includedCount" type="number-integer">
+            <description>GE01</description>
+        </field>
+        <field name="receivedCount" type="number-integer"/>
+        <field name="acceptedCount" type="number-integer"/>
+        <field name="groupErrorCode" type="text-short">
+            <description>AK905, for a group rejected as a whole</description>
+        </field>
+        <field name="ackCode" type="text-short"/>
+        <field name="ackDocumentId" type="id"/>
+        <field name="ackDate" type="date-time"/>
+        <relationship type="one" related="mantle.edi.EdiInterchange" short-alias="interchange"/>
+        <relationship type="one" title="Ack" related="mantle.edi.EdiDocument" short-alias="ackDocument">
+            <key-map field-name="ackDocumentId" related="ediDocumentId"/>
+        </relationship>
+        <index name="EDI_GROUP_CONTROL">
+            <index-field name="functionalIdCode"/>
+            <index-field name="controlNumber"/>
+        </index>
+    </entity>
+    <entity entity-name="EdiDocument" package="mantle.edi" cache="never">
+        <description>A transaction set (ST to SE) received or sent, with its business identity and outcome.
+            Received: Stored, then Validated or Rejected (the 997 says which), then Applied, Duplicate (the same business
+            document again), Conflict (its identity with changed content, for review) or Exception (a business refusal:
+            an unknown mapping, an unsupported segment). Sent: Pending is the event recorded with the business transaction
+            (a stable revision of the order, shipment or invoice); after the commit it is Produced (envelope and controls
+            recorded with its SystemMessage) or Refused (the mapping refused it, nothing sent), then Sent, then Accepted or
+            AckRejected by the partner's 997. Superseded: a later revision of the same record was recorded before this one
+            was produced.</description>
+        <field name="ediDocumentId" type="id" is-pk="true"/>
+        <field name="directionEnumId" type="id"/>
+        <field name="ediInterchangeId" type="id"/>
+        <field name="groupSeqId" type="id"/>
+        <field name="systemMessageRemoteId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partnerPartyId" type="id"/>
+        <field name="usageCode" type="text-short"/>
+        <field name="transactionSetId" type="id"/>
+        <field name="controlNumber" type="text-short"/>
+        <field name="statusId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="errorText" type="text-long"/>
+        <field name="businessKey" type="text-medium">
+            <description>The business identity in its scope (organization,
+            partner, environment, direction, transaction set), such as the purchase order number</description>
+        </field>
+        <field name="contentHash" type="text-medium">
+            <description>A hash of the business content, without the envelope
+            and control numbers</description>
+        </field>
+        <field name="documentRevision" type="number-integer"/>
+        <field name="purposeCode" type="text-short"/>
+        <field name="orderId" type="id"/>
+        <field name="shipmentId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="ackedInterchangeId" type="id">
+            <description>For a 997 sent: the group it acknowledges</description>
+        </field>
+        <field name="ackedGroupSeqId" type="id"/>
+        <field name="duplicateOfDocumentId" type="id"/>
+        <field name="systemMessageId" type="id">
+            <description>Sent: the outgoing SystemMessage; received: the receipt</description>
+        </field>
+        <field name="eventDate" type="date-time"/>
+        <field name="producedDate" type="date-time"/>
+        <field name="sentDate" type="date-time"/>
+        <field name="ackCode" type="text-short"/>
+        <field name="ackDocumentId" type="id"/>
+        <field name="ackDate" type="date-time"/>
+        <field name="documentText" type="text-very-long">
+            <description>The transaction set's segments, exactly as received
+            or sent</description>
+        </field>
+        <field name="documentData" type="text-very-long">
+            <description>JSON: a received document's validation (for its
+            997) and the lines it was applied with (for the documents sent back)</description>
+        </field>
+        <relationship type="one" title="EdiDirection" related="moqui.basic.Enumeration" short-alias="direction">
+            <key-map field-name="directionEnumId"/>
+        </relationship>
+        <relationship type="one" title="EdiDocument" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" related="mantle.edi.EdiInterchange" short-alias="interchange"/>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one" related="mantle.shipment.Shipment" short-alias="shipment"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one-nofk" related="moqui.service.message.SystemMessage" short-alias="systemMessage"/>
+        <index name="EDI_DOC_KEY">
+            <index-field name="partnerPartyId"/>
+            <index-field name="businessKey"/>
+        </index>
+        <index name="EDI_DOC_STATUS">
+            <index-field name="statusId"/>
+        </index>
+        <seed-data>
+            <moqui.basic.StatusType description="EDI Document" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Stored" sequenceNum="10" statusId="EdocStored" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Validated" sequenceNum="11" statusId="EdocValidated" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Rejected" sequenceNum="12" statusId="EdocRejected" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Applied" sequenceNum="13" statusId="EdocApplied" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Duplicate" sequenceNum="14" statusId="EdocDuplicate" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Conflict" sequenceNum="15" statusId="EdocConflict" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Exception" sequenceNum="16" statusId="EdocException" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Pending" sequenceNum="20" statusId="EdocPending" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Refused" sequenceNum="21" statusId="EdocRefused" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Superseded" sequenceNum="22" statusId="EdocSuperseded" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Produced" sequenceNum="23" statusId="EdocProduced" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Sent" sequenceNum="24" statusId="EdocSent" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Accepted" sequenceNum="25" statusId="EdocAccepted" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusItem description="Acknowledged Rejected" sequenceNum="26" statusId="EdocAckRejected" statusTypeId="EdiDocument"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocStored" toStatusId="EdocValidated" transitionName="Validate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocStored" toStatusId="EdocRejected" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocValidated" toStatusId="EdocApplied" transitionName="Apply"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocValidated" toStatusId="EdocDuplicate" transitionName="Duplicate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocValidated" toStatusId="EdocConflict" transitionName="Conflict"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocValidated" toStatusId="EdocException" transitionName="Exception"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocException" toStatusId="EdocApplied" transitionName="Apply"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocException" toStatusId="EdocDuplicate" transitionName="Duplicate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocException" toStatusId="EdocConflict" transitionName="Conflict"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocPending" toStatusId="EdocProduced" transitionName="Produce"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocPending" toStatusId="EdocRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocPending" toStatusId="EdocSuperseded" transitionName="Supersede"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocRefused" toStatusId="EdocPending" transitionName="Retry"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocRefused" toStatusId="EdocSuperseded" transitionName="Supersede"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocProduced" toStatusId="EdocSent" transitionName="Send"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocProduced" toStatusId="EdocAccepted" transitionName="Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocProduced" toStatusId="EdocAckRejected" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocSent" toStatusId="EdocAccepted" transitionName="Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocSent" toStatusId="EdocAckRejected" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocAccepted" toStatusId="EdocAckRejected" transitionName="Reject"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EdocAckRejected" toStatusId="EdocAccepted" transitionName="Accept"/>
+        </seed-data>
+    </entity>
+    <extend-entity entity-name="ShipmentPackage" package="mantle.shipment">
+        <field name="sscc" type="text-short">
+            <description>The package's GS1 Serial Shipping Container Code (18 digits with
+            its check digit), as its carton label carries it; an 856 sends it in MAN*GM. Allocating SSCCs and printing
+            GS1-128 labels is not part of Mantle yet.</description>
+        </field>
+    </extend-entity>
+</entities>

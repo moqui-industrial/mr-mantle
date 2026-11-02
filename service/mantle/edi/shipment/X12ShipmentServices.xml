@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 4010 ship notice of the sample EDI profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md). Ported from the
+    Java Moqui mantle-edi component (1.1.5, commit 134acb6, shipment/X12ShipmentServices.xml), which sent a tare per line
+    with no SSCC; the mapping is X12Documents.js's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="produce" noun="ShipNotice" allow-remote="false">
+        <description>The 856 body for a shipped shipment, in the Shipment, Order, Pack, Item hierarchy from its
+            packages and their contents: TD1 (packages and gross weight), TD5 (the method's SCAC), REF*CN, DTM*011 and the
+            ship-to and ship-from at the shipment, PRF at each order, MAN*GM with the package's SSCC (else MAN*CP with its
+            tracking number) at each pack, LIN and SN1 with the purchase order's line at each item. Refuses
+            SHIPMENT_NOT_SHIPPED, NOT_EDI_ORDER, NO_PACKAGES, CONTENTS_AMBIGUOUS, UNPACKED_CONTENTS, PACKAGE_MIXES_ORDERS,
+            SSCC_MISSING (when the profile requires SSCCs), SSCC_INVALID and UOM_UNSUPPORTED.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyEdiMap" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12Documents.js').execute('shipNotice', context)"/>
+            <set field="bodyEdiMap" from="answer.bodyEdiMap"/>
+        </actions>
+    </service>
+</services>

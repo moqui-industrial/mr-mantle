@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 EDI documents sent (plan/payments-shipping-edi.md E1, docs/EdiX12.md): each business event records its document in
+    the business transaction, so a rollback leaves nothing to send and a crash after the commit loses nothing (the
+    send_EdiPendingDocuments job sends what the after-commit send did not). The record services return at once for a
+    record that did not come by EDI; the invoice rule takes any status change, since the profile's invoiceStatusId
+    (the billing event) can be any invoice status. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="EdiOrderDecidedRecordAck" service="update#mantle.order.OrderHeader" when="post-service">
+        <condition>
+            <expression>statusChanged &amp;&amp; ['OrderApproved', 'OrderCancelled', 'OrderRejected'].includes(statusId)</expression>
+        </condition>
+        <actions>
+            <service-call name="mantle.edi.EdiServices.record#OrderAcknowledgment" in-map="{orderId}"/>
+        </actions>
+    </seca>
+    <seca id="EdiShipmentShippedRecordNotice" service="update#mantle.shipment.Shipment" when="post-service">
+        <condition>
+            <expression>statusChanged &amp;&amp; statusId == 'ShipShipped'</expression>
+        </condition>
+        <actions>
+            <service-call name="mantle.edi.EdiServices.record#ShipNotice" in-map="{shipmentId}"/>
+        </actions>
+    </seca>
+    <seca id="EdiInvoiceStatusRecordDocument" service="update#mantle.account.invoice.Invoice" when="post-service">
+        <condition>
+            <expression>statusChanged</expression>
+        </condition>
+        <actions>
+            <service-call name="mantle.edi.EdiServices.record#InvoiceDocument" in-map="{invoiceId}"/>
+        </actions>
+    </seca>
+</secas>

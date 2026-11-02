@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 EDI (plan/payments-shipping-edi.md E1, docs/EdiX12.md): receiving interchanges on an EDI connection's
+    SystemMessageRemote, the 997 functional acknowledgments both ways, and the lifecycle of the documents sent. Ported from
+    the Java Moqui mantle-edi component (github.com/moqui/mantle-edi, 1.1.5, commit 134acb6, EdiServices.xml); the rules are
+    X12.js's, the business mappings X12Documents.js's (named by the profile: mantle.edi.order.X12OrderServices,
+    mantle.edi.shipment.X12ShipmentServices, mantle.edi.account.X12InvoiceServices). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ========== Receive and consume ========== -->
+    <service verb="receive" noun="X12Interchange" allow-remote="false">
+        <description>The receive service of the EdiX12 message type: keeps the bytes received on an
+            authenticated connection (the REST endpoint's or the SFTP poll's remote) as they came, before anything is
+            parsed, once per remote and content (store#ReceivedSystemMessage; a second delivery of the same bytes answers
+            duplicateOfId and is not consumed again). Refuses a receipt with no remote (CONNECTION_REQUIRED).</description>
+        <implements service="org.moqui.impl.SystemMessageServices.receive#SystemMessage"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('receive', context)"/>
+            <set field="systemMessageIdList" from="answer.systemMessageIdList"/>
+            <set field="duplicateOfId" from="answer.duplicateOfId"/>
+        </actions>
+    </service>
+    <service verb="consume" noun="X12Interchange" allow-remote="false">
+        <description>The consume service of the EdiX12 message type: stores the receipt's interchanges,
+            groups and documents (store#ReceivedInterchanges), validates each document, records each group's 997 when the
+            profile sends them, applies each validated document through its profile's mapping service, each in a
+            transaction of its own, then sends what this produced unless the connection batches. A receipt with a
+            quarantined interchange is put in error, after the others were processed. Consuming a receipt again resumes
+            from the statuses recorded.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('consume', context)"/>
+            <set field="noStatusUpdate" from="answer.noStatusUpdate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ReceivedInterchanges" allow-remote="false">
+        <description>Once per receipt: each interchange, quarantined when it cannot be trusted
+            (no ISA, its form, version 00401, controls or trailer count, sender, receiver or usage other than its
+            connection's), a duplicate when the same interchange was processed before, else accepted with its groups
+            (rejected as a whole for a trailer, control, count, version or functional ID error, AK905) and documents
+            (rejected for an ST/SE trailer, control or count error, AK502; else Stored).</description>
+        <in-parameters>
+            <parameter name="systemMessageId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="quarantined" type="Integer"/>
+            <parameter name="resumed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('storeReceipt', context)"/>
+            <set field="quarantined" from="answer.quarantined"/>
+            <set field="resumed" from="answer.resumed"/>
+        </actions>
+    </service>
+    <service verb="validate" noun="InboundDocument" allow-remote="false">
+        <description>A stored document on its grammar (segment order and occurrences, undefined
+            segments; EdiHandler), the profile's element rules (required elements, types, lengths, its code subset) and
+            the 850's totals (CTT01, CTT02, AMT*TT): Validated, or Rejected with the AK3/AK4 its 997 reports.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('validateDocument', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="record" noun="GroupAcknowledgment" allow-remote="false">
+        <description>The 997 a received group is owed, once its documents are validated: a pending
+            outbound document for the group. None for a 997 group (an acknowledgment is never acknowledged) or when the
+            profile does not send 997s.</description>
+        <in-parameters>
+            <parameter name="ediInterchangeId" required="true"/>
+            <parameter name="groupSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ediDocumentId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordGroupAck', context)"/>
+            <set field="ediDocumentId" from="answer.ediDocumentId"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="InboundDocument" allow-remote="false">
+        <description>A validated document (or one in exception, retried) through its profile's mapping
+            service, which applies it with Mantle's services and sets its status. The connection is locked, so two
+            deliveries of one business document apply one after the other. A refusal throws its reason code.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('applyInbound', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="record" noun="InboundException" allow-remote="false">
+        <description>A received document its mapping refused or failed on: Exception with the reason
+            code, in a transaction of its own after the application rolled back.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+            <parameter name="reasonCode"/>
+            <parameter name="errorText"/>
+        </in-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordException', context)"/>
+        </actions>
+    </service>
+    <!-- ========== Functional acknowledgments (997) ========== -->
+    <service verb="produce" noun="FunctionalAck" allow-remote="false">
+        <description>Mapping service of a 997 sent: the body acknowledging the received group (AK1; an
+            AK2 with AK3/AK4 and AK5 for each set unless the group is rejected as a whole; AK9 with the counts and the
+            group's error code), from the validation recorded.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyEdiMap" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('functionalAckBody', context)"/>
+            <set field="bodyEdiMap" from="answer.bodyEdiMap"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="FunctionalAck" allow-remote="false">
+        <description>Mapping service of a 997 received: finds the group this side sent (AK1, by the
+            connection's organization, partner and usage) and accepts or rejects each document sent in it (AK5, or AK9 for
+            those it does not list), confirming or rejecting their SystemMessages. Refuses a 997 of a group or set not
+            sent (ACK_UNMATCHED). Nothing is acknowledged back.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rejectedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('applyFunctionalAck', context)"/>
+            <set field="rejectedCount" from="answer.rejectedCount"/>
+        </actions>
+    </service>
+    <!-- ========== Documents sent ========== -->
+    <service verb="record" noun="OrderAcknowledgment" allow-remote="false">
+        <description>SECA on an order's status: an 855 for the decision on an order received in a
+            purchase order (approved, cancelled or rejected), recorded in the business transaction as the order's next
+            revision, and sent after the commit unless the connection batches.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ediDocumentId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordOrderAck', context)"/>
+            <set field="ediDocumentId" from="answer.ediDocumentId"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ShipNotice" allow-remote="false">
+        <description>SECA on a shipment shipped: an 856 for each EDI connection of its orders, recorded in
+            the business transaction, sent after the commit.</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ediDocumentIdList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordShipNotice', context)"/>
+            <set field="ediDocumentIdList" from="answer.ediDocumentIdList"/>
+        </actions>
+    </service>
+    <service verb="record" noun="InvoiceDocument" allow-remote="false">
+        <description>SECA on an invoice's status: an 810 for a sales invoice of an order received in a
+            purchase order when it reaches the profile's billing status, recorded in the business transaction, sent after
+            the commit. Sending it is not a new accounting posting.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ediDocumentId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordInvoice', context)"/>
+            <set field="ediDocumentId" from="answer.ediDocumentId"/>
+        </actions>
+    </service>
+    <service verb="produce" noun="Document" allow-remote="false">
+        <description>A pending document sent: its body from the profile's mapping service (in a transaction
+            of its own; a refusal records the document Refused and sends nothing), checked on the set's grammar, in an
+            interchange with ISA and GS control numbers allocated now under the connection scope's lock, kept with its
+            outgoing SystemMessage (Produced) in this one transaction.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="systemMessageId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('produceDocument', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="systemMessageId" from="answer.systemMessageId"/>
+        </actions>
+    </service>
+    <service verb="send" noun="PendingDocuments" allow-remote="false" authenticate="anonymous-all">
+        <description>After a business transaction commits, and as the send_EdiPendingDocuments job:
+            produces the pending documents (those given, else the oldest up to limit), each in a transaction of its own,
+            then sends each produced document's SystemMessage and records it Sent. A document whose production failed
+            stays Pending, one whose send failed stays Produced with its controls, for the next run; a rollback of the
+            business transaction left no document to send.</description>
+        <in-parameters>
+            <parameter name="ediDocumentIdList" type="List"/>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="producedCount" type="Integer"/>
+            <parameter name="sentCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('sendPending', context)"/>
+            <set field="producedCount" from="answer.producedCount"/>
+            <set field="sentCount" from="answer.sentCount"/>
+        </actions>
+    </service>
+    <service verb="record" noun="DocumentSent" allow-remote="false">
+        <description>A produced document whose SystemMessage was sent: Sent with the send date.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('recordSent', context)"/>
+        </actions>
+    </service>
+    <service verb="retry" noun="Document" allow-remote="false">
+        <description>An operator's retry, keeping the document's identity: a received document in exception is
+            applied again (after its crosswalk or master data was fixed), a refused one sent is produced and sent again, a
+            produced one whose message is in error is sent again with the same bytes and controls.
+            Refuses another status (NOT_RETRYABLE). Needs the EDI_ADMIN permission.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('retry', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OverdueAcknowledgments" allow-remote="false">
+        <description>The documents sent that need attention: overdueList, per connection whose profile expects 997s,
+            those sent (not 997s) longer ago than its ackOverdueMinutes (a day when not set) with no acknowledgment; and
+            stuckList, those Pending or Produced longer than stuckMinutes (a crash after the commit, a failed send) or whose
+            message is in error, and those Refused.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId"/>
+            <parameter name="stuckMinutes" type="Integer" default-value="60"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="overdueList" type="List"/>
+            <parameter name="stuckList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('overdue', context)"/>
+            <set field="overdueList" from="answer.overdueList"/>
+            <set field="stuckList" from="answer.stuckList"/>
+        </actions>
+    </service>
+    <service verb="retry" noun="Receipt" allow-remote="false">
+        <description>An operator's retry of a receipt left in error: an interchange quarantined while the connection was
+            misconfigured (fixed since), or a document whose validation, 997 or application could not be recorded. It is
+            consumed again from its kept bytes and records (consume#ReceivedSystemMessage with allowError): its
+            quarantined interchanges are checked again (one now trusted replaces its quarantine, Superseded) and nothing
+            done before is repeated. A resend of the same bytes is a duplicate receipt, so this is the way to recover it.
+            Refuses a receipt not in error or received (NOT_RETRYABLE). Needs the EDI_ADMIN permission.</description>
+        <in-parameters>
+            <parameter name="systemMessageId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12.js').execute('retryReceipt', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+</services>

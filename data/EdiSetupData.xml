@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 EDI (plan/payments-shipping-edi.md E1, docs/EdiX12.md; ported from mantle-edi 1.1.5, 134acb6,
+    MantleEdiSetupData.xml): the message type and the operator permission. A connection is a SystemMessageRemote (its
+    transport and credentials, entered by an administrator, never in data) with an EdiConnection; its partner's rules are
+    a profile, such as the sample in EdiSampleProfileData.xml. No produce-ack service on the type: the 997s are this
+    side's per group (EdiServices.record#GroupAcknowledgment), never the framework's per message. -->
+<entity-facade-xml type="seed">
+    <moqui.service.message.SystemMessageType systemMessageTypeId="EdiX12" description="X12 EDI interchange" contentType="application/edi-x12" receiveServiceName="mantle.edi.EdiServices.receive#X12Interchange" consumeServiceName="mantle.edi.EdiServices.consume#X12Interchange"/>
+    <moqui.security.UserPermission userPermissionId="EDI_ADMIN" description="EDI Admin"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="EDI_ADMIN" fromDate="0"/>
+</entity-facade-xml>

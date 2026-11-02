@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 4010 invoice of the sample EDI profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md). Ported from the Java
+    Moqui mantle-edi component (1.1.5, commit 134acb6, account/X12InvoiceServices.xml), which sent product lines only;
+    the mapping is X12Documents.js's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="produce" noun="Invoice" allow-remote="false">
+        <description>The 810 body for a sales invoice of one EDI order: BIG, the remit-to and ship-to, ITD with the
+            due date, an IT1 per product line (with its child charges and allowances as SAC), TDS the invoice total, TXI for
+            tax items and SAC for the other charges and allowances, by the profile's codes. Refuses an item type the profile
+            does not map (CHARGE_UNSUPPORTED), CHARGE_SIGN, AMOUNT_PRECISION, MULTIPLE_ORDERS, NOT_EDI_ORDER, LINE_UNKNOWN
+            and a total the lines and charges do not make (TOTAL_MISMATCH).</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyEdiMap" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12Documents.js').execute('invoice', context)"/>
+            <set field="bodyEdiMap" from="answer.bodyEdiMap"/>
+        </actions>
+    </service>
+</services>

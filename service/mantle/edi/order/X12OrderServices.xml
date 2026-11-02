@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- X12 4010 order documents of the sample EDI profile (plan/payments-shipping-edi.md E1, docs/EdiX12.md), named by
+    EdiProfileDocument.mappingServiceName. Ported from the Java Moqui mantle-edi component (1.1.5, commit 134acb6,
+    order/X12OrderServices.xml); the mapping is X12Documents.js's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="apply" noun="PurchaseOrder" allow-remote="false">
+        <description>A validated 850 as one sales order of the connection's product store, for its partner:
+            the ship-to from the partner's location code (EdiLocation), each line's product from its IDs through the
+            profile's crosswalk, its quantity, unit (EdctUom) and price as sent, requested dates (DTM 001, 002, 010, 037,
+            038), SAC charges and allowances (EdctCharge, stated amounts) and notes, then placed; approving it is the
+            seller's decision. The same purchase order again is a Duplicate and its identity with changed content a
+            Conflict, neither making an order. Refusals: UNSUPPORTED_SEGMENT, CURRENCY_MISMATCH, SHIP_TO_REQUIRED,
+            SHIP_TO_UNKNOWN, ITEM_UNKNOWN, ITEM_MISMATCH, LINE_DUPLICATE, SAC_UNSUPPORTED, CONFIG_INVALID.</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12Documents.js').execute('applyPurchaseOrder', context)"/>
+            <set field="orderId" from="answer.orderId"/>
+        </actions>
+    </service>
+    <service verb="produce" noun="PurchaseOrderAck" allow-remote="false">
+        <description>The 855 body for an order's decision: BAK (AD, AC or RD) and each purchase order line
+            with its ACK (IA, IQ, IP, IC or IR) and the quantity the order now has. Refuses an order not decided
+            (ORDER_NOT_DECIDED), with lines the purchase order did not have (LINE_ADDED_UNSUPPORTED) or more than one part
+            (MULTIPLE_PARTS).</description>
+        <in-parameters>
+            <parameter name="ediDocumentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyEdiMap" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/edi/X12Documents.js').execute('purchaseOrderAck', context)"/>
+            <set field="bodyEdiMap" from="answer.bodyEdiMap"/>
+        </actions>
+    </service>
+</services>
