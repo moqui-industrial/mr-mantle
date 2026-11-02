@@ -76,6 +76,43 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Authorize.Net" enumId="PgtAuthorizeNet" enumTypeId="PaymentGatewayType"/>
         </seed-data>
     </entity>
+    <entity entity-name="PaymentGatewayPayTrace" package="mantle.account.method">
+        <description>The non-secret options of a PayTrace gateway (PaymentGatewayConfig with paymentGatewayTypeEnumId
+            PgtPayTrace, shared key), on the PayTrace JSON API v3. The connection is the config's SystemMessageRemote:
+            sendUrl the API base (https://api.sandbox.paytrace.com for the sandbox, https://api.paytrace.com for production),
+            usageCode T or P (it picks the Protect.js host), username the API user (OAuth client_id) and password its
+            password (client_secret), in the remote's encrypted fields. Ported from the mantle-paytrace component's
+            PaymentGatewayPayTrace, whose login moves to the remote and whose hostName and apiVersion are replaced by the
+            remote's endpoint and the v3 paths.</description>
+        <field name="paymentGatewayConfigId" type="id" is-pk="true"/>
+        <field name="merchantId" type="text-short"><description>The PayTrace merchant account id (merchant_id, a
+            number) every transaction request names.</description></field>
+        <field name="integratorId" type="text-short"><description>The integrator id PayTrace issued for this
+            integration (X-Integrator-Id, up to 12 characters), sent with every request. It identifies the integration, not
+            the account, and is not a credential.</description></field>
+        <field name="currencyUomId" type="id"><description>The currency of the merchant account. PayTrace amounts carry
+            no currency, so a payment in another currency is refused (CURRENCY_NOT_SUPPORTED) rather than sent.</description></field>
+        <field name="lookupGraceSeconds" type="number-integer"><description>How old a lost answer must be before a
+            lookup that finds no transaction for its reference answers that the provider has none (not done); a younger
+            one stays unknown, as PayTrace's export may lag. Empty is 300.</description></field>
+        <field name="sendEnhancedData" type="text-indicator"><description>N to send no level 2/3 enhanced data; empty or Y
+            sends it after each capture or sale of a payment with an order or invoice.</description></field>
+        <field name="commodityCode" type="text-short"><description>The level 3 commodity code of a line whose product has
+            none (ProductIdentification PidtCommodityCode): the code the merchant service provider assigned, 3 to 20
+            letters, digits or dashes.</description></field>
+        <field name="defaultUnitOfMeasure" type="text-short"><description>The level 3 unit of measure of a line with no
+            quantity unit, or one with no PayTrace code (1 to 12 letters or digits, such as PCE or EA).</description></field>
+        <field name="customerLabelPrefix" type="text-short"><description>Put before the vault customer label
+            ("mantle-" and the payment method id), for instances sharing one PayTrace account (their method ids can
+            repeat).</description></field>
+        <relationship type="one" related="mantle.account.method.PaymentGatewayConfig"/>
+        <relationship type="one" title="Account" related="moqui.basic.Uom">
+            <key-map field-name="currencyUomId" related="uomId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="PayTrace" enumId="PgtPayTrace" enumTypeId="PaymentGatewayType"/>
+        </seed-data>
+    </entity>
     <view-entity entity-name="PaymentGatewayResponseFinance" package="mantle.account.method" cache="never">
         <description>Gateway responses with the parties of their payment, for organization and privacy conditions.</description>
         <member-entity entity-alias="R" entity-name="mantle.account.method.PaymentGatewayResponse"/>

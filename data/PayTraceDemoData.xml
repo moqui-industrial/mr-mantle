@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="demo">
+    <!-- A PayTrace sandbox gateway, with no credentials: enter the API user (username) and its password (password) on the
+        remote in the System Message Remote screen, or in a data file of the deployment's own, and the merchant id and the
+        integrator id PayTrace issued on PaymentGatewayPayTrace. For production use another remote with sendUrl
+        https://api.paytrace.com and usageCode P. To take cards for a store add a ProductStorePaymentGateway
+        (paymentInstrumentEnumId PiCreditCard, paymentGatewayConfigId PayTraceDemo). For a sale instead of authorize then
+        capture, set authorizeServiceName to mantle.account.PayTraceServices.authorizeAndCapture#Payment and leave
+        captureServiceName empty. -->
+    <moqui.service.message.SystemMessageRemote systemMessageRemoteId="PayTraceSandbox" description="PayTrace sandbox" sendUrl="https://api.sandbox.paytrace.com" usageCode="T"/>
+    <mantle.account.method.PaymentGatewayConfig paymentGatewayConfigId="PayTraceDemo" paymentGatewayTypeEnumId="PgtPayTrace" description="PayTrace sandbox" systemMessageRemoteId="PayTraceSandbox" authorizeServiceName="mantle.account.PayTraceServices.authorize#Payment" captureServiceName="mantle.account.PayTraceServices.capture#Payment" releaseServiceName="mantle.account.PayTraceServices.release#Payment" refundServiceName="mantle.account.PayTraceServices.refund#Payment" detailsServiceName="mantle.account.PayTraceServices.get#PaymentGatewayDetails"/>
+    <mantle.account.method.PaymentGatewayPayTrace paymentGatewayConfigId="PayTraceDemo" currencyUomId="USD" lookupGraceSeconds="300" sendEnhancedData="Y" defaultUnitOfMeasure="PCE"/>
+</entity-facade-xml>

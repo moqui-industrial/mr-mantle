@@ -1,8 +1,10 @@
 # Authorize.Net payment gateway
 
 Mantle's Authorize.Net gateway: `service/mantle/account/AuthorizeNetServices.xml` and `AuthorizeNet.js`, on the gateway
-interfaces of `PaymentServices.xml` (authorize, capture, release, refund, details). It uses the current Authorize.Net
-JSON API (`createTransactionRequest`, customer profiles, transaction reporting) with the framework HTTP client, no SDK.
+interfaces of `PaymentServices.xml` (authorize, capture, release, refund, details), with what it shares with the
+[PayTrace](PayTrace.md) gateway (the response record, the browser endpoints' checks) in `GatewayLib.js`. It uses the
+current Authorize.Net JSON API (`createTransactionRequest`, customer profiles, transaction reporting) with the framework
+HTTP client, no SDK.
 It was ported from the Java Moqui [AuthorizeDotNet](https://github.com/moqui/AuthorizeDotNet/tree/eaa351c) component
 (1.2.5, `eaa351c`); the AIM `x_` name/value protocol it also used is deprecated and not ported. The plan and its
 implementation record are [plan/payments-shipping-edi.md](../plan/payments-shipping-edi.md) (P1).

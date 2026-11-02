@@ -570,6 +570,16 @@ GatewayContracts,PaymentGateway,AccountingPaymentGateway,AccountingPaymentRefund
 - `poll#PaymentGatewayDetails` no longer needs a `paymentMethodId`: a reference and a gateway, so token-only payments are
   polled.
 
+**Amended by P2 (the HTTP test seam).** A `moqui test` run is closed to the network while the fixtures are off too:
+`moqui_core::service::http_fixtures::network_refusal`, checked in `outbound::send_inner` and `open_inner` after the
+fixtures and before any installed sender or the built-in transport, fails a request to anything but a loopback address
+(localhost, `*.localhost`, 127.0.0.0/8, ::1) with a transport error naming its redacted URL and a warning. Outside a test
+run (`allowed()` false) nothing changes. A spec that needs a real host opens URL prefixes with
+`HttpFixtures.allowNetwork([...])`; `reset()` is now off, no fixtures, no requests and nothing opened, so a run stays
+closed. Found when a later spec's poll job sent the gateway specs' leftover payments to the real sandboxes. Rust test
+`a_closed_test_run_refuses_all_but_loopback_and_opened_prefixes`; `./moq test mr-mantle` (1421 passed) and the mr-boss,
+mr-pass and basic-comms specs with outbound HTTP (see the P2 record) logged no refusal.
+
 ### P1 — Authorize.Net (implementation record, 2026-11-02)
 
 The Authorize.Net gateway on the Phase 0 contracts. Nothing is committed yet; the record names the artifacts per
@@ -696,3 +706,209 @@ run.
 endpoint with the signature key, and one real signed delivery verified; a sandbox run of authorize, capture, void,
 settled refund (after the nightly batch), a held transaction and profile use; the production remote (`usageCode` P,
 production endpoint) entered by an administrator; PCI scope review of the page serving AcceptUI.
+
+### P2 — PayTrace (implementation record, 2026-11-02)
+
+The PayTrace gateway on the Phase 0 contracts and P1's patterns, revised after an independent review (the fixes are
+folded into the design below). Nothing is committed yet. The gateway is in mr-mantle; the review's network guard for
+test runs is in mr-moqui (amending Phase 0, see its record).
+
+**Source and API baseline.** Ported from [mantle-paytrace](https://github.com/moqui/mantle-paytrace/tree/5dbe616) 1.0.3,
+commit `5dbe616` (CC0 with the patent grant, written by David E. Jones, Anderson Urrego Restrepo and Michael Jones; the
+new files' headers keep the dedication and name them, and Mantle's `AUTHORS` is left to its signers): the vault payment
+operations, the response code mapping (101..125 success and decline sets, errors 35/43/44), the level 3 mapping from the
+order lines (customer PO, tax, freight, discounts, quantities, the UoM table, item data) and the transaction status map.
+Not ported: the v1 paths and password grant, raw-card vault requests and the `create#`/`update#CreditCard` SECAs that sent
+card numbers, the user-preference gateway selection, the brand-split level 3 endpoints and the request/response logging.
+Wire protocol: PayTrace JSON API v3, from the OpenAPI schema published at `https://api.paytrace.com/v3/openapi.json`
+(info.version 3.5.1, SHA-256 `7a41ee2f…b5c3`; the sandbox's is 3.5.2 with the same card, vault, export and enhanced data
+paths, the production one adding four PAX terminal paths), read 2026-11-02, with the
+[B2B integration guide](https://developer.north.com/b2b/integration-guide) and the
+[Enhanced Data guide](https://paytrace.atlassian.net/wiki/spaces/HD/pages/4941905959/Integration+Guide). Used:
+`POST /v3/token` (form encoded `grant_type=client_credentials`, `client_id` the API user, `client_secret` its password;
+the answer `access_token`, `expires_in`), the `X-Integrator-Id` header (max 12), the `data` wrapper of every answer,
+`/v3/card/authorize|sale/pt-protect` and `/customer/{id}`, `/v3/card/batch/capture` and `/batch/void`,
+`/v3/card/refund-auth/by-transaction/{id}`, `GET /v3/card/transaction/{id}?merchant_id=`,
+`GET /v3/card/transactions/capturable/{merchant_id}`, `/v3/transactions/export/by-date` (`including_text`; error 180
+none found), `/v3/customer/create/pt-protect`, `GET`/`DELETE /v3/customer/{id}`, `/v3/payment-fields/token` (the
+Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Data; 170 and 171 accepted).
+
+**Changed artifacts.**
+
+- mr-mantle, new: `service/mantle/account/PayTrace.js` and `PayTraceServices.xml` (the five gateway services and
+  `authorizeAndCapture#Payment`, `send#`/`retry#EnhancedData`, `store#`/`delete#CustomerPaymentProfile`,
+  `get#BrowserPaymentConfig`, `submit#BrowserPaymentToken`), `service/PayTrace.secas.xml` (a deleted method's vault
+  customer), `service/mantle/account/GatewayLib.js` (shared with P1, below), `data/PayTraceSeedData.xml` (seed:
+  `PidtCommodityCode`), `data/PayTraceSetupData.xml` (seed-initial: the paused job `retry_PayTraceEnhancedData`),
+  `data/PayTraceDemoData.xml` (demo: gateway `PayTraceDemo`, remote `PayTraceSandbox`, no credentials, merchant or
+  integrator id), `docs/PayTrace.md`, `docs/examples/PayTraceProtect.html`, `test/PayTraceGateway.spec.js`.
+- mr-mantle, changed: `entity/PaymentGatewayEntities.xml` (`PaymentGatewayPayTrace`: `merchantId`, `integratorId`,
+  `currencyUomId`, `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode`, `defaultUnitOfMeasure`,
+  `customerLabelPrefix`; seed `PgtPayTrace`), `service/mantle.rest.xml` (`my/payments/{paymentId}/payTrace` GET and
+  POST), `service/mantle/account/AuthorizeNet.js` (onto `GatewayLib.js`, behavior unchanged), `docs/AuthorizeNet.md`
+  (one line), `test/AuthorizeNetGateway.spec.js` (the cleanup below). `PaymentServices.xml` is unchanged.
+- mr-moqui: `crates/moqui-core/src/service/http_fixtures.rs` (the closed test run, `allowNetwork`, `reset`),
+  `http_fixtures_tests.rs` (its test), `crates/moqui-core/src/outbound.rs` (the check in `send_inner` and `open_inner`),
+  `docs/Build-Test.md` ("HTTP fixtures").
+
+**Design.**
+
+- *Shared code.* `GatewayLib.js` holds what both adapters use, moved out of `AuthorizeNet.js`: the response record with
+  every flag and the refusal, the operation start, amounts in the provider's form, the original transaction, other refunds,
+  the last details status, the lost response and its grace, the billing contact of a method, the new card method, the
+  browser endpoint checks (`browserPayment`: payer or treasury, gateway, method of the same gateway, open status), the
+  page state, the operation id check, and `submitBrowserToken` (lock and recheck, `begin#PaymentGatewayOperation` before any
+  profile, the payer's consent, a declined new card's profile deleted) and `dispatch`. P1's 15 features pass unchanged.
+- *Authentication.* The token is cached in the process cache `mantle.account.PayTrace.accessToken` by remote, endpoint
+  and user until a minute before `expires_in` (900 when absent, the documentation's smallest), sealed: XORed with a
+  keystream of `ec.user.singleUseCodeHash` (the conf's hash type, SHA-256 by default) of the remote's password, a random
+  nonce and a block counter, so the Tools cache screen (which lists values) shows hex no one can use without the
+  password. A token that does not unseal (another password or hash type since) is asked for again. It is never recorded
+  or logged. A 401 on a request takes a new token and sends that request once more (a 401 is refused before processing,
+  so it cannot charge twice); a second 401 is resultError. Credentials the token endpoint refuses, and a second 401 with
+  a fresh token, are not sent again for 60 seconds. The integrator id is an option (at most 12 characters, checked), not
+  a secret; the API user's password is the remote's encrypted `password`. The cipher is this module's construction from
+  the framework's hash, chosen as the least invasive store the Tools screen cannot read; a framework store for
+  short-lived secrets would replace it.
+- *Card data.* Protect.js `hpf_token`/`enc_key` (the `paymentToken` input) or the vault customer; no card number and no
+  security code (v3 takes a CSC only e2ee-encrypted, so `cardSecurityCode` is not sent). PayTrace keeps one card per vault
+  customer: `customer_id` is `gatewayCimId`, the `customer_label` Mantle gives (`customerLabelPrefix`, `mantle-` and the
+  method id, the method made first so its id names it) is `gatewayCustomerId`. The card record keeps the masked number
+  and expiry from `GET /v3/customer/{id}`; the type is not given there and stays empty.
+- *Identity.* No idempotency key for card transactions in v3 (the schema has one only for ACH): the 32-character key goes
+  in `invoice_number` and starts `description`. A transport failure, 408, a 5xx, an unreadable answer, a 2xx answer with
+  neither a response code nor an ErrorSchema error (the capture batch has no 200 schema), response code 1 and the
+  duplicate block 777 are resultUnknown: never resultError, which the contract treats as safe to send again. The lookup
+  of a lost authorization, sale or refund is the export by date (from a day before the lost request to a day after now,
+  `MM/DD/YYYY` in the user's zone) with the key as `including_text`; error 180 is none found. Each candidate whose
+  `description` starts with the key (up to five) is read by id; `invoice_number` is not compared, as an enhanced data PUT
+  overwrites it. The export's `approval_code` is the found authorization's. Not found answers `operationFound` false
+  after `lookupGraceSeconds` (default 300); a failed search leaves it unknown. A lost capture or void reads the
+  authorization's transaction. A capture or void refused for its state (816, 818) whose transaction is already there is a
+  success (`ALREADY_CAPTURED`, `ALREADY_VOIDED`).
+- *Outcomes and status.* 101/106/108/109/112/167 success, 102 and 103 declined, errors 35 bad card, 43/44 bad expiry,
+  778/779/790 declined, other errors resultError, wherever the HTTP status (a refusal may come as 4xx with the error
+  list, or `{detail: [...]}` from request validation). An approval whose `total_amount` differs from `requested_amount`
+  (surcharging) keeps its success with `transactionStatus` `AMOUNT_MISMATCH` and a warning. The record's `status` and
+  `action`: `A` with `action` exactly `auth_only` authorized, any other `A` and `L` Delivered, `S` Confirmed, `V`/`R`
+  voided (Void for an authorization), `D`/`F` Declined; P, I, Z, N leave the payment. Because PayTrace's status after a
+  capture is not documented, a payment that is Delivered, Confirmed or has an approved capture is never taken back to
+  Authorized (nor Confirmed to Delivered); and when the record still reads `A`/`auth_only`, the capturable list decides
+  whether it was captured, for a lost capture's lookup and for a capture refused with 816 (a list that cannot be read
+  leaves the outcome unknown, never an error). Settlement time only when `status_changed_at` carries its zone.
+- *Refunds.* As P1: settled, the refund authorization by transaction id (a transaction of its own with the reference,
+  so a lost refund is found by its key); captured and unsettled, a whole-amount void recorded as the refund
+  (`VOID_BEFORE_SETTLEMENT`, `altReference` the original), "whole" compared with Mantle's own approved capture amount; a
+  part before settlement refused (`REFUND_BEFORE_SETTLEMENT`). No unlinked credit.
+- *Currency.* PayTrace amounts carry no currency: `currencyUomId` is the account's, and another currency is refused
+  (`CURRENCY_NOT_SUPPORTED`). Amounts must round to the currency and have at most two places, else `AMOUNT_INVALID`.
+- *Enhanced data, a separate outcome.* An approved capture or sale (and a lookup that finds a lost one captured)
+  registers `send#EnhancedData` to run after its transaction commits (`ec.service.special().registerOnCommit()`, on a
+  service thread): the PUT and its recording are in a transaction of their own, so they never fail, roll back or hold the
+  lock of the charge, and a keyed retry of the charge replays it. The invoice (`forInvoiceId`) or order part lines become
+  one Enhanced Data PUT. Each line's amount is quantity times unit (unit amount times selected amount for an order)
+  rounded to the currency; its tax and discount children are its `item_tax_amount` and `discount_amount`
+  (`item_total_amount` = amount less discount); shipping lines and their children are freight; tax lines are tax;
+  top-level discounts and negative lines are the summary discount; other children are their own lines; VAT (not in
+  totals) and cancelled quantities are left out. Quantity times `unit_cost` is always the line's amount: the unit amount,
+  else rounded to the currency, else one unit of the line's amount. Level 3 is sent when the line totals less the
+  discount plus freight and tax equal the captured amount (the guide's balancing rule), else level 2 (customer reference
+  and invoice number, as a partial payment's lines do not describe it). `customer_reference_id`, required for both, is
+  the customer PO, else the invoice or order id. Tax 0 is sent as `-1` (tax exempt) as the source did. The outcome is its
+  own `PgoLevel3Data` response (`transactionStatus` level3/level2): accepted only for 170 or 171; else resultError with
+  `ENHANCED_DATA_REJECTED` (PayTrace's error ids in `responseCode`), `ENHANCED_DATA_UNCONFIRMED`,
+  `ENHANCED_DATA_NO_ANSWER`, `ENHANCED_DATA_NOT_SENT` or `ENHANCED_DATA_FAILED` (building the data threw). Never
+  resultUnknown, which would block the payment. `send#EnhancedData` sends it again (a full overwrite, which the schema
+  calls idempotent) for a Delivered payment, refusing one voided before settlement (`TRANSACTION_VOIDED`).
+  `retry#EnhancedData` (job `retry_PayTraceEnhancedData`, paused) sends it for each captured, unsettled payment with an
+  order or invoice whose latest one was not accepted, or that has none (an after-commit send that did not run), at most
+  `maxAttempts` (5) sends a payment and never for a capture voided before settlement, each in its own transaction.
+- *Browser.* `get#BrowserPaymentConfig` makes a Protect.js client key per page (valid 20 minutes, a browser key never
+  kept or logged) and gives the script of the remote's environment (`protect.sandbox.paytrace.com` /
+  `protect.paytrace.com`); `submit#BrowserPaymentToken` takes `hpfToken`, `encKey`, `savePaymentMethod`, `operationId`.
+  The example page is static (no qvt/tui surface), as P1's.
+- *No webhooks.* PayTrace has no card transaction webhook in v3 (`silent_post` is for Trace AR invoices); the poll job
+  is the path after the call.
+
+**Review findings rejected or partly taken.** None of the must-fix items was rejected. Not done: limiting
+`get#BrowserPaymentConfig`'s client key creation per payment against error 790 (one key per page load is PayTrace's
+documented flow; a deployment that hits the limit can cache keys per payment for their 20 minutes); limiting
+PaymentGateway's poll feature to its own gateway (the closed test run makes it unnecessary).
+
+**Not verifiable from public documentation** (built on the best documented shape, to confirm in the sandbox):
+
+- The schema's 200 answers show no examples for single transactions; the shape used is the documented
+  `TransactionResExternal` in the data wrapper. Whether a decline comes with HTTP 200 or 4xx is not stated; both are read.
+- The transaction record's `action` values other than `auth_only`, and which `status` a captured authorization has (the
+  guards above keep a captured payment captured either way); what the capturable list's `search_term` matches (the id
+  is compared on each row it returns, and a list that cannot be read leaves the outcome unknown).
+- Whether a refund authorization works for every brand (the tag text says Visa, Mastercard and Discover for now), and
+  whether the batch capture answers the original's transaction id (the example does).
+- What `including_text` searches, and the export's time zone for `start_date`/`end_date` (hence a day's margin).
+- Level 3 balancing: the guide's formula (line totals less discount plus freight and tax equal the amount) is used,
+  while the schema's `item_total_amount` text says the line totals alone must equal the transaction amount; and how line
+  `item_tax_amount` relates to the summary `tax_amount`. Also the rules that quantity and unit cost be below the
+  transaction amount, which PayTrace checks and a rejection records.
+- Whether auth-only transactions take enhanced data (the API text says sale or auth-only, the guide sale or capture only:
+  Mantle sends after the capture).
+- The token answer's `expires_in` (the example shows 900; the guide says two hours).
+
+**Fast checks run** (after the review fixes). `./moq test mr-mantle --spec PayTraceGateway` (13 features passed, each
+0.03–0.54 s): approval and capture with the reference, integrator id and redacted bearer token, and a poll still reading
+A/auth_only leaving it Delivered; decline, fraud block and bad card; a 2xx answer with no response code unknown (and
+blocking), a `{detail: [...]}` validation refusal, 816 on a no-longer-capturable authorization ALREADY_CAPTURED and on a
+capturable one an error; release and "already voided"; settled refund, void before settlement and the refused part;
+vault customer create/use/delete; a lost authorization found by the export, and one with error 180 not done and sent
+again with the same key; the duplicate block, and a lost capture found through the capturable list; the token cached
+and sealed, a 401 renewed once with one approval, a second 401 not sent a third time and then nothing sent for a
+minute, an expired cached token replaced; order lines to level 3 with the balance checked, invoice lines with the
+invoice id as customer reference and a 3 × 0.125 line sent as 1 × 0.38, and level 2 for a partial payment, all after the
+charge's commit; rejected enhanced data recorded apart from the capture and accepted on `send#EnhancedData`, a lost one
+and a never-sent one found by `retry#EnhancedData` within `maxAttempts`, a sale voided before settlement refused and
+left by the job, seven charge requests in all; the browser endpoints with the REST path, the payer keeping the card and a
+refused customer; no token, card number or secret in a response, method, card or system message. `./moq test mr-mantle
+--spec
+GatewayContracts,PaymentGateway,AccountingPaymentGateway,AccountingPaymentRefunds,AccountingPortals,AuthorizeNetGateway,PaymentMethodServices,AccountingReturns,AccountingPaymentLifecycle,PayTraceGateway`
+(10 specs, 107 features passed); `./moq test mr-mantle` (156 specs, 1421 features passed, no request refused by the
+closed test run); `./moq test mr-boss --spec
+MailSignIn,CalendarSettings,Unsubscribe,MailAccounts,Calendar,Inbox,Chat,AccountingPaymentGateway,AccountingPaymentRefunds`
+(86 passed, 3 skipped for imap in the Dev package) and `./moq test --debug mr-boss --spec
+MailSignIn,MailAccounts,Inbox,CalendarSettings` (45 passed); `./moq test mr-pass --spec Transport,SsoHandoff,Operations,Forum`
+(25 passed); `./moq test basic-comms` (40 passed); none of these logged a refused request. `cargo test -p moqui-core`
+(1302 + 16 passed, 5 ignored; `a_closed_test_run_refuses_all_but_loopback_and_opened_prefixes` new); `cargo clippy -p
+moqui-core -p moqui-host --all-targets -- -D warnings` (clean); `./moq build`. The PayTrace and Authorize.Net specs'
+console at `--log-level debug` contains none of the tokens, client keys, access tokens or secrets. `moqui lint` of
+`PayTraceServices.xml`: clean. Prettier (with `--ignore-path=`) on the three modules and both specs; `xmllint --format`
+with a canonical comparison on the new XML files. No slow test was run.
+
+**Found on the way.** In one run of several specs, the PayTrace and Authorize.Net specs' payments stayed Authorized or
+Delivered with references, and PaymentGateway's poll job, after the fixtures were reset, sent their lookups to the real
+sandboxes with spec credentials (the PayTrace one 401'd once per payment, 9 s). The framework now closes a test run to
+the network (Phase 0 amendment), and both specs also clear their remote's `sendUrl` in `cleanupSpec` as defense in depth.
+
+**Known limits.**
+
+- The response is written in the caller's transaction (Phase 0 limit); PayTrace has no card idempotency, so after a local
+  rollback a keyed retry sends again, and only its duplicate block (777, the merchant's setting) or the reference lookup
+  catches it.
+- The token cache is per process; the sealing protects it from the cache screen, not from code that reads the remote's
+  password.
+- `merchant_tax_id` and `customer_tax_id` (the source sent FEINs in v1) need PayTrace's e2ee encryption and are not
+  sent; PayTrace uses its merchant setup and data on file. `source_address` is left to PayTrace's merchant default.
+  Commodity codes come from `PidtCommodityCode` identifications or one gateway default; national tax, duty and the
+  other processor-managed fields are PayTrace's.
+- The level 2/3 decision is all or nothing per capture; a partial capture of a multi-part order sends level 2.
+- Enhanced data that PayTrace never accepts stays a visible error after `maxAttempts`; there is no operator screen
+  beyond the gateway response lists, and the retry job is paused by default.
+- No ACH, recurring, Trace AR invoices, terminal/EMV, adjust or the e2ee library; a legacy method with a full card
+  number and no vault customer is refused, as in P1.
+- One card per vault customer: a party's cards are separate vault customers.
+
+**Deployment gate.** Sandbox access and an integrator id from PayTrace (an external prerequisite: the sandbox request
+form, about five business days) and the account's security settings matched to production (required fields such as
+billing ZIP or invoice). A sandbox run of authorize, capture, void, settled refund, vault use, a decline, a lost answer
+looked up, a Protect.js page and an enhanced data submission accepted and one rejected, checking the unverified points
+above (decline HTTP status, `action` values and the status after a capture, the capturable list search, export search,
+refund authorization brands, the level 3 balancing rule, token lifetime). The production remote (`usageCode` P,
+`https://api.paytrace.com`) entered by an administrator; enable `retry_PayTraceEnhancedData`; PCI scope review of the
+page serving Protect.js. Passing these specs is not PayTrace certification.

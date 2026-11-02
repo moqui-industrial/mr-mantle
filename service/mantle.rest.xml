@@ -43,6 +43,11 @@ along with this software (see the LICENSE.md file). If not, see
         <resource name="payments"><id name="paymentId"><resource name="authorizeNet">
             <method type="get"><service name="mantle.account.AuthorizeNetServices.get#BrowserPaymentConfig"/></method>
             <method type="post"><service name="mantle.account.AuthorizeNetServices.submit#BrowserPaymentToken"/></method>
+        </resource>
+        <!-- The same with PayTrace Protect.js (docs/PayTrace.md) -->
+        <resource name="payTrace">
+            <method type="get"><service name="mantle.account.PayTraceServices.get#BrowserPaymentConfig"/></method>
+            <method type="post"><service name="mantle.account.PayTraceServices.submit#BrowserPaymentToken"/></method>
         </resource></id></resource>
     </resource>
 

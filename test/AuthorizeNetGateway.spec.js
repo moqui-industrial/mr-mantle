@@ -71,6 +71,11 @@ spec({
         ec.artifactExecution.enableAuthz()
     },
     cleanupSpec() {
+        // the spec's payments stay in the database: with no endpoint their gateway sends nothing when a later spec's
+        // poll job asks for their details, as the fixtures are off then
+        ec.artifactExecution.disableAuthz()
+        call("update#moqui.service.message.SystemMessageRemote", {systemMessageRemoteId: "ANET_SPEC", sendUrl: null})
+        ec.artifactExecution.enableAuthz()
         http.reset()
     }
 })

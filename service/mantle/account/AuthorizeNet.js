@@ -22,7 +22,9 @@
 // refId and order.invoiceNumber, and a lookup finds the transaction by them. Card data, tokens and credentials are never
 // recorded or logged; the request bodies are not logged at all.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
+const G = ec.resource.script("component://mr-mantle/service/mantle/account/GatewayLib.js")
 const {one, rows, find, call} = lib
+const {clip, record, refuse, describe, isRefund, authorizedTransaction} = G
 const P = "mantle.account.payment.Payment",
     PM = "mantle.account.method.PaymentMethod",
     R = "mantle.account.method.PaymentGatewayResponse",
@@ -94,11 +96,10 @@ function gateway(paymentGatewayConfigId) {
     else if (!remote) problem = "Gateway " + paymentGatewayConfigId + " has no connection (SystemMessageRemote)"
     else if (!remote.sendUrl || !remote.username || !remote.password)
         problem = "The connection " + remote.systemMessageRemoteId + " needs its API endpoint, API login id and transaction key"
-    return {id: paymentGatewayConfigId, config, options: options || {}, remote, problem}
+    return {id: paymentGatewayConfigId, label: "Authorize.Net", config, options: options || {}, remote, problem}
 }
 
 const reference = idempotencyKey => (idempotencyKey ? String(idempotencyKey).slice(0, REF_LENGTH) : null)
-const clip = (text, length = 255) => (text == null ? null : String(text).slice(0, length))
 
 // Send one API request. The body's fields are in the schema's order (the JSON API is checked as XML); the credentials go
 // first. Answers {data} with the parsed answer, or {unknown} when the request may have gone and no readable answer came
@@ -138,49 +139,12 @@ function resultOf(data) {
 // An amount as the API's decimal text, rounded to its currency; refused (null) when finer than the currency or
 // than the two places the API takes.
 function amountText(value, currencyUomId) {
-    if (value == null || !currencyUomId) return null
-    const amount = toDecimal(value)
-    const rounded = ec.l10n.roundCurrency(amount, currencyUomId)
-    if (!rounded.eq(amount) || rounded.scale() > 2 || rounded.compare(0) <= 0) return null
-    return String(rounded)
+    const amount = G.providerAmount(value, currencyUomId, 2)
+    return amount == null ? null : String(amount)
 }
 
 // ---- Responses ----
 
-// One PaymentGatewayResponse for this call, with every result flag set (N unless given).
-function record(base, fields) {
-    const flags = [
-        "resultSuccess",
-        "resultDeclined",
-        "resultError",
-        "resultUnknown",
-        "resultNsf",
-        "resultBadExpire",
-        "resultBadCardNumber"
-    ]
-    const values = {
-        paymentGatewayConfigId: base.gw.id,
-        paymentOperationEnumId: base.operationEnumId,
-        paymentId: base.payment?.paymentId,
-        paymentMethodId: base.paymentMethodId || base.payment?.paymentMethodId,
-        amount: base.amount,
-        amountUomId: base.payment?.amountUomId,
-        transactionDate: ec.user.nowTimestamp,
-        idempotencyKey: base.idempotencyKey,
-        refundPaymentId: base.refundPaymentId
-    }
-    for (const flag of flags) values[flag] = "N"
-    Object.assign(values, fields)
-    values.reasonMessage = clip(values.reasonMessage)
-    return call("create#" + R, values).paymentGatewayResponseId
-}
-// Not sent: the gateway or the payment cannot be used for this operation (resultError, safe to send again once fixed).
-function refuse(base, reasonCode, message) {
-    ec.logger.warn(
-        "Authorize.Net " + base.operationEnumId + " of payment " + base.payment?.paymentId + " not sent: " + reasonCode
-    )
-    return {paymentGatewayResponseId: record(base, {resultError: "Y", reasonCode, reasonMessage: message})}
-}
 // A transaction answer (createTransactionResponse) as a response: approved (1), declined (2), error (3), held for review
 // (4, pending), with the source's reason code mapping; a duplicate refusal (11) means an earlier request may have gone,
 // so it is unknown and looked up by its reference.
@@ -228,33 +192,8 @@ function transact(base, body) {
 
 // ---- Payment operations ----
 
-function describe(payment) {
-    return clip("Payment " + payment.paymentId + (payment.orderId ? " order " + payment.orderId : ""), 255)
-}
 function start(p, operationEnumId, amount) {
-    const payment = one(P, {paymentId: p.paymentId})
-    const gw = gateway(p.paymentGatewayConfigId)
-    const base = {
-        gw,
-        payment,
-        operationEnumId,
-        idempotencyKey: p.idempotencyKey,
-        amount: amount ?? payment?.amount,
-        refundPaymentId: p.refundPaymentId
-    }
-    const problem = !payment ? "Payment " + p.paymentId + " not found" : gw.problem
-    return {payment, gw, base, problem}
-}
-// The original authorization's transaction id: the payment's reference, else its approved authorization response's.
-function authorizedTransaction(payment) {
-    if (payment.paymentRefNum) return payment.paymentRefNum
-    const approved = Array.from(
-        find(R, {paymentId: payment.paymentId, resultSuccess: "Y"})
-            .condition("paymentOperationEnumId", "in", ["PgoAuthorize", "PgoAuthAndCapture"])
-            .orderBy("-transactionDate")
-            .list()
-    )
-    return approved.length ? approved[0].referenceNum : null
+    return G.start(p, gateway(p.paymentGatewayConfigId), operationEnumId, amount)
 }
 
 // authorize#Payment and authorizeAndCapture#Payment (sale): a single-use browser token, else the payment method's
@@ -363,13 +302,7 @@ function refund(p) {
     }
     if (capturedStatuses.includes(tx.transactionStatus)) {
         const captured = toDecimal(tx.settleAmount ?? tx.authAmount ?? payment.amount)
-        let otherRefunds = find(P, {refundForPaymentId: payment.paymentId}).condition("statusId", "not-in", [
-            "PmntCancelled",
-            "PmntVoid",
-            "PmntDeclined"
-        ])
-        if (p.refundPaymentId) otherRefunds = otherRefunds.condition("paymentId", "not-equals", p.refundPaymentId)
-        if (toDecimal(amount).compare(captured) !== 0 || otherRefunds.count() > 0)
+        if (toDecimal(amount).compare(captured) !== 0 || G.otherRefundCount(payment, p.refundPaymentId) > 0)
             return refuse(
                 base,
                 "REFUND_BEFORE_SETTLEMENT",
@@ -478,13 +411,12 @@ function findByReference(gw, refId, sinceMillis) {
 
 // How old a lost request must be before none found means not done: the configured grace, and always longer than the
 // duplicate window, within which a resend would have been refused rather than recorded.
-function graceMillis(gw) {
+function graceSeconds(gw) {
     const configured = gw.options.lookupGraceSeconds ?? GRACE_SECONDS
     const window = gw.options.duplicateWindow
     const floor = window != null ? Number(window) + GRACE_MARGIN_SECONDS : 0
-    return Math.max(Number(configured), floor) * 1000
+    return Math.max(Number(configured), floor)
 }
-const isRefund = payment => payment.paymentTypeEnumId === "PtRefund" || !!payment.refundForPaymentId
 // The Payment status a transaction's status means for this payment, or null to leave it as it is.
 function statusFor(payment, tx) {
     const status = tx.transactionStatus
@@ -535,15 +467,8 @@ function detailsOut(gw, payment, tx, gatewayStatusId, extra = {}) {
         },
         extra
     )
-    const last = Array.from(
-        find(R, {paymentId: payment.paymentId, paymentOperationEnumId: "PgoTxDetails"})
-            .orderBy("-transactionDate")
-            .orderBy("-paymentGatewayResponseId")
-            .limit(1)
-            .list()
-    )[0]
     const statusChange = gatewayStatusId != null && gatewayStatusId !== payment.statusId
-    if (statusChange || (last?.transactionStatus || null) !== clip(tx.transactionStatus, 60))
+    if (statusChange || G.lastDetailsStatus(payment.paymentId) !== clip(tx.transactionStatus, 60))
         out.paymentGatewayResponseId = record(
             {gw, payment, operationEnumId: "PgoTxDetails", amount: payment.amount},
             {
@@ -573,7 +498,7 @@ function resolve(gw, payment, p) {
         if (status === "authorizedPendingCapture") return {operationFound: false, gatewayStatusId: payment.statusId}
         return {}
     }
-    const lost = Array.from(find(R, {idempotencyKey: p.idempotencyKey, resultUnknown: "Y"}).orderBy("-transactionDate").list())[0]
+    const lost = G.lostResponse(p.idempotencyKey)
     const found = findByReference(gw, reference(p.idempotencyKey), lost?.transactionDate)
     if (found.transaction) {
         const tx = found.transaction
@@ -588,34 +513,28 @@ function resolve(gw, payment, p) {
         if (got.problem) return {}
         if (got.transaction?.transactionStatus === "voided") return {operationFound: true, gatewayStatusId: "PmntDelivered"}
     }
-    const grace = graceMillis(gw)
-    const age = lost ? Number(ec.user.nowTimestamp) - Number(lost.transactionDate) : Infinity
-    if (age < grace) return {}
+    if (!G.pastGrace(lost, graceSeconds(gw))) return {}
     return {operationFound: false, gatewayStatusId: isRefund(payment) ? "PmntCancelled" : payment.statusId}
 }
 
 // ---- Customer and payment profiles ----
 
-const customerType = partyId => (one("mantle.party.Person", {partyId}) ? "individual" : "business")
 // The billing name and address of a payment method, in the schema's order (the source's billTo mapping).
 function billTo(method, partyId) {
-    const person = one("mantle.party.Person", {partyId})
-    const address =
-        method?.postalContactMechId && one("mantle.party.contact.PostalAddress", {contactMechId: method.postalContactMechId})
-    const state = address?.stateProvinceGeoId && one("moqui.basic.Geo", {geoId: address.stateProvinceGeoId})
+    const contact = G.billingContact(method, partyId)
     const values = {
-        firstName: method?.firstNameOnAccount || person?.firstName,
-        lastName: method?.lastNameOnAccount || person?.lastName,
-        company: method?.companyNameOnAccount,
-        address: address?.address1,
-        city: address?.city,
-        state: state?.geoCodeAlpha2 || state?.geoCodeAlpha3 || address?.stateProvinceGeoId,
-        zip: address?.postalCode ? address.postalCode + (address.postalCodeExt ? "-" + address.postalCodeExt : "") : null,
-        country: address?.countryGeoId
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        company: contact.company,
+        address: contact.address1,
+        city: contact.city,
+        state: contact.stateCode,
+        zip: contact.postalCode ? contact.postalCode + (contact.postalCodeExt ? "-" + contact.postalCodeExt : "") : null,
+        country: contact.countryGeoId
     }
     const out = {}
     for (const [key, value] of Object.entries(values)) if (value) out[key] = clip(value, 50)
-    return Object.keys(out).length ? out : null
+    return {customerType: contact.person ? "individual" : "business", billTo: Object.keys(out).length ? out : null}
 }
 // The customer profile of a party at this gateway: kept on its payment methods (gatewayCustomerId).
 function customerProfileOf(partyId, gatewayId) {
@@ -648,9 +567,9 @@ function storeProfile(p) {
     if (!token.dataDescriptor || !token.dataValue)
         throw new Error("TOKEN_REQUIRED: A payment profile is made from a browser token")
     const payment = {opaqueData: {dataDescriptor: String(token.dataDescriptor), dataValue: String(token.dataValue)}}
-    const paymentProfile = {customerType: customerType(partyId)}
     const bill = billTo(method, partyId)
-    if (bill) paymentProfile.billTo = bill
+    const paymentProfile = {customerType: bill.customerType}
+    if (bill.billTo) paymentProfile.billTo = bill.billTo
     paymentProfile.payment = payment
     const validationMode = gw.options.validationMode || "none"
     let customerProfileId = customerProfileOf(partyId, gw.id)
@@ -698,26 +617,7 @@ function storeProfile(p) {
     if (method) {
         call("update#" + PM, Object.assign({paymentMethodId}, references))
     } else {
-        const last4 = String(card.cardNumber || "")
-            .replace(/\D/g, "")
-            .slice(-4)
-        paymentMethodId = call(
-            "create#" + PM,
-            Object.assign(
-                {
-                    paymentMethodTypeEnumId: "PmtCreditCard",
-                    ownerPartyId: partyId,
-                    description: last4 ? "Card ending " + last4 : "Card",
-                    fromDate: ec.user.nowTimestamp
-                },
-                references
-            )
-        ).paymentMethodId
-        call("create#mantle.account.method.CreditCard", {
-            paymentMethodId,
-            cardNumber: last4 ? "XXXX" + last4 : null,
-            creditCardTypeEnumId: cardTypes[card.cardType] || null
-        })
+        paymentMethodId = G.createCardMethod(partyId, references, G.last4Of(card.cardNumber), cardTypes[card.cardType])
     }
     const paymentGatewayResponseId = record(Object.assign(base, {paymentMethodId}), {
         resultSuccess: "Y",
@@ -848,27 +748,9 @@ function consumeWebhook(p) {
 
 // ---- Browser tokenization ----
 
-// The payer, or a user with treasury authority over the organization paid, may pay this payment in a browser; the
-// payment chooses the organization, gateway, amount and currency. Only a promised or declined Authorize.Net payment, whose
-// payment method (if any) is of the same gateway, so the token cannot go to another one.
-function browserPayment(paymentId, lock = false) {
-    const payment = paymentId && find(P, {paymentId}).forUpdate(lock).one()
-    if (!payment) throw new Error("PAYMENT_NOT_FOUND: The payment is not available")
-    const partyId = ec.user.userAccount?.partyId
-    const payer = !!partyId && partyId === payment.fromPartyId
-    if (!payer) call("mantle.account.PaymentServices.check#PaymentGatewayAccess", {organizationPartyId: payment.toPartyId})
-    const gw = gateway(payment.paymentGatewayConfigId)
-    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: The payment is not taken by Authorize.Net")
-    const method = payment.paymentMethodId && one(PM, {paymentMethodId: payment.paymentMethodId})
-    if (method?.paymentGatewayConfigId && method.paymentGatewayConfigId !== gw.id)
-        throw new Error("METHOD_OTHER_GATEWAY: The payment's payment method belongs to another gateway")
-    if (!["PmntPromised", "PmntDeclined"].includes(payment.statusId))
-        throw new Error("PAYMENT_NOT_OPEN: The payment is not waiting for a card")
-    return {payment, gw, payer}
-}
 // get#BrowserPaymentConfig: the public values Accept.js needs, and what the page shows.
 function browserConfig(p) {
-    const {payment, gw} = browserPayment(p.paymentId)
+    const {payment, gw} = G.browserPayment(p.paymentId, false, gateway)
     const sandbox = gw.remote.usageCode !== "P"
     const host = sandbox ? "https://jstest.authorize.net" : "https://js.authorize.net"
     return {
@@ -882,72 +764,21 @@ function browserConfig(p) {
         amountText: ec.l10n.formatCurrency(payment.amount, payment.amountUomId)
     }
 }
-// The state a page shows for an authorization's answer.
-function stateOf(out) {
-    const response = out.paymentGatewayResponseId && one(R, {paymentGatewayResponseId: out.paymentGatewayResponseId})
-    if (!response)
-        return out.reasonCode === "GATEWAY_OUTCOME_UNKNOWN"
-            ? "unknown"
-            : out.reasonCode === "GATEWAY_OUTCOME_PENDING"
-              ? "pending"
-              : "error"
-    if (response.resultSuccess === "Y") return "approved"
-    if (response.resultUnknown === "Y") return "unknown"
-    if (["resultDeclined", "resultNsf", "resultBadExpire", "resultBadCardNumber"].some(flag => response[flag] === "Y"))
-        return "declined"
-    return response.resultError === "Y" ? "error" : "pending"
-}
-// submit#BrowserPaymentToken: authorize the payment with the browser's single-use opaque data. With the payer's consent
-// to keep the card (savePaymentMethod; only the payer's own), first make a payment profile from it and authorize with
-// the profile; a profile whose card is then declined is deleted again. The payment is locked and checked again, and a
-// replay, a pending or an unknown earlier authorization sends nothing and makes no profile. The state is the gateway
-// response's; a page shows it but does not decide it.
+// submit#BrowserPaymentToken: authorize the payment with the browser's single-use opaque data (GatewayLib's
+// submitBrowserToken: the lock and recheck, begin# before a profile, the payer's consent to keep the card).
 function submitToken(p) {
-    const {payment, gw, payer} = browserPayment(p.paymentId, true)
-    const operationId = p.operationId ? String(p.operationId) : null
-    if (operationId && !/^[A-Za-z0-9_-]{8,40}$/.test(operationId))
-        throw new Error("OPERATION_INVALID: Reload the page and try again")
-    const paymentToken = {dataDescriptor: p.dataDescriptor, dataValue: p.dataValue}
-    if (!paymentToken.dataDescriptor || !paymentToken.dataValue) throw new Error("TOKEN_REQUIRED: No card details were tokenized")
-    const operationKey = operationId ? "anet-" + payment.paymentId + "-" + operationId : null
-    const authorize = token =>
-        call("mantle.account.PaymentServices.authorize#SinglePayment", {
-            paymentId: payment.paymentId,
-            paymentGatewayConfigId: gw.id,
-            operationKey,
-            paymentToken: token
-        })
-    const answer = out => {
-        const after = one(P, {paymentId: payment.paymentId})
-        return {
-            paymentId: payment.paymentId,
-            state: stateOf(out),
-            statusId: after.statusId,
-            paymentMethodId: after.paymentMethodId || null
-        }
-    }
-    const begun = call("mantle.account.PaymentServices.begin#PaymentGatewayOperation", {
-        paymentId: payment.paymentId,
-        operation: "authorize",
-        operationKey,
-        amount: payment.amount
+    if (!p.dataDescriptor || !p.dataValue) throw new Error("TOKEN_REQUIRED: No card details were tokenized")
+    return G.submitBrowserToken({
+        paymentId: p.paymentId,
+        gatewayOf: gateway,
+        operationPrefix: "anet",
+        operationId: p.operationId,
+        paymentToken: {dataDescriptor: p.dataDescriptor, dataValue: p.dataValue},
+        savePaymentMethod: p.savePaymentMethod,
+        storeProfile: (paymentToken, payment, gw) =>
+            storeProfile({partyId: payment.fromPartyId, paymentGatewayConfigId: gw.id, paymentToken}),
+        deleteProfile: paymentMethodId => deleteProfile({paymentMethodId})
     })
-    // a replay answers the first response; a pending or unknown one sends nothing; neither makes a profile
-    if (begun.replay || begun.blocked) return answer(authorize(null))
-    const save = payer && (p.savePaymentMethod === true || p.savePaymentMethod === "true")
-    if (!save) return answer(authorize(paymentToken))
-    const stored = storeProfile({partyId: payment.fromPartyId, paymentGatewayConfigId: gw.id, paymentToken})
-    call("update#" + P, {paymentId: payment.paymentId, paymentMethodId: stored.paymentMethodId})
-    const out = authorize(null)
-    const result = answer(out)
-    if (["declined", "error"].includes(result.state) && stored.paymentMethodId !== payment.paymentMethodId) {
-        // a card that was not accepted is not kept: its new profile goes, and the payment has its method of before
-        deleteProfile({paymentMethodId: stored.paymentMethodId})
-        call("update#" + PM, {paymentMethodId: stored.paymentMethodId, thruDate: ec.user.nowTimestamp})
-        call("update#" + P, {paymentId: payment.paymentId, paymentMethodId: payment.paymentMethodId || null})
-        result.paymentMethodId = payment.paymentMethodId || null
-    }
-    return result
 }
 
 const operations = {
@@ -966,13 +797,6 @@ const operations = {
 }
 ;({
     execute(op, input) {
-        if (!operations[op]) throw new Error("Unknown Authorize.Net operation " + op)
-        // the browser operations check the payer or treasury authority themselves; the rest are internal to the gateway
-        const was = ec.artifactExecution.disableAuthz()
-        try {
-            return operations[op](input || {})
-        } finally {
-            if (!was) ec.artifactExecution.enableAuthz()
-        }
+        return G.dispatch("Authorize.Net", operations, op, input)
     }
 })

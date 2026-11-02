@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- PayTrace on its JSON API v3 (https://api.paytrace.com/v3/redoc, OpenAPI 3.5.1), ported from the Java Moqui
+        mantle-paytrace component (github.com/moqui/mantle-paytrace 1.0.3, commit 5dbe616, on API v1). Configuration: a
+        PaymentGatewayConfig of type PgtPayTrace naming these services, its PaymentGatewayPayTrace options (merchant id,
+        integrator id, account currency) and its SystemMessageRemote (the API base and the API user's credentials); see
+        docs/PayTrace.md. The logic is PayTrace.js. -->
+    <!-- ========== Gateway services (PaymentGatewayConfig) ========== -->
+    <service verb="authorize" noun="Payment">
+        <description>Authorize with the single-use Protect.js token (paymentToken: hpf_token and enc_key; POST
+            /v3/card/authorize/pt-protect), else with the payment method's vault customer (gatewayCimId at this gateway;
+            /v3/card/authorize/customer/{id}). A payment with neither is refused (NO_PAYMENT_PROFILE): card numbers and
+            security codes are not sent from the server. A payment in another currency than the account's is refused
+            (CURRENCY_NOT_SUPPORTED). The idempotency key goes in invoice_number and at the start of description, which a
+            lookup searches after a lost answer.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('authorize', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="authorizeAndCapture" noun="Payment">
+        <description>A sale (/v3/card/sale/pt-protect or /v3/card/sale/customer/{id}): as authorize#Payment, captured at
+            once, then its enhanced data (as capture#Payment). Configure it as the authorizeServiceName with no
+            captureServiceName.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('sale', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="capture" noun="Payment">
+        <description>Capture an authorization (/v3/card/batch/capture), the whole or a smaller amount. A capture refused
+            for the transaction's state (816) whose transaction is already captured is a success (ALREADY_CAPTURED). After
+            an approved capture the payment's order or invoice lines go as enhanced data, recorded as their own PgoLevel3Data
+            response: a rejection never undoes or repeats the capture, and send#EnhancedData sends them again.</description>
+        <implements service="mantle.account.PaymentServices.capture#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('capture', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="release" noun="Payment">
+        <description>Void an authorization (/v3/card/batch/void). A void refused for the transaction's state (818) whose
+            transaction is already voided is a success (ALREADY_VOIDED).</description>
+        <implements service="mantle.account.PaymentServices.release#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('release', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="refund" noun="Payment">
+        <description>Refund linked to the captured transaction, never an unlinked credit. The transaction's state decides,
+            read first: settled, a refund authorization by transaction id of the amount (with the reference, a transaction
+            of its own); captured and not settled, a void of the whole amount recorded as the refund (reasonCode
+            VOID_BEFORE_SETTLEMENT); a partial refund before settlement is refused (REFUND_BEFORE_SETTLEMENT) and nothing is
+            sent.</description>
+        <implements service="mantle.account.PaymentServices.refund#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('refund', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PaymentGatewayDetails">
+        <description>The payment's transaction status (GET /v3/card/transaction/{id}), as a Payment status. For a lost
+            operation (idempotencyKey given) answers operationFound: a capture or void on the authorization's transaction
+            status; an authorization, sale or refund by its reference (the export by date searched for it, each candidate
+            read to check its invoice number). A PgoTxDetails response records a change only. None found answers false once
+            the lost request is older than lookupGraceSeconds; a search that could not be done leaves it unknown.</description>
+        <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
+        <actions>
+            <set field="detailsOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('details', context)"/>
+            <set field="paymentGatewayResponseId" from="detailsOut.paymentGatewayResponseId"/>
+            <set field="referenceNum" from="detailsOut.referenceNum"/>
+            <set field="approvalCode" from="detailsOut.approvalCode"/>
+            <set field="operationFound" from="detailsOut.operationFound"/>
+            <set field="gatewayStatusId" from="detailsOut.gatewayStatusId"/>
+            <set field="settlementDate" from="detailsOut.settlementDate"/>
+        </actions>
+    </service>
+    <!-- ========== Enhanced (level 2/3) data ========== -->
+    <service verb="send" noun="EnhancedData" authenticate="anonymous-all" allow-remote="false">
+        <description>Send a captured, unsettled payment's enhanced data (PUT /v3/invoice/by-transaction-id/{id}, a full
+            overwrite): level 3 from its invoice (forInvoiceId) or order lines when they balance with the captured amount,
+            else level 2 (customer reference and invoice number). The capture and sale services register it to run once
+            their transaction commits; an operator or the retry job sends it again. The outcome is a new PgoLevel3Data
+            response, in this service's own transaction; the charge is never sent again. Refuses a payment that is not
+            captured (PAYMENT_NOT_CAPTURED), one voided before settlement (TRANSACTION_VOIDED) or not of a PayTrace gateway.
+            Internal (anonymous-all so it runs after a commit): not for a remote caller.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+            <parameter name="transactionId">
+                <description>The captured transaction; defaults to the payment's</description>
+            </parameter>
+            <parameter name="amount" type="BigDecimal">
+                <description>The captured amount; defaults to the latest capture's</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Boolean">
+                <description>false when the payment has no order or invoice lines, or the
+                gateway sends no enhanced data</description>
+            </parameter>
+            <parameter name="accepted" type="Boolean"/>
+            <parameter name="level">
+                <description>level3 or level2</description>
+            </parameter>
+            <parameter name="paymentGatewayResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="enhancedOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('enhancedData', context)"/>
+            <set field="sent" from="enhancedOut.sent"/>
+            <set field="accepted" from="enhancedOut.accepted"/>
+            <set field="level" from="enhancedOut.level"/>
+            <set field="paymentGatewayResponseId" from="enhancedOut.paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="retry" noun="EnhancedData" semaphore="wait" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800">
+        <description>For the retry_PayTraceEnhancedData job: send#EnhancedData for each captured, unsettled payment (with an
+            order or invoice) of a PayTrace gateway whose latest enhanced data was not accepted, or that has none (newest
+            first, within lookBackDays and up to checkLimit), each in its own transaction; one that fails is logged and the
+            others go on. A payment sent maxAttempts times already, or voided before settlement, is left.</description>
+        <in-parameters>
+            <parameter name="checkLimit" type="Integer" default="200"/>
+            <parameter name="lookBackDays" type="Integer" default="30"/>
+            <parameter name="maxAttempts" type="Integer" default="5"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="retried" type="Integer"/>
+            <parameter name="accepted" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="retryOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('retryEnhancedData', context)"/>
+            <set field="retried" from="retryOut.retried"/>
+            <set field="accepted" from="retryOut.accepted"/>
+            <set field="failed" from="retryOut.failed"/>
+        </actions>
+    </service>
+    <!-- ========== Vault customers ========== -->
+    <service verb="store" noun="CustomerPaymentProfile" allow-remote="false">
+        <description>Make a PayTrace vault customer from a single-use Protect.js token (POST /v3/customer/create/pt-protect,
+            customer_label "mantle-" and the payment method id). The payment method (the given one, else a new credit card
+            method) keeps gatewayCimId (the vault customer id), gatewayCustomerId (its label), the gateway and only the
+            masked card and expiry; the token is not kept. Refuses a method of another party and a call without a
+            token.</description>
+        <in-parameters>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="paymentToken" type="Map" required="true"/>
+            <parameter name="partyId">
+                <description>The owner; defaults to the method's</description>
+            </parameter>
+            <parameter name="paymentMethodId"/>
+            <parameter name="emailAddress"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentMethodId"/>
+            <parameter name="gatewayCimId"/>
+            <parameter name="gatewayCustomerId"/>
+            <parameter name="paymentGatewayResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="storeOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('storeProfile', context)"/>
+            <set field="paymentMethodId" from="storeOut.paymentMethodId"/>
+            <set field="gatewayCimId" from="storeOut.gatewayCimId"/>
+            <set field="gatewayCustomerId" from="storeOut.gatewayCustomerId"/>
+            <set field="paymentGatewayResponseId" from="storeOut.paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="CustomerPaymentProfile" allow-remote="false">
+        <description>Delete the payment method's vault customer at its PayTrace gateway (DELETE /v3/customer/{id}) and clear
+            gatewayCimId. A failure is a warning and keeps the reference, to delete again.</description>
+        <in-parameters>
+            <parameter name="paymentMethodId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deleted" type="Boolean"/>
+            <parameter name="paymentGatewayResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="deleteOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('deleteProfile', context)"/>
+            <set field="deleted" from="deleteOut.deleted"/>
+            <set field="paymentGatewayResponseId" from="deleteOut.paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <!-- ========== Browser tokenization (Protect.js) ========== -->
+    <service verb="get" noun="BrowserPaymentConfig">
+        <description>What a browser needs to tokenize a card for this payment with Protect.js: the script address of the
+            connection's environment, a Protect.js client key (valid 20 minutes, made for this page and never kept), and the
+            amount to show. Only the payer, or a user with treasury authority over the organization paid; only an open
+            (promised or declined) payment of a PayTrace gateway.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="clientKey"/>
+            <parameter name="protectJsUrl"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="amountText"/>
+        </out-parameters>
+        <actions>
+            <set field="configOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('browserConfig', context)"/>
+            <set field="clientKey" from="configOut.clientKey"/>
+            <set field="protectJsUrl" from="configOut.protectJsUrl"/>
+            <set field="amount" from="configOut.amount"/>
+            <set field="currencyUomId" from="configOut.currencyUomId"/>
+            <set field="amountText" from="configOut.amountText"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="BrowserPaymentToken">
+        <description>Authorize the payment with the browser's single-use Protect.js token (hpfToken, encKey); with
+            savePaymentMethod (the payer's consent to keep the card; ignored for anyone but the payer), first make a vault
+            customer from it, put that method on the payment and authorize with it, and delete it again when the card is
+            declined. The payment is locked and checked again; a replay, or an earlier authorization still pending or
+            unknown, sends nothing and makes no vault customer. A payment method of another gateway is refused. The payment
+            decides the organization, gateway, amount and currency; the browser gives only the token, the consent and an
+            operation id (a retry with the same id is answered from the first response). The answer is the gateway
+            response's state: approved, declined, pending, unknown or error. Access as get#BrowserPaymentConfig.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+            <parameter name="hpfToken" required="true"/>
+            <parameter name="encKey" required="true"/>
+            <parameter name="savePaymentMethod" type="Boolean" default="false"/>
+            <parameter name="operationId">
+                <description>8 to 40 letters, digits, - or _, made once per attempt</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="state"/>
+            <parameter name="statusId"/>
+            <parameter name="paymentMethodId"/>
+        </out-parameters>
+        <actions>
+            <set field="submitOut" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayTrace.js').execute('submitToken', context)"/>
+            <set field="state" from="submitOut.state"/>
+            <set field="statusId" from="submitOut.statusId"/>
+            <set field="paymentMethodId" from="submitOut.paymentMethodId"/>
+        </actions>
+    </service>
+</services>
