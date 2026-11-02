@@ -2,7 +2,9 @@
 
 JavaScript spec files that `moqui test` runs, ported from Mantle's Spock specs, plus specs without a Groovy original
 that run the services the flows never reach. They run in the same script engine as the services, on a database loaded
-with every data type. Each `*.spec.js` file is one specification; `suite.js` gives the order.
+with every data type. Each `*.spec.js` file is one specification; `suite.js` gives the order. The specs are grouped
+in subdirectories named for the `service/mantle` directory whose services they mostly call (`account`, `ledger`,
+`order`, `product`, `shipment`, `work`, ...); a spec's name is its file name wherever it is.
 
 ```sh
 moqui test mr-mantle                                  # every spec, fresh database (about 20s to load)

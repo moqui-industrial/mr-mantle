@@ -421,7 +421,7 @@ worksheet, E2 and Stripe are not part of it. Nothing is committed yet; the recor
   takes `gatewayCustomerId`), `service/mantle/order/ReturnSettlement.js` (an unknown refund stays pending), `Portal.js` (an unknown answer stays
   pending and is looked up),
   `service/mantle/shipment/CarrierServices.xml` and `Shipping.js` (`pending`), the test carrier (`TestCarrier.js`,
-  `TestGatewayServices.xml`: postal codes 99904, 99905), specs `test/GatewayContracts.spec.js` (new),
+  `TestGatewayServices.xml`: postal codes 99904, 99905), specs `test/account/GatewayContracts.spec.js` (new),
   `AccountingPaymentGateway.spec.js`, `AccountingPortals.spec.js` and `WarehouseShipping.spec.js` (a feature each).
 - mr-moqui: `crates/moqui-core/src/service/http_fixtures.rs` and `http_fixtures_tests.rs` (new), `outbound.rs` (the
   fixtures answer before any transport), `service/mod.rs`, `native.rs`, `crates/moqui-host/src/test_cmd/mod.rs` (the test
@@ -614,7 +614,7 @@ the signature key in `X-ANET-Signature`, up to 10 retries, no ordering or duplic
   contract amendments listed at the end of the Phase 0 record: `GATEWAY_OUTCOME_PENDING`, a pending answer's reference,
   `record#PaymentAuthorized` for a pending authorization the lookup finds approved, a found void, the refund payment's
   reference, the poll), `docs/AuthorizeNet.md` and `docs/examples/AuthorizeNetAcceptUI.html` (new), and
-  `test/AuthorizeNetGateway.spec.js` (new).
+  `test/ext/AuthorizeNetGateway.spec.js` (new).
 - mr-moqui: `crates/moqui-core/src/service/system_sync/message.rs` (`SmatHmacSha512`: hex HMAC-SHA512 of the body, either
   case, an optional `sha512=` prefix, on receive and send) and `tests.rs` (its test and the HMAC-SHA512 vector),
   `framework/entity/ServiceEntities.xml` (the `SmatHmacSha512` enumeration), `SystemMessageServices.xml` (description),
@@ -742,12 +742,12 @@ Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Da
   customer), `service/mantle/ext/account/gateway/GatewayLib.js` (shared with P1, below), `data/PayTraceSeedData.xml` (seed:
   `PidtCommodityCode`), `data/PayTraceSetupData.xml` (seed-initial: the paused job `retry_PayTraceEnhancedData`),
   `data/PayTraceDemoData.xml` (demo: gateway `PayTraceDemo`, remote `PayTraceSandbox`, no credentials, merchant or
-  integrator id), `docs/PayTrace.md`, `docs/examples/PayTraceProtect.html`, `test/PayTraceGateway.spec.js`.
+  integrator id), `docs/PayTrace.md`, `docs/examples/PayTraceProtect.html`, `test/ext/PayTraceGateway.spec.js`.
 - mr-mantle, changed: `entity/PaymentGatewayEntities.xml` (`PaymentGatewayPayTrace`: `merchantId`, `integratorId`,
   `currencyUomId`, `lookupGraceSeconds`, `sendEnhancedData`, `commodityCode`, `defaultUnitOfMeasure`,
   `customerLabelPrefix`; seed `PgtPayTrace`), `service/mantle.rest.xml` (`my/payments/{paymentId}/payTrace` GET and
   POST), `service/mantle/ext/account/gateway/AuthorizeNet.js` (onto `GatewayLib.js`, behavior unchanged), `docs/AuthorizeNet.md`
-  (one line), `test/AuthorizeNetGateway.spec.js` (the cleanup below). `PaymentServices.xml` is unchanged.
+  (one line), `test/ext/AuthorizeNetGateway.spec.js` (the cleanup below). `PaymentServices.xml` is unchanged.
 - mr-moqui: `crates/moqui-core/src/service/http_fixtures.rs` (the closed test run, `allowNetwork`, `reset`),
   `http_fixtures_tests.rs` (its test), `crates/moqui-core/src/outbound.rs` (the check in `send_inner` and `open_inner`),
   `docs/Build-Test.md` ("HTTP fixtures").
@@ -951,7 +951,7 @@ The versioning page carried "agent instructions" naming MCP servers; they were n
   `receive#`/`consume#Webhook`), `data/ShippoSetupData.xml` (seed: the options group and SystemMessageType
   `ShippoWebhook`), `data/ShippoDemoData.xml` (demo: gateway `SHIPPO_DEMO` in test mode, remote `ShippoSandbox`, USPS,
   UPS, FedEx and DHL Express with empty carrier accounts, the USPS ground override `usps_ground_advantage`, three USPS
-  flat-rate box templates; no token, secret or account id), `docs/Shippo.md`, `test/ShippoGateway.spec.js`.
+  flat-rate box templates; no token, secret or account id), `docs/Shippo.md`, `test/ext/ShippoGateway.spec.js`.
 - mr-mantle, changed: `entity/ShippingGatewayEntities.xml` (seed `ShGtwyShippo`, `SgoLookupGraceSeconds`; on
   ShipmentPackageRouteSeg `gatewayShipmentId`, `gatewayAmountUomId`, `labelFileType` and their `return*` fields),
   `service/mantle/shipment/Shipping.js` (`finishPending`; the refusals `CONFIG_INVALID`, `PARCEL_INVALID`,
@@ -1153,7 +1153,7 @@ full-message logging. `X12Envelope.groovy` is not used: the envelope pass is X12
   `order/X12OrderServices.xml`, `shipment/X12ShipmentServices.xml`, `account/X12InvoiceServices.xml`,
   `x12/X12V4010TS{850,855,856,810,997}.js`, `service/Edi.secas.xml`, `data/EdiSetupData.xml` (seed: type `EdiX12`,
   permission `EDI_ADMIN`), `data/EdiSampleProfileData.xml` (seed-initial: the generic profile `X12_4010_SAMPLE`, the
-  job `send_EdiPendingDocuments`, on), `docs/EdiX12.md`, `test/EdiX12.spec.js`.
+  job `send_EdiPendingDocuments`, on), `docs/EdiX12.md`, `test/edi/EdiX12.spec.js`.
 - mr-moqui: `crates/moqui-core/src/edi.rs` (MIN/MAX, order and leftover checks, positions per set, AK4's AK403) and
   `edi/tests.rs`, `crates/moqui-core/src/script/runtime/edi.rs` (`setSegmentSuffix`, `setPaddingChar`),
   `crates/moqui-core/src/service/system_sync/sftp.rs` and the new `sftp_tests.rs` (per-file poll), `tests.rs` (the

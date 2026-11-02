@@ -77,7 +77,7 @@ gateway (`returnUrl`, a pending response with `redirectUrl`) on the same details
 
 ## Tests
 
-`test/AuthorizeNetGateway.spec.js` runs the gateway against sanitized provider-shaped answers with the framework's HTTP
+`test/ext/AuthorizeNetGateway.spec.js` runs the gateway against sanitized provider-shaped answers with the framework's HTTP
 fixtures ([Build-Test](../../../../docs/Build-Test.md#http-fixtures)):
 
 ```sh
