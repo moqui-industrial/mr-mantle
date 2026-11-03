@@ -826,7 +826,9 @@ const ZERO = () => toDecimal(0)
 // unitAmount, quantityUomId}.
 function linesOf(payment) {
     if (payment.forInvoiceId) {
-        const items = rows("mantle.account.invoice.InvoiceItem", {invoiceId: payment.forInvoiceId}).map(row => ({
+        // in item order, so the level 3 lines follow the invoice's
+        const items = Array.from(find("mantle.account.invoice.InvoiceItem", {invoiceId: payment.forInvoiceId})
+            .orderBy("invoiceItemSeqId").list()).map(row => ({
             seqId: row.invoiceItemSeqId,
             parentSeqId: row.parentItemSeqId || null,
             itemTypeEnumId: row.itemTypeEnumId,
@@ -841,7 +843,7 @@ function linesOf(payment) {
     if (!payment.orderId) return null
     const conditions = {orderId: payment.orderId}
     if (payment.orderPartSeqId) conditions.orderPartSeqId = payment.orderPartSeqId
-    const items = rows("mantle.order.OrderItem", conditions).map(row => ({
+    const items = Array.from(find("mantle.order.OrderItem", conditions).orderBy("orderItemSeqId").list()).map(row => ({
         seqId: row.orderItemSeqId,
         parentSeqId: row.parentItemSeqId || null,
         itemTypeEnumId: row.itemTypeEnumId,
