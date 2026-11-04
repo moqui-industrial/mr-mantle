@@ -612,6 +612,7 @@ feature("output is received into quarantine with generated serials at the run's 
         retry.result.alreadyApplied == true
         rows("mantle.product.receipt.AssetReceipt", {productionOutputLineId: lineOf(state.run1, "WPD_FIN").productionRunLineId})
             .length == 2
+        // no ProductionPolicy row and no loss: the limit is still the target less what was received (impl-manufacturing F-P7-2)
         over.error.includes("OVER_RECEIPT")
         outsider.error.includes("RECORD_UNAVAILABLE")
         nobody.error.includes("PERMISSION_DENIED")
@@ -737,7 +738,14 @@ feature("subcontract output is received from the vendor facility: components iss
         const costEvents = rows("mantle.work.production.ProductionCostEvent", {workEffortId: runId})
         costEvents.filter(row => row.costEventTypeEnumId === "PcetMaterialIssue").length == 2
         costEvents.filter(row => row.costEventTypeEnumId === "PcetOutputReceipt").length == output.assetReceiptIds.length
-        costEvents.every(row => row.acctgTransId != null && row.ledgerStatusEnumId === "PclPosted")
+        costEvents
+            .filter(row => row.costComponentEnumId !== "PrcOutside")
+            .every(row => row.acctgTransId != null && row.ledgerStatusEnumId === "PclPosted")
+        // and the service's accrual once, at the order line's price, awaiting the cost close (impl-manufacturing P14)
+        const accruals = costEvents.filter(row => row.costEventTypeEnumId === "PcetOutsideAccrual")
+        accruals.length == 1
+        n(accruals[0].amount) == 12
+        accruals[0].ledgerStatusEnumId == "PclAwaitingClose"
         retry.result.alreadyApplied == true
         more.error.includes("OVER_RECEIPT")
         extra.error.includes("QUANTITY_EXCEEDS_ORDERED")

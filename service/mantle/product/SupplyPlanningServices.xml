@@ -74,7 +74,7 @@ along with this software (see the LICENSE.md file). If not, see
             freshness limit); its suggestions (filtered by method, product or exceptions) with their requirement, covered and
             remaining quantity, supply links, dates, source and exception, and whether the user may convert each; the held
             lines pending release; the selected suggestion's demand and supply as of the run; and the organization's plan
-            schedule. Requires SUPPLY_PLAN_RUN, PRODUCTION_PLAN or PRODUCTION_VIEW; refuses an organization, facility or run
+            schedule. Requires SUPPLY_PLAN_RUN, PRODUCTION_PLAN, PRODUCTION_VIEW or PURCHASE_ORDER_EDIT (a buyer of outside processing); refuses an organization, facility or run
             outside the user's (RECORD_UNAVAILABLE).</description>
         <implements service="mantle.product.SupplyPlanningServices.define#PlanScope"/>
         <in-parameters>
@@ -99,6 +99,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canRun" type="Boolean"/>
             <parameter name="canSchedule" type="Boolean"/>
             <parameter name="canConvertMake" type="Boolean"/>
+            <parameter name="canConvertOutside" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
@@ -116,6 +117,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canRun" from="out.canRun"/>
             <set field="canSchedule" from="out.canSchedule"/>
             <set field="canConvertMake" from="out.canConvertMake"/>
+            <set field="canConvertOutside" from="out.canConvertOutside"/>
         </actions>
     </service>
     <service verb="store" noun="PlanSchedule" allow-remote="false">
@@ -165,9 +167,17 @@ along with this software (see the LICENSE.md file). If not, see
             with the method as of methodDate (the plan date when empty), on the facility given or the routing's work center
             under the suggestion's facility, then RequirementSupply and WorkRequirementFulfillment WrfDelivers, the
             requirement Ordered. The requirement is locked first: one already covered answers its existing run (resultCode
-            EXISTING), whoever covered it. Buy and transfer suggestions are not converted here (METHOD_NOT_CONVERTED).
-            Requires PRODUCTION_PLAN for make (PERMISSION_DENIED); refuses a suggestion outside the user's organizations
-            (RECORD_UNAVAILABLE), a stale plan (PLAN_STALE), an exception (SUGGESTION_EXCEPTION), a superseded or converted
+            EXISTING), whoever covered it. An outside-processing suggestion (PsmOutside, impl-manufacturing P14: the
+            requirement of mantle.work.ProductionServices.request#SubcontractService) becomes a line of a draft purchase order
+            of its supplier, one order per supplier in this call: the service OrderItem at the requirement's remaining
+            quantity and unit at the supplier's price (mantle.product.PriceServices.get#ProductPrice, the shared resolver,
+            with the organization as buyer), its OrderItemWorkEffort to the operation (requiredWork Y), a RequirementSupply
+            of the line, the requirement Ordered and the subcontract given the line; the order is never placed or approved
+            (Purchasing's). Its plan's age does not matter (the quantity is the request's, not netted). Other buy and
+            transfer suggestions are not converted here (METHOD_NOT_CONVERTED). Requires PRODUCTION_PLAN for make and
+            PURCHASE_ORDER_EDIT for outside processing (PERMISSION_DENIED); refuses an outside-processing suggestion with no
+            supplier (SUGGESTION_EXCEPTION) or no supplier price (PRICE_UNAVAILABLE), and a suggestion outside the user's
+            organizations (RECORD_UNAVAILABLE), a stale plan (PLAN_STALE), an exception (SUGGESTION_EXCEPTION), a superseded or converted
             suggestion (SUGGESTION_CLOSED), a product that cannot be produced (PRODUCT_NOT_USABLE) and
             create#ProductionOrder's refusals.</description>
         <in-parameters>
@@ -180,7 +190,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"><description>Per suggestion: planningSuggestionId, ok, resultCode CREATED or
-                EXISTING, requirementId, workEffortId, quantity and facilityId, or reasonCode and message.</description>
+                EXISTING, requirementId, workEffortId, quantity and facilityId (make), or orderId and orderItemSeqId
+                (outside processing), or reasonCode and message.</description>
             </parameter>
             <parameter name="createdCount" type="Integer"/>
             <parameter name="existingCount" type="Integer"/>
@@ -203,6 +214,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="operationKey" required="true"/>
             <parameter name="methodDate" type="Timestamp"/>
             <parameter name="facilityId"/>
+            <parameter name="orderId"><description>Outside processing: the draft order of the same supplier an earlier
+                group of the call made, which this line joins</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"/>

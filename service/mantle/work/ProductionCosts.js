@@ -95,6 +95,9 @@ function issuanceEvent(assetIssuanceId) {
     const cost = asset?.acquireCost == null || dec(asset.acquireCost).isZero() ? null : dec(asset.acquireCost)
     const quantity = dec(issuance.quantity)
     const line = issuance.productionMaterialLineId ? one(LINE, {productionRunLineId: issuance.productionMaterialLineId}) : null
+    // an output asset scrapped back to its open run (record#ProductionLoss, impl-manufacturing P7) adds to WIP as the output's
+    // scrap, not as material
+    const scrap = !!issuance.productionLossId
     const ledger = ledgerOf(
         postedTrans("assetIssuanceId", assetIssuanceId),
         cost ? quantity.multiply(cost) : null,
@@ -102,10 +105,15 @@ function issuanceEvent(assetIssuanceId) {
     )
     return Object.assign(ledger, {
         run,
-        costEventTypeEnumId: "PcetMaterialIssue",
-        costComponentEnumId: "PrcMaterial",
+        costEventTypeEnumId: scrap ? "PcetOutputScrap" : "PcetMaterialIssue",
+        costComponentEnumId: scrap ? "PrcOutput" : "PrcMaterial",
         operationWorkEffortId: issuance.operationWorkEffortId || null,
-        productionRunLineId: issuance.productionMaterialLineId || null,
+        productionRunLineId:
+            issuance.productionMaterialLineId ||
+            (scrap
+                ? one("mantle.work.production.ProductionLoss", {productionLossId: issuance.productionLossId})?.productionRunLineId
+                : null) ||
+            null,
         productId: issuance.productId,
         quantity,
         quantityUomId: stockUomOf(line, issuance.productId),
@@ -160,8 +168,16 @@ function receiptEvent(assetReceiptId) {
 // The source kinds an event is derived from; a later phase adds its own.
 const sources = {
     [ISSUANCE]: issuanceEvent,
-    [RECEIPT]: receiptEvent
+    [RECEIPT]: receiptEvent,
+    // impl-manufacturing P7: issued material scrapped in WIP (ProductionQuantities.js)
+    "mantle.work.production.ProductionLoss": productionLossId =>
+        ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuantities.js").lossCostEvent(productionLossId)
 }
+// P14: outside processing, derived in ProductionSubcontracts.js: a service acceptance's accrual and a bill match line's price
+// variance, both awaiting the cost close
+const subcontracts = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionSubcontracts.js")
+sources["mantle.order.purchase.ServiceAcceptance"] = id => subcontracts().acceptanceEvent(id)
+sources["mantle.account.invoice.InvoiceMatchLine"] = id => subcontracts().billVarianceEvent(id)
 
 // Writes the event of a source revision once, inside the caller's transaction; a second call answers the first event.
 function record(p) {
@@ -284,7 +300,11 @@ function eventRows(events, financial) {
 }
 // The actual cost: each component's net amount, the material issued and returned, the output's relief and what is left in
 // WIP (the variance the cost close settles), in the events' currency.
-function actualsOf(events) {
+function actualsOf(all) {
+    // a scrap of issued material is WIP already counted by its issue, which the cost close moves to scrap variance: shown
+    // apart, never added again (impl-manufacturing P7)
+    const scrapEvents = all.filter(event => event.costEventTypeEnumId === "PcetMaterialScrap")
+    const events = all.filter(event => event.costEventTypeEnumId !== "PcetMaterialScrap")
     const sum = filter =>
         events.filter(filter).reduce((total, event) => (event.amount == null ? total : total.add(dec(event.amount))), zero())
     const components = Array.from(new Set(events.map(event => event.costComponentEnumId))).map(componentEnumId => ({
@@ -300,7 +320,10 @@ function actualsOf(events) {
         issued: text(sum(event => event.costEventTypeEnumId === "PcetMaterialIssue")),
         returned: text(zero().subtract(sum(event => event.costEventTypeEnumId === "PcetMaterialReturn"))),
         outputRelieved: text(zero().subtract(sum(event => event.costEventTypeEnumId === "PcetOutputReceipt"))),
-        wipBalance: text(sum(() => true))
+        wipBalance: text(sum(() => true)),
+        scrapped: text(
+            scrapEvents.reduce((total, event) => (event.amount == null ? total : total.add(dec(event.amount))), zero())
+        )
     }
 }
 // Estimate against actual per component, for a reader of both.

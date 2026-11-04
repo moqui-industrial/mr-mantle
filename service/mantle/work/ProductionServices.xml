@@ -16,7 +16,8 @@ along with this software (see the LICENSE.md file). If not, see
     P16, its §4 owner contracts): create, release and read a run with its own lines (P16a), and the stock guards that
     issue to it, return unused material, receive its output and receive a subcontract's output (P16b), each on
     StockPosting.js's steps with Production.js's run steps. Manufacturing's own screens and its transition, change, split,
-    loss and cost services come with impl-manufacturing. -->
+    loss and cost services come with impl-manufacturing: the policy (P4), the lifecycle (P5a), cost evidence (P6) and
+    quantities, by-products and loss (P7, ProductionQuantities.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== the runs (P16a, part of M4) ===== -->
@@ -331,10 +332,14 @@ along with this software (see the LICENSE.md file). If not, see
             unit (given, or generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each
             receipt carries the output line, the operation and the quantity as entered, and has its cost event, which
             references the hook's transaction and refuses a receipt without a cost (COST_UNAVAILABLE; impl-manufacturing P6). A
-            retry with the same operation key answers the first. Requires STOCK_ISSUE; refuses a run outside the user's
+            retry with the same operation key answers the first. With the run's completeOnFinalReceipt policy flag (off by
+            default), a running run that reconciles after the receipt is completed in the same transaction (completed).
+            Requires STOCK_ISSUE; refuses a run outside the user's
             organizations (RECORD_UNAVAILABLE), one not released (RUN_NOT_RELEASED), a line of another run or role
             (LINE_INVALID, LINE_REQUIRED), a by-product, whose cost
-            allocation is not built (BYPRODUCT_NOT_COSTED), more than the line has left (OVER_RECEIPT), a facility of another
+            allocation is not built (BYPRODUCT_NOT_COSTED; P15), more than the line may still take (OVER_RECEIPT: its target
+            and the ProductionPolicy's overproduction tolerance as of the release, with a supervisor's approval beyond it,
+            less the good, held and lost quantity it accounts for; impl-manufacturing P7), a facility of another
             owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE, LOT_REQUIRED), the destination's
             refusals and a closed fiscal period today (PERIOD_CLOSED, read without locking).</description>
         <in-parameters>
@@ -351,6 +356,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lotNumber"/>
             <parameter name="lotId"/>
             <parameter name="expirationDate" type="Timestamp"/>
+            <parameter name="hold" type="Boolean" default-value="false"><description>Received produced-held, into quarantine
+                with an inspection (record#ProductionQuantity's pending; impl-manufacturing P7).</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RECEIVED, workEffortId, productionRunLineId,
@@ -363,7 +370,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="production" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')"/>
             <set field="begun" from="posting.begin(context, 'ProductionReceive', 'STOCK_ISSUE', ['workEffortId',
                     'productionRunLineId', 'quantity', 'quantityUomId', 'operationWorkEffortId', 'facilityId',
-                    'toLocationSeqId', 'serialNumbers', 'firstSerialNumber', 'lotNumber', 'lotId', 'expirationDate'])"/>
+                    'toLocationSeqId', 'serialNumbers', 'firstSerialNumber', 'lotNumber', 'lotId', 'expirationDate', 'hold'])"/>
             <if condition="begun.previous">
                 <set field="result" from="begun.previous"/>
                 <return/>
@@ -380,6 +387,10 @@ along with this software (see the LICENSE.md file). If not, see
                     .recordAll('mantle.product.receipt.AssetReceipt', posted.assetReceiptIds)"/>
             <set field="financialRead" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
                     .has('ACCOUNTING_VIEW')"/>
+            <!-- the final receipt completes a running run that now reconciles, under the run's completeOnFinalReceipt flag
+                (off by default; impl-manufacturing P7, §4) -->
+            <set field="afterReceipt" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .afterReceipt(plan.run.workEffortId)"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
                     posted.assetReceiptIds[0], {resultCode: 'RECEIVED', workEffortId: plan.run.workEffortId,
                         productionRunLineId: plan.line.productionRunLineId, operationWorkEffortId: plan.operationWorkEffortId,
@@ -390,7 +401,8 @@ along with this software (see the LICENSE.md file). If not, see
                         costSource: plan.cost.costSource, costProvisional: plan.cost.provisional,
                         unitCost: financialRead ? production.text(plan.lines[0].cost) : null, assetIds: posted.assetIds,
                         assetReceiptIds: posted.assetReceiptIds, qualityInspectionIds: posted.qualityInspectionIds,
-                        productionCostEventIds: costEventIds})"/>
+                        productionCostEventIds: costEventIds, completed: afterReceipt.completed,
+                        completeBlockCode: afterReceipt.blockCode})"/>
         </actions>
     </service>
     <service verb="receive" noun="SubcontractOutput" allow-remote="false">
@@ -403,6 +415,8 @@ along with this software (see the LICENSE.md file). If not, see
             PO price); then Purchasing's service acceptance (mantle.order.purchase.ServiceAcceptance, the accept#ServiceItem
             contract) of the dispatch's service order item with the output receipt and its inspection as evidence, under this
             entry point's check (§2). A retry with the same operation key answers the first, so the line is accepted once.
+            The acceptance writes the outside-processing accrual cost event once (the accepted quantity at the order line's
+            price, awaiting the cost close; impl-manufacturing P14).
             Requires STOCK_ISSUE; refuses a shipment that is not a subcontract dispatch (NOT_SUBCONTRACT), a facility that is
             not in custody (NOT_CUSTODY), an order not with its custodian (CUSTODIAN_MISMATCH), stock missing at the vendor
             facility (MATERIAL_SHORT), and the refusals of the issue, the output receipt and the acceptance
@@ -428,8 +442,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, workEffortId,
                 operationWorkEffortId, vendorFacilityId, issues (line, asset, quantity, assetIssuanceId), output (the
-                output receipt's result), serviceAcceptanceId, orderId, orderItemSeqId, acceptedQuantity, and the operation
-                fields.</description></parameter>
+                output receipt's result), serviceAcceptanceId, orderId, orderItemSeqId, acceptedQuantity, accrualCostEventId,
+                and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -472,12 +486,16 @@ along with this software (see the LICENSE.md file). If not, see
                         workEffortId: plan.operationWorkEffortId || plan.run.workEffortId,
                         assetReceiptId: received.result.assetReceiptIds[0] || null,
                         qualityInspectionId: received.result.qualityInspectionIds[0] || null, comments: comments})"/>
+            <!-- the outside-processing accrual of the accepted service, once with its acceptance (impl-manufacturing P14) -->
+            <set field="accrualEventIds" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .recordAll('mantle.order.purchase.ServiceAcceptance', [accepted.serviceAcceptanceId])"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.order.purchase.ServiceAcceptance',
                     accepted.serviceAcceptanceId, {resultCode: 'RECEIVED', shipmentId: shipmentId,
                         workEffortId: plan.run.workEffortId, operationWorkEffortId: plan.operationWorkEffortId,
                         vendorFacilityId: plan.vendorFacility.facilityId, issues: issues, output: received.result,
                         serviceAcceptanceId: accepted.serviceAcceptanceId, orderId: plan.orderId,
-                        orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity})"/>
+                        orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity,
+                        accrualCostEventId: accrualEventIds[0] || null})"/>
         </actions>
     </service>
 
@@ -733,8 +751,12 @@ along with this software (see the LICENSE.md file). If not, see
             (PRODUCTION_PLAN) takes a released run that has no stock or time fact (RUN_HAS_FACTS) back to a draft, its
             operations cancelled and its lines unfrozen. start, hold (a reason), resume (as released before a start, as
             running after), cancel (a reason; a draft, released or held run with no fact) and complete need
-            PRODUCTION_SUPERVISE; complete is refused until the quantity reconciliation (COMPLETE_UNAVAILABLE) and close is the
-            cost close's (CLOSE_BY_COST_CLOSE). requestStaged (PRODUCTION_PLAN) asks the supervisors to approve a staged release
+            PRODUCTION_SUPERVISE; complete (impl-manufacturing P7) needs each output line reconciled, target = good + held +
+            remaining + approved loss with nothing remaining (QUANTITIES_UNRECONCILED; finishRemainder records what is left as
+            an approved loss with the reason) and nothing held awaiting disposition (OUTPUT_HELD), no loss waiting for
+            approval (LOSS_PENDING), no operation running or held (OPERATION_OPEN; those not reported complete with it) and
+            each material line issued (MATERIAL_UNISSUED, unless acceptMaterialVariance); close is the cost close's
+            (CLOSE_BY_COST_CLOSE). requestStaged (PRODUCTION_PLAN) asks the supervisors to approve a staged release
             of a short draft (ProductionStagedRelease); approveStaged (PRODUCTION_SUPERVISE) approves it at the next revision.
             Refuses a run outside the user's organizations (RECORD_UNAVAILABLE), no revision (REVISION_REQUIRED) or a changed
             one (REVISION_CHANGED), an action from another status (STATUS_INVALID, RUN_NOT_DRAFT), a generic transition such as
@@ -751,10 +773,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="reasonCode"><description>An active production reason of the run's organization</description>
             </parameter>
             <parameter name="reexplode" type="Boolean" default-value="false"/>
+            <parameter name="finishRemainder" type="Boolean" default-value="false"><description>complete: record what is left
+                of each output line as an approved loss first</description></parameter>
+            <parameter name="acceptMaterialVariance" type="Boolean" default-value="false"><description>complete: accept the
+                material not issued as a variance</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (RELEASED, REEXPLODED, UNRELEASED, STARTED, HELD,
-                RESUMED, CANCELLED, REQUESTED or APPROVED), workEffortId, action, fromStatusId, statusId, revision; for a
+                RESUMED, CANCELLED, COMPLETED, REQUESTED or APPROVED), workEffortId, action, fromStatusId, statusId, revision; for a
                 release releaseDate, operationWorkEffortIds, staged and shortages; and the operation fields.</description>
             </parameter>
         </out-parameters>
@@ -767,7 +793,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>One action on several runs (design-manufacturing WorkOrders Selection): each run through
             transition#ProductionOrder in its own transaction under "operationKey/workEffortId", at the revision given for
             it in expectedRevisions or its current one, so a retry answers the runs already done. A result per run: outcome
-            success, blocked (SHORTAGE, METHOD_CHANGED, RUN_HAS_FACTS, COMPLETE_UNAVAILABLE) or failed, with its reason code
+            success, blocked (SHORTAGE, METHOD_CHANGED, RUN_HAS_FACTS, RUN_STARTED, or a completion's QUANTITIES_UNRECONCILED,
+            OUTPUT_HELD, LOSS_PENDING, MATERIAL_UNISSUED, OPERATION_OPEN) or failed, with its reason code
             and message; one failure does not stop the others. Requires PRODUCTION_PLAN or PRODUCTION_SUPERVISE; each run
             checks its action's own permission.</description>
         <in-parameters>
@@ -943,7 +970,8 @@ along with this software (see the LICENSE.md file). If not, see
             would post nothing (COST_UNAVAILABLE, F13); an unknown source entity is an error.</description>
         <in-parameters>
             <parameter name="sourceEntityName" required="true"><description>mantle.product.issuance.AssetIssuance or
-                mantle.product.receipt.AssetReceipt; later phases add theirs</description></parameter>
+                mantle.product.receipt.AssetReceipt, or mantle.work.production.ProductionLoss for a scrap of issued material (P7);
+                later phases add theirs</description></parameter>
             <parameter name="sourceId" required="true"/>
             <parameter name="sourceRevision" type="Integer"><description>1 when empty; a correction of the source (a
                 timesheet reopened, a rate changed) is its next revision</description></parameter>
@@ -1217,6 +1245,668 @@ along with this software (see the LICENSE.md file). If not, see
                     .requestMaintenance(posting.scope(), context)"/>
             <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,
                     'mantle.product.maintenance.AssetMaintenance', requested.assetMaintenanceId, requested)"/>
+        </actions>
+    </service>
+
+    <!-- ===== quantities, by-products and loss (impl-manufacturing P7; ProductionQuantities.js) ===== -->
+    <service verb="get" noun="ProductionQuantities" allow-remote="false">
+        <description>A run's quantities (design-manufacturing Quantities OutputPlan, ByProducts, §12.2): each output and
+            by-product line's target, received, accepted good and produced-held (its receipts' assets by their status now,
+            less what was scrapped back), approved process loss, scrap and rework, losses waiting for approval, what is left,
+            overproduction, the policy's tolerance, a supervisor's approval beyond it and what it may still take; each
+            material line's required, issued, returned, net, scrapped in WIP and remaining quantity; the quantity events and
+            losses (a loss's cost only with ACCOUNTING_VIEW); the reconciliation the completion needs (reconciled, the
+            refusal and whether Finish remainder or the material variance is offered); with Products' cost read the
+            by-products' allocation estimate (by quantity; the actual allocation is the cost close's, P15); and what the
+            user may do. Reads only. Requires PRODUCTION_VIEW or PRODUCTION_OPERATE; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="outputRows" type="List"/>
+            <parameter name="materialRows" type="List"/>
+            <parameter name="eventRows" type="List"/>
+            <parameter name="lossRows" type="List"/>
+            <parameter name="reconciliation" type="Map"/>
+            <parameter name="allocation" type="Map"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="can" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('read', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionOutput" allow-remote="false">
+        <description>A draft run's secondary output (PrlrOutput) or by-product (PrlrByproduct) line, added, changed or with
+            remove taken off (design-manufacturing Quantities AddOutput, ByProducts): its product, quantity and unit with the
+            exact conversion to the stock unit, and the routing operation that yields it; the WeptProduce rows rewritten and
+            the revision counted up. The run's own product is not changed here (OUTPUT_PRIMARY). A retry with the same
+            operation key answers the first. Requires PRODUCTION_PLAN; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE), a changed revision (REVISION_REQUIRED, REVISION_CHANGED), a released run (RUN_NOT_DRAFT), a
+            line of another run or role (LINE_INVALID), another role (ROLE_INVALID), no product (PRODUCT_REQUIRED) or
+            quantity (QUANTITY_INVALID), a unit without a conversion (UNIT_CONVERSION) and an operation not in the run's
+            routings (OPERATION_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="productionRunLineId"><description>The line to change or remove; empty adds one</description>
+            </parameter>
+            <parameter name="lineRoleEnumId"><description>PrlrByproduct (default) or PrlrOutput</description></parameter>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"><description>The product's stock unit when empty</description></parameter>
+            <parameter name="routingOperationWorkEffortId"/>
+            <parameter name="remove" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ADDED, STORED or REMOVED, workEffortId,
+                productionRunLineId, revision and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('storeOutput', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ProductionQuantity" allow-remote="false">
+        <description>Record what a released or running run produced on an output line (design-manufacturing Quantities
+            Reconcile, §12.2), in one transaction: process loss, scrap (before it was stock) and rework through their losses
+            (record#ProductionLoss's rules: a reason, an approval above the reason's threshold), then good output received
+            through receive#ProductionOutput and pending (produced-held) output received into quarantine with its
+            inspection (hold), each under this operation's key so a retry receives nothing twice, and a quantity event for
+            each. Output beyond what the line may still take (its target, the policy's overproduction tolerance and a
+            supervisor's approval, less what it accounts for) records nothing but an overproduction request, which notifies
+            the supervisors (ProductionOverproduction; resultCode APPROVAL_REQUESTED). The receipt can complete the run under
+            the completeOnFinalReceipt flag (completed). Requires PRODUCTION_OPERATE, and STOCK_ISSUE for the receipts;
+            refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not released or running
+            (RUN_NOT_RELEASED), a changed revision when one is given (REVISION_CHANGED), a line of another run
+            (LINE_INVALID), an operation of another run (OPERATION_INVALID), a negative quantity (QUANTITY_INVALID), none at
+            all (QUANTITY_REQUIRED), and the loss and receipt refusals.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="productionRunLineId"><description>The run's primary output when empty</description></parameter>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="good" type="BigDecimal"/>
+            <parameter name="pending" type="BigDecimal"/>
+            <parameter name="processLoss" type="BigDecimal"/>
+            <parameter name="scrap" type="BigDecimal"/>
+            <parameter name="rework" type="BigDecimal"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="facilityId"/>
+            <parameter name="toLocationSeqId"><description>Where the good output goes</description></parameter>
+            <parameter name="heldLocationSeqId"><description>The quarantine location of the pending output</description>
+            </parameter>
+            <parameter name="lotNumber"/>
+            <parameter name="serialNumbers" type="List"/>
+            <parameter name="firstSerialNumber"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECORDED or APPROVAL_REQUESTED, workEffortId,
+                productionRunLineId, productionQuantityEventIds, productionLossIds, pendingLossIds, receipts (each
+                receive#ProductionOutput result), completed, good, held, remaining; or the overproduction request's
+                productionQuantityEventId and excess; and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('recordQuantity', context)"/>
+        </actions>
+    </service>
+    <service verb="change" noun="ProductionQuantity" allow-remote="false">
+        <description>Change the target of a released, running or held run's output line (design-manufacturing Quantities
+            ChangeQuantity, R-SA-05): a target change event with the delta and the targets before and after, never below what
+            the line accounts for (good, held, loss and losses waiting: TARGET_BELOW_FACTS); the material and by-product lines
+            scaled with it, never below what each has issued or received (a manual material line keeps its quantity unless
+            scaleManual); the WeptConsume and WeptProduce rows rewritten from the lines; the revision counted up. History is never rewritten and set#ProducedProductQuantity is never called
+            (F8). A retry with the same operation key answers the first. Requires PRODUCTION_PLAN; refuses a run outside the
+            user's organizations (RECORD_UNAVAILABLE), a changed revision (REVISION_REQUIRED, REVISION_CHANGED), a draft or a
+            done run (RUN_NOT_RELEASED), no reason (REASON_REQUIRED) or an inactive reason code (REASON_INVALID), a line that is
+            not an output (LINE_INVALID), no target (QUANTITY_INVALID) and the same target (NO_CHANGE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="productionRunLineId"><description>The run's primary output when empty</description></parameter>
+            <parameter name="targetQuantity" type="BigDecimal" required="true"><description>In the line's stock
+                unit</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+            <parameter name="scaleManual" type="Boolean" default="false"><description>Scale the manual material lines
+                (store#ProductionMaterial) too; they keep their quantity otherwise</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CHANGED, workEffortId, productionRunLineId,
+                previousTarget, target, delta, revision, productionQuantityEventId and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('changeQuantity', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ProductionLoss" allow-remote="false">
+        <description>Record a loss inside an open run (design-manufacturing ScrapLoss RecordLoss, R-MFG-20; §12 M2 and M6), by
+            its path: PltComponentScrap, issued material of a material line scrapped in WIP, no more than its net issue less
+            what was scrapped, with a scrap cost event (record#ProductionCostEvent, PcetMaterialScrap at its asset's or the
+            line's issued cost, awaiting the cost close) and no stock movement; PltOutputScrap of an output asset of this run,
+            received or held, issued back to the run (issue#AssetToWorkEffort with the run's workEffortId and the loss, whose
+            hook posts it into WIP so the loss reaches production variance at the cost close, never a Warehouse adjustment;
+            needs STOCK_ISSUE), or of output scrapped before it was stock (no asset); PltProcessLoss, a quantity only; and
+            PltRework, units sent to rework (reworkWorkEffortId). A loss in output units writes its quantity event. The reason
+            is an active production reason of the run's owner in the loss's category, or a reason's text; above the reason's
+            approval threshold (a percent of the line's quantity) the loss waits for a supervisor (PlsPending, the
+            ProductionLossApproval notice) with no effect until approve#ProductionException, unless a supervisor records it.
+            Free stock outside a run is scrapped in Warehouse (scrap#Asset). A retry with the same operation key answers the
+            first. Requires PRODUCTION_OPERATE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
+            open (RUN_NOT_OPEN), an unknown type (LOSS_TYPE_INVALID), no quantity (QUANTITY_INVALID), a line of another run or
+            role (LINE_INVALID), more than was issued (QUANTITY_EXCEEDS_ISSUED), an asset not of the line or run
+            (ASSET_INVALID), stock outside the user's facilities or short (posting.stock's refusals, QUANTITY_EXCEEDS_AVAILABLE),
+            another owner's (OWNER_MISMATCH), an inactive or other-category reason (REASON_INVALID), no reason
+            (REASON_REQUIRED) and a closed fiscal period today (PERIOD_CLOSED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="lossTypeEnumId" required="true"/>
+            <parameter name="productionRunLineId"><description>The material line of a component scrap; an output line
+                otherwise (the run's primary output when empty)</description></parameter>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="assetId"><description>The output asset of an output scrap; for a component scrap, an asset
+                issued to the line, whose cost values it</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="comments"/>
+            <parameter name="reworkWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RECORDED or APPROVAL_REQUESTED, workEffortId,
+                productionLossId, lossTypeEnumId, productionRunLineId, assetId, quantity, statusId, pendingApproval,
+                assetIssuanceId, productionCostEventId, productionQuantityEventId and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('recordLoss', context)"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="ProductionException" allow-remote="false">
+        <description>A supervisor's decision on the record (design-manufacturing Approvals, F40): a loss waiting for approval
+            (productionLossId) approved, its effect applied now, or refused with a reason; or an overproduction request
+            (productionQuantityEventId) approved for its quantity, or the quantity given, which the output line may then take
+            beyond its target and tolerance, or refused. The decision marks the notices read. A retry with the same operation
+            key answers the first. Requires PRODUCTION_SUPERVISE; refuses a record outside the user's organizations or missing
+            (RECORD_UNAVAILABLE, RECORD_REQUIRED), one already decided (NOT_PENDING), another decision (DECISION_INVALID), a
+            refusal without a reason (REASON_REQUIRED), a run no longer open (RUN_NOT_OPEN) and the loss's own
+            refusals; with workEffortId, a record of another work order (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId"><description>The work order the caller checked: the record must be
+                its</description></parameter>
+            <parameter name="productionLossId"/>
+            <parameter name="productionQuantityEventId"/>
+            <parameter name="decision"><description>approve (default) or refuse</description></parameter>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode APPROVED or REFUSED, workEffortId, the record's id,
+                its effects and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('approveException', context)"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ProductionLosses" allow-remote="false">
+        <description>The production losses of the user's organizations (design-manufacturing ScrapLoss Losses), newest first,
+            paged: by run, operation, work center, product, reason, loss type, status and loss date range, each with its
+            type, product and lot, quantity, reason, status, its effect (a scrap cost event, the output issued back, a
+            quantity only) and, with ACCOUNTING_VIEW only, its cost. Each loss's run is checked against the user's
+            organizations. Requires PRODUCTION_VIEW or PRODUCTION_OPERATE.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="workCenterFacilityId"/>
+            <parameter name="productId"/>
+            <parameter name="reasonCode"/>
+            <parameter name="lossTypeEnumId"/>
+            <parameter name="statusId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="lossRows" type="List"/>
+            <parameter name="lossRowsCount" type="Integer"/>
+            <parameter name="lossRowsPageIndex" type="Integer"/>
+            <parameter name="lossRowsPageSize" type="Integer"/>
+            <parameter name="lossRowsPageMaxIndex" type="Integer"/>
+            <parameter name="lossRowsPageRangeLow" type="Integer"/>
+            <parameter name="lossRowsPageRangeHigh" type="Integer"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="canApprove" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('findLosses', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionLabels" allow-remote="false">
+        <description>A run's finished (its own product), secondary (another output or a by-product) and WIP (an operation,
+            or the run) labels (design-manufacturing §11; on Products P11's label contract: the product-50x30 template and a
+            Code 128 of the asset, operation or run id): each output asset received and still on hand with its product,
+            quantity, unit, lot, serial, owner, facility, run, operation and status; a held asset's label says it is held and
+            not accepted, so no label claims acceptance before disposition. kind (finished, secondary, wip) and assetIds
+            narrow them. Reads only. Requires PRODUCTION_VIEW or STOCK_ISSUE; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="kind"/>
+            <parameter name="assetIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="labelRows" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="template" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
+                    .execute('labels', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+
+    <!-- ===== a run's materials, backflush and shortages (impl-manufacturing P5b; ProductionMaterials.js) ===== -->
+    <service verb="get" noun="ProductionMaterials" allow-remote="false">
+        <description>A run's material lines as Components and MaterialIssueReceipt show them (design-manufacturing Components):
+            each line's operation, product, required quantity in the stock unit with the scrap allowance of the run's policy,
+            issued, returned and remaining, the stock free for it at the facilities the run nets against (its facility and,
+            for a line, the plant above it), shared in line order, what is short, the owner's stock held there by status
+            apart (quarantine, on hold, defective; never from available to promise, R-MFG-24), a staged release's short
+            quantity, and whether a planner added it by hand; with withStock, the available stock each line may be issued
+            from, oldest lot expiry first. Also the run's consumption policy (manual or backflush, the issue point), a draft's
+            routing operations, and whether the user may add lines (PRODUCTION_PLAN, a draft) or issue (STOCK_ISSUE, a
+            released run). Requires PRODUCTION_VIEW or STOCK_ISSUE; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="withStock" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="materialRows" type="List"/>
+            <parameter name="shortCount" type="Integer"/>
+            <parameter name="heldCount" type="Integer"/>
+            <parameter name="routingOperations" type="List"/>
+            <parameter name="canAdd" type="Boolean"/>
+            <parameter name="canIssue" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('materials', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionMaterial" allow-remote="false">
+        <description>Add, change or remove a manual material line of a draft run (design-manufacturing Components
+            AddMaterial): the component (a stocked product of the organization's, not what the run makes), its quantity in the
+            product's stock unit, the routing operation that consumes it, the facility its stock is staged from (the run
+            owner's) and an instruction. The line is marked manual, so a re-explosion of the method keeps it; the planning
+            rows (WeptConsume) are rewritten and the revision counts up, so a staged approval is asked again. A line from the
+            method is changed only through the method. A retry with the same operation key answers the first. Requires
+            PRODUCTION_PLAN; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not a draft
+            (RUN_NOT_DRAFT), a changed revision (REVISION_CHANGED, REVISION_REQUIRED), a line of another run or role
+            (LINE_INVALID), a method line (LINE_NOT_MANUAL), no product (PRODUCT_REQUIRED), another organization's product
+            (RECORD_UNAVAILABLE), one that is not stocked (NOT_STOCK) or the run's own output (PRODUCT_INVALID), no quantity
+            (QUANTITY_INVALID), another unit (UNIT_CONVERSION), an operation not of the routing (OPERATION_INVALID) and a
+            facility of another owner (FACILITY_OWNER).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="productionRunLineId"><description>The manual line to change or remove; empty adds one</description>
+            </parameter>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"><description>The product's stock unit when empty</description></parameter>
+            <parameter name="routingOperationWorkEffortId"/>
+            <parameter name="sourceFacilityId"/>
+            <parameter name="instructionText"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="clearEmpty" type="Boolean" default="false"><description>On a change, an empty routing
+                operation, source facility or instruction clears it; otherwise an empty field keeps the line's value (an edit
+                form posting every field passes true)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ADDED, UPDATED or REMOVED, workEffortId,
+                productionRunLineId, revision and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('store', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ProductionBackflush" allow-remote="false">
+        <description>What a backflush of a released run would issue (design-manufacturing MaterialIssueReceipt Preview
+            backflush): each material line's exact remaining quantity, of one operation's lines or all, with the lots it
+            would issue from (the run owner's available stock at the run's facilities, oldest lot expiry first, then the
+            oldest receipt; expired stock left out), and the findings that leave nothing to confirm: a policy that issues by
+            hand (BACKFLUSH_NOT_POLICY), a line the available stock does not cover (SHORTFALL: held stock is never issued,
+            also at a facility that allows issue beyond quantity on hand, F12), a staged short line still short
+            (LINE_STAGED_SHORT) and nothing left (NOTHING_TO_ISSUE). The previewKey names the run's revision and every pick
+            for backflush#ProductionMaterials. Reads only. Requires STOCK_ISSUE; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE), one not released (RUN_NOT_RELEASED) and an operation of another run
+            (OPERATION_INVALID).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="operationWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="canConfirm" type="Boolean"/>
+            <parameter name="previewKey"/>
+            <parameter name="consumptionText"/>
+            <parameter name="issuePointText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('previewBackflush', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="backflush" noun="ProductionMaterials" allow-remote="false">
+        <description>Confirm a backflush preview (design-manufacturing MaterialIssueReceipt): the preview is made again and
+            must match the previewKey given (PREVIEW_CHANGED when the stock or the run changed), then each pick is issued
+            through issue#ProductionMaterial, a new issuance per line and lot with its cost event, all in this transaction, so
+            a refusal of any (a held asset, a shortfall, a staged short line, a closed period) issues none. A retry with the
+            same operation key answers the first and issues nothing more. Requires STOCK_ISSUE; refuses what
+            preview#ProductionBackflush finds (BACKFLUSH_NOT_POLICY, SHORTFALL, LINE_STAGED_SHORT, NOTHING_TO_ISSUE) and what
+            the issue guard refuses.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="previewKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode BACKFLUSHED, workEffortId, operationWorkEffortId,
+                issued (each line, asset, lot, quantity and issuance), issuedCount and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('backflush', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionShortages" allow-remote="false">
+        <description>The open runs (drafts, released, running and held) of the user's organizations at a facility (a plant
+            takes the lines under it) whose material lines the free stock does not cover, earliest due first, the first 100
+            runs checked (truncated beyond): each run with its short lines, as Home's shortage queue shows them. Requires
+            PRODUCTION_VIEW (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shortRows" type="List"/>
+            <parameter name="shortRunCount" type="Integer"/>
+            <parameter name="checkedRunCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('shortages', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+
+    <!-- ===== outside processing (impl-manufacturing P14; ProductionSubcontracts.js) ===== -->
+    <service verb="request" noun="SubcontractService" allow-remote="false">
+        <description>Ask for an operation of a released run to be done by a supplier (design-manufacturing
+            SubcontractOperations New outside processing, R-MFG-05): a ProductionSubcontract with the supplier, the service
+            product, its quantity and unit, the required date, the lead time, the vendor-custody facility and the price basis
+            (a buyer's or price reader's note); an RqTpProduct Requirement of the service at the run's facility, proposed,
+            of the run's organization (OrgInternal) and supplier (Supplier), dated from the required date less the lead
+            time; and its RequirementSupply demand link (RstOperationDemand) to the operation, which covers nothing. The
+            request goes into the organization's current supply plans whose facility set covers the run's facility, as an
+            outside-processing suggestion a buyer converts to a draft service purchase order line (convert#PlanningSuggestions;
+            Purchasing approves and places the order). A retry with the same operation key answers the first. Requires
+            PRODUCTION_PLAN (PERMISSION_DENIED); refuses an operation outside the user's organizations or not of a run
+            (RECORD_UNAVAILABLE), a run not released (RUN_NOT_RELEASED), an operation already subcontracted
+            (SUBCONTRACT_EXISTS), a product that is not a service (NOT_SERVICE, PRODUCT_REQUIRED), no quantity
+            (QUANTITY_INVALID), a party that is not a supplier (SUPPLIER_INVALID), a facility that is not a vendor-custody
+            facility of the organization (NOT_CUSTODY) or not in the supplier's custody (CUSTODIAN_MISMATCH) and a lead time
+            outside 0 to 365 days (LEAD_TIME_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="productId" required="true"><description>The service product</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"><description>The product's unit when empty</description></parameter>
+            <parameter name="supplierPartyId"/>
+            <parameter name="requiredByDate" type="Timestamp"><description>The operation's (else the run's) estimated
+                completion when empty</description></parameter>
+            <parameter name="leadTimeDays" type="BigDecimal"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="priceBasisNote"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REQUESTED, productionSubcontractId, requirementId,
+                organizationPartyId, workEffortId, operationWorkEffortId, planningRunIds (the plans it is in), and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractRequest', 'PRODUCTION_PLAN', ['operationWorkEffortId',
+                    'productId', 'quantity', 'quantityUomId', 'supplierPartyId', 'requiredByDate', 'leadTimeDays',
+                    'vendorFacilityId', 'priceBasisNote', 'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- the operation locked, so two requests for it queue and the second is refused -->
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="lockedOperation" for-update="true"
+                    disable-authz="true"><field-map field-name="workEffortId" from="operationWorkEffortId"/></entity-find-one>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('request', context)"/>
+            <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,
+                    'mantle.work.production.ProductionSubcontract', requested.productionSubcontractId, requested)"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionSubcontract" allow-remote="false">
+        <description>Change an outside-processing agreement (design-manufacturing SubcontractDetail Agreement) at the revision
+            the user read: before its purchase line the supplier, quantity, unit, required date and lead time (its
+            requirement, supplier, demand link and plan suggestions follow), the vendor-custody facility and the change
+            reason, under PRODUCTION_PLAN; the price basis note under a buyer's or price reader's permission
+            (PURCHASE_ORDER_EDIT, SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT or ACCOUNTING_VIEW). Once on a purchase order only
+            the lead time, vendor facility and price basis change; the order is the buyer's. A retry with the same operation
+            key answers the first. Refuses a subcontract outside the user's organizations (RECORD_UNAVAILABLE), a stale
+            revision (REVISION_CHANGED), a closed subcontract (SUBCONTRACT_CLOSED), an ordered one's supplier, quantity,
+            unit or date (SUBCONTRACT_ORDERED), and request#SubcontractService's checks of the values.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="productionSubcontractId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="leadTimeDays" type="BigDecimal"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="priceBasisNote"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode STORED, productionSubcontractId, revision,
+                organizationPartyId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractStore', ['PRODUCTION_PLAN', 'PURCHASE_ORDER_EDIT',
+                    'SUPPLIER_PRICE_VIEW', 'SUPPLIER_PRICE_EDIT', 'ACCOUNTING_VIEW'], ['productionSubcontractId',
+                    'expectedRevision', 'supplierPartyId', 'quantity', 'quantityUomId', 'requiredByDate', 'leadTimeDays',
+                    'vendorFacilityId', 'priceBasisNote', 'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('store', context)"/>
+            <set field="result" from="posting.complete(begun.op, stored.organizationPartyId,
+                    'mantle.work.production.ProductionSubcontract', stored.productionSubcontractId, stored)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractMaterials" allow-remote="false">
+        <description>The components of a subcontracted operation (design-manufacturing SubcontractDetail Materials): each
+            material line of the operation (else of the run) with its owner (the run's organization, also at the vendor),
+            quantity and unit, what was sent to the vendor-custody facility and returned from it, what is held there now,
+            what was consumed there (issued to the run from it), issued in all and left; and the subcontract dispatches and
+            returns of the operation. No cost is read. Requires PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or
+            STOCK_ISSUE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="vendorFacilityName"/>
+            <parameter name="custodianName"/>
+            <parameter name="materials" type="List"/>
+            <parameter name="shipments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('materials', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractStatus" allow-remote="false">
+        <description>The outside processing of an operation (design-manufacturing SubcontractDetail Agreement and
+            Acceptance): its run and operation, its subcontract (the agreement; the price basis only for a price reader), the
+            service purchase lines (OrderItemWorkEffort) with their order status, ordered, accepted (ServiceAcceptance, with
+            the output receipt and inspection as evidence), billed and remaining quantities and match exceptions, the unit
+            price and amount only for a buyer or price reader (PURCHASE_ORDER_EDIT, SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT
+            or ACCOUNTING_VIEW), the output line and its receipts on the operation (held for inspection or not), the dispatch
+            and return counts, the state, the outside-processing cost events (their amounts only with ACCOUNTING_VIEW) and
+            what the user may do. Requires PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or STOCK_ISSUE
+            (PERMISSION_DENIED); refuses an operation outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="operation" type="Map"/>
+            <parameter name="subcontract" type="Map"/>
+            <parameter name="serviceLines" type="List"/>
+            <parameter name="output" type="Map"/>
+            <parameter name="dispatchCount" type="Integer"/>
+            <parameter name="returnCount" type="Integer"/>
+            <parameter name="orderedQuantity"/>
+            <parameter name="acceptedQuantity"/>
+            <parameter name="stateText"/>
+            <parameter name="stateColor"/>
+            <parameter name="costEvents" type="List"/>
+            <parameter name="priceRead" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="canRequest" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canEditAgreement" type="Boolean"/>
+            <parameter name="canEditPrice" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('status', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="SubcontractOperations" allow-remote="false">
+        <description>The outside-processing worklist (design-manufacturing SubcontractOperations): each operation of the
+            user's organizations' open runs (closed ones with includeClosed) that has a subcontract or a service purchase line,
+            with its run, plant, supplier, service product, order and its status, quantity, dispatches, output received,
+            service accepted, required date, state and whether it has an exception (a match exception, no supplier); the unit
+            price only for a buyer or price reader. Filtered by supplier, plant (with the facilities under it), run, order
+            status, state and exceptions only; soonest due first, a page at a time. Requires PRODUCTION_VIEW, PRODUCTION_PLAN
+            or PURCHASE_ORDER_EDIT (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="supplierPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="orderStatusId"/>
+            <parameter name="stateText"/>
+            <parameter name="exceptionsOnly" type="Boolean"/>
+            <parameter name="includeClosed" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="operationList" type="List"/>
+            <parameter name="operationListCount" type="Integer"/>
+            <parameter name="operationListPageIndex" type="Integer"/>
+            <parameter name="operationListPageSize" type="Integer"/>
+            <parameter name="operationListPageMaxIndex" type="Integer"/>
+            <parameter name="operationListPageRangeLow" type="Integer"/>
+            <parameter name="operationListPageRangeHigh" type="Integer"/>
+            <parameter name="canRequest" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('findOperations', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractOrder" allow-remote="false">
+        <description>An order as Manufacturing reads it (design-crosscut §3.6 Manufacturing row): a subcontract purchase order
+            or a sales order linked to a run the user sees: its header and items, each with its production links (a service
+            line's run and operation through OrderItemWorkEffort, with what was accepted; a sales line's supplying runs
+            through the run's demand order), prices only for a price reader (a purchase: PURCHASE_ORDER_EDIT,
+            SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT or ACCOUNTING_VIEW; a sale: PRICE_VIEW, PRICE_EDIT or ACCOUNTING_VIEW).
+            Read only: nothing is placed or approved here. Requires PRODUCTION_VIEW, PRODUCTION_PLAN or PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses an order linked to none of the user's runs (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subcontractOrder" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="subcontractOrder" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('order', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractShipment" allow-remote="false">
+        <description>A subcontract dispatch or return as Manufacturing reads it (design-crosscut §3.8 Manufacturing row, read
+            only): its lines with what was sent and reached the other end, the run and operation, the service order item, the
+            origin and destination, the vendor-custody facility and its custodian, and the owner of the stock (the run's
+            organization throughout, R-SA-08). Dispatch and return are Warehouse's (SubcontractShipmentDetail). Requires
+            PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or STOCK_ISSUE (PERMISSION_DENIED); refuses a shipment that
+            is not a subcontract dispatch of a run the user sees (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subcontractShipment" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="subcontractShipment" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('shipment', context)"/>
         </actions>
     </service>
 </services>

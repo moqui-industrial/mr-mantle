@@ -389,6 +389,14 @@ feature("the staged policy of a line releases a short draft without an approval,
 feature("a later release of the method is found and a re-explosion offered, then the reviewed draft releases", {
     when() {
         const workEffortId = draft(3, "PO5_ALT")
+        // a planner's manual line (impl-manufacturing P5b) survives the re-explosion
+        const manualAdded = run("po5_planner", P + "store#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId,
+            expectedRevision: revisionOf(workEffortId),
+            productId: "PO5_SHORT",
+            quantity: 1
+        })
         tick()
         as("po5_method", () => {
             const bomLine = call(B + "get#BomDetail", {productBomId: state.altBom}).bomItemRows.find(
@@ -407,16 +415,42 @@ feature("a later release of the method is found and a re-explosion offered, then
         const stale = act("po5_planner", workEffortId, "release")
         const reexploded = act("po5_planner", workEffortId, "release", {reexplode: true})
         const draftStatus = runOf(workEffortId).statusId
+        const manualKept = linesOf(workEffortId).filter(row => row.manualLine === "Y")
+        const methodLines = linesOf(workEffortId).filter(row => row.productId === "PO5_RM")
+        // the short manual line is removed before the release
+        const manualRemoved = run("po5_planner", P + "store#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId,
+            expectedRevision: revisionOf(workEffortId),
+            productionRunLineId: manualKept[0]?.productionRunLineId,
+            remove: true
+        })
         const released = act("po5_planner", workEffortId, "release")
-        return {workEffortId, preview, stale, reexploded, draftStatus, released}
+        return {
+            workEffortId,
+            manualAdded,
+            preview,
+            stale,
+            reexploded,
+            draftStatus,
+            manualKept,
+            methodLines,
+            manualRemoved,
+            released
+        }
     },
-    then({workEffortId, preview, stale, reexploded, draftStatus, released}) {
+    then({workEffortId, manualAdded, preview, stale, reexploded, draftStatus, manualKept, methodLines, manualRemoved, released}) {
+        manualAdded.error == ""
         preview.actions.find(row => row.action === "release").reasonCode == "METHOD_CHANGED"
         preview.actions.find(row => row.action === "release").reexplodeOffered == true
         stale.error.includes("METHOD_CHANGED")
         reexploded.error == ""
         reexploded.result.resultCode == "REEXPLODED"
         draftStatus == "WeInPlanning"
+        manualKept.length == 1
+        manualKept[0].productId == "PO5_SHORT"
+        methodLines.length == 1
+        manualRemoved.error == ""
         released.error == ""
         released.result.resultCode == "RELEASED"
         n(lineOf(workEffortId, "PO5_RM").stockQuantity) == 6
@@ -469,7 +503,8 @@ feature("a released run held before start resumes as released; started, held and
         r.runningStatus == "WeInProgress"
         // the history names the hold's reason
         r.lifecycle.history.some(row => row.toStatusText === "On Hold" && row.changeReason === "Fixture repair")
-        r.lifecycle.actions.find(row => row.action === "complete").reasonCode == "COMPLETE_UNAVAILABLE"
+        // nothing is received yet: complete waits for the quantity reconciliation (impl-manufacturing P7)
+        r.lifecycle.actions.find(row => row.action === "complete").reasonCode == "QUANTITIES_UNRECONCILED"
     }
 })
 
