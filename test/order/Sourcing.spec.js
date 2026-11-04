@@ -2,12 +2,14 @@
 // RFQ of the organization with its items, three suppliers invited as three requested quotes with a line per item, the
 // stopped supplier refused, another organization's buyer and a reader refused; the send storing the published PDF as the
 // RFQ's content, the supplier with a bad address InvitationDeliveryFailed by name while the other two are sent, the RFQ
-// Submitted, the same key answering the first result; a material change after it moving the revision, the requested quotes
-// following it, a new send going only to the suppliers not sent the new revision and the earlier RFQ printing as of its
-// send time; a supplier's answer entered with its channel, evidence, validity and prices moving the quote to OrderProposed,
+// Submitted, the same key answering the first result; a material change after it (the specification text first set, an
+// item's quantity) moving the revision, the requested quotes following it, a new send going only to the suppliers not sent
+// the new revision and the earlier RFQ printing as of its send time; a supplier's answer entered with its channel, evidence, validity and prices moving the quote to OrderProposed,
 // a price change in the line's history, an unsolicited quote entered straight in OrderProposed; the price publish making a
-// supplier price with the quote's dates and source and ending the tier's earlier row, a buyer refused for want of
-// SUPPLIER_PRICE_EDIT and an expired quote refused; and the RFQ type's policy (never triaged, never converted to a project).
+// supplier price with the quote's dates and source and ending the tier's earlier row, a tier of 100 its own row, the
+// supplier's agreement price and another supplier's price left alone, a buyer refused for want of SUPPLIER_PRICE_EDIT and
+// an expired quote refused; the RFQ type's policy (never triaged, never converted to a project); and quotes never supply
+// (the supply plan nets neither a requested nor a proposed quote, nothing reserved, placed or approved).
 // Standalone: a spec-local organization, suppliers with their addresses, a product, groups and users, and a mail server and
 // template of the spec's own with the mail capture on. Run: ./moq test mr-mantle --spec Sourcing
 const prefix = "SOURCING_SPEC"
@@ -19,6 +21,8 @@ const org = prefix + "_ORG",
     supplierBlocked = prefix + "_SUP_BLOCKED",
     product = prefix + "_PRODUCT",
     template = prefix + "_RFQ_EMAIL",
+    warehouse = prefix + "_WH",
+    agreement = prefix + "_AGR",
     since = "2000-01-01T00:00:00Z"
 const S = "mantle.order.SourcingServices.",
     R = "mantle.request.RequestServices."
@@ -141,6 +145,37 @@ spec({
             price: 12,
             priceUomId: "USD"
         })
+        // rows a publish leaves alone: the supplier's agreement price and another supplier's price
+        call("create#mantle.party.agreement.Agreement", {
+            agreementId: agreement,
+            agreementTypeEnumId: "AgrPurchase",
+            organizationPartyId: org,
+            otherPartyId: supplierA,
+            fromDate: since
+        })
+        for (const [productPriceId, vendorPartyId, agreementId] of [
+            [prefix + "_PRICE_AGR", supplierA, agreement],
+            [prefix + "_PRICE_B", supplierB, null]
+        ])
+            call("create#mantle.product.ProductPrice", {
+                productPriceId,
+                productId: product,
+                vendorPartyId,
+                customerPartyId: org,
+                agreementId,
+                // an agreement row as specific as a published one (the agreement in place of no unit) would be an equal
+                // precedence overlap that Products refuses; P13's rows name the agreement's unit
+                quantityUomId: agreementId ? "OTH_ea" : null,
+                pricePurposeEnumId: "PppPurchase",
+                priceTypeEnumId: "PptCurrent",
+                fromDate: since,
+                minQuantity: 0,
+                price: 11,
+                priceUomId: "USD"
+            })
+        // a warehouse with a minimum stock of 30 of the product, where quotes are never supply
+        call("create#mantle.facility.Facility", {facilityId: warehouse, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.facility.ProductFacility", {productId: product, facilityId: warehouse, minimumStock: 30})
         call("create#moqui.basic.email.EmailServer", {
             emailServerId: prefix + "_SMTP",
             smtpHost: "127.0.0.1",
@@ -159,6 +194,7 @@ spec({
         state.priceEditor = user("PRICE_EDITOR", ["SUPPLIER_PRICE_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.reader = user("READER", ["PURCHASE_APPROVE"])
         state.otherBuyer = user("OTHER_BUYER", ["PURCHASE_ORDER_EDIT"], otherOrg)
+        state.planner = user("PLANNER", ["SUPPLY_PLAN_RUN", "SUPPLY_PLAN_VIEW"])
         capture.enable()
     },
     cleanupSpec() {
@@ -269,6 +305,11 @@ feature("A material change after the send moves the revision; the requested quot
     when() {
         const item = rows("mantle.request.RequestItem", {requestId: state.requestId}).find(row => row.productId == product)
         const before = run(state.buyer, S + "get#QuoteRequestPrint", {requestId: state.requestId}).revision
+        // the specification text first set after the send is a material change too (F-P11-11)
+        const described = run(state.buyer, S + "store#QuoteRequest", {
+            requestId: state.requestId,
+            description: "Powder coated finish"
+        })
         const changed = run(state.buyer, S + "store#QuoteRequestItem", {
             requestId: state.requestId,
             requestItemSeqId: item.requestItemSeqId,
@@ -291,9 +332,13 @@ feature("A material change after the send moves the revision; the requested quot
             requestId: state.requestId,
             contentTypeEnumId: "RqCntRfqPublished"
         })
-        return {before, changed, quoteLine, resent, mails: capture.count(), earlier, now, published}
+        return {before, described, changed, quoteLine, resent, mails: capture.count(), earlier, now, published}
     },
-    then({before, changed, quoteLine, resent, mails, earlier, now, published}) {
+    then({before, described, changed, quoteLine, resent, mails, earlier, now, published}) {
+        described.error == ""
+        described.sourceRevision > before
+        !earlier.printHtml.includes("Powder coated finish")
+        now.printHtml.includes("Powder coated finish")
         changed.error == ""
         changed.sourceRevision > before
         quoteLine.every(line => String(line.quantity) == "25")
@@ -395,6 +440,19 @@ feature(
                 ? one("mantle.product.ProductPrice", {productPriceId: published.productPriceId})
                 : null
             const earlier = one("mantle.product.ProductPrice", {productPriceId: prefix + "_PRICE_A"})
+            // a tier of 100 at a lower price: its own row, the tier of 0 left in effect
+            const tier = run(state.priceEditor, S + "publish#SupplierQuotePrice", {
+                orderId: state.quoteA,
+                orderItemSeqId: state.quoteLine,
+                minQuantity: 100,
+                price: 8.75
+            })
+            const tierPrice = tier.productPriceId
+                ? one("mantle.product.ProductPrice", {productPriceId: tier.productPriceId})
+                : null
+            const untouched = [published.productPriceId, prefix + "_PRICE_AGR", prefix + "_PRICE_B"].map(
+                productPriceId => one("mantle.product.ProductPrice", {productPriceId})?.thruDate
+            )
             // the quote expires: its validity ended a moment ago
             login("john.doe")
             ec.artifactExecution.disableAuthz()
@@ -409,9 +467,9 @@ feature(
                 orderItemSeqId: state.quoteLine,
                 minQuantity: 100
             })
-            return {buyer, published, price, earlier, expired, quoteValidThru: part.validThruDate}
+            return {buyer, published, price, earlier, tier, tierPrice, untouched, expired, quoteValidThru: part.validThruDate}
         },
-        then({buyer, published, price, earlier, expired, quoteValidThru}) {
+        then({buyer, published, price, earlier, tier, tierPrice, untouched, expired, quoteValidThru}) {
             buyer.error.includes("PERMISSION_DENIED")
             published.error == ""
             price.vendorPartyId == supplierA
@@ -422,6 +480,13 @@ feature(
             Number(price.thruDate) == Number(quoteValidThru)
             Number(earlier.thruDate) == Number(price.fromDate)
             published.endedPriceIds.includes(prefix + "_PRICE_A")
+            tier.error == ""
+            tier.endedPriceIds.length == 0
+            String(tierPrice.minQuantity).startsWith("100")
+            String(tierPrice.price).startsWith("8.75")
+            Number(untouched[0]) == Number(quoteValidThru)
+            untouched[1] == null
+            untouched[2] == null
             expired.error.includes("QUOTE_EXPIRED")
         }
     }
@@ -438,5 +503,50 @@ feature("The RFQ type is never triaged or converted to a project", {
         !types.includes("RqtPurchaseRfq")
         converted.error.includes("REQUEST_TYPE_FIXED")
         rfq.rootWorkEffortId == null
+    }
+})
+
+feature("Quotes are never supply: not netted by the supply plan, never reserved, approved or placed", {
+    when() {
+        // an RFQ for the warehouse: one supplier's quote requested, another's proposed, 20 each
+        const created = run(state.buyer, S + "create#QuoteRequest", {
+            organizationPartyId: org,
+            requestName: "Warehouse widgets",
+            facilityId: warehouse
+        })
+        const requestId = created.requestId
+        run(state.buyer, S + "store#QuoteRequestItem", {requestId, productId: product, quantity: 20})
+        const requested = run(state.buyer, S + "store#QuoteInvitation", {requestId, supplierPartyId: supplierB})
+        const proposed = run(state.buyer, S + "store#SupplierQuote", {requestId, vendorPartyId: supplierA})
+        const quotes = [requested.orderId, proposed.orderId]
+        const ran = run(state.planner, "mantle.product.SupplyPlanningServices.run#SupplyPlan", {
+            organizationPartyId: org,
+            facilityIds: [warehouse],
+            productIds: [product]
+        })
+        const plan = run(state.planner, "mantle.product.SupplyPlanningServices.get#SupplyPlan", {
+            organizationPartyId: org,
+            facilityIds: [warehouse]
+        })
+        return {
+            created,
+            ran,
+            suggestion: (plan.suggestions || []).find(row => row.productId === product) || {},
+            headers: quotes.map(orderId => one("mantle.order.OrderHeader", {orderId})),
+            parts: quotes.map(orderId => rows("mantle.order.OrderPart", {orderId})[0]),
+            reservations: quotes.flatMap(orderId => rows("mantle.product.issuance.AssetReservation", {orderId})),
+            supplies: quotes.flatMap(orderId => rows("mantle.request.requirement.RequirementSupply", {orderId}))
+        }
+    },
+    then({created, ran, suggestion, headers, parts, reservations, supplies}) {
+        created.error == ""
+        ran.error == ""
+        // the whole minimum is suggested: neither quote's 20 is supply
+        String(suggestion.quantity) == "30"
+        headers.map(header => header.statusId).join() == "OrderRequested,OrderProposed"
+        parts.every(part => part.facilityId == warehouse && ["OrderRequested", "OrderProposed"].includes(part.statusId))
+        headers.every(header => header.placedDate == null && header.approvedDate == null)
+        reservations.length == 0
+        supplies.length == 0
     }
 })

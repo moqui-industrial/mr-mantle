@@ -3,7 +3,7 @@
 // An RFQ is a Request of type RqtPurchaseRfq whose organization is its OrgInternal RequestParty, one of the user's; its items
 // are RequestItems, and an item made from an approved purchase request line is linked to it by RequestItemAssoc. Its
 // revision is the time of the last change to its audit-logged material fields (an item's product, quantity, unit, required
-// date, description or cancel; the response date and the specification text). Each invited supplier's quote is a purchase
+// date, description or cancel; the response date, specification text, facility and currency). Each invited supplier's quote is a purchase
 // order with one part, the supplier the vendor and the organization the customer, in OrderRequested ("Request Quote"), its
 // lines from the RFQ items with RequestItemOrder links, kept in step with the items while it is requested; the supplier's
 // answer, entered by a buyer on its behalf with the channel it came by and its evidence, moves it to OrderProposed with prices
@@ -33,9 +33,10 @@ const REQUEST = "mantle.request.Request",
 const rfqType = "RqtPurchaseRfq"
 const quoteStatuses = ["OrderRequested", "OrderProposed"]
 const closedStatuses = ["ReqCompleted", "ReqCancelled"]
-// the material fields whose change is the RFQ's revision (audit-logged with "true", F57)
+// the material fields whose change is the RFQ's revision: the items' are audit-logged by the entity ("true", F57); the header's
+// are logged by store#QuoteRequest itself (headerAudit), an RFQ's only, so no other request's timeline changes (F-P11-11)
 const itemRevisionFields = ["productId", "quantity", "quantityUomId", "requiredByDate", "description", "statusId"]
-const headerRevisionFields = ["responseRequiredDate", "description"]
+const headerRevisionFields = ["responseRequiredDate", "description", "facilityId", "currencyUomId"]
 const readPermissions = ["PURCHASE_ORDER_EDIT", "PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"]
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -280,12 +281,31 @@ function update(p) {
             denied("CURRENCY_CHANGE_QUOTED", "RFQ " + rfq.requestId + " has quotes in its currency")
         changes.currencyUomId = requireCurrency(text(p.currencyUomId))
     }
-    if (p.changeReason)
-        ec.context.putAll(
-            Object.fromEntries(Object.keys(changes).map(field => [field + "_changeReason", String(p.changeReason)]))
-        )
     if (Object.keys(changes).length) call("update#" + REQUEST, Object.assign({requestId: rfq.requestId}, changes))
+    headerAudit(rfq, changes, p.changeReason)
     return {requestId: rfq.requestId, sourceRevision: revisionOf(rfq.requestId)}
+}
+// The audit rows of an RFQ's header change (its material fields, a first value set included), written here rather than by
+// the entity so that only an RFQ's timeline shows them: the RFQ's revision and its as-of print read them (F-P11-11).
+function headerAudit(rfq, changes, reason) {
+    const auditText = (field, value) =>
+        value == null || value === "" ? null : field === "responseRequiredDate" ? String(ms(value)) : String(value)
+    for (const field of headerRevisionFields) {
+        if (!Object.keys(changes).includes(field)) continue
+        const oldValueText = auditText(field, rfq.request[field])
+        const newValueText = auditText(field, changes[field])
+        if (oldValueText === newValueText) continue
+        call("create#moqui.entity.EntityAuditLog", {
+            changedEntityName: REQUEST,
+            changedFieldName: field,
+            pkPrimaryValue: rfq.requestId,
+            oldValueText,
+            newValueText,
+            changeReason: reason ? String(reason) : null,
+            changedDate: ec.user.nowTimestamp,
+            changedByUserId: ec.user.userId || null
+        })
+    }
 }
 
 // store#QuoteRequestItem: an RFQ item, new or changed, or removed (cancelled, so the change is in its history); the quotes
@@ -491,7 +511,7 @@ function rfqAt(rfq, at) {
         denied("REQUEST_NOT_YET", "RFQ " + rfq.requestId + " was not entered yet at that time")
     const headerLogs = auditFind(REQUEST, headerRevisionFields)
     const itemLogs = auditFind(ITEM, itemRevisionFields)
-    const header = field => (now ? rfq.request[field] : valueAt(headerLogs, field, null, at, rfq.request[field]))
+    const header = field => (now ? rfq.request[field] : valueAt(headerLogs, field, null, at, rfq.request[field]) || null)
     const lines = []
     for (const item of itemsOf(rfq.requestId, true)) {
         const seq = item.requestItemSeqId
@@ -521,7 +541,14 @@ function rfqAt(rfq, at) {
                   .filter(row => ms(row.changedDate) <= at)
                   .map(row => Number(ms(row.changedDate)))
           )
-    return {responseRequiredDate: header("responseRequiredDate"), description: header("description"), lines, revision}
+    return {
+        responseRequiredDate: header("responseRequiredDate"),
+        description: header("description"),
+        facilityId: header("facilityId"),
+        currencyUomId: header("currencyUomId"),
+        lines,
+        revision
+    }
 }
 // The print of an RFQ (as of a time, or now): its HTML, the revision and a hash of the print. A supplier's copy names the
 // supplier; it never names the other suppliers, internal maximum prices or the source requests' notes.
@@ -535,7 +562,7 @@ function printOf(rfq, at, supplierPartyId) {
                 ? [product.pseudoId || product.productId, product.productName].filter(Boolean).join(" · ")
                 : line.productId
         }
-    const facility = rfq.request.facilityId ? one("mantle.facility.Facility", {facilityId: rfq.request.facilityId}) : null
+    const facility = state.facilityId ? one("mantle.facility.Facility", {facilityId: state.facilityId}) : null
     const revisionText = state.revision ? "Revision of " + dateText(state.revision) : "Draft"
     const printHtml = ec.resource.template("component://mr-mantle/template/order/QuoteRequest.print.html.fancy", {
         requestId: rfq.requestId,
@@ -546,7 +573,7 @@ function printOf(rfq, at, supplierPartyId) {
         asOfText: at == null ? "" : dateText(at),
         dueText: state.responseRequiredDate ? dateText(state.responseRequiredDate) : "",
         facilityName: facility ? facility.facilityName || facility.facilityId : "",
-        currencyText: rfq.request.currencyUomId || "",
+        currencyText: state.currencyUomId || "",
         description: state.description || "",
         lines: state.lines.map(line => ({
             seq: line.requestItemSeqId,
@@ -882,6 +909,16 @@ function storeQuoteItem(p) {
 }
 
 // ===== the price publish =====
+// A quote an award placed (P12): a purchase order past OrderProposed that was proposed, so its quoted prices still publish.
+const awardedStatuses = ["OrderPlaced", "OrderApproved", "OrderSent", "OrderProcessing", "OrderHold", "OrderCompleted"]
+const awarded = order =>
+    awardedStatuses.includes(order.statusId) &&
+    find("moqui.entity.EntityAuditLog", {
+        changedEntityName: ORDER,
+        changedFieldName: "statusId",
+        pkPrimaryValue: order.orderId,
+        oldValueText: "OrderProposed"
+    }).count() > 0
 // publish#SupplierQuotePrice (R-PUR-21): a proposed quote line's price, or a quantity tier of it, made an effective supplier
 // price of the buying organization through Products' store#ProductPrice, valid for the quote's validity (from now at the
 // earliest), naming the quote and line; a row of the same supplier, product, organization, currency and tier in effect is
@@ -889,7 +926,7 @@ function storeQuoteItem(p) {
 function publish(p) {
     requirePermission("SUPPLIER_PRICE_EDIT")
     const po = orders().purchaseOrder(p.orderId, true)
-    if (po.order.statusId !== "OrderProposed")
+    if (po.order.statusId !== "OrderProposed" && !awarded(po.order))
         denied("QUOTE_NOT_PROPOSED", "Quote " + po.orderId + " has no supplier's answer to publish")
     if (expired(po.part)) denied("QUOTE_EXPIRED", "Quote " + po.orderId + " expired " + dateText(po.part.validThruDate))
     const line = blank(p.orderItemSeqId) ? null : one(ORDER_ITEM, {orderId: po.orderId, orderItemSeqId: p.orderItemSeqId})
@@ -901,7 +938,9 @@ function publish(p) {
     const now = Number(ec.user.nowTimestamp)
     // from a second ahead at the earliest, so the row it ends (expire#ProductPrice: an end now or later) ends where it starts
     const fromDate = Math.max(now + 1000, ms(p.fromDate) || 0, ms(po.part.validFromDate) || 0)
-    const thruDate = blank(p.thruDate) ? (po.part.validThruDate ? ms(po.part.validThruDate) : null) : ms(p.thruDate)
+    // to the quote's thru date at the latest: the supplier quoted no price after it
+    const validThru = po.part.validThruDate ? ms(po.part.validThruDate) : null
+    const thruDate = blank(p.thruDate) ? validThru : validThru == null ? ms(p.thruDate) : Math.min(ms(p.thruDate), validThru)
     if (thruDate != null && thruDate <= fromDate) denied("DATE_INVALID", "The price ends after it starts")
     const currencyUomId = po.order.currencyUomId
     const reason = text(p.changeReason) || "Published from quote " + po.orderId + " line " + line.orderItemSeqId
@@ -916,7 +955,8 @@ function publish(p) {
     }
     const endedIds = []
     for (const row of rows("mantle.product.ProductPrice", scope)) {
-        if (row.productStoreId || row.agreementId) continue
+        // a store's, an agreement's (changed on the agreement, P13) and a per-term price are other scopes
+        if (row.productStoreId || row.agreementId || row.termUomId) continue
         if (dec(row.minQuantity).compare(minQuantity) !== 0) continue
         const start = ms(row.fromDate) ?? -Infinity
         const end = ms(row.thruDate) ?? Infinity

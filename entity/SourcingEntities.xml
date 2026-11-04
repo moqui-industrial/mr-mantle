@@ -18,17 +18,15 @@ along with this software (see the LICENSE.md file). If not, see
     (RqCntRfqPublished), stamped with its time. Each invited supplier's quote is a purchase OrderHeader with one part (the
     supplier the vendor, the buying organization the customer) in OrderRequested and then OrderProposed, its lines linked to
     the RFQ items by RequestItemOrder; the channel a quote came by is the order's salesChannelEnumId and its evidence
-    OrderContent (OctSupplierQuote). The RFQ's material fields and the quote's validity are audit-logged on create and update
-    ("true", F57: the first value set is the change that matters), so an RFQ prints as of its send time and a quote's
+    OrderContent (OctSupplierQuote). The RFQ items' material fields and the quote's validity are audit-logged on create and update
+    ("true", F57: the first value set is the change that matters), the RFQ header's by store#QuoteRequest, so an RFQ prints as of its send time and a quote's
     amendments read back. A published quote price names its source order and line. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <extend-entity entity-name="Request" package="mantle.request">
-        <!-- an RFQ's response deadline and its specification text, part of what the supplier is sent: logged on update only,
-            as every request's change shows in its timeline and a request's first value is no change there (F-P11-11); an RFQ is
-            created with its response date, so each later change of it is logged -->
-        <field name="responseRequiredDate" type="date-time" enable-audit-log="update"/>
-        <field name="description" type="text-long" enable-audit-log="update"/>
+        <!-- no audit log on Request's fields: every request's audit-logged change shows in its timeline, so an RFQ's header
+            changes (response date, text, facility, currency) are logged by store#QuoteRequest itself, a first value set
+            included (F-P11-11) -->
         <seed-data>
             <moqui.basic.Enumeration enumId="RqtPurchaseRfq" description="Purchase RFQ" enumTypeId="RequestType"/>
             <!-- the RFQ as published to its suppliers (send#QuoteRequest), stored once per print -->

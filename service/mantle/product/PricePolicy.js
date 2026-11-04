@@ -305,7 +305,10 @@ function replace(p) {
         productPriceId: null,
         fromDate: new Date(at).toISOString(),
         price: p.price,
-        changeReason: p.changeReason
+        changeReason: p.changeReason,
+        // a successor's price is not the quote's: it names no source (publish#SupplierQuotePrice, impl-purchasing P11)
+        sourceOrderId: null,
+        sourceOrderItemSeqId: null
     })
     validate(next, [old.productPriceId])
     call("update#" + E, {productPriceId: old.productPriceId, thruDate: new Date(at).toISOString(), changeReason: p.changeReason})

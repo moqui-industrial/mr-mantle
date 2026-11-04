@@ -50,8 +50,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="QuoteRequest" allow-remote="false">
         <description>An open RFQ's name, specification text, response date, facility and currency (the currency only while no
-            quote is proposed, CURRENCY_CHANGE_QUOTED). A change of the response date or text is a new revision, which the
-            suppliers are sent again. Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED) and the refusals of
+            quote is proposed, CURRENCY_CHANGE_QUOTED). A change of the response date, text, facility or currency is a new
+            revision, which the suppliers are sent again; it is audit-logged here (the RFQ's only, F-P11-11), a first value
+            set included, and an as-of print reads it. Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED) and the refusals of
             create#QuoteRequest.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
@@ -253,12 +254,13 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="publish" noun="SupplierQuotePrice" allow-remote="false">
-        <description>A proposed quote line's price, or a quantity tier of it (minQuantity, price), made an effective purchase
-            price of the supplier for the buying organization (R-PUR-21; Products §7): written through
-            mantle.product.PriceServices.store#ProductPrice, valid for the quote's validity (from now at the earliest, or
-            the dates given within it), naming the source quote and line (sourceOrderId, sourceOrderItemSeqId). A price of the
-            same supplier, product, organization, currency and tier in effect is ended where the new one starts
-            (expire#ProductPrice). Requires SUPPLIER_PRICE_EDIT only (PERMISSION_DENIED); refuses a quote outside the user's
+        <description>A proposed (or awarded: placed from OrderProposed) quote line's price, or a quantity tier of it
+            (minQuantity, price), made an effective purchase price of the supplier for the buying organization (R-PUR-21;
+            Products §7): written through mantle.product.PriceServices.store#ProductPrice, valid for the quote's validity
+            (from now at the earliest, to the quote's thru date at the latest, or the dates given within it), naming the source
+            quote and line (sourceOrderId, sourceOrderItemSeqId). A price of the same supplier, product, organization,
+            currency and tier in effect is ended where the new one starts (expire#ProductPrice); a store's, an agreement's or
+            a per-term row is left alone. Requires SUPPLIER_PRICE_EDIT only (PERMISSION_DENIED); refuses a quote outside the user's
             organizations (RECORD_UNAVAILABLE), one not proposed (QUOTE_NOT_PROPOSED) or expired (QUOTE_EXPIRED), a line
             not on it or with no product (ITEM_UNAVAILABLE, PRODUCT_REQUIRED), no price (PRICE_REQUIRED), dates that end
             before they start (DATE_INVALID) and a price of the tier starting later (PRICE_OVERLAP).</description>
