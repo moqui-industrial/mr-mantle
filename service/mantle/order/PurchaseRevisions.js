@@ -25,6 +25,8 @@ const remainders = ec.resource.script("component://mr-mantle/service/mantle/orde
 const receiving = () => ec.resource.script("component://mr-mantle/service/mantle/shipment/Receiving.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
 const documents = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseOrderDocuments.js")
+// P13 review: a line released from a purchase agreement (PurchaseAgreements.js)
+const agreements = () => ec.resource.script("component://mr-mantle/service/mantle/party/PurchaseAgreements.js")
 const {find, one, rows, call, denied, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -321,14 +323,22 @@ function proposed(po, facts, p) {
                         "QUANTITY_BELOW_ACCEPTED",
                         "Line " + seq + " has " + quantityText(fact.accepted) + " accepted; it cannot go below that"
                     ]
-                else quantity = number
+                else {
+                    // P13 review: a line released from an agreement takes no more than its releases
+                    refusal = agreements().releasedLineRefusal(po.orderId, seq, number, null)
+                    if (!refusal) quantity = number
+                }
             } else if (field === "unitAmount") {
                 let number = null
                 try {
                     number = toDecimal(newValue)
                 } catch (_) {}
                 if (number == null || number.compare(0) < 0) refusal = ["PRICE_INVALID", "Enter a price of zero or more"]
-                else price = number
+                else {
+                    // P13 review: nor a higher price than its releases' agreement price
+                    refusal = agreements().releasedLineRefusal(po.orderId, seq, null, number)
+                    if (!refusal) price = number
+                }
             } else if (field === "productId") {
                 if (substitution !== "PsbAllowed")
                     refusal = ["SUBSTITUTION_NOT_ALLOWED", "The buying policy allows no substitute on a revision"]

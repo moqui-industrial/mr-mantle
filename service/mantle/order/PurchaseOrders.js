@@ -202,6 +202,14 @@ function storeItem(p) {
         if (p.itemDescription !== undefined) changes.itemDescription = text(p.itemDescription)
         if (p.requiredByDate !== undefined) changes.requiredByDate = blank(p.requiredByDate) ? null : p.requiredByDate
         if (p.costCenterId !== undefined) changes.costCenterId = costCenterId
+        // P13 review: a line released from an agreement takes no more than its releases (another release checks the caps)
+        const overRelease = agreements().releasedLineRefusal(
+            po.orderId,
+            item.orderItemSeqId,
+            changes.quantity,
+            changes.unitAmount
+        )
+        if (overRelease) denied(overRelease[0], overRelease[1])
         call("update#" + ITEM, changes)
         return {orderId: po.orderId, orderItemSeqId: item.orderItemSeqId}
     }

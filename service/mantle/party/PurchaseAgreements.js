@@ -837,7 +837,9 @@ function release(p) {
         agreementItemSeqId: item.agreementItemSeqId,
         validDate: ec.user.nowTimestamp
     })
-    if (!priced.priceAvailable)
+    // the agreement's own price row, not the supplier's general price (P13 review)
+    const pricedRow = priced.priceAvailable && priced.productPriceId ? one(PRICE, {productPriceId: priced.productPriceId}) : null
+    if (!pricedRow || pricedRow.agreementId !== pa.agreementId || pricedRow.agreementItemSeqId !== item.agreementItemSeqId)
         denied("PRICE_UNAVAILABLE", "Item " + item.agreementItemSeqId + " has no price you may read; set the agreement's price")
     const unitAmount = dec(priced.price)
     const amount = ec.l10n.roundCurrency(quantity.multiply(unitAmount), currencyUomId)
@@ -881,6 +883,9 @@ function release(p) {
                 "RELEASE_ORDER_INVALID",
                 "Release to a draft purchase order of the agreement's organization, supplier and currency"
             )
+        // the buying policy's supplier check, as a new draft's (P13 review)
+        const checked = policy.supplierUsable(pa.organizationPartyId, pa.supplierPartyId)
+        if (checked.result === "STOP") denied(checked.reasonCode, checked.message)
     } else {
         orderId = call("mantle.order.PurchaseServices.create#PurchaseOrder", {
             organizationPartyId: pa.organizationPartyId,
@@ -1329,8 +1334,38 @@ function expire() {
     return {expiredCount}
 }
 
+// A released line's change (P13 review): the release is the line's allocation, so the line takes no more quantity, and no
+// higher price, than its releases gave it at the agreement's price; more comes from another release, which checks the caps.
+// Answers [code, text] or null; a line released from no agreement is not checked.
+function releasedLineRefusal(orderId, orderItemSeqId, quantity, unitAmount) {
+    if (blank(orderId) || blank(orderItemSeqId)) return null
+    const releases = rows(RELEASE, {orderId, orderItemSeqId})
+    if (!releases.length) return null
+    const agreementId = releases[0].agreementId
+    const released = releases.reduce((sum, row) => sum.add(dec(row.quantity)), toDecimal(0))
+    if (quantity != null && dec(quantity).compare(released) > 0)
+        return [
+            "RELEASE_LINE_OVER",
+            "Line " +
+                orderItemSeqId +
+                " was released from agreement " +
+                agreementId +
+                " for " +
+                quantityText(released) +
+                "; release more from the agreement"
+        ]
+    const price = releases.reduce((max, row) => (dec(row.unitAmount).compare(max) > 0 ? dec(row.unitAmount) : max), toDecimal(0))
+    if (unitAmount != null && dec(unitAmount).compare(price) > 0)
+        return [
+            "RELEASE_LINE_OVER",
+            "Line " + orderItemSeqId + " was released from agreement " + agreementId + " at its price; it does not go above it"
+        ]
+    return null
+}
+
 const operations = {store, storeItem, balance, release, submit, decide, print, expire}
 ;({
+    releasedLineRefusal,
     AGREEMENT,
     purchaseAgreement,
     agreementRow,

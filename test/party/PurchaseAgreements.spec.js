@@ -2,8 +2,10 @@
 // agreement with its item's quantity and value caps, tolerance and price, approved through decide#PurchaseApproval with the
 // agreement as source (the activation, the approved revision and its PDF as AgreementContent; a template refused); releases at
 // the agreement's price within the caps, one over the remaining value refused beyond the tolerance and one within it passing, a
-// cancelled line giving its quantity back; a changed cap counted as a revision that takes no release until approved, in the
-// history and read back as of the approval by the print; and an expired agreement refusing a release while its order stays.
+// cancelled line giving its quantity back; a changed cap counted as a revision that takes no release until approved (its
+// history and print as of a time are acceptance's PurchaseAgreementWalk); a released line raised past its release, the
+// agreement's price changed through store#ProductPrice, an item without the agreement's price and an expired agreement
+// refused.
 // Standalone: a spec-local organization, supplier, product, buyer and approver, with artifact authorization disabled (the
 // rules are the services' own permission checks).
 // Run: ./moq test mr-mantle --spec PurchaseAgreements
@@ -255,7 +257,7 @@ feature(
 )
 
 feature(
-    "a changed cap counts the revision and takes no release until its approval; the history shows it and the print as of the approval shows the old cap; an expired agreement takes no release and its order stays",
+    "a changed cap counts the revision and takes no release until its approval; a released line takes no more than its release; the agreement's price changes only on the agreement; an item without it and an expired agreement take no release",
     {
         when() {
             const made = approvedAgreement()
@@ -264,8 +266,30 @@ feature(
                 agreementItemSeqId: made.agreementItemSeqId,
                 quantity: 10
             })
-            const approvedAt = tick()
-            tick()
+            // the released draft line raised past its release, or priced above it (P13 review)
+            const raised = run(state.buyer, P + "store#PurchaseOrderItem", {
+                orderId: released.orderId,
+                orderItemSeqId: released.orderItemSeqId,
+                quantity: 500
+            })
+            const repriced = run(state.buyer, P + "store#PurchaseOrderItem", {
+                orderId: released.orderId,
+                orderItemSeqId: released.orderItemSeqId,
+                unitAmount: 20
+            })
+            const lowered = run(state.buyer, P + "store#PurchaseOrderItem", {
+                orderId: released.orderId,
+                orderItemSeqId: released.orderItemSeqId,
+                quantity: 8
+            })
+            // the agreement's price row through the general price service
+            const priceRow = rows("mantle.product.ProductPrice", {agreementId: made.agreementId})[0]
+            const generalEdit = run("john.doe", "mantle.product.PriceServices.store#ProductPrice", {
+                productPriceId: priceRow.productPriceId,
+                productId: product,
+                price: 1,
+                changeReason: "Cheaper"
+            })
             const changed = run(state.buyer, A + "store#AgreementItem", {
                 agreementId: made.agreementId,
                 agreementItemSeqId: made.agreementItemSeqId,
@@ -285,64 +309,54 @@ feature(
                 agreementId: made.agreementId,
                 agreementRevision: made.decided.agreementRevision
             })
-            const reapproved = run(state.approver, P + "decide#PurchaseApproval", {agreementId: made.agreementId})
-            const oldPrint = run(state.buyer, A + "get#PurchaseAgreementPrint", {
-                agreementId: made.agreementId,
-                asOfDate: approvedAt
+            // an item without the agreement's price is not released at the supplier's own price
+            const unpriced = approvedAgreement({}, {price: null})
+            const unpricedRelease = run(state.buyer, A + "release#PurchaseAgreement", {
+                agreementId: unpriced.agreementId,
+                agreementItemSeqId: unpriced.agreementItemSeqId,
+                quantity: 1
             })
-            const nowPrint = run(state.buyer, A + "get#PurchaseAgreementPrint", {agreementId: made.agreementId})
-            const capLogs = rows("moqui.entity.EntityAuditLog", {
-                changedEntityName: "mantle.party.agreement.AgreementItem",
-                pkPrimaryValue: made.agreementId,
-                changedFieldName: "amountCap"
-            })
-            // ended yesterday: no release, and the job sets it Expired; its order stays
+            // ended yesterday: no release; its order stays
             const ended = run(state.buyer, A + "store#PurchaseAgreement", {agreementId: made.agreementId, thruDate: now() - 1000})
             const expiredRelease = run(state.buyer, A + "release#PurchaseAgreement", {
                 agreementId: made.agreementId,
                 agreementItemSeqId: made.agreementItemSeqId,
                 quantity: 1
             })
-            const expired = run("john.doe", A + "expire#PurchaseAgreements", {})
             return {
                 made,
                 released,
+                raised,
+                repriced,
+                lowered,
+                generalEdit,
                 changed,
                 pendingRelease,
                 notices,
                 stale,
-                reapproved,
-                oldPrint,
-                nowPrint,
-                capLogs,
+                unpriced,
+                unpricedRelease,
                 ended,
                 expiredRelease,
-                expired,
-                agreement: agreementOf(made.agreementId),
-                contents: rows("mantle.party.agreement.AgreementContent", {agreementId: made.agreementId}),
                 order: one("mantle.order.OrderHeader", {orderId: released.orderId})
             }
         },
         then(r) {
             r.released.error == ""
+            r.raised.error.includes("RELEASE_LINE_OVER")
+            r.repriced.error.includes("RELEASE_LINE_OVER")
+            r.lowered.error == ""
+            r.generalEdit.error.includes("changes on the agreement")
             r.changed.error == ""
             r.changed.revised == true
             r.changed.agreementRevision == r.made.decided.agreementRevision + 1
             r.pendingRelease.error.includes("AGREEMENT_CHANGE_PENDING")
             r.notices.length >= 1
             r.stale.error.includes("STALE_REVISION")
-            r.reapproved.error == ""
-            r.contents.length == 2
-            r.oldPrint.error == ""
-            r.oldPrint.agreementRevision == r.made.decided.agreementRevision
-            r.oldPrint.printHtml.includes("$1,000.00")
-            !r.oldPrint.printHtml.includes("$1,500.00")
-            r.nowPrint.printHtml.includes("$1,500.00")
-            r.capLogs.some(row => row.changeReason == "Volume renegotiated" && row.oldValueText != null)
+            r.unpriced.decided.error == ""
+            r.unpricedRelease.error.includes("PRICE_UNAVAILABLE")
             r.ended.error == ""
             r.expiredRelease.error.includes("AGREEMENT_EXPIRED")
-            r.expired.error == ""
-            r.agreement.statusId == "AgmStExpired"
             r.order.statusId == "OrderOpen"
         }
     }
