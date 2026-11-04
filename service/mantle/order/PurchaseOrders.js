@@ -17,6 +17,8 @@ const approvals = () => ec.resource.script("component://mr-mantle/service/mantle
 const revisions = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
 // P10: a request-sourced line's approval converts the request's commitment (PurchaseRequests.js)
 const requests = () => ec.resource.script("component://mr-mantle/service/mantle/request/PurchaseRequests.js")
+// P13: a purchase agreement's approval is decided here too (PurchaseAgreements.js)
+const agreements = () => ec.resource.script("component://mr-mantle/service/mantle/party/PurchaseAgreements.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -202,6 +204,14 @@ function storeItem(p) {
         if (p.itemDescription !== undefined) changes.itemDescription = text(p.itemDescription)
         if (p.requiredByDate !== undefined) changes.requiredByDate = blank(p.requiredByDate) ? null : p.requiredByDate
         if (p.costCenterId !== undefined) changes.costCenterId = costCenterId
+        // P13 review: a line released from an agreement takes no more than its releases (another release checks the caps)
+        const overRelease = agreements().releasedLineRefusal(
+            po.orderId,
+            item.orderItemSeqId,
+            changes.quantity,
+            changes.unitAmount
+        )
+        if (overRelease) denied(overRelease[0], overRelease[1])
         call("update#" + ITEM, changes)
         return {orderId: po.orderId, orderItemSeqId: item.orderItemSeqId}
     }
@@ -449,6 +459,7 @@ function placedBy(order, userId, partyId) {
 // revision) and approves the order through approve#Order (PURCHASE_ORDER_APPROVE for a purchase part); one that leaves a step
 // waiting sends it to its approvers. A retry with the same operation key answers the first result.
 function decide(p) {
+    if (blank(p.orderId) && !blank(p.agreementId)) return agreements().execute("decide", p)
     requirePermission("PURCHASE_APPROVE")
     const po = purchaseOrder(p.orderId, true)
     const decision = String(p.decision || "approve")

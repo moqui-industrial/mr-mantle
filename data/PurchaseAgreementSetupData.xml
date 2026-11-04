@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- Purchase agreements past their thru date (impl-purchasing P13): once a day an active purchase agreement whose thru
+        date has passed is set Expired (mantle.party.AgreementServices.expire#PurchaseAgreements). A release checks the
+        dates itself, so an agreement the job has not reached yet takes no release either; its POs stay. An agreement's
+        activation is approved on PurchaseOrderApproval with the agreement as source (PurchaseApprovalSetupData.xml). -->
+    <moqui.service.job.ServiceJob jobName="expire_PurchaseAgreements" description="Expire purchase agreements past their dates"
+            serviceName="mantle.party.AgreementServices.expire#PurchaseAgreements" cronExpression="0 5 0 * * ?" paused="N"
+            transactionTimeout="1800"/>
+</entity-facade-xml>

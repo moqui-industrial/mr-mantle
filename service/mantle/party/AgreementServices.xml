@@ -13,6 +13,14 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Purchase agreements (impl-purchasing P13): PurchaseAgreementServices.xml, included by name -->
+    <service-include verb="store" noun="PurchaseAgreement" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="store" noun="AgreementItem" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="submit" noun="PurchaseAgreement" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="get" noun="ReleaseBalance" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="release" noun="PurchaseAgreement" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="get" noun="PurchaseAgreementPrint" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
+    <service-include verb="expire" noun="PurchaseAgreements" location="component://mr-mantle/service/mantle/party/PurchaseAgreementServices.xml"/>
 
     <service verb="create" noun="AgreementContent">
         <in-parameters>

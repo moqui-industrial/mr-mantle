@@ -22,6 +22,10 @@ const POLICY = "mantle.order.purchase.PurchaseApprovalPolicy",
     REQUEST = "mantle.request.Request"
 // each source's topic and policy source type; P10 adds requests (PurchaseRequests.js requestSource) and P12 awards
 const topics = {[ORDER]: "PurchaseOrderApproval", [PARTY]: "PurchaseSupplierApproval", [REQUEST]: "PurchaseRequestApproval"}
+// P13: a purchase agreement is approved as a purchase order is, on its topic (§4; PurchaseAgreements.js)
+const AGREEMENT = "mantle.party.agreement.Agreement"
+const agreements = () => ec.resource.script("component://mr-mantle/service/mantle/party/PurchaseAgreements.js")
+topics[AGREEMENT] = "PurchaseOrderApproval"
 const sourceTypes = {[ORDER]: "PasOrder", [PARTY]: "PasSupplier", [REQUEST]: "PasRequest"}
 const policyFields = [
     "organizationPartyId",
@@ -304,6 +308,7 @@ function messageOf(source, state) {
     if (source.sourceEntityName === ORDER) message.orderId = source.sourceId
     // P10: a source's own fields for its topic's title and link (a request's id, name and revision time)
     if (source.message) Object.assign(message, source.message)
+    if (source.sourceEntityName === AGREEMENT) message.agreementId = source.sourceId
     return message
 }
 // The approvers' messages of a source are read once its step is decided: each unread copy is marked read, so the approval
@@ -346,14 +351,18 @@ function notify(source, state = null) {
         if (!userIds.length) return {notifiedCount: 0}
         const message = messageOf(source, state)
         const batches = quorumOf(step) > 1 ? userIds.map(userId => [userId]) : [userIds]
-        for (const batch of batches)
-            ec.makeNotificationMessage()
+        for (const batch of batches) {
+            const notice = ec
+                .makeNotificationMessage()
                 .topic(topics[source.sourceEntityName])
                 .message(message)
                 .record(source.sourceEntityName, source.sourceId)
                 .actorUserId(ec.user.userId)
                 .userIds(batch)
-                .send()
+            // P13: a source of its own wording (an agreement on the purchase order topic)
+            if (source.title) notice.title(source.title(state))
+            notice.send()
+        }
         return {notifiedCount: userIds.length}
     } catch (error) {
         ec.logger.error("Approval notice of " + source.label + " was not sent: " + error.message)
@@ -671,6 +680,8 @@ function preview(p) {
     if (!blank(p.orderId)) {
         po = orders().purchaseOrder(p.orderId)
         source = orderSource(po)
+    } else if (!blank(p.agreementId)) {
+        source = agreements().agreementSource(agreements().purchaseAgreement(p.agreementId))
     } else if (!blank(p.supplierPartyId)) {
         const organizationPartyId = requireOrganization(text(p.organizationPartyId))
         orders().supplierOf(organizationPartyId, text(p.supplierPartyId))
@@ -847,6 +858,13 @@ function decideSource(p, decision) {
         return call("mantle.order.PurchaseServices.decide#PurchaseApproval", {
             orderId: p.recordId,
             orderRevision: message.sourceRevision ?? null,
+            decision,
+            reason: text(p.reason)
+        })
+    if (p.recordEntityName === AGREEMENT)
+        return call("mantle.order.PurchaseServices.decide#PurchaseApproval", {
+            agreementId: p.recordId,
+            agreementRevision: message.sourceRevision ?? null,
             decision,
             reason: text(p.reason)
         })

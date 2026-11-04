@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase agreements (design-purchasing §7 Agreements and AgreementDetail; impl-purchasing P13, §2, §4): included in
+    mantle.party.AgreementServices by name (service-include), over PurchaseAgreements.js. An AgrPurchase Agreement of an
+    internal organization (the buyer) with a supplier: blanket (a quantity and value cap per item, with a release
+    tolerance) or a template. Its activation and each later revision are approved through
+    mantle.order.PurchaseServices.decide#PurchaseApproval with the agreementId, on PurchaseOrderApproval. Each service
+    checks its permission and refuses an agreement outside the user's organizations (RECORD_UNAVAILABLE). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="store" noun="PurchaseAgreement" allow-remote="false">
+        <description>Create or change a purchase agreement (design NewAgreement, AgreementHeader, AgreementTerms). With no
+            agreementId: a draft of the organization with the supplier at revision 1, the currency the buying policy's when
+            empty; with templateAgreementId, a copy of the template's items, prices and terms in effect (never its
+            releases). With an agreementId: the supplier, dates, currency, description and text; the terms (each new, changed,
+            ended with a thruDate or, never approved, removed) and the signers and other parties (AgreementParty, removed with
+            remove); or statusId to close (an active or expired one) or cancel it (a draft or active one, with a reason). A
+            change of the supplier, dates, currency or a term counts the revision once with changeReason in the audit log,
+            supersedes the earlier revisions' decisions and sends an active or submitted agreement to its approvers at the
+            new revision. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses another organization (RECORD_UNAVAILABLE),
+            a supplier it may not buy from (SUPPLIER_UNAVAILABLE), a template that is not one or another organization's
+            (TEMPLATE_INVALID), no currency (CURRENCY_REQUIRED), dates out of order (DATE_INVALID), a change of a closed,
+            expired or cancelled agreement (AGREEMENT_CLOSED), a supplier or currency change once released
+            (SUPPLIER_CHANGE_RELEASED, CURRENCY_CHANGE_RELEASED), activation here (STATUS_INVALID), a cancel without a
+            reason (REASON_REQUIRED) and a status the flow does not allow.</description>
+        <in-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="otherPartyId"><description>The supplier</description></parameter>
+            <parameter name="templateAgreementId"/>
+            <parameter name="isTemplate"/>
+            <parameter name="agreementDate" type="Timestamp"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="description"/>
+            <parameter name="textData"/>
+            <parameter name="statusId"/>
+            <parameter name="terms" type="List"><description>Each term: agreementTermId (a change), termTypeEnumId,
+                settlementTermId, termText, termNumber, agreementItemSeqId, fromDate, thruDate, remove</description></parameter>
+            <parameter name="parties" type="List"><description>Each signer or other party: partyId, roleTypeId (default
+                AgreementSigner), remove</description></parameter>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="statusId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="revised" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('store', context)"/>
+            <script>ec.context.putAll(stored)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="AgreementItem" allow-remote="false">
+        <description>Add, change, end or remove an item of a draft or active purchase agreement (design AgreementItems, F10):
+            its product, quantity cap and unit, value cap (amountCap, in the agreement's currency), release tolerance percent,
+            dates and text, and its price (a ProductPrice row of the agreement and item, purchase direction: a new price ends
+            the row in effect and starts the next, so the price as of a time stays readable). An item never approved and never
+            released is removed with remove; any other is ended with a thruDate. A change counts the agreement's revision
+            once, as store#PurchaseAgreement. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses another
+            organization (RECORD_UNAVAILABLE), a closed agreement (AGREEMENT_CLOSED), an item not on it (ITEM_UNAVAILABLE),
+            no product (PRODUCT_REQUIRED), a negative or zero amount (AMOUNT_INVALID), dates out of order (DATE_INVALID), a
+            cap below what the item's releases use (CAP_BELOW_RELEASED), a product change once released
+            (PRODUCT_CHANGE_RELEASED) and the removal of an approved or released item (ITEM_APPROVED).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="amountCap"/>
+            <parameter name="releaseTolerancePercent"/>
+            <parameter name="price"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="itemText"/>
+            <parameter name="remove" type="Boolean"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementItemSeqId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="revised" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('storeItem', context)"/>
+            <script>ec.context.putAll(stored)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="PurchaseAgreement" allow-remote="false">
+        <description>Send a draft purchase agreement, or an active one whose changed revision waits, to the approvers of its
+            step waiting (PurchaseOrderApproval, the agreement as source; the organization's purchase order policy steps for
+            the agreement's value: its items' value caps, else their quantities at the agreement's price). Requires
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses another organization (RECORD_UNAVAILABLE), a template
+            (TEMPLATE_NO_APPROVAL), an agreement waiting for no approval (AGREEMENT_NOT_PENDING), one with no item
+            (AGREEMENT_EMPTY) and a value no policy row covers (POLICY_MISSING).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="notifiedCount" type="Integer"/>
+            <parameter name="pendingStepText"/>
+        </out-parameters>
+        <actions>
+            <set field="submitted" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('submit', context)"/>
+            <script>ec.context.putAll(submitted)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ReleaseBalance" allow-remote="false">
+        <description>A purchase agreement's balance (design AgreementList, AgreementReleases): whether it takes a release now
+            and why not (a template, not active, expired by its status or date, or a change waiting for its approval); each
+            item's quantity and value caps, tolerance, price, what its releases use (each release's quantity less its line's
+            cancelled quantity, none once the order is cancelled or rejected) and what remains; and each release with its
+            order and line, the agreement's revision, the line's ordered, cancelled and received quantities and its value. A
+            template has no balance. Requires PURCHASE_ORDER_EDIT, PURCHASE_APPROVE or PURCHASE_ORDER_APPROVE
+            (PERMISSION_DENIED); refuses another organization (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="balance" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="balance" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('balance', context).balance"/>
+        </actions>
+    </service>
+    <service verb="release" noun="PurchaseAgreement" allow-remote="false">
+        <description>Release a quantity of an active purchase agreement's item to a draft purchase order (design
+            ReleaseAgreement): a new draft of the organization from the supplier in the agreement's currency
+            (create#PurchaseOrder, with the facility given), or the draft given of the same organization, supplier and
+            currency; its line (store#PurchaseOrderItem) at the agreement's price (get#ProductPrice with the agreement and
+            item: the agreement's price row first) and the release allocation (AgreementRelease) with the agreement's revision
+            and its time. The agreement is locked first, so two releases at once cannot exceed the caps together. Recurring
+            releases are made the same way, each checked again. The same operation key answers the first result. Requires
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses another organization (RECORD_UNAVAILABLE), a template
+            (TEMPLATE_NO_RELEASE), an expired agreement (AGREEMENT_EXPIRED), one not active (AGREEMENT_NOT_ACTIVE) or not
+            started (AGREEMENT_NOT_STARTED), a changed revision not approved yet (AGREEMENT_CHANGE_PENDING), a revision that
+            is not the current one (STALE_REVISION), an item not on it or not in effect (ITEM_UNAVAILABLE,
+            ITEM_NOT_IN_EFFECT), no price (PRICE_UNAVAILABLE), a quantity or value over what remains beyond the item's
+            tolerance (RELEASE_OVER_QUANTITY, RELEASE_OVER_VALUE), an order that is not such a draft (RELEASE_ORDER_INVALID)
+            and what create#PurchaseOrder and store#PurchaseOrderItem refuse (SUPPLIER_BLOCKED, PRODUCT_NOT_USABLE).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="agreementItemSeqId" required="true"/>
+            <parameter name="quantity" required="true"/>
+            <parameter name="orderId"><description>A draft purchase order to add the line to; a new draft when
+                empty</description></parameter>
+            <parameter name="orderName"/>
+            <parameter name="facilityId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="itemDescription"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="agreementReleaseId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="remainingQuantity" type="BigDecimal"/>
+            <parameter name="remainingAmount" type="BigDecimal"/>
+            <parameter name="overCap" type="Boolean"><description>The release took the item past a cap, within its
+                tolerance</description></parameter>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="released" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('release', context)"/>
+            <script>ec.context.putAll(released)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="PurchaseAgreementPrint" allow-remote="false">
+        <description>A purchase agreement's print, now or as of a date and time read back from the audit log (its status,
+            supplier, dates, currency and revision; each item's product, quantity, unit, value cap, tolerance and dates, with
+            the price row in effect then; the terms; the releases made by then): its HTML, the revision then and the file
+            name of its PDF. Requires PURCHASE_ORDER_EDIT, PURCHASE_APPROVE or PURCHASE_ORDER_APPROVE (PERMISSION_DENIED);
+            refuses another organization (RECORD_UNAVAILABLE), a time to come or not a time (DATE_INVALID) and a time
+            before the agreement (AGREEMENT_NOT_YET).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="printHtml"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="fileName"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="printed" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('print', context)"/>
+            <script>ec.context.putAll(printed)</script>
+        </actions>
+    </service>
+    <service verb="expire" noun="PurchaseAgreements" allow-remote="false">
+        <description>The daily job (expire_PurchaseAgreements): each active purchase agreement past its thru date set
+            Expired, each in its own transaction (one that fails is logged and the others go on). Its orders stay.</description>
+        <out-parameters>
+            <parameter name="expiredCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="expiredCount" from="ec.resource.script('component://mr-mantle/service/mantle/party/PurchaseAgreements.js')
+                .execute('expire', context).expiredCount"/>
+        </actions>
+    </service>
+</services>

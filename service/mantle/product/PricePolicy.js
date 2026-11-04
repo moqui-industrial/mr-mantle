@@ -83,6 +83,9 @@ function access(r, write = false) {
         const other = agr.otherPartyId ? one("mantle.party.Party", {partyId: agr.otherPartyId}) : null
         if (other?.privateOwnerUserId && other.privateOwnerUserId !== ec.user.userId)
             throw new Error("Price agreement is not available")
+        // a purchase agreement's price is part of the agreement, changed and approved with it (store#AgreementItem, P13)
+        if (write && agr.agreementTypeEnumId === "AgrPurchase")
+            throw new Error("A purchase agreement's price changes on the agreement")
     }
     if (d === "invalid" || (write && d === "public" && !admin))
         throw denied("direction", "Choose an internal sales vendor, or an external supplier and an internal buying organization")

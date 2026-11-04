@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase agreements (design-purchasing §7 Agreements and AgreementDetail; impl-purchasing P13, §2, §4, F10, F18, F36,
+    F57): the AgrPurchase type, the one Mantle Agreement status flow (AgmStDraft, AgmStActive, AgmStExpired, AgmStClosed,
+    AgmStCancelled; review X13, which Sales adopts), an item's value cap and release tolerance, effective-dated items and
+    terms, and the release allocation, a record of its own. Versions are the audit log: a purchase agreement's revision is
+    agreementRevision and its time, counted once by each change of its key fields (header dates, supplier and currency;
+    the items' product, quantity, unit, cap, tolerance, dates and price; the terms), each logged "true" so its first value
+    is in the log too (F57) and a print as of a time reads it back. The approval of a revision
+    (mantle.order.PurchaseServices.decide#PurchaseApproval with the agreement as source, on PurchaseOrderApproval) sets
+    approvedRevision and stores the agreement's PDF as AgreementContent (AcntApprovedVersion); a release needs the agreement
+    Active at its approved revision. Signers and other parties are AgreementParty rows (AgreementSigner). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Agreement" package="mantle.party.agreement">
+        <!-- the key fields Mantle logged with "update" (its first value left out, F57) are logged on create as well -->
+        <field name="otherPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="currencyUomId" type="id" enable-audit-log="true"/>
+        <field name="agreementRevision" type="number-integer" enable-audit-log="true">
+            <description>A purchase agreement's revision: 1 when created, counted once by each change of its key fields
+                (mantle.party.AgreementServices store#PurchaseAgreement and store#AgreementItem). An approval decision is bound
+                to it.</description></field>
+        <field name="revisionDate" type="date-time"><description>When the revision was counted.</description></field>
+        <field name="approvedRevision" type="number-integer" enable-audit-log="true">
+            <description>The revision whose approval completed; a release needs it to be the agreement's revision, so a
+                changed active agreement takes no release until its new revision is approved.</description></field>
+        <field name="approvedDate" type="date-time"/>
+    </extend-entity>
+    <extend-entity entity-name="AgreementItem" package="mantle.party.agreement">
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="amountCap" type="currency-amount" enable-audit-log="true">
+            <description>The value the item's releases may reach, in the agreement's currency (F10); empty is no value
+                cap.</description></field>
+        <field name="releaseTolerancePercent" type="number-decimal" enable-audit-log="true">
+            <description>How far over its quantity and value caps the item's releases may go, as a percent; empty is
+                none.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="AgreementTerm" package="mantle.party.agreement">
+        <!-- effective-dated terms, each key field logged with its first value -->
+        <field name="settlementTermId" type="id" enable-audit-log="true"/>
+        <field name="termTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="termText" type="text-long" enable-audit-log="true"/>
+        <field name="termNumber" type="number-decimal" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <entity entity-name="AgreementRelease" package="mantle.party.agreement" cache="never">
+        <description>One release of a purchase agreement's item to a purchase order line, a fact of its own (impl-purchasing
+            §2): the order and line, the quantity and value released at the agreement's price, and the agreement's revision
+            and its time. Written only by mantle.party.AgreementServices.release#PurchaseAgreement, under a lock on the
+            agreement, so two releases cannot take more than the caps and tolerance together. What a release still uses is
+            read from its line: the released quantity less the line's cancelled quantity, none once the order is cancelled
+            or rejected, so an expired, closed or cancelled agreement keeps its fulfilled history.</description>
+        <field name="agreementReleaseId" type="id" is-pk="true"/>
+        <field name="agreementId" type="id" not-null="true"/>
+        <field name="agreementItemSeqId" type="id" not-null="true"/>
+        <field name="orderId" type="id" not-null="true"/>
+        <field name="orderItemSeqId" type="id" not-null="true"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="unitAmount" type="currency-precise"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="agreementRevision" type="number-integer"/>
+        <field name="agreementRevisionDate" type="date-time"/>
+        <field name="productPriceId" type="id"/>
+        <field name="releaseDate" type="date-time"/>
+        <field name="releasedByUserId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one" related="mantle.party.agreement.AgreementItem" short-alias="agreementItem">
+            <key-map field-name="agreementId"/><key-map field-name="agreementItemSeqId"/></relationship>
+        <relationship type="one" related="mantle.order.OrderHeader" short-alias="order"/>
+        <relationship type="one-nofk" related="mantle.order.OrderItem" short-alias="orderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one-nofk" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <index name="AGR_RELEASE_AGR"><index-field name="agreementId"/><index-field name="agreementItemSeqId"/></index>
+        <index name="AGR_RELEASE_ORDER"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="AgrPurchase" description="Purchase" enumTypeId="AgreementType"/>
+            <!-- the one Mantle Agreement status flow (review X13): approval activates a draft; an active agreement expires
+                past its thru date, is closed or cancelled; an expired one is closed -->
+            <moqui.basic.StatusItem statusId="AgmStDraft" statusTypeId="Agreement" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="AgmStActive" statusTypeId="Agreement" sequenceNum="2" description="Active"/>
+            <moqui.basic.StatusItem statusId="AgmStExpired" statusTypeId="Agreement" sequenceNum="3" description="Expired"/>
+            <moqui.basic.StatusItem statusId="AgmStClosed" statusTypeId="Agreement" sequenceNum="4" description="Closed"/>
+            <moqui.basic.StatusItem statusId="AgmStCancelled" statusTypeId="Agreement" sequenceNum="5" description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStDraft" toStatusId="AgmStActive"
+                    transitionName="Activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStDraft" toStatusId="AgmStCancelled"
+                    transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStExpired"
+                    transitionName="Expire"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStClosed"
+                    transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStActive" toStatusId="AgmStCancelled"
+                    transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AgmStExpired" toStatusId="AgmStClosed"
+                    transitionName="Close"/>
+            <!-- the approved agreement's PDF, stored once per approved revision -->
+            <moqui.basic.Enumeration enumId="AcntApprovedVersion" description="Approved agreement"
+                    enumTypeId="AgreementContentType"/>
+            <!-- a signer of the agreement, of either party (AgreementParty) -->
+            <mantle.party.RoleType roleTypeId="AgreementSigner" description="Agreement signer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="AgreementSigner"/>
+        </seed-data>
+    </entity>
+</entities>
