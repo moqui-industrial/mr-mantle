@@ -1227,9 +1227,10 @@ function convertGroup(p) {
 
 // ===== the purchase order's approval (PurchaseOrders.js decide) =====
 // At the approval of a purchase order: each line sourced from a request line (RequestItemOrder) passes on the request's
-// commitment (convert#Commitment, keyed by the order's revision), so the amount is not counted twice; a line with no open
-// request commitment, or whose earlier revision already holds one at the order stage, is reserved as the order's other
-// lines are (reserve#Commitment), where its account is under an approved budget.
+// commitment (convert#Commitment, keyed by the order's revision), so the amount is not counted twice; a revised line whose
+// request commitment is still open replaces its earlier order commitment and converts the rest; a line with no open request
+// commitment is reserved as the order's other lines are (reserve#Commitment, which replaces an earlier revision's), where
+// its account is under an approved budget.
 function convertOrderCommitments(po, revision, overrideReason) {
     const links = rows(ITEM_ORDER, {orderId: po.orderId})
     if (!links.length) return {convertedCount: 0, reservedCount: 0}
@@ -1268,7 +1269,9 @@ function convertOrderCommitments(po, revision, overrideReason) {
         const earlier = rows(COMMITMENT, {sourceEntityName: ORDER, sourceId: po.orderId, stageEnumId: "BcsOrder"}).filter(
             row => row.sourceItemId === link.orderItemSeqId && !["BcBlocked", "BcReversed"].includes(row.statusId)
         )
-        const parent = earlier.length
+        // the request line's commitment still open; a line that already holds a commitment at this revision (a retry, or a
+        // lowered line's) answers it through reserve#Commitment
+        const parent = earlier.some(row => String(row.sourceRevision) === String(revision))
             ? null
             : rows(COMMITMENT, {
                   organizationPartyId: po.organizationPartyId,
@@ -1278,6 +1281,15 @@ function convertOrderCommitments(po, revision, overrideReason) {
                   statusId: "BcReserved"
               })[0]
         if (parent) {
+            // a revision of a line converted at an earlier revision (F-P10-6): its earlier order commitment is replaced, as
+            // reserve#Commitment replaces an earlier revision's, and the new one converts what the request still holds, so
+            // the request's remainder is not held beside the line's new amount (counted twice)
+            for (const row of earlier.filter(row => row.statusId === "BcReserved"))
+                call("update#" + COMMITMENT, {
+                    budgetCommitmentId: row.budgetCommitmentId,
+                    statusId: "BcReleased",
+                    releasedDate: ec.user.nowTimestamp
+                })
             call(
                 "mantle.other.BudgetServices.convert#Commitment",
                 Object.assign({fromCommitmentId: parent.budgetCommitmentId}, line)

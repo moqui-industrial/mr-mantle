@@ -19,7 +19,8 @@ const org = prefix + "_ORG",
     since = "2000-01-01T00:00:00Z"
 const R = "mantle.request.RequestServices.",
     P = "mantle.order.PurchaseServices.",
-    B = "mantle.other.BudgetServices."
+    B = "mantle.other.BudgetServices.",
+    O = "mantle.order.OrderServices."
 const REQUEST = "mantle.request.Request"
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
@@ -395,7 +396,27 @@ feature("approving a sourced purchase order converts the request's commitment, s
         const decided = run(state.approver, P + "decide#PurchaseApproval", {orderId})
         const order = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, stageEnumId: "BcsOrder"})
         const parent = one("mantle.other.budget.BudgetCommitment", {budgetCommitmentId: before[0]?.budgetCommitmentId})
-        return {before, decided, order, parent}
+        // a revision raising the line to the request's maximum (4 at 10): the new revision converts the request's remainder
+        // and replaces the first order commitment, so 40 is held, not the request's 10 beside it (F-P10-6)
+        run(state.buyer, O + "start#PurchaseRevision", {orderId, reason: "One more"})
+        const applied = run(state.buyer, O + "apply#PurchaseRevision", {
+            orderId,
+            itemChanges: [{orderItemSeqId: link.orderItemSeqId, quantity: 4}],
+            reason: "One more"
+        })
+        const revised = run(state.approver, P + "decide#PurchaseApproval", {orderId})
+        const after = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, stageEnumId: "BcsOrder"})
+        const open = [
+            ...rows("mantle.other.budget.BudgetCommitment", {sourceId: requestId, stageEnumId: "BcsRequest"}),
+            ...after
+        ].filter(row => row.statusId == "BcReserved")
+        const opened = open.reduce((total, row) => {
+            const passed = after
+                .filter(child => child.convertedFromId == row.budgetCommitmentId && child.statusId != "BcBlocked")
+                .reduce((sum, child) => sum + child.amount.toNumber(), 0)
+            return total + Math.max(0, row.amount.toNumber() - passed)
+        }, 0)
+        return {before, decided, order, parent, applied, revised, after, opened}
     },
     then(r) {
         r.before.length == 1
@@ -405,6 +426,16 @@ feature("approving a sourced purchase order converts the request's commitment, s
         r.order[0].convertedFromId == r.before[0].budgetCommitmentId
         r.order[0].amount.toNumber() == 30
         r.parent.statusId == "BcReserved"
+        r.applied.error == ""
+        r.revised.error == ""
+        r.after.find(row => row.budgetCommitmentId == r.order[0].budgetCommitmentId).statusId == "BcReleased"
+        r.after.some(
+            row =>
+                row.statusId == "BcReserved" &&
+                row.amount.toNumber() == 40 &&
+                row.convertedFromId == r.before[0].budgetCommitmentId
+        )
+        r.opened == 40
     }
 })
 
