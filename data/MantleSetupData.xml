@@ -36,6 +36,21 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- Special Permissions - NOTE: other such permissions that the data model seed data relies on are in MantleUdmSetupData.xml in mr-mantle -->
     <userPermissions userPermissionId="ORDER_APPROVE" description="Order Approve"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_APPROVE" fromDate="0"/>
+    <!-- Purchasing's approvals and policies (impl-purchasing P1, §4, X4): PURCHASE_APPROVE decides a purchase request, award or
+        supplier approval, PURCHASE_ORDER_APPROVE approves a purchase order part (approve#Order's purchase direction, P3),
+        PURCHASE_HOLD_RELEASE places and releases a Purchase hold reason (OrderHoldType OhtPurchase's enumCode), and
+        PURCHASE_POLICY_EDIT keeps the buying and approval policies; SUPPLIER_SCORECARD_EDIT keeps a supplier's scorecard
+        evaluations (mantle.party.SupplierServices). Granted to the Purchasing groups by the app's setup data. -->
+    <userPermissions userPermissionId="PURCHASE_APPROVE" description="Purchase Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_ORDER_APPROVE" description="Purchase Order Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_HOLD_RELEASE" description="Purchase Hold Release"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_HOLD_RELEASE" fromDate="0"/>
+    <userPermissions userPermissionId="PURCHASE_POLICY_EDIT" description="Purchase Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPLIER_SCORECARD_EDIT" description="Supplier Scorecard Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_SCORECARD_EDIT" fromDate="0"/>
     <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
         WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
         receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
