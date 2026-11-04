@@ -144,8 +144,8 @@ function facilityTree(facility) {
 
 // ===== demand and supply =====
 // The open sales demand of the organization at a facility set, by product: what is ordered less what was cancelled, issued
-// and reserved against stock (the reserved quantity is out of the available stock already). A kit's line is its kit
-// components' demand.
+// and reserved (the reserved quantity is out of the available stock already, its unavailable part as a negative available
+// to promise). A kit's line is its kit components' demand.
 function salesDemand(ctx, node) {
     const parts = Array.from(
         find("mantle.order.OrderPart", {vendorPartyId: ctx.organizationPartyId})
@@ -164,40 +164,53 @@ function salesDemand(ctx, node) {
         )
         for (const item of items) {
             const ordered = dec(item.quantity).subtract(dec(item.quantityCancelled))
-            const issued = rows("mantle.product.issuance.AssetIssuance", {
-                orderId: item.orderId,
-                orderItemSeqId: item.orderItemSeqId
-            }).reduce((total, row) => total.add(dec(row.quantity)), zero())
-            const reserved = rows("mantle.product.issuance.AssetReservation", {
-                orderId: item.orderId,
-                orderItemSeqId: item.orderItemSeqId
-            }).reduce((total, row) => {
-                const held = dec(row.quantityNotIssued ?? row.quantity).subtract(dec(row.quantityNotAvailable))
-                return held.compare(0) > 0 ? total.add(held) : total
-            }, zero())
-            const open = ordered.subtract(issued).subtract(reserved)
-            if (open.compare(0) <= 0) continue
+            const keyOf = {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}
+            // issued and reserved by product: a kit's line is issued as the kit and reserved as its components
+            const sums = (entity, quantityOf) => {
+                const byId = new Map()
+                for (const row of rows(entity, keyOf)) {
+                    const quantity = quantityOf(row)
+                    if (quantity.compare(0) > 0) byId.set(row.productId, (byId.get(row.productId) || zero()).add(quantity))
+                }
+                return byId
+            }
+            const issued = sums("mantle.product.issuance.AssetIssuance", row => dec(row.quantity))
+            // the whole reservation not issued: its unavailable part is a negative available to promise already
+            // (reserve#AssetForOrderItem), as get#InventoryProjectedInfo's orderNotReserved has it
+            const reserved = sums("mantle.product.issuance.AssetReservation", row => dec(row.quantityNotIssued ?? row.quantity))
+            const sumOf = map => Array.from(map.values()).reduce((total, quantity) => total.add(quantity), zero())
             const date = item.requiredByDate || part.shipBeforeDate || null
             const line = {
                 kind: "sales",
                 label: "Sales order " + item.orderId + " line " + item.orderItemSeqId,
                 orderId: item.orderId,
                 orderItemSeqId: item.orderItemSeqId,
-                date,
-                quantity: open
+                date
             }
             const product = one(PRODUCT, {productId: item.productId})
-            if (product?.productTypeEnumId === "PtPickAssembly")
-                for (const component of kitComponents(item.productId, open, ctx.planDate))
-                    add(
-                        component.productId,
-                        Object.assign({}, line, {
-                            kind: "kitSales",
-                            label: line.label + ", kit " + item.productId,
-                            quantity: component.quantity
-                        })
-                    )
-            else add(item.productId, line)
+            if (product?.productTypeEnumId === "PtPickAssembly") {
+                const notIssued = ordered.subtract(issued.get(item.productId) || zero())
+                if (notIssued.compare(0) <= 0) continue
+                for (const component of kitComponents(item.productId, notIssued, ctx.planDate)) {
+                    // a component's reservation counts once, also when nested kits name it twice
+                    const held = reserved.get(component.productId) || zero()
+                    const taken = held.compare(component.quantity) < 0 ? held : component.quantity
+                    reserved.set(component.productId, held.subtract(taken))
+                    const open = component.quantity.subtract(taken)
+                    if (open.compare(0) > 0)
+                        add(
+                            component.productId,
+                            Object.assign({}, line, {
+                                kind: "kitSales",
+                                label: line.label + ", kit " + item.productId,
+                                quantity: open
+                            })
+                        )
+                }
+                continue
+            }
+            const open = ordered.subtract(sumOf(issued)).subtract(sumOf(reserved))
+            if (open.compare(0) > 0) add(item.productId, Object.assign(line, {quantity: open}))
         }
     }
     return byProduct
@@ -276,10 +289,49 @@ function minimumStock(ctx, node) {
             ])
     return byProduct
 }
+// The organization's transfers in transit to a node, by product: each transfer line's issuances less what its receipts
+// accepted and rejected (Transfers.js sums the two apart, F37). The origin's stock is out of its available to promise once
+// issued, so it is supply at the destination until received (get#InventoryProjectedInfo counts no transfer).
+function transferRows(ctx, node) {
+    const byProduct = new Map()
+    const shipments = Array.from(
+        find("mantle.shipment.Shipment", {shipmentTypeEnumId: "ShpTpTransfer", fromPartyId: ctx.organizationPartyId})
+            .condition("statusId", "not-in", ["ShipDelivered", "ShipRejected", "ShipCancelled"])
+            .list()
+    )
+    for (const shipment of shipments) {
+        const segments = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: shipment.shipmentId}).sort((a, b) =>
+            String(a.shipmentRouteSegmentSeqId).localeCompare(String(b.shipmentRouteSegmentSeqId))
+        )
+        const destinationId = [...segments].reverse().find(row => row.destinationFacilityId)?.destinationFacilityId || null
+        if (!destinationId || !node.facilityIds.includes(destinationId)) continue
+        for (const source of rows("mantle.shipment.ShipmentItemSource", {shipmentId: shipment.shipmentId})) {
+            if (source.statusId === "SisCancelled" || !source.productId) continue
+            const issued = rows("mantle.product.issuance.AssetIssuance", {
+                shipmentItemSourceId: source.shipmentItemSourceId
+            }).reduce((total, row) => total.add(dec(row.quantity).subtract(dec(row.quantityCancelled))), zero())
+            const received = rows("mantle.product.receipt.AssetReceipt", {
+                shipmentItemSourceId: source.shipmentItemSourceId
+            }).reduce((total, row) => total.add(dec(row.quantityAccepted)).add(dec(row.quantityRejected)), zero())
+            const inTransit = issued.subtract(received)
+            if (inTransit.compare(0) <= 0) continue
+            if (!byProduct.has(source.productId)) byProduct.set(source.productId, [])
+            byProduct.get(source.productId).push({
+                kind: "transfer",
+                label: "Transfer " + shipment.shipmentId + " in transit",
+                shipmentId: shipment.shipmentId,
+                date: shipment.estimatedArrivalDate || null,
+                quantity: inTransit,
+                supply: true
+            })
+        }
+    }
+    return byProduct
+}
 // The stock and open supply of a product at a node: available stock, held stock with its inspection's due date (pending
-// release), and open purchase order lines less what they received.
+// release), transfers in transit to it, and open purchase order lines less what they received.
 function stockLines(ctx, node, productId) {
-    const lines = []
+    const lines = (node.transfers?.get(productId) || []).map(line => Object.assign({}, line))
     const assets = Array.from(
         find(ASSET, {productId, ownerPartyId: ctx.organizationPartyId, assetTypeEnumId: "AstTpInventory"})
             .condition("facilityId", "in", node.facilityIds)
@@ -508,6 +560,7 @@ function runPlan(p) {
         node.sales = salesDemand(ctx, node)
         node.runs = runRows(ctx, node)
         node.minimum = minimumStock(ctx, node)
+        node.transfers = transferRows(ctx, node)
     }
     // the products with demand (or the scope given), and every component below them
     let productIds = productScope.length
@@ -894,6 +947,7 @@ const kindLabels = {
     runOutput: "Work order output",
     kitMaterial: "Kit assembly material",
     kitOutput: "Kit assembly output",
+    transfer: "Transfer in transit",
     minimum: "Minimum stock",
     planned: "Planned make"
 }
@@ -1168,8 +1222,17 @@ function runScheduled() {
             const account = schedule.changedByUserId
                 ? one("moqui.security.UserAccount", {userId: schedule.changedByUserId})
                 : null
-            if (!account || ec.user.internalLoginUser(account.username) !== true)
-                throw new Error("The schedule's user is not available")
+            // the login gate refuses a disabled or terminated account; its error is kept off this job's messages, so the
+            // schedule is named and the others go on
+            ec.message.pushErrors()
+            let loggedIn = false
+            try {
+                loggedIn = !!account && ec.user.internalLoginUser(account.username) === true
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            if (!loggedIn) throw new Error("SCHEDULE_USER_UNAVAILABLE: the user who kept the schedule cannot sign in")
             const out = probe("mantle.product.SupplyPlanningServices.run#SupplyPlan", {
                 organizationPartyId: schedule.organizationPartyId,
                 facilityIds: listOf(schedule.facilityIds),
@@ -1192,7 +1255,15 @@ function runScheduled() {
             if (!disabled) ec.artifactExecution.enableAuthz()
         }
     }
-    if (previousUsername) ec.user.internalLoginUser(previousUsername)
+    // back to the job's own user, or none: a schedule's user never outlives its run
+    ec.message.pushErrors()
+    try {
+        if (previousUsername) ec.user.internalLoginUser(previousUsername)
+        else if (ec.user.userId) ec.user.logoutUser()
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
     return {results}
 }
 

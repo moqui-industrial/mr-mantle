@@ -34,7 +34,8 @@ along with this software (see the LICENSE.md file). If not, see
             facility set; the last one is superseded, its unconverted suggestions ended and their requirements reused or
             rejected). Nets each product once, after its parents, at each facility with the facilities under it: open sales
             demand less its reservations (a kit's as its components'), each run's remaining WeptConsume and WeptProduce
-            (drafts included; a kit assembly's shown, not netted), open purchase order lines, available stock and the
+            (drafts included; a kit assembly's shown, not netted), transfers in transit to it, open purchase order lines,
+            available stock and the
             minimum stock, over the horizon. A shortage is a transfer from a facility of the set with a surplus, else a make
             suggestion with a released BOM (its components exploded through get#BomExplosion's requirements as the next
             level's demand, dated by the lead and preparation days), else a buy suggestion from a supplier price, else a

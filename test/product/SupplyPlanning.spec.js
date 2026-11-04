@@ -545,3 +545,147 @@ feature("an active schedule that is due runs as the user who kept it, and its ne
         msOf(schedule.nextRunDate) > Date.now() + 11 * 3600000
     }
 })
+
+feature("a reservation's unavailable part and a transfer in transit are each counted once", {
+    when() {
+        for (const productId of ["SPL_RES", "SPL_TR"]) {
+            call("create#mantle.product.Product", {
+                productId,
+                productName: productId,
+                productTypeEnumId: "PtAsset",
+                assetTypeEnumId: "AstTpInventory",
+                amountUomId: "OTH_ea",
+                ownerPartyId: org,
+                statusId: "PrdActive"
+            })
+            call("create#mantle.product.ProductPrice", {
+                productId,
+                vendorPartyId: supplier,
+                pricePurposeEnumId: "PppPurchase",
+                priceTypeEnumId: "PptCurrent",
+                fromDate: since,
+                price: 1,
+                priceUomId: "USD"
+            })
+        }
+        // 10 ordered and reserved against 6 on hand: 4 not available, the asset's available to promise -4 (as
+        // reserve#AssetForOrderItem leaves it)
+        salesOrder("SPL_SO_RES", "SPL_RES", 10, new Date(state.requiredMs))
+        const reservedAsset = call("create#mantle.product.asset.Asset", {
+            productId: "SPL_RES",
+            facilityId: warehouse,
+            ownerPartyId: org,
+            assetTypeEnumId: "AstTpInventory",
+            statusId: "AstAvailable",
+            hasQuantity: "Y",
+            quantityOnHandTotal: 6,
+            availableToPromiseTotal: -4
+        }).assetId
+        call("create#mantle.product.issuance.AssetReservation", {
+            assetId: reservedAsset,
+            productId: "SPL_RES",
+            orderId: "SPL_SO_RES",
+            orderItemSeqId: "01",
+            quantity: 10,
+            quantityNotAvailable: 4,
+            quantityNotIssued: 10,
+            reservedDate: new Date()
+        })
+        // 5 ordered, 3 issued at the second warehouse on a transfer to this one and 1 received: 2 in transit
+        salesOrder("SPL_SO_TR", "SPL_TR", 5, new Date(state.requiredMs))
+        call("create#mantle.shipment.Shipment", {
+            shipmentId: "SPL_TRANSFER",
+            shipmentTypeEnumId: "ShpTpTransfer",
+            statusId: "ShipShipped",
+            fromPartyId: org,
+            toPartyId: org
+        })
+        call("create#mantle.shipment.ShipmentRouteSegment", {
+            shipmentId: "SPL_TRANSFER",
+            shipmentRouteSegmentSeqId: "01",
+            originFacilityId: second,
+            destinationFacilityId: warehouse
+        })
+        call("create#mantle.shipment.ShipmentItem", {shipmentId: "SPL_TRANSFER", productId: "SPL_TR", quantity: 3})
+        call("create#mantle.shipment.ShipmentItemSource", {
+            shipmentItemSourceId: "SPL_TRANSFER_01",
+            shipmentId: "SPL_TRANSFER",
+            productId: "SPL_TR",
+            quantity: 3,
+            statusId: "SisPending"
+        })
+        call("create#mantle.product.issuance.AssetIssuance", {
+            assetId: receive("SPL_TR", 0, second),
+            productId: "SPL_TR",
+            shipmentId: "SPL_TRANSFER",
+            shipmentItemSourceId: "SPL_TRANSFER_01",
+            quantity: 3,
+            issuedDate: new Date()
+        })
+        call("create#mantle.product.receipt.AssetReceipt", {
+            assetId: receive("SPL_TR", 1),
+            productId: "SPL_TR",
+            shipmentId: "SPL_TRANSFER",
+            shipmentItemSourceId: "SPL_TRANSFER_01",
+            quantityAccepted: 1,
+            receivedDate: new Date()
+        })
+        const ran = plan("spl_planner", {productIds: ["SPL_RES", "SPL_TR"]})
+        const answer = read("spl_planner")
+        const transfer = byProduct(answer, "SPL_TR")
+        const explained = read("spl_planner", {planningSuggestionId: transfer.planningSuggestionId})
+        return {ran, answer, explained}
+    },
+    then({ran, answer, explained}) {
+        ran.error == ""
+        // 10 less the 6 on hand: the 4 not available is the negative available to promise, not open demand as well
+        byProduct(answer, "SPL_RES").quantity == "4"
+        // 5 less the 1 received and the 2 in transit
+        byProduct(answer, "SPL_TR").quantity == "2"
+        explained.demandSupply.some(
+            row => row.kindText == "Transfer in transit" && row.quantity == "2" && row.nettedText == "Netted"
+        )
+    }
+})
+
+feature("a schedule whose user can no longer sign in is named on it, and the other schedules still run", {
+    when() {
+        call("create#mantle.facility.Facility", {
+            facilityId: "SPL_OTHER_WH",
+            facilityTypeEnumId: "FcTpWarehouse",
+            ownerPartyId: other
+        })
+        const outsider = run("spl_outsider", S + "store#PlanSchedule", {
+            organizationPartyId: other,
+            intervalHours: 6,
+            active: "Y",
+            nextRunDate: new Date(Date.now() - 60000)
+        })
+        const mine = run("spl_planner", S + "store#PlanSchedule", {
+            organizationPartyId: org,
+            facilityIds: [warehouse],
+            intervalHours: 12,
+            active: "Y",
+            nextRunDate: new Date(Date.now() - 60000)
+        })
+        call("update#moqui.security.UserAccount", {userId: "SPL_OUTSIDER", disabled: "Y"})
+        const ran = invoke(S + "run#ScheduledSupplyPlans", {})
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        call("update#moqui.security.UserAccount", {userId: "SPL_OUTSIDER", disabled: "N"})
+        const results = ran.results || []
+        const otherSchedule = one("mantle.request.requirement.PlanSchedule", {organizationPartyId: other})
+        run("spl_planner", S + "store#PlanSchedule", {organizationPartyId: org, facilityIds: [warehouse], active: "N"})
+        call("update#mantle.request.requirement.PlanSchedule", {organizationPartyId: other, active: "N"})
+        return {outsider, mine, ran, results, otherSchedule}
+    },
+    then({outsider, mine, ran, results, otherSchedule}) {
+        outsider.error == ""
+        mine.error == ""
+        ran.error == ""
+        results.find(row => row.organizationPartyId == other).error.includes("SCHEDULE_USER_UNAVAILABLE")
+        !!results.find(row => row.organizationPartyId == org).planningRunId
+        otherSchedule.lastRunMessage.includes("SCHEDULE_USER_UNAVAILABLE")
+        msOf(otherSchedule.nextRunDate) > Date.now() + 5 * 3600000
+    }
+})
