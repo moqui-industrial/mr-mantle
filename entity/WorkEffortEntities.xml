@@ -202,6 +202,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="methodWorkCenterId" type="id" enable-audit-log="true"/>
         <field name="methodPredecessorIds" type="text-long" enable-audit-log="true"/>
         <field name="methodChangeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="methodSourceWorkEffortId" type="id" enable-audit-log="true"><description>For a routing operation, the
+            operation template or the other routing's operation it was copied from (RoutingServices.copy#RoutingOperations);
+            the copy keeps no link that changes it when the source changes</description></field>
+        <field name="methodRequiredEvidence" type="text-medium" enable-audit-log="true"><description>For an operation
+            template or a routing operation, the evidence an operator records to complete it (a photo, a measurement, a
+            signature), as text</description></field>
+        <field name="methodInspectionTemplateId" type="id" enable-audit-log="true"><description>For an operation template
+            or a routing operation, the production InspectionTemplate its output is checked with</description></field>
+        <field name="methodArchived" type="text-indicator" enable-audit-log="true"><description>Y for an operation template
+            that no new routing operation may be copied from; the operations already copied keep their standards</description></field>
         <field name="workEffortName" type="text-medium"/>
         <field name="description" type="text-long"/>
         <field name="location" type="text-medium"/>
@@ -673,6 +683,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-long"/>
         <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
         <field name="userId" type="id" default="ec.user.userId"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"><description>For a published production instruction
+            (WectInstruction): when it takes effect; a publish ends the one before at this date</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="contentChecksum" type="text-medium"><description>The SHA-256 of the file at contentLocation, taken when
+            it was stored; the file is never written again</description></field>
         <relationship type="one" related="mantle.work.effort.WorkEffort"/>
         <relationship type="one" title="WorkEffortContentType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="contentTypeEnumId"/></relationship>
@@ -691,6 +706,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- a project's estimate as sent for approval, a file of its Estimate milestone, mantle.work.ProjectServices
                 send#EstimateForApproval (IronStone Projects) -->
             <moqui.basic.Enumeration enumId="WectEstimate" description="Estimate" enumTypeId="WorkEffortContentType"/>
+            <!-- a published instruction of an operation template, dated (fromDate, thruDate) and stored once with its
+                checksum, mantle.work.RoutingServices store#OperationInstruction (IronStone Manufacturing) -->
+            <moqui.basic.Enumeration enumId="WectInstruction" description="Production Instruction" enumTypeId="WorkEffortContentType"/>
         </seed-data>
     </entity>
     <entity entity-name="WorkEffortDeliverableProd" package="mantle.work.effort" cache="never">

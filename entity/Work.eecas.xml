@@ -40,4 +40,19 @@ along with this software (see the LICENSE.md file). If not, see
         <condition><expression>workEffortTypeEnumId == 'WetTask' &amp;&amp; originalValue != null &amp;&amp; originalValue.statusId != statusId</expression></condition>
         <actions><service-call name="mantle.request.RequestServices.complete#RequestFromWork" in-map="{workEffortId:workEffortId}"/></actions>
     </eeca>
+    <!-- IronStone Manufacturing (impl-manufacturing P2, §4): a published production instruction is stored once with its
+        checksum and only ended; the generic file screens and services write WorkEffortContent too, so the guard is on the
+        entity (OperationTemplates.js guardInstruction) -->
+    <eeca id="WorkEffortInstructionImmutable" entity="mantle.work.effort.WorkEffortContent"
+            on-create="true" on-update="true" on-delete="true" run-before="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>contentTypeEnumId == 'WectInstruction' || originalValue?.contentTypeEnumId == 'WectInstruction'</expression></condition>
+        <actions>
+            <set field="contentValue" from="{workEffortContentId:workEffortContentId, workEffortId:workEffortId,
+                contentTypeEnumId:contentTypeEnumId, contentLocation:contentLocation, contentChecksum:contentChecksum,
+                fromDate:fromDate, thruDate:thruDate}"/>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/OperationTemplates.js').execute('guardInstruction',
+                {eecaOperation:eecaOperation, originalValue:originalValue, entityValue:contentValue})</script>
+        </actions>
+    </eeca>
 </eecas>
