@@ -103,7 +103,8 @@ along with this software (see the LICENSE.md file). If not, see
                     from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingSetup.js').preferenceFields"/>
             <set field="preferenceValues" from="policy.pick(settings || {}, preferenceFields)"/>
             <set field="invalidFlag" from="['postingGuardEnabled', 'requiredLedgerDimensionsEnabled',
-                    'forwardIssuanceRepostEnabled', 'allowAccountingSelfApproval', 'invoiceApprovalRequired',
+                    'forwardIssuanceRepostEnabled', 'forwardReceiptRepostEnabled', 'allowAccountingSelfApproval',
+                    'invoiceApprovalRequired',
                     'inventoryRevaluationEnabled', 'receiptInvoiceSelfBilledOnly',
                     'returnSettlementRequired', 'salesInvoiceFinalizedAtShip', 'projectCostPostingEnabled',
                     'realTimeGlSummary', 'kitCostFromComponents']

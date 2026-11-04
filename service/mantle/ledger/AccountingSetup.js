@@ -23,6 +23,7 @@ const preferenceFields = [
     "postingGuardEnabled",
     "requiredLedgerDimensionsEnabled",
     "forwardIssuanceRepostEnabled",
+    "forwardReceiptRepostEnabled",
     "allowAccountingSelfApproval",
     "invoiceApprovalRequired",
     "inventoryRevaluationEnabled",
