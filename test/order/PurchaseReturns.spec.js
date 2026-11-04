@@ -1,0 +1,220 @@
+// Purchasing's supplier returns (impl-purchasing P8; design-purchasing §9 ReturnDetail): a buyer holding RETURN_AUTHORIZE
+// authorizes a supplier return of their organization with the supplier's RMA, which makes its outbound shipment, and records
+// a later RMA number; a return with no items, another organization's and a user without the permission are refused. A
+// replacement (PURCHASE_ORDER_EDIT) of an authorized return is a purchase order from the supplier at no price, approved, with
+// its expected receipt, linked from the return item, never more than the item leaves open; a retry answers the first. The
+// organization does not settle returns separately (Mantle's default), so an item asking for a replacement already has
+// Mantle's own placed replacement order from the authorization, which the replacement approves rather than ordering twice;
+// an item asking for a credit gets a new order.
+// Standalone: a spec-local organization, supplier, facility and users, with artifact authorization disabled (the rules are
+// the services' own permission checks). Run: ./moq test mr-mantle --spec PurchaseReturns
+const helper = () => ec.resource.script("component://mr-mantle/test/ledger/AccountingReceivablesFixtures.js")
+const svc = (name, p) => helper().call(name, p)
+const one = (entity, key) => helper().lib.one(entity, key)
+const rows = (entity, key) => helper().lib.rows(entity, key)
+const prefix = "PUR_RET_SPEC"
+const org = prefix + "_ORG",
+    otherOrg = prefix + "_ORG2",
+    supplier = prefix + "_SUPPLIER",
+    facility = prefix + "_WH",
+    product = "DEMO_1_1"
+const R = "mantle.order.ReturnServices."
+const users = {}
+const ids = {}
+let keySeq = 0
+const key = () => prefix + "-" + Date.now() + "-" + ++keySeq
+
+function party(partyId, name, roleTypeId) {
+    svc("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization"})
+    svc("create#mantle.party.Organization", {partyId, organizationName: name})
+    svc("create#mantle.party.PartyRole", {partyId, roleTypeId})
+}
+function user(kind, permissions, organizationPartyId = org) {
+    const id = prefix + "_" + kind.toUpperCase()
+    users[kind] = id
+    svc("create#moqui.security.UserGroup", {userGroupId: id, description: "Purchase returns " + kind})
+    for (const permission of permissions)
+        svc("create#moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId: permission, fromDate: 0})
+    svc("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
+    svc("create#moqui.security.UserAccount", {
+        userId: id,
+        username: id,
+        partyId: id,
+        currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+        passwordHashType: "SHA"
+    })
+    svc("create#moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
+    svc("create#mantle.party.PartyRelationship", {
+        partyRelationshipId: id,
+        fromPartyId: id,
+        toPartyId: organizationPartyId,
+        relationshipTypeEnumId: "PrtAgent",
+        fromDate: 0
+    })
+}
+// The call as the user: its out-map, or the refusal's message in `error`.
+function as(kind, name, p) {
+    login(users[kind])
+    ec.message.pushErrors()
+    try {
+        const out = ec.service.sync().name(name).parameters(p).requireNewTransaction(true).call() || {}
+        if (ec.message.hasError()) return {error: ec.message.getErrorsString()}
+        return Object.assign({error: ""}, out)
+    } catch (error) {
+        return {error: String(error.message)}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        login("john.doe")
+    }
+}
+const returnOf = () => svc(R + "create#ReturnFromOrder", {orderId: ids.orderId, orderPartSeqId: "01"}).returnId
+
+spec({
+    stepwise: true,
+    setupSpec() {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        party(org, "Purchase returns organization", "OrgInternal")
+        svc("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {
+            organizationPartyId: org,
+            sourcePartyId: "DefaultSettings",
+            baseCurrencyUomId: "USD"
+        })
+        svc("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org, receiptInvoiceSelfBilledOnly: "Y"})
+        party(otherOrg, "Purchase returns other organization", "OrgInternal")
+        party(supplier, "Purchase returns supplier", "Supplier")
+        svc("create#mantle.facility.Facility", {facilityId: facility, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        user("buyer", ["PURCHASE_ORDER_EDIT", "RETURN_AUTHORIZE"])
+        user("editor", ["PURCHASE_ORDER_EDIT"])
+        user("reader", ["PURCHASE_APPROVE"])
+        user("other", ["PURCHASE_ORDER_EDIT", "RETURN_AUTHORIZE"], otherOrg)
+        // ten bought at 5.00, six received and accepted (not delivered, so no receipt bill)
+        const order = svc("mantle.order.OrderServices.create#Order", {
+            customerPartyId: org,
+            vendorPartyId: supplier,
+            currencyUomId: "USD",
+            facilityId: facility
+        })
+        svc("mantle.order.OrderServices.add#OrderProductQuantity", {
+            orderId: order.orderId,
+            orderPartSeqId: order.orderPartSeqId,
+            productId: product,
+            quantity: 10,
+            unitAmount: 5,
+            itemTypeEnumId: "ItemInventory"
+        })
+        svc("mantle.order.OrderServices.place#Order", {orderId: order.orderId})
+        svc("mantle.order.OrderServices.approve#Order", {orderId: order.orderId})
+        const shipment = svc("mantle.shipment.ShipmentServices.create#OrderPartShipment", {
+            orderId: order.orderId,
+            orderPartSeqId: "01",
+            destinationFacilityId: facility
+        })
+        svc("mantle.shipment.ShipmentServices.receive#ShipmentProduct", {
+            shipmentId: shipment.shipmentId,
+            productId: product,
+            quantityAccepted: 6,
+            quantityRejected: 0,
+            facilityId: facility
+        })
+        ids.orderId = order.orderId
+        ids.assetReceiptId = rows("mantle.product.receipt.AssetReceipt", {shipmentId: shipment.shipmentId})[0].assetReceiptId
+    },
+    cleanupSpec() {
+        login("john.doe")
+        ec.artifactExecution.enableAuthz()
+    }
+})
+
+feature("a buyer authorizes a supplier return with the supplier's RMA; the refusals name their reason", {
+    when() {
+        ids.returnId = returnOf()
+        ids.emptyReturnId = returnOf()
+        const added = as("buyer", R + "add#ReceiptToReturn", {
+            returnId: ids.returnId,
+            assetReceiptId: ids.assetReceiptId,
+            returnQuantity: 2,
+            returnResponseEnumId: "RrspReplace"
+        })
+        const editor = as("editor", R + "authorize#SupplierReturn", {returnId: ids.returnId, supplierRmaId: "RMA-1"})
+        const other = as("other", R + "authorize#SupplierReturn", {returnId: ids.returnId, supplierRmaId: "RMA-1"})
+        const empty = as("buyer", R + "authorize#SupplierReturn", {returnId: ids.emptyReturnId})
+        const authorized = as("buyer", R + "authorize#SupplierReturn", {returnId: ids.returnId, supplierRmaId: "RMA-1"})
+        const again = as("buyer", R + "authorize#SupplierReturn", {returnId: ids.returnId, supplierRmaId: "RMA-1"})
+        const recorded = as("buyer", R + "authorize#SupplierReturn", {returnId: ids.returnId, supplierRmaId: "RMA-2"})
+        // Mantle's response processing at authorization answers nothing for a supplier return: no replacement yet
+        ids.mantleReplacementId = rows("mantle.order.return.ReturnItem", {returnId: ids.returnId})[0].replacementOrderId
+        const header = one("mantle.order.return.ReturnHeader", {returnId: ids.returnId})
+        const shipment = authorized.result?.shipmentId
+            ? one("mantle.shipment.Shipment", {shipmentId: authorized.result.shipmentId})
+            : null
+        return {added, editor, other, empty, authorized, again, recorded, header, shipment}
+    },
+    then({added, editor, other, empty, authorized, again, recorded, header, shipment}) {
+        added.error == ""
+        editor.error.includes("PERMISSION_DENIED")
+        other.error.includes("RECORD_UNAVAILABLE")
+        empty.error.includes("RETURN_EMPTY")
+        authorized.error == ""
+        authorized.result.resultCode == "AUTHORIZED"
+        authorized.result.statusId == "ReturnApproved"
+        shipment.shipmentTypeEnumId == "ShpTpPurchaseReturn"
+        again.result.resultCode == "ALREADY_AUTHORIZED"
+        recorded.result.resultCode == "RMA_RECORDED"
+        header.supplierRmaId == "RMA-2"
+        ids.mantleReplacementId == null
+    }
+})
+
+feature("a replacement is an approved purchase order at no price with its expected receipt, at most what the item leaves", {
+    when() {
+        const notApproved = as("buyer", R + "create#ReplacementOrder", {operationKey: key(), returnId: ids.emptyReturnId})
+        const reader = as("reader", R + "create#ReplacementOrder", {operationKey: key(), returnId: ids.returnId})
+        const other = as("other", R + "create#ReplacementOrder", {operationKey: key(), returnId: ids.returnId})
+        const itemSeq = rows("mantle.order.return.ReturnItem", {returnId: ids.returnId})[0].returnItemSeqId
+        const tooMany = as("buyer", R + "create#ReplacementOrder", {
+            operationKey: key(),
+            returnId: ids.returnId,
+            lineList: [{returnItemSeqId: itemSeq, quantity: 3}]
+        })
+        const operationKey = key()
+        const created = as("buyer", R + "create#ReplacementOrder", {operationKey, returnId: ids.returnId})
+        const retry = as("buyer", R + "create#ReplacementOrder", {operationKey, returnId: ids.returnId})
+        const nothing = as("buyer", R + "create#ReplacementOrder", {operationKey: key(), returnId: ids.returnId})
+        const orderId = created.result?.orderId
+        return {
+            notApproved,
+            reader,
+            other,
+            tooMany,
+            created,
+            retry,
+            nothing,
+            part: orderId ? one("mantle.order.OrderPart", {orderId, orderPartSeqId: "01"}) : null,
+            lines: orderId ? rows("mantle.order.OrderItem", {orderId}) : [],
+            item: one("mantle.order.return.ReturnItem", {returnId: ids.returnId, returnItemSeqId: itemSeq}),
+            receipt: created.result?.shipmentId ? one("mantle.shipment.Shipment", {shipmentId: created.result.shipmentId}) : null
+        }
+    },
+    then(r) {
+        r.notApproved.error.includes("RETURN_NOT_APPROVED")
+        r.reader.error.includes("PERMISSION_DENIED")
+        r.other.error.includes("RECORD_UNAVAILABLE")
+        r.tooMany.error.includes("QUANTITY_EXCEEDS_ELIGIBLE")
+        r.created.error == ""
+        r.created.result.resultCode == "CREATED"
+        r.part.statusId == "OrderApproved"
+        r.part.vendorPartyId == supplier
+        r.part.customerPartyId == org
+        r.lines.length == 1
+        String(r.lines[0].quantity) == "2"
+        r.lines[0].unitAmount.isZero()
+        r.item.replacementOrderId == r.created.result.orderId
+        String(r.item.replacedQuantity) == "2"
+        r.receipt.shipmentTypeEnumId == "ShpTpPurchase"
+        r.retry.result.alreadyApplied == true
+        r.retry.result.orderId == r.created.result.orderId
+        r.nothing.error.includes("NOTHING_TO_REPLACE")
+    }
+})

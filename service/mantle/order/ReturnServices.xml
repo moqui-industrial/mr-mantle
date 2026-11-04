@@ -1821,4 +1821,57 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{returnContentId:returnContentId, contentLocation:contentLocation}"/>
         </actions>
     </service>
+    <!-- ===== Purchasing's supplier returns (design-purchasing §9 Returns and ReturnDetail, PUR-RETURN; impl-purchasing P8;
+        PurchaseReturns.js) ===== -->
+    <service verb="authorize" noun="SupplierReturn" allow-remote="false">
+        <description>The buyer's authorization of a supplier return (design-purchasing ReturnDetail, crosscut §3.18 Purchasing
+            row): a created or requested return with items is approved (approve#Return, whose ReturnApprovedProcess makes the
+            ShpTpPurchaseReturn shipment) with the supplier's RMA number (ReturnHeader.supplierRmaId); on a return already
+            authorized it records a new RMA number only (RMA_RECORDED) or answers ALREADY_AUTHORIZED. Requires RETURN_AUTHORIZE
+            (PERMISSION_DENIED); refuses a return outside the user's organizations (RECORD_UNAVAILABLE), a customer return
+            (NOT_SUPPLIER_RETURN), a cancelled or completed one (RETURN_CLOSED) and one with no items (RETURN_EMPTY).</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="supplierRmaId"><description>The supplier's return authorization number.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode AUTHORIZED, RMA_RECORDED or ALREADY_AUTHORIZED, returnId,
+                statusId, supplierRmaId, shipmentId (the outbound shipment) and organizationPartyId.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseReturns.js')
+                    .authorize(context)"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ReplacementOrder" allow-remote="false">
+        <description>A replacement for what a supplier return sends back (design-purchasing ReturnDetail, PUR-RETURN): a purchase
+            order of the return's organization from its supplier, the given items' products (an item's replacement product
+            when it names one) at no price, placed and approved, each return item linked to it (replacementOrderId) with its
+            replacedQuantity raised, which settle#Return leaves out of the credit; its expected receipt through
+            mantle.shipment.WarehouseTaskServices.ensure#PurchaseReceipt at the return's facility. An item fully settled by
+            credit and replacement once shipped is completed. Without lineList, every item asking for a replacement
+            (RrspReplace) for what is open. A retry with the same operation key answers the first. Requires PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses a return outside the user's organizations (RECORD_UNAVAILABLE), a customer return
+            (NOT_SUPPLIER_RETURN), one not authorized (RETURN_NOT_APPROVED), an item not on it (RETURN_ITEM_UNAVAILABLE),
+            nothing to replace (NOTHING_TO_REPLACE), no quantity (QUANTITY_INVALID) and more than was neither credited nor
+            replaced (QUANTITY_EXCEEDS_ELIGIBLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="lineList" type="List"><description>Maps of returnItemSeqId and quantity (empty quantity: what is
+                open of the item).</description></parameter>
+            <parameter name="facilityId"><description>The receiving facility; the return's facility when empty.</description>
+            </parameter>
+            <parameter name="estimatedArrivalDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CREATED, returnId, orderId, orderPartSeqId, shipmentId
+                (the expected receipt), facilityId, lines (returnItemSeqId, quantity), and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseReturns.js')
+                    .replacement(context)"/>
+        </actions>
+    </service>
 </services>
