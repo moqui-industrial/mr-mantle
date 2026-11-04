@@ -118,8 +118,26 @@ function detail(p) {
 function list(p) {
     const s = policy().scope(p),
         out = []
-    for (const row of rows(B)) {
-        if (row.organizationPartyId !== s.organizationPartyId || (p.productId && row.productId !== p.productId)) continue
+    const conditions = {organizationPartyId: s.organizationPartyId}
+    if (p.productId) conditions.productId = p.productId
+    let query = find(B, conditions)
+    // Manufacturing's BillsOfMaterials list (P2): its text search, by product, name and method code ignoring case
+    const text = String(p.text || "").trim()
+    if (text) {
+        const factory = ec.entity.conditionFactory,
+            pattern = "%" + text.replace(/[\\%_]/g, character => "\\" + character) + "%"
+        query = query.condition(
+            factory.makeCondition(
+                ["productBomId", "productId", "bomName", "methodCode"].map(field =>
+                    factory.makeCondition(field, "like", pattern).ignoreCase()
+                ),
+                "or"
+            )
+        )
+    }
+    for (const row of Array.from(query.orderBy("productId").orderBy("methodCode").list())) {
+        // pick kits are never manufacturing methods (D15): left out of the list
+        if (one("mantle.product.Product", {productId: row.productId})?.productTypeEnumId === "PtPickAssembly") continue
         try {
             const g = getBom(row.productBomId),
                 date = p.asOfDate || ec.user.nowTimestamp,
@@ -317,6 +335,13 @@ function validate(p) {
         add(g.bom.productBomId, "Review and acknowledge the named legacy import issues before release")
     if (!lines.some(r => r.roleEnumId === "BmirConsume"))
         add(g.bom.productBomId, "A method needs at least one consumed component")
+    // a release at this date would overlap the effective window of one already approved to start then or later
+    const later = decisions(g.bom.productBomId).find(r => ms(r.fromDate) >= ms(date))
+    if (later && pending.length)
+        add(
+            g.bom.productBomId,
+            "Overlapping effective window: approval " + later.methodReleaseDecisionId + " already starts on or after this date"
+        )
     try {
         policy().convert(g.bom.baseQuantity, g.bom.quantityUomId, g.product.amountUomId || g.bom.quantityUomId, date)
     } catch (e) {
@@ -438,6 +463,8 @@ function release(p) {
                 stamped[i]
             )
         )
+    // the release decides what was asked for: its approvers' BomRelease notices are read (MethodReleases.js)
+    ec.resource.script("component://mr-mantle/service/mantle/product/MethodReleases.js").clear(B, g.bom.productBomId)
     return Object.assign(detail({productBomId: g.bom.productBomId, asOfDate: date}), {
         methodReleaseDecisionId: decisionId,
         stampedLines: stamped,
