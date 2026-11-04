@@ -255,6 +255,35 @@ feature(
     }
 )
 
+feature("ending a dated row: a future one is withdrawn at its start and can be added again; an end before now is refused", {
+    when() {
+        const store = fields =>
+            run(
+                "wcs_resource",
+                W + "store#WorkCenterCapacity",
+                Object.assign({facilityId: line, changeReason: "Spec future capacity"}, fields)
+            )
+        const start = new Date(Date.now() + 3 * 24 * 3600000).toISOString()
+        const future = {capacityBasisEnumId: "WccbSlots", productTypeEnumId: "PtAsset", parallelSlots: 3, fromDate: start}
+        const added = store(future)
+        const withdrawn = store({workCenterCapacityId: added.workCenterCapacity?.workCenterCapacityId})
+        const again = store(future)
+        const againWithdrawn = store({workCenterCapacityId: again.workCenterCapacity?.workCenterCapacityId})
+        const pastEnd = store({workCenterCapacityId: state.rateCapacityId, thruDate: "2001-01-01T00:00:00Z"})
+        return {added, withdrawn, again, againWithdrawn, pastEnd}
+    },
+    then({added, withdrawn, again, againWithdrawn, pastEnd}) {
+        added.error == ""
+        withdrawn.error == ""
+        withdrawn.workCenterCapacity.thruDate != null
+        String(withdrawn.workCenterCapacity.thruDate) == String(withdrawn.workCenterCapacity.fromDate)
+        withdrawn.workCenterCapacity.inEffect == false
+        again.error == ""
+        againWithdrawn.error == ""
+        pastEnd.error.includes("now or later")
+    }
+})
+
 feature("an alternate is another work center of the organization; the center itself, a foreign one and a duplicate are refused", {
     when() {
         const store = (username, fields) =>

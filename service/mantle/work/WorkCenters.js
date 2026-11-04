@@ -26,7 +26,7 @@ const facilityName = facility => (facility ? facility.facilityName || facility.f
 const now = () => ec.user.nowTimestamp
 const iso = value => new Date(ms(value)).toISOString()
 const dateValue = value => (blank(value) ? null : iso(value))
-// The start of a new dated row: now or later; a day given as today (its midnight is past) starts now.
+// The start (or end) of a dated change: now or later; a day given as today (its midnight is past) is now.
 function startOf(value) {
     const start = dateValue(value)
     if (!start || ms(start) >= ms(now())) return start || iso(now())
@@ -36,6 +36,8 @@ function startOf(value) {
 }
 // a row in effect now or ahead (not ended before now)
 const current = row => row.thruDate == null || ms(row.thruDate) > ms(now())
+// a row ended at its start (one ended before it took effect) is never in effect
+const withdrawn = row => row.thruDate != null && ms(row.thruDate) <= ms(row.fromDate)
 
 // ===== scope =====
 // The reader's scope: a production or method read permission, and the organizations whose facilities they work in.
@@ -107,7 +109,11 @@ function center(p) {
     const old = one(CENTER, {facilityId: facility.facilityId})
     const fields = ["plantFacilityId", "calendarId", "efficiencyPercent", "oeeTargetPercent", "schedulingPolicyEnumId"]
     const data = Object.assign(old ? policy.pick(lib.map(old), fields) : {}, policy.pick(p, fields))
-    if (!old && blank(data.plantFacilityId) && facility.parentFacilityId) data.plantFacilityId = facility.parentFacilityId
+    // a new center's plant defaults to its parent facility when that is of the same organization
+    if (!old && blank(data.plantFacilityId) && facility.parentFacilityId) {
+        const parent = one(FACILITY, {facilityId: facility.parentFacilityId})
+        if (parent && parent.ownerPartyId === methodScope.organizationPartyId) data.plantFacilityId = parent.facilityId
+    }
     percent(data.efficiencyPercent, "Work-center percentages")
     percent(data.oeeTargetPercent, "Work-center percentages")
     if (!blank(data.calendarId)) {
@@ -179,7 +185,7 @@ function capacity(p) {
         capacityBasisEnumId: basis,
         productId: data.productId,
         productTypeEnumId: data.productTypeEnumId
-    })
+    }).filter(row => !withdrawn(row))
     if (same.some(row => ms(row.fromDate) === ms(fromDate))) throw new Error("A capacity of this kind already starts then")
     const next = same.filter(row => ms(row.fromDate) > ms(fromDate)).sort((a, b) => ms(a.fromDate) - ms(b.fromDate))[0]
     const fields = Object.keys(data).concat(["fromDate", "thruDate", "changeReason"])
@@ -219,7 +225,10 @@ function alternate(p) {
     const thruDate = dateValue(p.thruDate)
     if (thruDate && ms(thruDate) <= ms(fromDate)) throw new Error("The alternate's end must follow its start")
     const overlapping = rows(ALTERNATE, {facilityId: facility.facilityId, alternateFacilityId: other.facilityId, productId}).some(
-        row => (row.thruDate == null || ms(row.thruDate) > ms(fromDate)) && (!thruDate || ms(row.fromDate) < ms(thruDate))
+        row =>
+            !withdrawn(row) &&
+            (row.thruDate == null || ms(row.thruDate) > ms(fromDate)) &&
+            (!thruDate || ms(row.fromDate) < ms(thruDate))
     )
     if (overlapping) throw new Error(facilityName(other) + " is already an alternate then")
     const data = {
@@ -236,10 +245,11 @@ function alternate(p) {
     const created = lib.call("create#" + ALTERNATE, data)
     return {workCenterAlternate: alternateRow(one(ALTERNATE, {workCenterAlternateId: created.workCenterAlternateId}))}
 }
-// The end of a dated row: thruDate (now by default), not before its start and not later than the end it has.
+// The end of a dated row: thruDate, now or later (now by default; what was in effect before now is not changed), and not
+// later than the end it has. A row that has not started yet ends at its start, so it never takes effect.
 function endRow(entity, idField, row, thruDate, why) {
-    const end = dateValue(thruDate) || iso(now())
-    if (ms(end) < ms(row.fromDate)) throw new Error("The end must not be before the start")
+    let end = startOf(thruDate)
+    if (ms(end) < ms(row.fromDate)) end = iso(row.fromDate)
     if (row.thruDate != null && ms(row.thruDate) <= ms(end)) throw new Error("This row has already ended")
     policy.audit(["thruDate", "changeReason"], why)
     lib.call("update#" + entity, {[idField]: row[idField], thruDate: end, changeReason: why})
@@ -349,7 +359,7 @@ function read(p) {
     const plantId = center.plantFacilityId || facility.parentFacilityId
     const plant = plantId ? one(FACILITY, {facilityId: plantId}) : null
     const calendar = center.calendarId ? one("mantle.work.calendar.Calendar", {calendarId: center.calendarId}) : null
-    const keep = row => p.includeEnded === true || p.includeEnded === "true" || current(row)
+    const keep = row => p.includeEnded === true || p.includeEnded === "true" || (current(row) && !withdrawn(row))
     const byStart = (a, b) => ms(a.fromDate) - ms(b.fromDate)
     Object.assign(result, {
         workCenter: {
