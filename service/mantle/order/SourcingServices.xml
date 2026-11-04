@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Requests for quotation and supplier quotes (design-purchasing §5 QuoteRequests, QuoteRequestDetail, Quotes, QuoteDetail;
+    impl-purchasing P11, §4, R-PUR-13, R-PUR-21, F19, F35, F41), over Sourcing.js. An RFQ is a Request of type RqtPurchaseRfq
+    of one of the user's organizations (its OrgInternal RequestParty; RECORD_UNAVAILABLE outside them); each invited
+    supplier's quote is a purchase order in OrderRequested and then OrderProposed, its lines linked to the RFQ items by
+    RequestItemOrder. Every verb checks PURCHASE_ORDER_EDIT and the organization, but publish#SupplierQuotePrice, which
+    checks SUPPLIER_PRICE_EDIT only. Quotes are never supply, never approved and never sent as purchase orders. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="create" noun="QuoteRequest" allow-remote="false">
+        <description>A draft RFQ (RqtPurchaseRfq) of one of the user's organizations, filed by the user: the organization as its
+            OrgInternal RequestParty, its name, specification text, delivery facility, currency (the buying policy's, else the
+            accounting one) and response date (the buying policy's rfqResponseDays from now by default). Given approved
+            purchase request lines (sourceRequestItemKeys, requestId:requestItemSeqId), each becomes an item for the
+            quantity left to source, linked to its line by RequestItemAssoc. Requires PURCHASE_ORDER_EDIT; refuses an
+            organization outside the user's (RECORD_UNAVAILABLE), no name (NAME_REQUIRED), another organization's facility
+            (FACILITY_INVALID), an unknown currency (CURRENCY_INVALID), and a source line of another organization
+            (SOURCE_INVALID), not approved (NOT_APPROVED) or already sourced (ALREADY_SOURCED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="facilityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="sourceRequestItemKeys"><description>Comma list of requestId:requestItemSeqId</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="requestItemSeqIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="created" from="ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('create', context)"/>
+            <set field="requestId" from="created.requestId"/>
+            <set field="requestItemSeqIds" from="created.requestItemSeqIds"/>
+        </actions>
+    </service>
+    <service verb="store" noun="QuoteRequest" allow-remote="false">
+        <description>An open RFQ's name, specification text, response date, facility and currency (the currency only while no
+            quote is proposed, CURRENCY_CHANGE_QUOTED). A change of the response date, text, facility or currency is a new
+            revision, which the suppliers are sent again; it is audit-logged here (the RFQ's only, F-P11-11), a first value
+            set included, and an as-of print reads it. Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED) and the refusals of
+            create#QuoteRequest.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="facilityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="sourceRevision" type="Long"/></out-parameters>
+        <actions>
+            <set field="sourceRevision" from="ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('update', context).sourceRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="QuoteRequestItem" allow-remote="false">
+        <description>An item of an open RFQ, new, changed or removed (remove: cancelled, so the change stays in its history): a
+            product usable for buying (check#ProductUsable, usage Purchase; PRODUCT_NOT_USABLE) or a description, the quantity
+            and its unit (the product's by default), the required date. Each change is the RFQ's new revision, which the suppliers
+            are sent again; a quote still requested follows it (its line added, changed or taken off), one the supplier answered
+            keeps its lines. Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED), an item not on it
+            (ITEM_UNAVAILABLE), one with neither product nor description (ITEM_INVALID), an unknown product or unit
+            (PRODUCT_REQUIRED, UOM_INVALID) and a quantity that is not above zero (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="description"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="sourceRevision" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('storeItem', context)"/>
+            <set field="requestItemSeqId" from="stored.requestItemSeqId"/>
+            <set field="sourceRevision" from="stored.sourceRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="QuoteInvitation" allow-remote="false">
+        <description>A supplier invited to an open RFQ: its quote, a purchase order with one part (the supplier the vendor, the
+            organization the customer, the RFQ's currency and facility) in OrderRequested ("Request Quote"), a line per item
+            linked by RequestItemOrder, unpriced until the supplier answers; a supplier already invited answers its quote
+            (existing). With declined, a requested quote the supplier declined (OrderRejected, "Reject Request", with its
+            reason). Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED), an RFQ with no items (NO_ITEMS),
+            another organization's supplier (SUPPLIER_UNAVAILABLE), the buying policy's Stop (SUPPLIER_BLOCKED,
+            SUPPLIER_SUSPENDED, SUPPLIER_UNAPPROVED; a Warn is a warning), and for a decline a quote not of the RFQ
+            (INVITATION_UNAVAILABLE), one already answered (QUOTE_PROPOSED) or no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="orderId"/>
+            <parameter name="declined" type="Boolean" default="false"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="existing" type="Boolean"/>
+            <parameter name="supplierResult"/>
+        </out-parameters>
+        <actions>
+            <set field="invited" from="ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('invite', context)"/>
+            <set field="orderId" from="invited.orderId"/>
+            <set field="statusId" from="invited.statusId"/>
+            <set field="existing" from="!!invited.existing"/>
+            <set field="supplierResult" from="invited.supplierResult || null"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteRequestPrint" allow-remote="false">
+        <description>An RFQ's print as published now, or as of a date and time read back from the audit log (its items' product,
+            quantity, unit, required date, description and cancel; its response date and text). Requires PURCHASE_ORDER_EDIT,
+            PURCHASE_APPROVE or PURCHASE_ORDER_APPROVE; refuses an RFQ outside the user's organizations (RECORD_UNAVAILABLE), a
+            time to come or not a time (DATE_INVALID) and one before the RFQ (REQUEST_NOT_YET).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="printHtml"/>
+            <parameter name="revision" type="Long"/>
+            <parameter name="revisionText"/>
+            <parameter name="asOfText"/>
+            <parameter name="lineCount" type="Integer"/>
+            <parameter name="contentHash"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('print', context))</script>
+        </actions>
+    </service>
+    <service verb="send" noun="QuoteRequest" allow-remote="false">
+        <description>An open RFQ published and sent to its invited suppliers: the RFQ as of now rendered to a PDF, stored once
+            per print as RequestContent (RqCntRfqPublished) stamped with its time, and mailed with the PDF to each quote still
+            requested or proposed (orderIds, else those not sent the current revision; a material change after a send needs a
+            new send) at the supplier's order addresses, else its primary ones, one message per address in its own
+            transaction, recorded as the quote's OrderEmailMessage. A supplier with no address, an invalid one or no delivery
+            is InvitationDeliveryFailed with its code (RECIPIENT_REQUIRED, RECIPIENT_INVALID, DELIVERY_FAILED) and the others
+            are sent. The first send moves a draft to Submitted (published). The same operation key answers the first result.
+            Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED), no items (NO_ITEMS), no invitation
+            (NO_INVITATIONS), a quote not invited to it (INVITATION_UNAVAILABLE) and a key used for another request
+            (OPERATION_KEY_CONFLICT).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="orderIds"><description>The quotes to send (a comma list or list); empty sends those not sent the
+                current revision</description></parameter>
+            <parameter name="note"/>
+            <parameter name="subject"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="requestContentId"/>
+            <parameter name="contentHash"/>
+            <parameter name="supplierResults" type="List"><description>Each quote's orderId, supplierPartyId, supplierName,
+                recipients, resultStatus (SENT or InvitationDeliveryFailed), errorCode and errorMessage.</description></parameter>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('send', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SupplierQuote" allow-remote="false">
+        <description>A supplier's quote entered on its behalf: the supplier's reference (otherPartyOrderId) and quote date,
+            validity (validFromDate, validThruDate), payment term and Incoterm, delivery date, the channel it came by
+            (salesChannelEnumId: e-mail, phone and the others) and its evidence (a file, or how it came) as OrderContent
+            (OctSupplierQuote) in the supplier's role. A requested quote moves to OrderProposed ("Propose Quote"); with no
+            orderId a new quote is entered straight in OrderProposed, from the vendor for the organization, with the RFQ's
+            items when requestId is given (one supplier, one live quote per RFQ: QUOTE_EXISTS). Each change of the part's
+            fields is audit-logged with the reason. Requires PURCHASE_ORDER_EDIT; refuses an order that is not a requested or
+            proposed quote (QUOTE_CLOSED), outside the user's organizations (RECORD_UNAVAILABLE), another organization's or a
+            stopped supplier, an unknown currency, term or channel (CURRENCY_INVALID, TERM_INVALID, CHANNEL_INVALID) and a
+            validity that ends before it starts (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="requestId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="vendorPartyId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="otherPartyOrderDate" type="Timestamp"/>
+            <parameter name="validFromDate" type="Timestamp"/>
+            <parameter name="validThruDate" type="Timestamp"/>
+            <parameter name="estimatedDeliveryDate" type="Timestamp"/>
+            <parameter name="settlementTermId"/>
+            <parameter name="tradeTermEnumId"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="evidenceText"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderContentId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('storeQuote', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SupplierQuoteItem" allow-remote="false">
+        <description>A requested or proposed quote's line: the quoted unit price, quantity, unit, promised date, the supplier's
+            item code (otherPartyProductId) and text, each change audit-logged with the reason (the line's history); with no
+            orderItemSeqId a new line of a product usable for buying. Requires PURCHASE_ORDER_EDIT; refuses an order that is not
+            a requested or proposed quote (QUOTE_CLOSED), a line not on it (ITEM_UNAVAILABLE), an unknown product or unit and a
+            negative price or quantity (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="promisedDate" type="Timestamp"/>
+            <parameter name="otherPartyProductId"/>
+            <parameter name="itemDescription"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="orderItemSeqId"/></out-parameters>
+        <actions>
+            <set field="orderItemSeqId" from="ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('storeQuoteItem', context).orderItemSeqId"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="SupplierQuotePrice" allow-remote="false">
+        <description>A proposed (or awarded: placed from OrderProposed) quote line's price, or a quantity tier of it
+            (minQuantity, price), made an effective purchase price of the supplier for the buying organization (R-PUR-21;
+            Products §7): written through mantle.product.PriceServices.store#ProductPrice, valid for the quote's validity
+            (from now at the earliest, to the quote's thru date at the latest, or the dates given within it), naming the source
+            quote and line (sourceOrderId, sourceOrderItemSeqId). A price of the same supplier, product, organization,
+            currency and tier in effect is ended where the new one starts (expire#ProductPrice); a store's, an agreement's or
+            a per-term row is left alone. Requires SUPPLIER_PRICE_EDIT only (PERMISSION_DENIED); refuses a quote outside the user's
+            organizations (RECORD_UNAVAILABLE), one not proposed (QUOTE_NOT_PROPOSED) or expired (QUOTE_EXPIRED), a line
+            not on it or with no product (ITEM_UNAVAILABLE, PRODUCT_REQUIRED), no price (PRICE_REQUIRED), dates that end
+            before they start (DATE_INVALID) and a price of the tier starting later (PRICE_OVERLAP).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+            <parameter name="minQuantity" type="BigDecimal"/>
+            <parameter name="price" type="BigDecimal"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productPriceId"/>
+            <parameter name="endedPriceIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Sourcing.js')
+                    .execute('publish', context))</script>
+        </actions>
+    </service>
+</services>

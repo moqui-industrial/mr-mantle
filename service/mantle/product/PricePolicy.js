@@ -35,7 +35,7 @@ const optional = [
     "agreementItemSeqId"
 ]
 const writeFields =
-    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason".split(
+    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason,sourceOrderId,sourceOrderItemSeqId".split(
         ","
     )
 const pick = (p, keys) =>
@@ -305,7 +305,10 @@ function replace(p) {
         productPriceId: null,
         fromDate: new Date(at).toISOString(),
         price: p.price,
-        changeReason: p.changeReason
+        changeReason: p.changeReason,
+        // a successor's price is not the quote's: it names no source (publish#SupplierQuotePrice, impl-purchasing P11)
+        sourceOrderId: null,
+        sourceOrderItemSeqId: null
     })
     validate(next, [old.productPriceId])
     call("update#" + E, {productPriceId: old.productPriceId, thruDate: new Date(at).toISOString(), changeReason: p.changeReason})

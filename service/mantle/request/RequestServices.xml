@@ -619,7 +619,8 @@ along with this software (see the LICENSE.md file). If not, see
             const form = appSetting('ProjPublicForm')
             const types = Array.from(ec.entity.find('moqui.basic.Enumeration').condition('enumTypeId', 'RequestType').useCache(true).disableAuthz().list())
                     .map((row) => row.enumId)
-            const known = (list) => list.filter((id) => types.includes(id))
+            // a purchase RFQ is never offered or triaged: Submitted means published (impl-purchasing P11, R-PUR-13)
+            const known = (list) => list.filter((id) => types.includes(id) && id !== 'RqtPurchaseRfq')
             let offered = known(listOf(own.WstRequestTypes || intake.offered))
             if (!offered.length) offered = known(['RqtBugFix', 'RqtNewFeature', 'RqtSupport', 'RqtInformation', 'RqtProposal'])
             let triaged = known(listOf(intake.triaged))
@@ -1439,7 +1440,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="convert" noun="RequestToProject">
         <description>A request becomes a project's (design-projects.md §6 ConvertToProject): its project is set and it moves to
-            In Progress. The caller made the project (NewProject or a quick project) and checks the user may.</description>
+            In Progress. The caller made the project (NewProject or a quick project) and checks the user may. A purchase RFQ
+            (RqtPurchaseRfq) is refused (REQUEST_TYPE_FIXED, impl-purchasing P11).</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -1448,6 +1450,8 @@ along with this software (see the LICENSE.md file). If not, see
             const request = ec.entity.find('mantle.request.Request').condition('requestId', requestId).one()
             if (request == null) { ec.message.addError(`Request ${requestId} not found`); return }
             if (['ReqCompleted', 'ReqCancelled'].includes(request.statusId)) { ec.message.addError(ec.l10n.localize('This request is closed')); return }
+            // a purchase RFQ is Purchasing's, never a project's (impl-purchasing P11, R-PUR-13)
+            if (request.requestTypeEnumId === 'RqtPurchaseRfq') { ec.message.addError('REQUEST_TYPE_FIXED: ' + ec.l10n.localize('An RFQ is not converted to a project')); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(`Project ${workEffortId} not found`); return }
             ec.service.sync().name('mantle.request.RequestServices.update#Request').parameters({requestId: requestId, rootWorkEffortId: workEffortId,

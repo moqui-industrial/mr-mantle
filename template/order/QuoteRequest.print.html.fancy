@@ -1,0 +1,68 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A request for quotation (RFQ) as published, or as of a date and time read back from the audit log
+     (mantle.order.SourcingServices.get#QuoteRequestPrint): its PDF is what send#QuoteRequest mails and stores. requestId,
+     requestName, organizationName, supplierName (empty for the RFQ as published to every supplier), revisionText,
+     asOfText (empty for the RFQ now), dueText (respond by), facilityName (deliver to), currencyText, description and lines
+     (seq, productText, description, quantityText, unitText, requiredText). It leaves out internal maximum prices, the
+     other suppliers invited and the source requests' notes. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Request for quotation')} ${requestId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+.sub { color: #59606b; margin: 0 0 6mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 38mm; font-weight: bold; }
+.lines { margin-top: 6mm; }
+.lines th { border-bottom: 1px solid #20252b; }
+.lines td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; white-space: nowrap; }
+.note { color: #59606b; font-size: 9pt; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Request for quotation')} ${requestId}</h1>
+<p class="sub">${revisionText}<#if asOfText> · ${ec.l10n.localize('as of')} ${asOfText}</#if></p>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Buyer')}</th><td>${organizationName}</td></tr>
+    <#if supplierName><tr><th>${ec.l10n.localize('Supplier')}</th><td>${supplierName}</td></tr></#if>
+    <#if requestName><tr><th>${ec.l10n.localize('Reference')}</th><td>${requestName}</td></tr></#if>
+    <#if dueText><tr><th>${ec.l10n.localize('Respond by')}</th><td>${dueText}</td></tr></#if>
+    <#if facilityName><tr><th>${ec.l10n.localize('Deliver to')}</th><td>${facilityName}</td></tr></#if>
+    <#if currencyText><tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr></#if>
+</tbody></table>
+<#if description><p style="margin-top:4mm">${description}</p></#if>
+<table class="lines">
+    <thead><tr>
+        <th>#</th>
+        <th>${ec.l10n.localize('Item')}</th>
+        <th class="amount">${ec.l10n.localize('Quantity')}</th>
+        <th>${ec.l10n.localize('Required by')}</th>
+    </tr></thead>
+    <tbody>
+    <#list lines as line>
+        <tr>
+            <td>${line.seq}</td>
+            <td>${line.productText}<#if line.description><br><span class="note">${line.description}</span></#if></td>
+            <td class="amount">${line.quantityText} ${line.unitText}</td>
+            <td>${line.requiredText}</td>
+        </tr>
+    </#list>
+    </tbody>
+</table>
+<p class="note" style="margin-top:6mm">${ec.l10n.localize('Please quote your unit price, lead time and validity for each item.')}</p>
+</body></html>
