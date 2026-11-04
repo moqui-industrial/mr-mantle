@@ -37,7 +37,11 @@
 // (SUGGESTION_SNOOZED). An outside-processing requirement (request#SubcontractService's
 // RqTpProduct requirement of a service, with its RstOperationDemand link to the operation; impl-manufacturing P14) is a
 // PsmOutside suggestion of every run of a set that covers its facility, never netted; a buyer converts it into a line of a
-// draft purchase order of its supplier, with OrderItemWorkEffort to the operation (convertOutside).
+// draft purchase order of its supplier, with OrderItemWorkEffort to the operation (convertOutside). A buy suggestion's other
+// routes (impl-purchasing P14b, SupplyPlanningRoutes.js): where the buying policy sends plan buys to purchase requests
+// (planBuyToRequest), a purchase request of the organization's facility sent to its approval; for customer-order demand on
+// the buyer's choice, P7's drop-ship route (the sales line moved to the supplier's drop-ship facility). The lines of the
+// organization's approved purchase requests not yet ordered (and of a submitted one a conversion made) are supply.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, rows, ms, denied, call, probe, dateText, access} = lib
@@ -93,6 +97,7 @@ const productionPolicy = () => ec.resource.script("component://mr-mantle/service
 const methodPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
 const routings = () => ec.resource.script("component://mr-mantle/service/mantle/work/Routings.js")
 const workCalendar = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionCalendar.js")
+const routes = () => ec.resource.script("component://mr-mantle/service/mantle/product/SupplyPlanningRoutes.js")
 
 // ===== scope =====
 function requireAny(permissions) {
@@ -224,7 +229,23 @@ function salesDemand(ctx, node) {
                 continue
             }
             const open = ordered.subtract(sumOf(issued)).subtract(sumOf(reserved))
-            if (open.compare(0) > 0) add(item.productId, Object.assign(line, {quantity: open}))
+            if (open.compare(0) > 0) add(item.productId, Object.assign({}, line, {quantity: open}))
+            // what its reservations hold without stock is netted as the negative available to promise; shown and pegged
+            // here, so a shortage it makes keeps the sales line (its RequirementOrderItem, R-PUR-37; impl-purchasing P14b)
+            const waiting = rows("mantle.product.issuance.AssetReservation", keyOf)
+                .filter(row => row.productId === item.productId)
+                .reduce((total, row) => total.add(dec(row.quantityNotAvailable)), zero())
+            if (waiting.compare(0) > 0)
+                add(
+                    item.productId,
+                    Object.assign({}, line, {
+                        kind: "salesWaiting",
+                        label: line.label + ", reserved without stock",
+                        quantity: waiting,
+                        netted: false,
+                        pegged: true
+                    })
+                )
         }
     }
     return byProduct
@@ -458,6 +479,8 @@ function stockLines(ctx, node, productId) {
                     supply: true
                 })
         }
+    // the lines of the organization's purchase requests still to order (impl-purchasing P14b)
+    lines.push(...routes().requestSupply(ctx.organizationPartyId, node.facilityIds, productId))
     return lines
 }
 
@@ -579,6 +602,18 @@ function supplierOf(ctx, productId) {
         .filter(row => row.vendorPartyId && row.vendorPartyId !== ctx.organizationPartyId && lib.active(row, ctx.planDate))
         .sort((a, b) => dec(a.minQuantity).compare(dec(b.minQuantity)))
     return prices[0]?.vendorPartyId || null
+}
+// A bought product's lead time: the standard lead time of the supplier price supplierOf chooses, else null.
+function supplierLeadOf(ctx, productId) {
+    const supplierPartyId = supplierOf(ctx, productId)
+    if (!supplierPartyId) return null
+    const price = rows("mantle.product.ProductPrice", {
+        productId,
+        vendorPartyId: supplierPartyId,
+        pricePurposeEnumId: "PppPurchase",
+        priceTypeEnumId: "PptCurrent"
+    }).find(row => row.standardLeadTimeDays != null && lib.active(row, ctx.planDate))
+    return price ? {lead: dec(price.standardLeadTimeDays), prepare: zero(), basis: "supplier"} : null
 }
 function usable(productId, usage, quantity, facilityId) {
     try {
@@ -782,7 +817,10 @@ function plan(ctx, nodes) {
             .sort()
         for (const productId of products) {
             const structure = structureOf(ctx, productId)
-            const lead = structure.bom && !structure.error ? leadDaysOf(ctx, structure, toDecimal(1)) : null
+            // a made product's lead time, else a bought one's: its supplier price's standard lead time (P14b), so held
+            // quantity due within it is netted where the schedule says so
+            const lead =
+                structure.bom && !structure.error ? leadDaysOf(ctx, structure, toDecimal(1)) : supplierLeadOf(ctx, productId)
             const nets = nodes.map(node => {
                 const lines = []
                 for (const line of node.sales.get(productId) || []) lines.push(Object.assign({netted: true}, line))
@@ -966,7 +1004,7 @@ function writeSuggestion(ctx, planningRunId, suggestion, reusable) {
             fromDate: ec.user.nowTimestamp
         })
     }
-    for (const line of suggestion.lines.filter(each => each.netted && each.orderId && !each.supply))
+    for (const line of suggestion.lines.filter(each => (each.netted || each.pegged) && each.orderId && !each.supply))
         if (
             !one("mantle.request.requirement.RequirementOrderItem", {
                 requirementId,
@@ -1054,6 +1092,7 @@ const kindLabels = {
     held: "Held for inspection",
     purchase: "Purchase order",
     sales: "Sales order",
+    salesWaiting: "Sales order waiting for stock",
     kitSales: "Kit on sales order",
     runMaterial: "Work order material",
     runOutput: "Work order output",
@@ -1063,7 +1102,8 @@ const kindLabels = {
     minimum: "Minimum stock",
     planned: "Planned make",
     operation: "Outside operation",
-    reorder: "Reorder rule"
+    reorder: "Reorder rule",
+    request: "Purchase request"
 }
 const warningLabels = {
     LATE_RELEASE: "Release date has passed",
@@ -1093,6 +1133,8 @@ function suggestionRow(row, run, stale, names) {
                   workEffortId: supply.workEffortId || null,
                   orderId: supply.orderId || null,
                   orderItemSeqId: supply.orderItemSeqId || null,
+                  requestId: supply.requestId || null,
+                  requestItemSeqId: supply.requestItemSeqId || null,
                   quantity: text(supply.quantity),
                   ended: !!supply.thruDate
               }))
@@ -1152,6 +1194,9 @@ function suggestionRow(row, run, stale, names) {
             )
             .join(", "),
         snoozed: !!snooze,
+        // customer-order demand (a sales line in its requirement), which a buyer may send by the drop-ship route (P14b)
+        customerDemand:
+            row.methodEnumId === "PsmBuy" && !!row.requirementId && routes().customerLines(row.requirementId).length > 0,
         stateColor: row.exceptionCode
             ? "negative"
             : row.stateEnumId === "PssConverted"
@@ -1254,7 +1299,9 @@ function getPlan(p) {
         canSchedule: access.has("SUPPLY_PLAN_RUN"),
         canConvertMake: access.has(convertPermissions.PsmMake),
         canConvertOutside: access.has(convertPermissions.PsmOutside),
-        canConvertBuy: access.has(convertPermissions.PsmBuy)
+        canConvertBuy: access.has(convertPermissions.PsmBuy),
+        // the route the buying policy gives a buy conversion: order (a draft purchase order) or request (P14b)
+        buyRoute: routes().policyRoute(organizationPartyId)
     }
     if (!run) return answer
     const stale = staleOf(run)
@@ -1312,7 +1359,13 @@ function getPlan(p) {
             directionText: line.supply ? "Supply" : "Demand",
             dateText: line.date == null ? "" : dateText(line.date),
             quantity: line.quantity,
-            nettedText: line.netted ? "Netted" : line.beyondHorizon ? "Beyond the horizon" : "Not netted",
+            nettedText: line.netted
+                ? "Netted"
+                : line.kind === "salesWaiting"
+                  ? "In the available stock"
+                  : line.beyondHorizon
+                    ? "Beyond the horizon"
+                    : "Not netted",
             orderId: line.orderId,
             workEffortId: line.workEffortId,
             qualityInspectionId: line.qualityInspectionId
@@ -1421,25 +1474,41 @@ function convert(p) {
     // one draft order per supplier group in this call, the first line's order taken by the next: outside processing by
     // supplier (P14), a buy by supplier and facility (P14a)
     const supplierOrders = new Map()
+    // a buy's route (P14b): the policy's order or request, or the drop-ship route asked for; one purchase request per
+    // organization and facility in this call, each sent to its approval once its lines are in
+    const supplierRequests = new Map()
+    const route = str(p.route)
     const automatic = p.automatic === true || p.automatic === "true" || p.automatic === "Y"
     for (const planningSuggestionId of ids) {
         try {
             const suggestion = one(SUGGESTION, {planningSuggestionId})
+            const run = suggestion ? one(RUN, {planningRunId: suggestion.planningRunId}) : null
+            const buyRoute =
+                suggestion?.methodEnumId === "PsmBuy" && run ? routes().routeOf(run.organizationPartyId, route) : null
             const groupKey = !suggestion?.supplierPartyId
                 ? null
-                : suggestion.methodEnumId === "PsmBuy"
-                  ? "buy|" + suggestion.supplierPartyId + "|" + suggestion.facilityId
-                  : suggestion.supplierPartyId
+                : buyRoute === "request"
+                  ? "request|" + suggestion.facilityId
+                  : buyRoute === "dropShip"
+                    ? null
+                    : suggestion.methodEnumId === "PsmBuy"
+                      ? "buy|" + suggestion.supplierPartyId + "|" + suggestion.facilityId
+                      : suggestion.supplierPartyId
             const out = probe("mantle.product.SupplyPlanningServices.convert#PlanningSuggestion", {
                 planningSuggestionId,
                 operationKey: operationKey + "/" + planningSuggestionId,
                 methodDate: p.methodDate || null,
                 facilityId: str(p.facilityId),
-                orderId: (groupKey && supplierOrders.get(groupKey)) || null,
+                orderId: (buyRoute !== "request" && groupKey && supplierOrders.get(groupKey)) || null,
+                requestId: (buyRoute === "request" && supplierRequests.get(groupKey)) || null,
+                route: buyRoute,
+                supplierPartyId: str(p.supplierPartyId),
                 automatic
             })
-            if (out.result?.orderId && out.result.resultCode === "CREATED" && groupKey)
+            if (out.result?.orderId && out.result.resultCode === "CREATED" && groupKey && buyRoute !== "request")
                 supplierOrders.set(groupKey, out.result.orderId)
+            if (out.result?.requestId && out.result.resultCode === "CREATED" && groupKey && buyRoute === "request")
+                supplierRequests.set(groupKey, out.result.requestId)
             results.push(Object.assign({planningSuggestionId, ok: true}, out.result))
         } catch (error) {
             const message = String(error.message || error).replace(/^(Error: )+/, "")
@@ -1447,8 +1516,11 @@ function convert(p) {
             results.push({planningSuggestionId, ok: false, reasonCode: lib.reasonCode({message}) || reasonIn(message), message})
         }
     }
+    // each purchase request this call made, sent to its approval (a failure is named; the request stays a draft)
+    const requests = routes().submitRequests(Array.from(new Set(supplierRequests.values())), results)
     return {
         results,
+        requests,
         createdCount: results.filter(row => row.ok && row.resultCode === "CREATED").length,
         existingCount: results.filter(row => row.ok && row.resultCode === "EXISTING").length,
         failedCount: results.filter(row => !row.ok).length
@@ -1505,7 +1577,9 @@ function convertOne(p) {
             workEffortId: links[0].workEffortId || null,
             workEffortIds: links.map(row => row.workEffortId).filter(Boolean),
             orderId: links[0].orderId || null,
-            orderItemSeqId: links[0].orderItemSeqId || null
+            orderItemSeqId: links[0].orderItemSeqId || null,
+            requestId: links[0].requestId || null,
+            requestItemSeqId: links[0].requestItemSeqId || null
         }
     // an automatic conversion (a schedule's or a policy's) leaves a snoozed rule's shortage; a person may still convert it
     if (
@@ -1517,7 +1591,12 @@ function convertOne(p) {
             "The reorder rule of " + suggestion.productId + " at " + suggestion.facilityId + " is snoozed"
         )
     if (suggestion.methodEnumId === "PsmOutside") return convertOutside(p, suggestion, run, requirement, remaining)
-    if (suggestion.methodEnumId === "PsmBuy") return convertBuy(p, suggestion, run, requirement, remaining)
+    if (suggestion.methodEnumId === "PsmBuy") {
+        const buyRoute = str(p.route) || routes().routeOf(run.organizationPartyId, null)
+        if (buyRoute === "request" || buyRoute === "dropShip")
+            return routes().convert(buyRoute, p, {suggestion, run, requirement, remaining, buyChecks, coveredOf})
+        return convertBuy(p, suggestion, run, requirement, remaining)
+    }
     const stale = staleOf(run)
     if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
     if (suggestion.exceptionCode) denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The suggestion has an exception")
@@ -1846,15 +1925,8 @@ function draftOrderLine(p, line) {
 // of the line, the requirement Ordered and the suggestion converted. A customer order's demand keeps its sales line: the
 // requirement's RequirementOrderItem stays, and the line's provenance with it.
 function convertBuy(p, suggestion, run, requirement, remaining) {
-    const stale = staleOf(run)
-    if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
-    if (suggestion.exceptionCode || !suggestion.supplierPartyId)
-        denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The buy suggestion has no supplier")
-    if (!["PssProposed", "PssPartial"].includes(suggestion.stateEnumId))
-        denied("SUGGESTION_CLOSED", "The suggestion is " + enumText(suggestion.stateEnumId))
+    buyChecks(suggestion, run, remaining)
     const productId = suggestion.productId
-    const reason = usable(productId, "Purchase", remaining, suggestion.facilityId)
-    if (reason) denied("PRODUCT_NOT_USABLE", productId + " cannot be bought: " + reason)
     const product = one(PRODUCT, {productId})
     const quantityUomId = suggestion.quantityUomId || requirement.quantityUomId || product?.amountUomId || null
     const {orderId, orderItemSeqId} = draftOrderLine(p, {
@@ -1894,9 +1966,22 @@ function convertBuy(p, suggestion, run, requirement, remaining) {
         quantity: text(remaining)
     }
 }
+// A buy suggestion's checks before any route converts it: its plan current and fresh, the suggestion open with its supplier,
+// the product usable for purchase.
+function buyChecks(suggestion, run, remaining) {
+    const stale = staleOf(run)
+    if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
+    if (suggestion.exceptionCode || !suggestion.supplierPartyId)
+        denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The buy suggestion has no supplier")
+    if (!["PssProposed", "PssPartial"].includes(suggestion.stateEnumId))
+        denied("SUGGESTION_CLOSED", "The suggestion is " + enumText(suggestion.stateEnumId))
+    const reason = usable(suggestion.productId, "Purchase", remaining, suggestion.facilityId)
+    if (reason) denied("PRODUCT_NOT_USABLE", suggestion.productId + " cannot be bought: " + reason)
+}
 // A supply link as a refusal names it: its order line, run, request or transfer.
 function supplyText(link) {
     if (link.orderId) return "purchase order " + link.orderId + " line " + link.orderItemSeqId
+    if (link.requestId) return "purchase request " + link.requestId + " line " + link.requestItemSeqId
     if (link.workEffortId) return "work order " + link.workEffortId
     return enumText(link.supplyTypeEnumId) + " " + (link.requirementSupplyId || "")
 }

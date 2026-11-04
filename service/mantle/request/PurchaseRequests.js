@@ -610,6 +610,8 @@ function cancel(p) {
         sourceId: pr.requestId
     })
     approvals().clearNotices(requestSource(purchaseRequest(pr.requestId)))
+    // a request a supply plan conversion made no longer covers the plan's demand (impl-purchasing P14b)
+    ec.resource.script("component://mr-mantle/service/mantle/product/SupplyPlanningRoutes.js").releaseRequestSupply(pr.requestId)
     const orderIds = [
         ...new Set(
             rows(ITEM_ORDER, {requestId: pr.requestId})

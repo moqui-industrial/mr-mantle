@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The buy conversion's route by policy (impl-purchasing P14b; crosscut §4.2, R-PUR-20; design-purchasing §8
+    SupplyPlanning): with planBuyToRequest Y on the organization's buying policy, convert#PlanningSuggestions turns a buy
+    suggestion into a purchase request sent to its approval rather than a line of a draft purchase order. Empty takes N, so
+    the conversion is P14a's draft order unless the policy says otherwise. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="planBuyToRequest" type="text-indicator" enable-audit-log="true"><description>Y: a buy suggestion of
+            the supply plan is converted into a purchase request sent to its approval (its approved demand is then sourced
+            in RequestSourcing); N with no row: into a line of a draft purchase order</description></field>
+    </extend-entity>
+</entities>
