@@ -1097,7 +1097,13 @@ function splitPlan(run, p) {
         mode === "backorder" && yes(p.complete) && run.statusId === "WeInProgress"
             ? quantities().completeCheck(
                   Object.assign({}, run),
-                  {acceptMaterialVariance: p.acceptMaterialVariance, reason: p.reason, reasonCode: p.reasonCode},
+                  // the backorder takes the rest of the work, so the source's operations not reported close with it (P10)
+                  {
+                      acceptMaterialVariance: p.acceptMaterialVariance,
+                      closeUnreportedOperations: true,
+                      reason: p.reason,
+                      reasonCode: p.reasonCode
+                  },
                   lines.map(line => {
                       const row = lineRows.find(entry => entry.line.productionRunLineId === line.productionRunLineId)
                       return row ? Object.assign({}, line, {stockQuantity: row.keep}) : line
@@ -1329,7 +1335,11 @@ function split(p) {
     let completed = false
     if (completing) {
         const fresh = one(WORK, {workEffortId: run.workEffortId})
-        const gate = quantities().completeCheck(fresh, {acceptMaterialVariance: p.acceptMaterialVariance, reason: why})
+        const gate = quantities().completeCheck(fresh, {
+            acceptMaterialVariance: p.acceptMaterialVariance,
+            closeUnreportedOperations: true,
+            reason: why
+        })
         if (!gate.allowed) denied(gate.reasonCode, gate.message)
         quantities().complete(fresh, {acceptMaterialVariance: p.acceptMaterialVariance}, "Completed with backorder " + newId)
         completed = true
@@ -1412,14 +1422,20 @@ function cancellationPlan(run, p = {}) {
         if (yes(p.returnUnused))
             for (const row of returnRows)
                 steps.push("Returns " + row.returnable + " " + row.productName + " of issue " + row.assetIssuanceId)
+        // a close-out accepts what was not done: the material variance and the operations not reported (P10)
         completeCheck = quantities().completeCheck(run, {
             finishRemainder: true,
             acceptMaterialVariance: true,
+            closeUnreportedOperations: true,
             reason: p.reason || "Close out",
             reasonCode: p.reasonCode
         })
         if (completeCheck.reasonCode === "NOTHING_REMAINING")
-            completeCheck = quantities().completeCheck(run, {acceptMaterialVariance: true, reason: p.reason || "Close out"})
+            completeCheck = quantities().completeCheck(run, {
+                acceptMaterialVariance: true,
+                closeUnreportedOperations: true,
+                reason: p.reason || "Close out"
+            })
         steps.push(...(completeCheck.impact || []))
         if (!completeCheck.allowed)
             return {
@@ -1503,7 +1519,13 @@ function cancelOrder(p) {
         resultCode = "CANCELLED"
     } else {
         const fresh = one(WORK, {workEffortId: run.workEffortId})
-        const finish = {finishRemainder: true, acceptMaterialVariance: true, reason: why, reasonCode: p.reasonCode}
+        const finish = {
+            finishRemainder: true,
+            acceptMaterialVariance: true,
+            closeUnreportedOperations: true,
+            reason: why,
+            reasonCode: p.reasonCode
+        }
         let gate = quantities().completeCheck(fresh, finish)
         if (gate.reasonCode === "NOTHING_REMAINING") {
             finish.finishRemainder = false

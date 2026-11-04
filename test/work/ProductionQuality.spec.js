@@ -499,7 +499,8 @@ feature("a disposition releases five, reserved first to the pegged order item, a
         const read = run("pqg_super", P + "get#ProductionQuantities", {workEffortId: r.workEffortId})
         const losses = rows(LOSS, {workEffortId: r.workEffortId})
         const runStatus = status("pqg_super", {workEffortId: r.workEffortId})
-        const completed = act("pqg_super", r.workEffortId, "complete")
+        // Assemble was not completed on the shop floor (impl-manufacturing P10, F95)
+        const completed = act("pqg_super", r.workEffortId, "complete", {closeUnreportedOperations: true})
         return {
             r,
             id,
