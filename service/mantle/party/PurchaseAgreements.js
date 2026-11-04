@@ -65,9 +65,12 @@ const fieldLabels = {
 const dateFields = ["fromDate", "thruDate"]
 const blank = value => value == null || String(value).trim() === ""
 const text = value => (blank(value) ? null : String(value).trim())
-const given = (p, field) => p[field] !== undefined
+// a field the caller gave: an empty text clears it, a missing one (undefined or null, as a screen passes a field its form
+// does not have) leaves it
+const given = (p, field) => p[field] !== undefined && p[field] !== null
 const dec = value => toDecimal(value ?? 0)
 const now = () => Number(ec.user.nowTimestamp)
+const nonNegative = value => (value.compare(0) < 0 ? toDecimal(0) : value)
 const revisionOf = agreement => Number(agreement.agreementRevision ?? 1)
 const partyName = partyId => lib.partyNames([partyId])[partyId] || partyId || ""
 const statusText = statusId => (statusId ? one("moqui.basic.StatusItem", {statusId})?.description || statusId : "")
@@ -340,8 +343,8 @@ function store(p) {
             const value = dateOf(p[field], field === "fromDate" ? "start date" : "end date")
             if (value !== ms(pa.agreement[field])) changes[field] = value
         }
-    const from = given(changes, "fromDate") ? changes.fromDate : ms(pa.agreement.fromDate)
-    const thru = given(changes, "thruDate") ? changes.thruDate : ms(pa.agreement.thruDate)
+    const from = Object.hasOwn(changes, "fromDate") ? changes.fromDate : ms(pa.agreement.fromDate)
+    const thru = Object.hasOwn(changes, "thruDate") ? changes.thruDate : ms(pa.agreement.thruDate)
     if (from != null && thru != null && thru <= from) denied("DATE_INVALID", "The agreement ends after it starts")
     const plain = {}
     for (const field of ["description", "textData"]) if (given(p, field)) plain[field] = text(p[field])
@@ -568,16 +571,16 @@ function storeItem(p) {
     }
     const productId = values.productId ?? item?.productId
     if (!productId) denied("PRODUCT_REQUIRED", "Choose a product")
-    const from = given(values, "fromDate") ? values.fromDate : ms(item?.fromDate)
-    const thru = given(values, "thruDate") ? values.thruDate : ms(item?.thruDate)
+    const from = Object.hasOwn(values, "fromDate") ? values.fromDate : ms(item?.fromDate)
+    const thru = Object.hasOwn(values, "thruDate") ? values.thruDate : ms(item?.thruDate)
     if (from != null && thru != null && thru <= from) denied("DATE_INVALID", "The item ends after it starts")
     if (item) {
         if (values.productId && values.productId !== item.productId && releasesOf(pa.agreementId, item.agreementItemSeqId).length)
             denied("PRODUCT_CHANGE_RELEASED", "Item " + item.agreementItemSeqId + " has releases; its product stays")
-        // a cap is not lowered below what the item's releases use
+        // a cap the change sets is not below what the item's releases use (a cap they passed within its tolerance stays)
         const used = usageOf(pa.agreementId, item.agreementItemSeqId)
-        const quantityCap = given(values, "quantity") ? values.quantity : item.quantity
-        const valueCap = given(values, "amountCap") ? values.amountCap : item.amountCap
+        const quantityCap = Object.hasOwn(values, "quantity") ? values.quantity : null
+        const valueCap = Object.hasOwn(values, "amountCap") ? values.amountCap : null
         if (quantityCap != null && dec(quantityCap).compare(used.quantity) < 0)
             denied(
                 "CAP_BELOW_RELEASED",
@@ -848,7 +851,7 @@ function release(p) {
             "Item " +
                 item.agreementItemSeqId +
                 " has " +
-                [quantityText(dec(item.quantity).subtract(used.quantity)), uomText(item.quantityUomId)]
+                [quantityText(nonNegative(dec(item.quantity).subtract(used.quantity))), uomText(item.quantityUomId)]
                     .filter(Boolean)
                     .join(" ") +
                 " left" +
@@ -860,7 +863,7 @@ function release(p) {
             "Item " +
                 item.agreementItemSeqId +
                 " has " +
-                money(dec(item.amountCap).subtract(used.amount), currencyUomId) +
+                money(nonNegative(dec(item.amountCap).subtract(used.amount)), currencyUomId) +
                 " left" +
                 (item.releaseTolerancePercent ? " (" + quantityText(item.releaseTolerancePercent) + "% tolerance)" : "")
         )
