@@ -17,6 +17,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="postingGuardEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
         <field name="requiredLedgerDimensionsEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
         <field name="forwardIssuanceRepostEnabled" type="text-indicator" default="'N'" enable-audit-log="update"/>
+        <field name="forwardReceiptRepostEnabled" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: repost#AssetReceipt posts a dated delta (ReceiptAdjustments.js) and leaves the posted history, as
+                forwardIssuanceRepostEnabled does for issuances (impl-manufacturing F32)</description></field>
         <field name="allowAccountingSelfApproval" type="text-indicator" default="'N'" enable-audit-log="update"/>
         <field name="invoiceDocumentTemplate" type="text-medium" enable-audit-log="update"/>
         <field name="paymentDocumentTemplate" type="text-medium" enable-audit-log="update"/>

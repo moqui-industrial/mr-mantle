@@ -1909,4 +1909,351 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('shipment', context)"/>
         </actions>
     </service>
+
+    <!-- ===== controlled changes (impl-manufacturing P9; ProductionChanges.js, SupportedAssembly.js) ===== -->
+    <service verb="get" noun="ProductionChanges" allow-remote="false">
+        <description>A run's controlled changes (design-manufacturing Components Substitute, BillOfMaterialsCompare's amendment):
+            its substitution and amendment requests, newest first, each with its summary, reviews and whether the user may
+            decide it; the material lines with the substitutes their BOM line's rule allows (BsrEquivalent: the component's
+            PatEquivalent rows) and what they have left; whether the user may ask a substitute or an amendment (strict
+            release refuses both on a released run); and the run it was split, backordered or cloned from. Requires
+            PRODUCTION_VIEW; refuses a run outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="strictRelease" type="Boolean"/>
+            <parameter name="changeRows" type="List"/>
+            <parameter name="substituteRows" type="List"/>
+            <parameter name="canSubstitute" type="Boolean"/>
+            <parameter name="canAmend" type="Boolean"/>
+            <parameter name="amendmentPending" type="Boolean"/>
+            <parameter name="sourceRunId"/>
+            <parameter name="sourceText"/>
+        </out-parameters>
+        <actions>
+            <set field="changes" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('changes', context)"/>
+            <script>ec.context.putAll(changes)</script>
+        </actions>
+    </service>
+    <service verb="substitute" noun="ProductionMaterial" allow-remote="false">
+        <description>Substitute an allowed alternative for a material line's remaining quantity (design-manufacturing Components
+            Substitute, R-MFG-36, R-SA-05): request (PRODUCTION_PLAN or PRODUCTION_SUPERVISE) names the line, the substitute,
+            the quantity of the original it replaces (its remaining by default) and the factor (substitute stock units per
+            original unit, 1 by default) with a reason; approve or refuse (PRODUCTION_SUPERVISE) decides a request on the run.
+            The candidate comes from the BOM line's rule only: BsrEquivalent offers the component's active PatEquivalent rows,
+            and any other product is refused. Applying it adds a material line of the substitute beside the original (its
+            operation and BOM line, substituteOfLineId), lowers the original by what moved, rewrites the WeptConsume rows so
+            planning does not count the demand twice, and counts the revision up; on a released run this is an amendment of
+            its lines, audit-logged. A supervisor's own request, or one under a policy with substituteApproval N, applies at
+            once; otherwise the organization's supervisors are told (ProductionSubstitution) and the decision revalidates the
+            request. A retry with the same operation key answers the first. Refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE), a closed one (RUN_CLOSED), a released one under strictRelease (STRICT_RELEASE), a changed
+            revision (REVISION_REQUIRED, REVISION_CHANGED, CHANGE_STALE), a line of another run or a substitute line
+            (LINE_INVALID), a product the rule does not allow (SUBSTITUTE_NOT_ALLOWED), a quantity beyond what the line has
+            left (QUANTITY_INVALID, QUANTITY_EXCEEDS_REMAINING), another stock unit with no factor (UNIT_INCOMPATIBLE), a
+            second request of a line (CHANGE_PENDING), a missing reason (REASON_REQUIRED, REASON_INVALID) and a decided or
+            unknown change (CHANGE_DECIDED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action" default-value="request"><description>request, approve or refuse</description></parameter>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="productionRunLineId"/>
+            <parameter name="substituteProductId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="conversionFactor" type="BigDecimal"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+            <parameter name="productionChangeId"><description>approve and refuse: the request</description></parameter>
+            <parameter name="refusalReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REQUESTED, APPLIED or REFUSED, workEffortId,
+                productionChangeId, revision, substituteRunLineId, amendment (applied to a released run), and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('substitute', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ProductionAmendment" allow-remote="false">
+        <description>What an amendment of a released run to its method as of methodDate (now by default) would remap (design
+            §12.1, the amendment policy of impl-manufacturing §4): each method material line kept (issued, scrapped or on an
+            executed operation: its facts and links stay), changed (quantity, product, operation or BOM line, less what
+            substitutes took, never below what was issued), added or removed, and each operation kept (started or with facts),
+            changed, added or cancelled; the findings and a previewKey. allowed false with AMEND_NOT_RELEASED (a draft or
+            closed run), STRICT_RELEASE (the policy refuses amendments), METHOD_INVALID or NO_CHANGE. Requires
+            PRODUCTION_VIEW, PRODUCTION_PLAN or METHOD_APPROVE; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="methodDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="methodDate" type="Timestamp"/>
+            <parameter name="methodDateText"/>
+            <parameter name="impact" type="List"/>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="operationRows" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="previewKey"/>
+        </out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('previewAmendment', context)"/>
+            <script>ec.context.putAll(preview)</script>
+        </actions>
+    </service>
+    <service verb="amend" noun="ProductionOrder" allow-remote="false">
+        <description>An audit-logged amendment of a released run's remaining lines and operations to its method as of
+            methodDate (design §12.1, R-MFG-36; the amendment policy of impl-manufacturing §4): request (PRODUCTION_PLAN or
+            METHOD_EDIT) at the run's revision, with a reason and the preview's key, records the remap (preview#ProductionAmendment)
+            and a change notice when Products' ChangeNotices is on; approve (METHOD_APPROVE or PRODUCTION_SUPERVISE) gives
+            the user's reviews, a method approver's and a production supervisor's, each revalidating the remap, and the
+            amendment applies when both are given (one user holding both gives both): only unexecuted lines and operations
+            change, the original facts keep their lines and operations, the WeptConsume/WeptProduce rows are rewritten, and
+            the run's method date, routing and method refs move at the next revision. The method approvers are told first
+            (ProductionAmendment), then the supervisors. refuse (either permission) ends it with a reason. A retry with the same
+            operation key answers the first. Refuses a run outside the user's organizations (RECORD_UNAVAILABLE), a draft or
+            closed run (AMEND_NOT_RELEASED), one released under strictRelease (STRICT_RELEASE: a method change needs a linked
+            new run), a changed revision (REVISION_REQUIRED, REVISION_CHANGED, CHANGE_STALE) or remap (PREVIEW_CHANGED), a
+            method that changes nothing (NO_CHANGE) or is not valid (METHOD_INVALID), a second request (CHANGE_PENDING), a
+            missing reason (REASON_REQUIRED, REASON_INVALID), a review the user does not give (PERMISSION_DENIED) and a decided
+            or unknown change (CHANGE_DECIDED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action" default-value="request"><description>request, approve or refuse</description></parameter>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="methodDate" type="Timestamp"><description>request: as of when the method is read; now when
+                empty</description></parameter>
+            <parameter name="previewKey"/>
+            <parameter name="changeNoticeId"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+            <parameter name="productionChangeId"><description>approve and refuse: the request</description></parameter>
+            <parameter name="refusalReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REQUESTED, REVIEWED, APPLIED or REFUSED, workEffortId,
+                productionChangeId, revision, waitingFor, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('amend', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ProductionSplit" allow-remote="false">
+        <description>What a split or backorder of a run would move (design-manufacturing SplitWorkOrder Allocation and
+            Disposition): a quantity of the remaining output (all of it for a backorder by default), each material line's share
+            no more than it has left to issue (issued material stays with the source as WIP: MATERIAL_STAYS), the by-products'
+            share beyond what they received, the demand links (RequirementSupply) moved newest first, the source's operations,
+            which stay, the new run's status (a draft, or released at the same method date), and for a backorder that completes
+            the source the completion check; with a previewKey. Requires PRODUCTION_PLAN; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE), a closed one (RUN_CLOSED), nothing left (NOTHING_REMAINING), a quantity not
+            above zero or beyond what is left (QUANTITY_INVALID, QUANTITY_EXCEEDS_REMAINING), all of the run (SPLIT_ALL) and
+            another mode (MODE_INVALID).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="mode" default-value="split"><description>split or backorder</description></parameter>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="facilityId"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="complete" type="Boolean" default-value="false"/>
+            <parameter name="acceptMaterialVariance" type="Boolean" default-value="false"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="split" type="Map"><description>workEffortId, revision, mode, quantity, remaining, target,
+                sourceTarget, facilityId, methodDate, productBomId, newStatusText, lineRows, supplyRows, operationRows,
+                findings, completeCheck, previewKey.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="split" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('previewSplit', context)"/>
+        </actions>
+    </service>
+    <service verb="split" noun="ProductionOrder" allow-remote="false">
+        <description>Split a run, or backorder what is left of it, at the preview the user confirmed (design-manufacturing
+            SplitWorkOrder Confirm; §12.1): one transaction makes the new run (ManufacturingServices.create#ProductionRun with
+            no legacy products, the source's method date, BOM, routing, method refs and demand links, productionSourceRunId),
+            its lines (the moved shares), the source's lines lowered by them with a target change event, both runs'
+            WeptConsume/WeptProduce rows, the RequirementSupply links moved (ended and started again, so the sums stay); a
+            released source's new run is released at the same method date (release#ProductionOrder with the method kept) with
+            its own operations, a draft's stays a draft. A backorder with complete (PRODUCTION_SUPERVISE) completes the running
+            source in the same transaction (P7's reconciliation, acceptMaterialVariance as there). Receipts, issues, time and
+            WIP stay on the source. A retry with the same operation key answers the same runs. Requires PRODUCTION_PLAN;
+            refuses what preview#ProductionSplit refuses, a changed revision (REVISION_REQUIRED, REVISION_CHANGED), no preview
+            or a changed one (PREVIEW_REQUIRED, PREVIEW_CHANGED), a missing reason (REASON_REQUIRED, REASON_INVALID), a
+            facility of another owner (FACILITY_OWNER), a completion of a run not running (STATUS_INVALID) and the completion's
+            refusals.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="mode" default-value="split"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="facilityId"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="previewKey"/>
+            <parameter name="complete" type="Boolean" default-value="false"/>
+            <parameter name="acceptMaterialVariance" type="Boolean" default-value="false"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode SPLIT or BACKORDERED, workEffortId, newWorkEffortId,
+                quantity, revision, statusId, newStatusId, newRevision, completed, productionQuantityEventId, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('split', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ProductionCancellation" allow-remote="false">
+        <description>The reviewed plan to cancel a released, running or held run that has postings (design-manufacturing
+            WorkOrderDetail: never a deletion): mode reversal when nothing was received, lost or timed (each issue's unreturned
+            quantity returned into its asset, then the run cancelled), else residual (the unused issues returned when
+            returnUnused, what is left finished as an approved loss, the material variance accepted and the run completed for
+            the cost close), with its steps, the returns and a previewKey; allowed false with NO_FACTS (cancel from the
+            lifecycle), STATUS_INVALID, or the completion's refusal (OUTPUT_HELD, LOSS_PENDING, OPERATION_OPEN). Requires
+            PRODUCTION_VIEW or PRODUCTION_SUPERVISE; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="returnUnused" type="Boolean" default-value="false"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="mode"/>
+            <parameter name="modeText"/>
+            <parameter name="steps" type="List"/>
+            <parameter name="returnRows" type="List"/>
+            <parameter name="facts" type="Map"/>
+            <parameter name="previewKey"/>
+        </out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('previewCancellation', context)"/>
+            <script>ec.context.putAll(preview)</script>
+        </actions>
+    </service>
+    <service verb="cancel" noun="ProductionOrder" allow-remote="false">
+        <description>Cancel a run that has postings by its reviewed plan (preview#ProductionCancellation), in one transaction:
+            a reversal returns each issue (return#UnusedMaterial, STOCK_ISSUE, each with its own cost event) and cancels the run
+            and its operations; a residual close returns the unused issues when asked, finishes what is left as an approved loss,
+            accepts the material variance and completes the run, which Accounting's cost close settles. Nothing is deleted. A
+            retry with the same operation key answers the first. Requires PRODUCTION_SUPERVISE; refuses what the preview
+            refuses, a changed revision (REVISION_REQUIRED, REVISION_CHANGED), no preview or a changed one (PREVIEW_REQUIRED,
+            PREVIEW_CHANGED), a missing reason (REASON_REQUIRED, REASON_INVALID) and returns without STOCK_ISSUE
+            (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="previewKey"/>
+            <parameter name="returnUnused" type="Boolean" default-value="false"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CANCELLED or CLOSED_OUT, workEffortId, mode, statusId,
+                revision, returnReceiptIds, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('cancel', context)"/>
+        </actions>
+    </service>
+    <service verb="clone" noun="ProductionOrder" allow-remote="false">
+        <description>A new draft like a run (design-manufacturing WorkOrderDetail clone): create#ProductionOrder with the
+            run's organization, product, quantity (or the one given), unit, facility (or the one given), BOM and routing, as of
+            now; it copies no posting, manual line or timer, and names the run it was cloned from (PsoClone). A retry with the
+            same operation key answers the first. Requires PRODUCTION_PLAN; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE) and what create#ProductionOrder refuses.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="facilityId"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CLONED, workEffortId (the new draft),
+                sourceWorkEffortId, revision, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionChanges.js')
+                    .execute('clone', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="SupportedAssemblyReversal" allow-remote="false">
+        <description>What the reversal of a pick assembly kit would do (design-manufacturing Disassembly Preview; F29–F32):
+            the kit asset, its pick assembly work effort, what is on hand and was received, and each component issuance slice
+            to cancel, newest first, the slices KitCost.js valued the kits at (lot, status, quantity, and with ACCOUNTING_VIEW
+            its cost and the kits' and slices' value), with a previewKey. Requires PRODUCTION_SUPERVISE or PRODUCTION_VIEW;
+            refuses what reverse#SupportedAssembly refuses before it posts.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"><description>The asset's quantity on hand when empty</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reversal" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="reversal" from="ec.resource.script('component://mr-mantle/service/mantle/work/SupportedAssembly.js')
+                    .execute('preview', context)"/>
+        </actions>
+    </service>
+    <service verb="reverse" noun="SupportedAssembly" allow-remote="false">
+        <description>Reverse a supported pick assembly (design-manufacturing Disassembly Confirm; §12.1; F15, F29–F32): a
+            PtPickAssembly kit still on hand is broken down through ManufacturingServices.breakDown#Assembly without its
+            unissue (its kit receipt lowered, a dated reversing delta with forwardReceiptRepostEnabled), and the component
+            issuance slices its kits used are cancelled newest first, each with its quantity (a dated reversing delta with
+            forwardIssuanceRepostEnabled), so the posted history stays and work in process nets to zero; in one transaction, at
+            the preview the user confirmed. Requires PRODUCTION_SUPERVISE; refuses an asset outside the user's facilities
+            (RECORD_UNAVAILABLE), a product that is not a pick assembly kit or a kit not from a pick assembly
+            (ASSEMBLY_UNSUPPORTED), either flag off for the kit's owner (FORWARD_REPOST_REQUIRED, naming it), more than is on
+            hand (KIT_SOLD: a unit already sold or shipped), a held kit (KIT_HELD), physical-inventory variances on the kit
+            (KIT_COUNTED), a closed period (PERIOD_CLOSED), no components (BOM_MISSING), issued quantities short of what the
+            kit's current components use (BOM_CHANGED), slices whose value differs from the kits' (COST_SLICE_MISMATCH: reverse
+            the newest kits first), no reason (REASON_REQUIRED) and no preview or a changed one (PREVIEW_REQUIRED,
+            PREVIEW_CHANGED). A retry with the same operation key answers the first.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="previewKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REVERSED, assetId, workEffortId, quantity,
+                cancelledIssuanceIds, acctgTransIds (the dated reversing entries), and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/SupportedAssembly.js')
+                    .execute('reverse', context)"/>
+        </actions>
+    </service>
 </services>
