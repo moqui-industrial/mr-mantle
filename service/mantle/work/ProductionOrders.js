@@ -449,6 +449,8 @@ function apply(run, action, p, key, gate) {
         // the short lines of a staged release stay blocked for issue until the stock covers them
         for (const short of gate.shortages || [])
             call("update#" + LINE, {productionRunLineId: short.productionRunLineId, stagedShortQuantity: short.short})
+        // the shortage notice to the planners (impl-manufacturing P5b)
+        ec.resource.script("component://mr-mantle/service/mantle/work/ProductionMaterials.js").notifyShortage(run, gate.shortages)
         clearStagedRequests(run)
         notifySupervisors("ProductionRelease", run, {organizationPartyId: run.ownerPartyId, releasedByUserId: ec.user.userId})
         return Object.assign(answer, {
