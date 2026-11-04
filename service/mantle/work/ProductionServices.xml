@@ -340,8 +340,9 @@ along with this software (see the LICENSE.md file). If not, see
             default), a running run that reconciles after the receipt is completed in the same transaction (completed).
             Requires STOCK_ISSUE; refuses a run outside the user's
             organizations (RECORD_UNAVAILABLE), one not released (RUN_NOT_RELEASED), a line of another run or role
-            (LINE_INVALID, LINE_REQUIRED), a by-product, whose cost
-            allocation is not built (BYPRODUCT_NOT_COSTED; P15), more than the line may still take (OVER_RECEIPT: its target
+            (LINE_INVALID, LINE_REQUIRED), a by-product without a frozen estimate to take its co-product share of (a
+            by-product is received at that share under the organization's ProductionAllocationPolicy, impl-manufacturing
+            P15; BYPRODUCT_NOT_COSTED), more than the line may still take (OVER_RECEIPT: its target
             and the ProductionPolicy's overproduction tolerance as of the release, with a supervisor's approval beyond it,
             less the good, held and lost quantity it accounts for; impl-manufacturing P7), a facility of another
             owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE, LOT_REQUIRED), the destination's
@@ -760,7 +761,9 @@ along with this software (see the LICENSE.md file). If not, see
             an approved loss with the reason) and nothing held awaiting disposition (OUTPUT_HELD), no loss waiting for
             approval (LOSS_PENDING), no operation running or held (OPERATION_OPEN; those not reported complete with it) and
             each material line issued (MATERIAL_UNISSUED, unless acceptMaterialVariance); close is the cost close's
-            (CLOSE_BY_COST_CLOSE). The quality gates (impl-manufacturing P8): start and resume refuse a run with a
+            (CLOSE_BY_COST_CLOSE without PRODUCTION_COST_POST): mantle.ledger.ProductionCostServices.post#CostClose closes a
+            complete run in its transaction once the cost close is posted (COST_CLOSE_NOT_POSTED before; impl-manufacturing
+            P15). The quality gates (impl-manufacturing P8): start and resume refuse a run with a
             failed gate (QUALITY_BLOCKED, naming the inspection); complete refuses a final inspection pending or failed
             (INSPECTION_PENDING, INSPECTION_FAILED) and an in-process gate not passed (QUALITY_GATE_OPEN), before the
             quantities; a release refuses an operation template that is not published (TEMPLATE_UNAVAILABLE); unrelease and
@@ -788,7 +791,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (RELEASED, REEXPLODED, UNRELEASED, STARTED, HELD,
-                RESUMED, CANCELLED, COMPLETED, REQUESTED or APPROVED), workEffortId, action, fromStatusId, statusId, revision; for a
+                RESUMED, CANCELLED, COMPLETED, CLOSED, REQUESTED or APPROVED), workEffortId, action, fromStatusId, statusId, revision; for a
                 release releaseDate, operationWorkEffortIds, staged and shortages; and the operation fields.</description>
             </parameter>
         </out-parameters>
@@ -979,7 +982,8 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="sourceEntityName" required="true"><description>mantle.product.issuance.AssetIssuance or
                 mantle.product.receipt.AssetReceipt, or mantle.work.production.ProductionLoss for a scrap of issued material (P7);
-                later phases add theirs</description></parameter>
+                later phases add theirs; a later revision of a bill match line (P14) is the reversal of its variance once the
+                match is unapplied, recorded by the cost close (P15)</description></parameter>
             <parameter name="sourceId" required="true"/>
             <parameter name="sourceRevision" type="Integer"><description>1 when empty; a correction of the source (a
                 timesheet reopened, a rate changed) is its next revision</description></parameter>

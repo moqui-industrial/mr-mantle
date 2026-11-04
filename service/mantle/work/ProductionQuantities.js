@@ -330,7 +330,7 @@ function completeCheck(run, p = {}, lines = production().linesOf(run.workEffortI
     const open = operations.filter(op => op.statusId !== "WeComplete")
     if (open.length) impact.push("Completes the " + open.length + " operation" + (open.length === 1 ? "" : "s") + " not reported")
     const byproducts = lines.filter(line => line.lineRoleEnumId === "PrlrByproduct")
-    if (byproducts.length) impact.push("By-products are received once their cost allocation exists (the cost close)")
+    if (byproducts.length) impact.push("By-products take their share of the run's cost at the cost close")
     impact.unshift("Completes the work order; Accounting's cost close closes it")
     return {allowed: true, impact}
 }

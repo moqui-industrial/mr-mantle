@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting's production cost close (design-accounting ProductionCostClose and CostingPolicies, AC-07; crosscut §3.24;
+    impl-manufacturing P15): the organization's effective-dated allocation policy (store#AllocationPolicy), what a close
+    allocates of each cost event (P6's ProductionCostAllocation, with the account and component it posted), and the run's
+    cost close (its transaction, date and the policy row it applied). Written only by mantle.ledger.ProductionCostServices. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- The allocation policy of an organization from a date (CostingPolicies): the overhead basis (a rate per work-center
+        hour from each center's WorkCenterRate overhead component, else the policy's own rate; a percentage of the direct
+        labor; or none), the co-product method (quantity normalized to the primary output's unit, the BOM output lines' fixed
+        shares, or relative sales value), whether a close may take explicit output weights, where the scrap of issued material
+        goes (the asset type's scrap account, or production variance) and an account in place of the organization's production
+        variance account. A change ends the row in effect and starts the next (store#AllocationPolicy); the key fields are
+        audit-logged, and a posted close keeps the row it applied (ProductionCostAllocation, the run's
+        productionAllocationPolicyId). With no row the default holds: work-center hours and quantity. -->
+    <entity entity-name="ProductionAllocationPolicy" package="mantle.work.production" cache="never">
+        <field name="productionAllocationPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="overheadBasisEnumId" type="id" enable-audit-log="true"/>
+        <field name="overheadRate" type="currency-precise" enable-audit-log="true"/>
+        <field name="overheadPercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="rateUomId" type="id" enable-audit-log="true"/>
+        <field name="coproductMethodEnumId" type="id" enable-audit-log="true"/>
+        <field name="allowOutputWeights" type="text-indicator" enable-audit-log="true"/>
+        <field name="scrapToVariance" type="text-indicator" enable-audit-log="true"/>
+        <field name="varianceGlAccountId" type="id" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ProductionOverheadBasis" related="moqui.basic.Enumeration" short-alias="overheadBasis">
+            <key-map field-name="overheadBasisEnumId"/></relationship>
+        <relationship type="one" title="ProductionCoproductMethod" related="moqui.basic.Enumeration"
+                short-alias="coproductMethod">
+            <key-map field-name="coproductMethodEnumId"/></relationship>
+        <relationship type="one" title="Rate" related="moqui.basic.Uom" short-alias="rateUom">
+            <key-map field-name="rateUomId"/></relationship>
+        <relationship type="one" title="Variance" related="mantle.ledger.account.GlAccount" short-alias="varianceGlAccount">
+            <key-map field-name="varianceGlAccountId" related="glAccountId"/></relationship>
+        <index name="PRODALLOCPOL_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+
+    <!-- What a cost close posted of an allocation (P6's record): the cost component and account, the accounting day, and
+        whether it was an adjustment after the run's close (R-SA-11). An allocation with no event is the overhead the close
+        applied on an event's hours (its productionCostEventId), or the residual of an output line; destination says where
+        it went (WIP absorption, an output line's share, variance). -->
+    <extend-entity entity-name="ProductionCostAllocation" package="mantle.work.production">
+        <field name="organizationPartyId" type="id"/>
+        <field name="costComponentEnumId" type="id"/>
+        <field name="glAccountId" type="id"/>
+        <field name="accountingDate" type="date"/>
+        <field name="adjustment" type="text-indicator"/>
+        <field name="basisQuantity" type="number-decimal"/>
+        <field name="basisRate" type="currency-precise"/>
+        <field name="sharePercent" type="number-decimal"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" title="ProductionCostComponent" related="moqui.basic.Enumeration" short-alias="component">
+            <key-map field-name="costComponentEnumId"/></relationship>
+        <relationship type="one" related="mantle.ledger.account.GlAccount" short-alias="glAccount"/>
+        <relationship type="one" related="mantle.work.production.ProductionAllocationPolicy" short-alias="policy"/>
+    </extend-entity>
+
+    <!-- The run's cost close (post#CostClose): when it posted, its transaction (none when nothing was left to post), the
+        policy row it applied and its operation; close (transition#ProductionOrder) is refused until it is set. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionCostClosedDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionCostCloseTransId" type="id" enable-audit-log="true"/>
+        <field name="productionAllocationPolicyId" type="id" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

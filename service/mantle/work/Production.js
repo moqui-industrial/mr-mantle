@@ -866,9 +866,9 @@ function outputPlan(userScope, p) {
     const run = runOf(userScope, p.workEffortId)
     requireReleased(run)
     const line = outputLineOf(run, p.productionRunLineId, true)
-    // a by-product's cost is Accounting's allocation (design ByProducts, D12), which is not built: it is not received here
-    if (line.lineRoleEnumId === "PrlrByproduct")
-        denied("BYPRODUCT_NOT_COSTED", "By-product " + line.productId + " is received once its cost allocation exists")
+    // a by-product is received at its co-product allocation (design ByProducts, D12; impl-manufacturing P15): its share of
+    // the frozen estimate under Accounting's allocation policy, refused without one (BYPRODUCT_NOT_COSTED, before anything)
+    const byproduct = line.lineRoleEnumId === "PrlrByproduct"
     const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
     const unit = unitOf(line, p.quantity, p.quantityUomId)
     // what the line may still take: its target and the run's overproduction tolerance, with a supervisor's approval beyond
@@ -929,7 +929,11 @@ function outputPlan(userScope, p) {
     )
     if (!target.locationSeqId && facility.assetInventoryLocRequire === "Y")
         denied("LOCATION_REQUIRED", "Choose where the output goes")
-    const cost = outputCost(run, line, unit.stockQuantity)
+    const cost = byproduct
+        ? ec.resource
+              .script("component://mr-mantle/service/mantle/ledger/ProductionCostClose.js")
+              .byproductCost(run, line, unit.stockQuantity)
+        : outputCost(run, line, unit.stockQuantity)
     return {
         run,
         line,

@@ -803,7 +803,7 @@ feature("under the completeOnFinalReceipt flag the final output receipt complete
     }
 })
 
-feature("a draft's by-product is planned, refused for receipt until its cost allocation, and estimated by quantity", {
+feature("a draft's by-product is planned, estimated by quantity and received at that share (impl-manufacturing P15)", {
     when() {
         const workEffortId = draft(10)
         const added = run("ppq_planner", P + "store#ProductionOutput", {
@@ -850,6 +850,9 @@ feature("a draft's by-product is planned, refused for receipt until its cost all
             produce,
             late,
             byproductReceipt,
+            byproductCosts: (byproductReceipt.result?.assetIds || []).map(assetId =>
+                n(one("mantle.product.asset.Asset", {assetId}).acquireCost)
+            ),
             read: quantities("ppq_finance", workEffortId),
             readerRead: quantities("ppq_reader", workEffortId)
         }
@@ -863,7 +866,12 @@ feature("a draft's by-product is planned, refused for receipt until its cost all
         x.produce[0].typeEnumId == "WeptProduce"
         n(x.produce[0].estimatedQuantity) == 2
         x.late.error.includes("RUN_NOT_DRAFT")
-        x.byproductReceipt.error.includes("BYPRODUCT_NOT_COSTED")
+        // 2 of the 12 output units by quantity take 2/12 of the estimate 50
+        x.byproductReceipt.error == ""
+        x.byproductReceipt.result.costSource == "allocation"
+        x.byproductCosts.length == 1
+        // the share is a currency amount, 8.33 for the line's 2, so a unit takes 4.165
+        Math.abs(x.byproductCosts[0] - 4.165) < 0.0001
         x.read.outputRows.length == 2
         x.read.allocation.available == true
         x.read.allocation.totalCost == "50"

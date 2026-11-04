@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting's production cost close (design-accounting ProductionCostClose and CostingPolicies, AC-07; crosscut §3.24;
+    impl-manufacturing P15), over Manufacturing's cost events (mantle.work.ProductionServices.record#ProductionCostEvent):
+    the allocation policy, the preview and post of a run's close with its adjustments after the close, the run's posted
+    close, a review returned to production and the period close rows (ProductionCostClose.js). Each service checks its
+    permission and the organization itself. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="AllocationPolicies" allow-remote="false">
+        <description>The organization's production allocation policy (CostingPolicies): the row in effect now (the default,
+            work-center hours and quantity, when none is), and every row newest first with its state. Requires
+            ACCOUNTING_VIEW, ACCOUNTING_GL_POST, ACCOUNTING_ADMIN or PRODUCTION_COST_POST, or PRODUCTION_VIEW for the bases
+            and methods without the rates and the variance account (PERMISSION_DENIED); refuses an organization the user
+            does not work in (ORGANIZATION_DENIED).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="policyRows" type="List"/>
+            <parameter name="expectedFromDate" type="Timestamp"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('policies', context)"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="policy" from="out.policy"/>
+            <set field="policyRows" from="out.policyRows"/>
+            <set field="expectedFromDate" from="out.expectedFromDate"/>
+            <set field="canEdit" from="out.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="AllocationPolicy" allow-remote="false">
+        <description>Change the organization's production allocation policy (CostingPolicies, finance administration): a new
+            ProductionAllocationPolicy row from fromDate (now when empty) ending the row in effect, with its key fields
+            audit-logged with the reason. A field not given keeps the previous row's value, an empty one clears it. Requires
+            ACCOUNTING_ADMIN (PERMISSION_DENIED); refuses another organization (ORGANIZATION_DENIED), no reason
+            (CHANGE_REASON_REQUIRED), a stale form (POLICY_CHANGED: expectedFromDate is not the row in effect), a start before
+            now, a second row at the same time, an unknown basis or method, a labor percentage basis without its percentage,
+            a negative rate (POLICY_INVALID) and a variance account not active for the organization
+            (ACCOUNT_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="expectedFromDate" type="Timestamp"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="overheadBasisEnumId"><description>PobWorkCenterHour, PobLaborPercent or PobNone</description>
+            </parameter>
+            <parameter name="overheadRate"><description>Per work-center hour, for a center with no overhead
+                WorkCenterRate</description></parameter>
+            <parameter name="overheadPercent"><description>Of direct labor, with PobLaborPercent</description></parameter>
+            <parameter name="rateUomId"/>
+            <parameter name="coproductMethodEnumId"><description>PcmQuantity, PcmFixedShare or PcmSalesValue</description>
+            </parameter>
+            <parameter name="allowOutputWeights"/>
+            <parameter name="scrapToVariance"/>
+            <parameter name="varianceGlAccountId"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionAllocationPolicyId"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="policyRows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('storePolicy', context)"/>
+            <set field="productionAllocationPolicyId" from="out.productionAllocationPolicyId"/>
+            <set field="policy" from="out.policy"/>
+            <set field="policyRows" from="out.policyRows"/>
+        </actions>
+    </service>
+    <service verb="define" noun="CostCloseParameters" type="interface">
+        <description>The run and accounting day of a cost close.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="accountingDate" type="Date"><description>The review's proposed day, else today</description>
+            </parameter>
+            <parameter name="outputWeights" type="Map"><description>An output line's weight by its productionRunLineId, only
+                where the effective policy allows explicit weights</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="CostClose" allow-remote="false">
+        <description>Preview a production run's cost close (design-accounting ProductionCostClose; D12, R-SA-01): the events
+            not yet in the GL absorbed by cost component (Dr WIP; Cr applied labor, applied machine and overhead, the
+            outside-processing accrual), the variance of a subcontract bill whose match was unapplied reversed, the overhead
+            of the effective ProductionAllocationPolicy (per work-center hour of the operations' machine runtime, else their
+            labor, at the center's overhead rate; a percentage of labor; none), the scrap of issued material moved out of WIP
+            (to its asset type's scrap account, or variance), the co-product split of the run's cost over its output lines
+            and the residual WIP to production variance, the ledger lines, the findings and the inputFingerprint
+            post#CostClose takes. After the run's close it previews the late events as an adjustment (R-SA-11). The findings
+            block the post: a run not complete, unvalued events, movements that posted nothing, another currency, time on a
+            timesheet not approved, a closed or missing fiscal period, an unmapped or inactive account, explicit weights the
+            policy does not allow, a missing share or sales price, and nothing to adjust. Reads only. Requires
+            ACCOUNTING_GL_POST or PRODUCTION_COST_POST (PERMISSION_DENIED); refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.ledger.ProductionCostServices.define#CostCloseParameters"/>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="mode"><description>close, or adjustment after the run's close</description></parameter>
+            <parameter name="modeText"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="accountingDate"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="absorptionRows" type="List"/>
+            <parameter name="overheadRows" type="List"/>
+            <parameter name="scrapRows" type="List"/>
+            <parameter name="outputRows" type="List"/>
+            <parameter name="ledgerRows" type="List"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="blocked" type="Boolean"/>
+            <parameter name="canPost" type="Boolean"/>
+            <parameter name="inputFingerprint"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('preview', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="post" noun="CostClose" allow-remote="false">
+        <description>Post a previewed production cost close in one run-level transaction (design-accounting
+            ProductionCostClose; D12, R-SA-11): one AttManufacturing AcctgTrans of the preview's ledger lines (none when
+            nothing is left to post), the absorbed events marked posted at the close with it, a ProductionCostAllocation per
+            absorbed event, overhead, scrap, output line share and variance under the policy row it applied, and, unless it
+            is an adjustment after the close, the run's close recorded (productionCostClosedDate, its transaction and policy,
+            the review PcrClosed) and the run closed through transition#ProductionOrder (WeComplete to WeClosed); the review
+            notices are marked read. A retry with the same operation key answers the first post. Requires PRODUCTION_COST_POST
+            (PERMISSION_DENIED); refuses a run outside the user's organizations (RECORD_UNAVAILABLE), no preview
+            (PREVIEW_REQUIRED), evidence changed since the preview (STALE_PREVIEW), any finding of the preview (by its code:
+            PERIOD_CLOSED, TIME_UNAPPROVED, UNVALUED_EVENTS, RUN_NOT_COMPLETE, ...) and a posting the ledger refuses
+            (POSTING_REFUSED).</description>
+        <implements service="mantle.ledger.ProductionCostServices.define#CostCloseParameters"/>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="inputFingerprint" required="true"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode CLOSED or ADJUSTED, workEffortId, mode, acctgTransId,
+                productionCostAllocationIds, productionAllocationPolicyId, accountingDate, variance, statusId, revision,
+                transitionResultCode, alreadyApplied</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('post', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CostClose" allow-remote="false">
+        <description>A production run's posted cost close: whether and when it was closed, its transaction and the policy row
+            it applied, the review state, and each allocation (destination, component, line, share; amounts, accounts and
+            transactions only with ACCOUNTING_VIEW, ACCOUNTING_GL_POST or PRODUCTION_COST_POST). Reads only. Requires one of
+            those or PRODUCTION_VIEW (PERMISSION_DENIED); refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="closed" type="Boolean"/>
+            <parameter name="closedDate" type="Timestamp"/>
+            <parameter name="closedDateText"/>
+            <parameter name="acctgTransId"/>
+            <parameter name="productionAllocationPolicyId"/>
+            <parameter name="reviewStatusId"/>
+            <parameter name="reviewStatusText"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="allocationRows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('closeOf', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="return" noun="CostReview" allow-remote="false">
+        <description>Return a requested cost review to production with a note (PcrReturned), so Manufacturing may request it
+            again; the review notices are marked read. Requires PRODUCTION_COST_POST (PERMISSION_DENIED); refuses a run
+            outside the user's organizations (RECORD_UNAVAILABLE), a review not requested (REVIEW_NOT_REQUESTED) and no note
+            (NOTE_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="note" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('returnReview', context)"/>
+        </actions>
+    </service>
+    <service verb="check" noun="ProductionClose" allow-remote="false">
+        <description>The production rows of the period close checklist (CloseServices.define#CloseCheck): the WIP accounts at
+            the period's end against the production runs' WIP from their cost events and allocations, with the runs that
+            hold WIP (PccProductionWip), and the runs completed by the period's end and not cost closed, with the closed runs
+            that have cost events after their close (PccProductionCostClose). Refuses a user who may not read the
+            organization's periods.</description>
+        <implements service="mantle.ledger.CloseServices.define#CloseCheck"/>
+        <actions>
+            <set field="checked" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/ProductionCostClose.js')
+                    .execute('closeCheck', context)"/>
+            <set field="count" from="checked.count"/>
+            <set field="items" from="checked.items"/>
+        </actions>
+    </service>
+</services>
