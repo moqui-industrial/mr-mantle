@@ -331,8 +331,9 @@ function clearNotices(source) {
 // The step waiting of a source, to its approvers who may decide it (the placer left out unless self-approval is allowed,
 // and those the step's separation or quorum refuses): one message for a step one approval decides, one per approver for a
 // quorum, so one approver's decision does not read the others' copies. A failure is logged and the change stays.
-function notify(source, state = progress(source)) {
+function notify(source, state = null) {
     try {
+        state = state || progress(source)
         clearNotices(source)
         if (!state.current || state.refused) return {notifiedCount: 0}
         const step = state.current
@@ -361,9 +362,12 @@ function notify(source, state = progress(source)) {
 // handle#PurchaseApprovalRevision, the SECA on increment#OrderRevision: a commercial change of a purchase order (not a
 // status, file or note) after a decision supersedes the decisions of earlier revisions, and a placed order sent for approval
 // goes back to its first step's approvers at the new revision. An order with neither a decision nor an approval notice
-// returns at once. No permission check: it runs as any user.
+// returns at once, and so does an order with no purchase part (a sales order: every order's revision passes here, and
+// NotificationMessage has no index on its record). No permission check: it runs as any user.
 function revisionChanged(p) {
     if (["status", "content", "note"].includes(p.revisionKind) || blank(p.orderId)) return {supersededCount: 0}
+    const part = rows("mantle.order.OrderPart", {orderId: p.orderId}).find(row => orders().isPurchasePart(row))
+    if (!part) return {supersededCount: 0}
     const decisions = rows(DECISION, {sourceEntityName: ORDER, sourceId: p.orderId}).filter(row => !row.supersededDate)
     const noticed =
         find("moqui.security.user.NotificationMessage", {
@@ -384,16 +388,14 @@ function revisionChanged(p) {
     // be refused as stale
     if ((stale.length || noticed) && order.statusId === "OrderPlaced") {
         try {
-            const part = rows("mantle.order.OrderPart", {orderId: p.orderId})[0]
-            if (part && orders().isPurchasePart(part))
-                notify(
-                    orderSource({
-                        orderId: String(p.orderId),
-                        part,
-                        organizationPartyId: part.customerPartyId,
-                        supplierPartyId: part.vendorPartyId
-                    })
-                )
+            notify(
+                orderSource({
+                    orderId: String(p.orderId),
+                    part,
+                    organizationPartyId: part.customerPartyId,
+                    supplierPartyId: part.vendorPartyId
+                })
+            )
         } catch (error) {
             ec.logger.error("Purchase order " + p.orderId + " was not resubmitted for approval: " + error.message)
         }
