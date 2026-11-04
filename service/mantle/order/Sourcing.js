@@ -381,9 +381,12 @@ function followItem(rfq, requestItemSeqId) {
             })
             if (removed) continue
         } else if (line) {
+            // the line's price given (unpriced until the supplier answers): without one update#OrderItem prices it by the
+            // resolver (F-P12-4)
             call("mantle.order.OrderServices.update#OrderItem", {
                 orderId: invitation.orderId,
                 orderItemSeqId: line.orderItemSeqId,
+                unitAmount: line.unitAmount ?? 0,
                 quantity: item.quantity,
                 quantityUomId: item.quantityUomId,
                 requiredByDate: item.requiredByDate,
@@ -436,6 +439,8 @@ function quoteOrder(rfqOrNull, organizationPartyId, supplierPartyId, statusId, c
         orderName: rfqOrNull ? "RFQ " + rfqOrNull.requestId + " · " + (rfqOrNull.request.requestName || "") : null,
         statusId
     })
+    // P12: marked a supplier quote, so the purchase order lists leave out the quotes never placed (F-P12-1)
+    call("update#" + ORDER, {orderId: created.orderId, supplierQuote: "Y"})
     return {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, supplierResult: checked.result}
 }
 // store#QuoteInvitation: a supplier invited to an RFQ (its quote order in OrderRequested, a line per item), or a requested
@@ -916,6 +921,9 @@ function storeQuoteItem(p) {
     const line = one(ORDER_ITEM, {orderId: po.orderId, orderItemSeqId: p.orderItemSeqId})
     if (!line) denied("ITEM_UNAVAILABLE", "Line " + p.orderItemSeqId + " is not on quote " + po.orderId)
     if (values.unitAmount != null) values.isModifiedPrice = "Y"
+    // P12: any change without a price keeps the quoted one (update#OrderItem without a unitAmount prices a product line again
+    // by the resolver, whatever field changed; F-P12-4)
+    else if (Object.keys(values).length) Object.assign(values, {unitAmount: dec(line.unitAmount), isModifiedPrice: "Y"})
     if (Object.keys(values).length)
         call(
             "mantle.order.OrderServices.update#OrderItem",

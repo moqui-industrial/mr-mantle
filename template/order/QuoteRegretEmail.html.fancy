@@ -1,0 +1,19 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- The regret notice to a supplier whose quote was not awarded (mantle.order.SourcingServices.close#QuoteRequest,
+     R-PUR-35): the message the buyer reviewed, then the RFQ and the supplier's own quote reference. It names no other
+     supplier, price or award. -->
+<div style="font:11pt Helvetica,Arial,sans-serif">
+<#list String(message).split('\n') as messageLine>${messageLine}<br></#list>
+<p style="color:#59606b;margin-top:16px">${ec.l10n.localize('Request for quotation')} ${requestId}<#if requestName> · ${requestName}</#if><#if reference> · ${ec.l10n.localize('your reference')} ${reference}</#if></p>
+</div>

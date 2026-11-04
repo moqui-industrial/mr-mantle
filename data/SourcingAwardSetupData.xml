@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- An award of an RFQ's quotes waiting for a decision (impl-purchasing P12; design-purchasing §5 Award, D8), seeded as P4's
+        and P10's topics are: sent by commit#Award when the buying organization has award (PasAward) approval policy rows in
+        effect, one message per approver of the step waiting; approve#NotificationMessage and refuse#NotificationMessage call
+        mantle.order.PurchaseServices approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the award at
+        the revision in the message (sourceRevision, the time it was submitted) through decide#AwardApproval; the last step's
+        approval places the award's quotes, a refusal leaves them unplaced and needs a reason. The message holds requestId,
+        requestName, awardKey (the award's operation key), revisionText, organizationName, supplierText, amountText and
+        stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseAwardApproval" inboxEnumId="NinNotifications"
+            description="Award of supplier quotes to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve the award of RFQ ${requestId} ${requestName} of ${organizationName} to ${supplierText}, ${amountText} (${stepText})"/>
+    <!-- A regret notice to a supplier whose quote was not awarded (close#QuoteRequest, R-PUR-35): from the buying organization's
+        order or primary address; the service passes subject, fromAddress and fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RFQ_REGRET_EMAIL" description="Quote not awarded"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+</entity-facade-xml>

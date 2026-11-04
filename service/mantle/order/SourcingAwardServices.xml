@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The comparison and award of supplier quotes (design-purchasing §5 QuoteComparison, Award; impl-purchasing P12, §4, R-PUR-35,
+    D8, D10, D19, F19, F35), over Awards.js, included by name in mantle.order.SourcingServices (SourcingServices.xml). No award
+    record: an award places the quote order ("Place from Quote") with its RequirementSupply links, and the quotes left are
+    cancelled as Not awarded ("Cancel Quote"). Every verb checks its permission (PURCHASE_ORDER_EDIT; the comparison also a
+    purchase approver; the award's decision PURCHASE_APPROVE) and the RFQ's organization. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="compare" noun="SupplierQuotes" allow-remote="false">
+        <description>An RFQ's quotes compared per demand line (its items, or the one chosen): each offer (a quote line linked to
+            the item, or another line of the quote of a pack or declared substitute of its product) in the item's unit through
+            the unit conversions and pack products, priced at the compared quantity (the item's quantity left to award, or the
+            quantity given for the one chosen) by the quote's published tier rows else the line's price, in the display currency
+            (the RFQ's by default) at Accounting's dated rate of the day given (today by default). The original basis (quoted
+            quantity, unit, price and currency) shows beside the normalized one; the committed price and amount and the
+            estimated landed cost (with the quote's freight estimate) stay apart. A missing rate, unit, conversion or price is
+            Not comparable with its reason and a missing freight leaves the landed cost Unknown, never zero or cheapest; an
+            expired or awarded offer is not ranked. The comparable offers are ranked by unit price with the reason; the ranking
+            chooses nothing. With output csv or print, the comparison as CSV text or as the print's HTML. Requires
+            PURCHASE_ORDER_EDIT, PURCHASE_APPROVE or PURCHASE_ORDER_APPROVE; refuses an RFQ outside the user's organizations
+            (RECORD_UNAVAILABLE), an item not on it (ITEM_UNAVAILABLE), a display unit that is not a currency (CURRENCY_INVALID)
+            and a negative quantity (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestItemSeqId"><description>One demand line (phones and the terminal pick one)</description></parameter>
+            <parameter name="quantity" type="BigDecimal"><description>The compared quantity of the one demand line</description></parameter>
+            <parameter name="displayCurrencyUomId"/>
+            <parameter name="fxDate"><description>The day of the exchange rates (yyyy-MM-dd or a date)</description></parameter>
+            <parameter name="output"><description>csv or print</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="basis" type="Map"><description>requestId, requestName, organizationName, sourceRevision,
+                revisionText, displayCurrencyUomId, fxDay and basisText</description></parameter>
+            <parameter name="demandRows" type="List"/>
+            <parameter name="offerRows" type="List"/>
+            <parameter name="csvText"/>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('compare', context))</script>
+        </actions>
+    </service>
+    <service verb="preview" noun="Award" allow-remote="false">
+        <description>An award checked without writing anything: the allocations (allocations, or allocationsText) grouped per
+            quote, each group with its supplier, amount, due date, the buying policy's supplier check, the budget decision of
+            its lines no purchase request reserved (check#Budget; WITHHELD for a user who may not read budgets, the purchase
+            order's approval deciding it) and its failure by name: a quote not of the RFQ (INVITATION_UNAVAILABLE), not
+            answered or closed (QUOTE_CLOSED), expired (QUOTE_EXPIRED), changed since compared (SOURCE_CHANGED, against
+            quoteRevisions), a stopped supplier (SUPPLIER_BLOCKED, SUPPLIER_SUSPENDED, SUPPLIER_UNAPPROVED), a product not
+            usable for buying (PRODUCT_NOT_USABLE), a line of another product (PRODUCT_DIFFERENT), unit (UOM_INCOMPATIBLE,
+            UOM_MISSING) or no price (NOT_QUOTED), part of a pack (QUANTITY_NOT_WHOLE), a substitute not accepted
+            (INVALID_SUBSTITUTE), more than the demand left (DEMAND_ALREADY_COVERED) or a budget Stop (BUDGET_STOP); each
+            demand line's quantity left, allocated and still uncovered; whether the award needs approval. Requires
+            PURCHASE_ORDER_EDIT; refuses an RFQ outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="allocations" type="List"><description>Each orderId, orderItemSeqId, requestItemSeqId, quantity (in
+                the demand's unit) and substituteApproved</description></parameter>
+            <parameter name="allocationsText"><description>orderId:orderItemSeqId:requestItemSeqId:quantity[:S] entries
+                separated by ; or new lines (S accepts a substitute)</description></parameter>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="quoteRevisions"><description>orderId:orderRevision pairs separated by commas</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="sourceChanged" type="Boolean"/>
+            <parameter name="sourceChangedText"/>
+            <parameter name="groupRows" type="List"><description>The result envelope per quote (design RequestSourcing's fields)
+                with its lineRows</description></parameter>
+            <parameter name="demandRows" type="List"/>
+            <parameter name="approvalRequired" type="Boolean"/>
+            <parameter name="approvalText"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="canCommit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('preview', context))</script>
+        </actions>
+    </service>
+    <service verb="commit" noun="Award" allow-remote="false">
+        <description>An award placed: each quote of the allocations in its own transaction (commit#AwardGroup), each chosen
+            line's quantity set to its allocation (audit-logged, a tier price where one applies), the quote's other product lines
+            taken off and named in a note, RequestItemOrder and RequirementSupply for purchase request demand (the requirement
+            Ordered once covered) and the quote placed ("Place from Quote"), where the approval gate keeps it from approval until
+            decided; never approved or sent. A group fails by name (preview#Award's codes) and the others are placed; the result
+            per group; the same operation key answers the first result. Where the organization has award approval policy rows
+            (PasAward) in effect, nothing is placed: the award is sent on the PurchaseAwardApproval topic (PENDING_APPROVAL) and
+            placed at its last approval (decide#AwardApproval). Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ
+            (REQUEST_CLOSED), no allocation (ALLOCATION_REQUIRED), an RFQ changed since compared (SOURCE_CHANGED), a key used
+            for another request (OPERATION_KEY_CONFLICT) and, for an award to approve, a missing rate (RATE_MISSING) or policy
+            (POLICY_MISSING).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="allocations" type="List"/>
+            <parameter name="allocationsText"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="quoteRevisions"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="resultStatus"><description>PLACED, FAILED or PENDING_APPROVAL</description></parameter>
+            <parameter name="groupRows" type="List"/>
+            <parameter name="placedCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="awardKey"/>
+            <parameter name="sourceRevision" type="Long"><description>The award's revision, for its approval</description></parameter>
+            <parameter name="stepText"/>
+            <parameter name="notifiedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('commit', context))</script>
+        </actions>
+    </service>
+    <service verb="commit" noun="AwardGroup" allow-remote="false">
+        <description>Internal to commit#Award and decide#AwardApproval: one quote placed as its award group, in the caller's
+            transaction (each group its own), under the lock of the quote and of its lines' requirements, every check of
+            preview#Award read again; a quote this award (operationKey) placed already answers existing. Requires
+            PURCHASE_ORDER_EDIT, or for an approved award (awardKey) PURCHASE_APPROVE.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="lines" type="List"><description>Each orderItemSeqId, requestItemSeqId, quantity (in the demand's unit)
+                and substituteApproved</description></parameter>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="quoteRevision" type="Long"/>
+            <parameter name="quoteStamp"><description>The quote's terms as an award waiting for its approval saw them
+                (SOURCE_CHANGED when they changed since)</description></parameter>
+            <parameter name="awardKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="statusId"/>
+            <parameter name="existing" type="Boolean"/>
+            <parameter name="allocatedQuantity"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('commitGroup', context))</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="AwardApproval" allow-remote="false">
+        <description>A purchase approver's decision on an award waiting (PurchaseAwardApproval, the topic's handler through
+            approve#PurchaseSource and refuse#PurchaseSource): the step waiting at the award's revision decided
+            (record#AwardDecision, committed on its own); a refusal (with its reason) leaves the quotes unplaced, the last step's
+            approval places the award's groups as commit#Award does and keeps the result, another step goes to its approvers. A
+            decided award answers its result. Requires PURCHASE_APPROVE; refuses an award not of the RFQ (AWARD_UNAVAILABLE), a
+            stale revision naming the current one (STALE_REVISION), a closed RFQ (REQUEST_CLOSED) and the steps' refusals
+            (NOT_ELIGIBLE, SELF_APPROVAL, ALREADY_DECIDED, SEPARATION_REQUIRED, POLICY_MISSING, REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="awardKey" required="true"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="resultStatus"><description>PLACED, FAILED, REFUSED or WAITING</description></parameter>
+            <parameter name="stepText"/>
+            <parameter name="groupRows" type="List"/>
+            <parameter name="placedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('decide', context))</script>
+        </actions>
+    </service>
+    <service verb="record" noun="AwardDecision" allow-remote="false">
+        <description>Internal to decide#AwardApproval, in its own transaction: the decision kept at the award's revision
+            (PurchaseApprovalDecision of the RFQ), the award refused, approved for placing or sent to its next step. Requires
+            PURCHASE_APPROVE.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="awardKey" required="true"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultStatus"/>
+            <parameter name="stepText"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('recordDecision', context))</script>
+        </actions>
+    </service>
+    <service verb="close" noun="QuoteRequest" allow-remote="false">
+        <description>The losing side of an RFQ closed (R-PUR-35): each quote left (requested or proposed) cancelled as Not
+            awarded ("Cancel Quote"; "Cancel Quote Request" for one never answered) with a note, its supplier pages' capabilities
+            revoked, and with sendRegret the regret notice (regretMessage, reviewed in the preview; a default when empty) mailed
+            to each address of the supplier in its own transaction with a result per recipient (SENT, QUEUED, or FAILED with
+            RECIPIENT_REQUIRED, RECIPIENT_INVALID or DELIVERY_FAILED while the others go); the RFQ Completed. The awarded
+            quotes, their orders and the demand left uncovered (for the next run) stay; a warning names draft purchase orders
+            still open for the same demand. With preview, what it would do and to whom, writing nothing. The same operation key
+            answers the first result. Requires PURCHASE_ORDER_EDIT; refuses a closed RFQ (REQUEST_CLOSED), an award waiting for
+            its approval (AWARD_PENDING) and a key used for another request (OPERATION_KEY_CONFLICT).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+            <parameter name="sendRegret" type="Boolean" default="false"/>
+            <parameter name="regretMessage"/>
+            <parameter name="reason"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="closingRows" type="List"/>
+            <parameter name="awardedRows" type="List"/>
+            <parameter name="recipientRows" type="List"/>
+            <parameter name="regretMessage"/>
+            <parameter name="warningText"/>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('close', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SupplierQuoteFreight" allow-remote="false">
+        <description>A requested or proposed quote's freight estimate (design QuoteTerms): its one freight line (ItemShipping,
+            no product) set, changed (audit-logged with the reason) or, with no amount, taken off; the comparison's estimated
+            landed cost adds it. Requires PURCHASE_ORDER_EDIT; refuses an order outside the user's organizations
+            (RECORD_UNAVAILABLE), one that is not a requested or proposed quote (QUOTE_CLOSED) and a negative amount
+            (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="orderItemSeqId"/></out-parameters>
+        <actions>
+            <set field="orderItemSeqId" from="ec.resource.script('component://mr-mantle/service/mantle/order/Awards.js')
+                    .execute('storeFreight', context).orderItemSeqId"/>
+        </actions>
+    </service>
+</services>

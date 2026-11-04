@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The comparison and award of supplier quotes (design-purchasing §5 QuoteComparison, Award; impl-purchasing P12, §4, F19):
+    no award record. An award places the quote order ("Place from Quote") with its RequirementSupply links; the quotes not
+    awarded are cancelled ("Cancel Quote"). A quote order is marked when it is made (supplierQuote), so the purchase order
+    lists can leave out the quotes that never left the quote statuses (F-P12-1). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <!-- Y on an order made as a supplier's quote (requested or proposed, Sourcing.js quoteOrder); kept once an award places
+            it, so a quote that was never placed (no placedDate) is told from a purchase order -->
+        <field name="supplierQuote" type="text-indicator"/>
+        <seed-data>
+            <!-- a requested quote never answered is cancelled when its RFQ closes (close#QuoteRequest): it was not awarded, and
+                OrderRejected ("Reject Request") is the supplier's decline -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OrderRequested" toStatusId="OrderCancelled"
+                    transitionName="Cancel Quote Request"/>
+        </seed-data>
+    </extend-entity>
+</entities>
