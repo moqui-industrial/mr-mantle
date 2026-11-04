@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Production quantities, by-products and loss (design-manufacturing Quantities, ScrapLoss, §12.2; impl-manufacturing P7): the
+    kinds of a quantity event and a loss, a loss's approval status, the two cost event types a loss writes, and the two
+    approval notices sent to the run organization's PRODUCTION_SUPERVISE holders. Both are decided on the record
+    (approve#ProductionException), never from the notification (F40), so neither has an approve service; the decision marks
+    them read. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType description="Production Quantity Event Type" enumTypeId="ProductionQuantityEventType"/>
+    <moqui.basic.Enumeration description="Good" enumId="PqetGood" enumTypeId="ProductionQuantityEventType" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Produced, held" enumId="PqetPending" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Process loss" enumId="PqetProcessLoss" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Scrap" enumId="PqetScrap" enumTypeId="ProductionQuantityEventType" sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Rework" enumId="PqetRework" enumTypeId="ProductionQuantityEventType" sequenceNum="5"/>
+    <moqui.basic.Enumeration description="Target changed" enumId="PqetTargetChange" enumTypeId="ProductionQuantityEventType"
+            sequenceNum="6"/>
+    <moqui.basic.Enumeration description="Overproduction requested" enumId="PqetOverproduction"
+            enumTypeId="ProductionQuantityEventType" sequenceNum="7"/>
+
+    <moqui.basic.EnumerationType description="Production Approval" enumTypeId="ProductionApproval"/>
+    <moqui.basic.Enumeration description="Waiting for a supervisor" enumId="PapPending" enumTypeId="ProductionApproval"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Approved" enumId="PapApproved" enumTypeId="ProductionApproval" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Refused" enumId="PapRefused" enumTypeId="ProductionApproval" sequenceNum="3"/>
+
+    <moqui.basic.EnumerationType description="Production Loss Type" enumTypeId="ProductionLossType"/>
+    <moqui.basic.Enumeration description="Issued component scrapped" enumId="PltComponentScrap"
+            enumTypeId="ProductionLossType" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output scrapped" enumId="PltOutputScrap" enumTypeId="ProductionLossType"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Process loss" enumId="PltProcessLoss" enumTypeId="ProductionLossType"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Rework" enumId="PltRework" enumTypeId="ProductionLossType" sequenceNum="4"/>
+
+    <moqui.basic.StatusType statusTypeId="ProductionLoss" description="Production loss"/>
+    <moqui.basic.StatusItem statusId="PlsPending" statusTypeId="ProductionLoss" description="Waiting for a supervisor"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PlsApproved" statusTypeId="ProductionLoss" description="Recorded" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PlsRefused" statusTypeId="ProductionLoss" description="Refused" sequenceNum="3"/>
+    <moqui.basic.StatusFlow statusFlowId="ProductionLoss" statusTypeId="ProductionLoss" description="Production loss approval"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionLoss" statusId="PlsPending" toStatusId="PlsApproved"
+            transitionName="Approve" userPermissionId="PRODUCTION_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionLoss" statusId="PlsPending" toStatusId="PlsRefused"
+            transitionName="Refuse" userPermissionId="PRODUCTION_SUPERVISE"/>
+
+    <!-- the cost events of a loss: issued material scrapped in WIP (its value, for the cost close's scrap variance; no stock
+        moves, so nothing posts now) and output issued back to the run (the issuance's hook posts it back into WIP) -->
+    <moqui.basic.Enumeration description="Issued material scrapped" enumId="PcetMaterialScrap"
+            enumTypeId="ProductionCostEventType" sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Output scrapped back to the run" enumId="PcetOutputScrap"
+            enumTypeId="ProductionCostEventType" sequenceNum="5"/>
+
+    <moqui.security.user.NotificationTopic topic="ProductionLossApproval" inboxEnumId="NinNotifications"
+            description="Production loss to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve a loss of ${quantity} ${productName} on work order ${workEffortId}"/>
+    <moqui.security.user.NotificationTopic topic="ProductionOverproduction" inboxEnumId="NinNotifications"
+            description="Overproduction to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve ${quantity} more ${productName} on work order ${workEffortId}"/>
+</entity-facade-xml>
