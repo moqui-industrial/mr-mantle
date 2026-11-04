@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The production schedule (design-manufacturing ProductionSchedule, Operations' Reschedule, §12 M5 and M10;
+    impl-manufacturing P12; ProductionSchedule.js): an operation's schedule revision, and each schedule change an operation
+    went through or was asked for (a move, an unschedule, a supervisor's override request and its decision). A file of its
+    own so it merges apart from ProductionEntities.xml. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- An operation child's schedule revision: schedule#ProductionOperation takes it as the expected revision and adds one with
+        each change of the operation's work center or dates. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="scheduleRevision" type="number-integer" enable-audit-log="true"/>
+    </extend-entity>
+
+    <entity entity-name="ProductionScheduleChange" package="mantle.work.production" cache="never">
+        <description>One schedule change of a production operation (schedule#ProductionOperation): a move to a work center and
+            dates, or an unschedule, applied or requested. A change with conflicts is applied only with a supervisor's override
+            (overrideApplied Y, its reason kept); a scheduler without that authority requests it (SchRequested), and a supervisor
+            applies or refuses the request. The work center's capacity is never changed by an override. The row keeps where the
+            operation was and where it went, the conflicts found when it was applied or asked for, and who did what.</description>
+        <field name="scheduleChangeId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"><description>The operation</description></field>
+        <field name="runWorkEffortId" type="id"/>
+        <field name="changeKindEnumId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="fromFacilityId" type="id"/>
+        <field name="fromStartDate" type="date-time"/>
+        <field name="fromEndDate" type="date-time"/>
+        <field name="toFacilityId" type="id"/>
+        <field name="toStartDate" type="date-time"/>
+        <field name="toEndDate" type="date-time"/>
+        <field name="fromRevision" type="number-integer"><description>The operation's schedule revision the change was made or
+            asked at</description></field>
+        <field name="runRevision" type="number-integer"/>
+        <field name="reason" type="text-long"/>
+        <field name="conflictsJson" type="text-very-long"><description>The conflicts found: [{code, message}]</description></field>
+        <field name="overrideApplied" type="text-indicator"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionReason" type="text-long"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" title="Run" related="mantle.work.effort.WorkEffort" short-alias="run">
+            <key-map field-name="runWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="ScheduleChangeKind" related="moqui.basic.Enumeration" short-alias="kindEnum">
+            <key-map field-name="changeKindEnumId"/></relationship>
+        <relationship type="one" title="ProductionScheduleChange" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="From" related="mantle.facility.Facility">
+            <key-map field-name="fromFacilityId" related="facilityId"/></relationship>
+        <relationship type="one" title="To" related="mantle.facility.Facility">
+            <key-map field-name="toFacilityId" related="facilityId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="PRODSCHCHG_OPER"><index-field name="workEffortId"/></index>
+        <index name="PRODSCHCHG_STATUS"><index-field name="statusId"/></index>
+    </entity>
+</entities>
