@@ -199,17 +199,23 @@ spec({
             materialCost: 5,
             complete: "Y"
         })
-        // the costing rate of production run time (design Y2), and a plain task with time of its own
-        call("create#mantle.humanres.rate.RateAmount", {
-            rateAmountId: "PSF_RATE",
-            rateTypeEnumId: "RatpStandard",
-            ratePurposeEnumId: "RaprProductionCost",
-            workTypeEnumId: "WktpProductionRun",
-            rateCurrencyUomId: "USD",
-            timePeriodUomId: "TF_hr",
-            rateAmount: 20,
-            fromDate: since
-        })
+        // the costing rates of production run and set-up time (design Y2), from yesterday so they are the latest started
+        // (RateAmount names no organization: a demo rate would otherwise match too), and a plain task with time of its own
+        const rateFrom = new Date(Date.now() - 86400000)
+        for (const [rateAmountId, workTypeEnumId, rateAmount] of [
+            ["PSF_RATE", "WktpProductionRun", 20],
+            ["PSF_RATE_SETUP", "WktpProductionSetup", 30]
+        ])
+            call("create#mantle.humanres.rate.RateAmount", {
+                rateAmountId,
+                rateTypeEnumId: "RatpStandard",
+                ratePurposeEnumId: "RaprProductionCost",
+                workTypeEnumId,
+                rateCurrencyUomId: "USD",
+                timePeriodUomId: "TF_hr",
+                rateAmount,
+                fromDate: rateFrom
+            })
         call("create#" + WORK, {
             workEffortId: "PSF_TASK",
             workEffortTypeEnumId: "WetTask",
@@ -803,6 +809,94 @@ feature(
     }
 )
 
+feature(
+    "the labor event follows its entry: approved again a new recording, a work type change re-valued, an hours change a delta, the deletion keeps the events",
+    {
+        when() {
+            const entry = one(TIME, {timeEntryId: state.entryId || rows(TIME, {workEffortId: state.r.assemble})[0].timeEntryId})
+            const timeEntryId = entry.timeEntryId
+            const events = () =>
+                rows(EVENT, {sourceEntityName: TIME, sourceId: timeEntryId}).sort(
+                    (a, b) => Number(a.sourceRevision) - Number(b.sourceRevision)
+                )
+            const sync = () => run("psf_super", P + "sync#ProductionLaborCost", {timeEntryIdList: [timeEntryId]})
+            const timesheetId = entry.timesheetId
+            const submitted = run("psf_operator", T + "submit#Timesheet", {timesheetId})
+            const approved = run("psf_super", T + "approve#Timesheet", {timesheetId})
+            const afterApproval = events()
+            const repeated = sync()
+            // a change of what values it while approved (a plain update, as with the week's lock off): set-up time
+            call("update#" + TIME, {timeEntryId, workTypeEnumId: "WktpProductionSetup"})
+            const retyped = sync()
+            const afterRetype = events()
+            call("update#" + TIME, {timeEntryId, hours: n(entry.hours) + 1})
+            const changed = sync()
+            const afterHours = events()
+            const reopened = run("psf_super", T + "reopen#Timesheet", {timesheetId, reason: "Correct the time"})
+            const afterReopen = events()
+            const deleted = run("psf_operator", "mantle.work.TimeServices.delete#TimeEntry", {timeEntryId})
+            return {
+                entry,
+                submitted,
+                approved,
+                afterApproval,
+                repeated,
+                retyped,
+                afterRetype,
+                changed,
+                afterHours,
+                reopened,
+                afterReopen,
+                deleted,
+                gone: one(TIME, {timeEntryId}) == null,
+                afterDelete: events()
+            }
+        },
+        then(x) {
+            const h = n(x.entry.hours)
+            const near = (a, b) => Math.abs(n(a) - b) < 0.01
+            x.submitted.error == ""
+            x.approved.error == ""
+            // approved again after the reopen: a new recording at the run rate, naming its entry
+            x.afterApproval.length == 3
+            n(x.afterApproval[2].quantity) == h
+            x.afterApproval[2].rateId == "PSF_RATE"
+            x.afterApproval[2].timeEntryId == x.entry.timeEntryId
+            x.afterApproval[2].originalCostEventId == null
+            x.repeated.error == ""
+            x.repeated.productionCostEventIds.length == 0
+            // the work type change reverses the run-rate recording and records it again at the set-up rate
+            x.retyped.error == ""
+            x.afterRetype.length == 5
+            n(x.afterRetype[3].quantity) == -h
+            near(x.afterRetype[3].amount, -h * 20)
+            x.afterRetype[3].originalCostEventId == x.afterApproval[2].productionCostEventId
+            n(x.afterRetype[4].quantity) == h
+            x.afterRetype[4].rateId == "PSF_RATE_SETUP"
+            near(x.afterRetype[4].amount, h * 30)
+            // an hour more is a delta at the set-up rate
+            x.changed.error == ""
+            x.afterHours.length == 6
+            near(x.afterHours[5].quantity, 1)
+            near(x.afterHours[5].amount, 30)
+            x.afterHours[5].originalCostEventId == x.afterRetype[4].productionCostEventId
+            // the reopen reverses the set-up recording; the entry of the reopened week is then deleted, its events kept
+            x.reopened.error == ""
+            x.afterReopen.length == 7
+            near(x.afterReopen[6].quantity, -(h + 1))
+            near(x.afterReopen[6].amount, -(h + 1) * 30)
+            x.deleted.error == ""
+            x.gone == true
+            x.afterDelete.length == 7
+            x.afterDelete.every(row => row.timeEntryId == x.entry.timeEntryId)
+            near(
+                x.afterDelete.reduce((sum, row) => sum + n(row.quantity), 0),
+                0
+            )
+        }
+    }
+)
+
 feature("a work order's completion refuses operations not completed on the shop floor until the supervisor closes them", {
     when() {
         const off = state.off
@@ -823,6 +917,52 @@ feature("a work order's completion refuses operations not completed on the shop 
         x.closed.error == ""
         x.closed.result.resultCode == "COMPLETED"
         x.operations.every(op => op.statusId == "WeComplete")
+    }
+})
+
+feature("an operator's assignment and a schedule preview read the person's skills (mantle.humanres.ability.PartySkill)", {
+    when() {
+        const created = run("psf_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "PSF_FIN",
+            quantity: 2,
+            facilityId: plant
+        })
+        const workEffortId = created.workEffortId
+        const released = act("psf_planner", workEffortId, "release")
+        const assemble = rows(WORK, {parentWorkEffortId: workEffortId}).sort(
+            (a, b) => Number(a.operationSequenceNum || 0) - Number(b.operationSequenceNum || 0)
+        )[0]
+        const assigned = run("psf_planner", P + "store#ProductionParty", {
+            operationKey: key(),
+            workEffortId,
+            expectedRevision: revision(workEffortId),
+            partyId: "PSF_OPERATOR2",
+            roleTypeId: "Assignee"
+        })
+        const preview = () =>
+            run("psf_super", "mantle.work.ProductionPlanningServices.schedule#ProductionOperation", {
+                workEffortId: assemble.workEffortId,
+                action: "preview",
+                startDate: new Date(Date.now() + 86400000),
+                endDate: new Date(Date.now() + 90000000)
+            })
+        const unqualified = preview()
+        call("create#mantle.humanres.ability.PartySkill", {partyId: "PSF_OPERATOR2", skillTypeEnumId: "PSF_SKILL"})
+        const qualified = preview()
+        call("delete#mantle.humanres.ability.PartySkill", {partyId: "PSF_OPERATOR2", skillTypeEnumId: "PSF_SKILL"})
+        return {created, released, assigned, unqualified, qualified}
+    },
+    then(x) {
+        x.created.error == ""
+        x.released.error == ""
+        x.assigned.error == ""
+        x.assigned.result.warnings.some(text => text.includes("Torque wrench"))
+        x.unqualified.error == ""
+        x.unqualified.result.conflicts.some(row => row.code == "SKILLS")
+        x.qualified.error == ""
+        x.qualified.result.conflicts.every(row => row.code != "SKILLS")
     }
 })
 

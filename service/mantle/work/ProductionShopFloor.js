@@ -349,19 +349,25 @@ function queue(p) {
     if (userScope.organizationPartyIds) runFind = runFind.condition("ownerPartyId", "in", userScope.organizationPartyIds)
     if (facilityIds) runFind = runFind.condition("facilityId", "in", facilityIds)
     if (!blank(p.workEffortId)) runFind = runFind.condition("workEffortId", p.workEffortId)
-    let runs = Array.from(runFind.orderBy("estimatedStartDate").orderBy("workEffortId").limit(queueLimit).list())
     const partyId = myParty()
     const now = ec.user.nowTimestamp
+    // mine: the work orders the user is assigned to, or one of whose operations, chosen before the limit
     if (yes(p.mine)) {
-        const mineIds = new Set(
-            rows(PARTY, {partyId: partyId || "_NA_", roleTypeId: "Assignee"})
-                .filter(row => lib.active(row, now))
-                .map(row => row.workEffortId)
-        )
-        runs = runs.filter(
-            run => mineIds.has(run.workEffortId) || operationsOfRun(run.workEffortId).some(op => mineIds.has(op.workEffortId))
-        )
+        const mineIds = rows(PARTY, {partyId: partyId || "_NA_", roleTypeId: "Assignee"})
+            .filter(row => lib.active(row, now))
+            .map(row => row.workEffortId)
+        const parentIds = mineIds.length
+            ? Array.from(
+                  find(WORK)
+                      .condition("workEffortId", "in", mineIds)
+                      .condition("parentWorkEffortId", "is-not-null", null)
+                      .selectField("parentWorkEffortId")
+                      .list()
+              ).map(row => row.parentWorkEffortId)
+            : []
+        runFind = runFind.condition("workEffortId", "in", Array.from(new Set(mineIds.concat(parentIds))).concat(["_NA_"]))
     }
+    const runs = Array.from(runFind.orderBy("estimatedStartDate").orderBy("workEffortId").limit(queueLimit).list())
     const timer = timerOf()
     const operationRows = []
     for (const run of runs) {
@@ -1140,27 +1146,66 @@ const laborEventsOf = timeEntryId =>
     rows(EVENT, {sourceEntityName: TIME, sourceId: timeEntryId}).sort(
         (a, b) => Number(a.sourceRevision) - Number(b.sourceRevision)
     )
+// What an entry's labor events recorded: their net hours, and the basis of the current recording (its first event since the
+// net was last nothing), with the events since then.
+function laborRecorded(events) {
+    let net = zero(),
+        basis = null,
+        since = []
+    for (const row of events) {
+        if (net.compare(0) === 0 && dec(row.quantity).compare(0) > 0) {
+            basis = row
+            since = []
+        }
+        since.push(row)
+        net = net.add(dec(row.quantity))
+        if (net.compare(0) === 0) basis = null
+    }
+    return {net, basis, since: basis ? since : []}
+}
+// Whether a recording still fits its entry (F35): the same run and operation, and the rate it was valued at still the costing
+// rate's match for the entry's work type, position class and date. A RateAmount whose amount was corrected still fits (the
+// rate is frozen at the approval; P15's review re-records it); an unvalued recording stays for that review.
+function laborFits(basis, entry, run) {
+    if (!run || basis.workEffortId !== run.workEffortId) return false
+    if ((basis.operationWorkEffortId || null) !== (entry.workEffortId !== run.workEffortId ? entry.workEffortId : null))
+        return false
+    if (!basis.rateId) return true
+    const row = one(RATE, {rateAmountId: basis.rateId})
+    return (
+        !!row &&
+        lib.active(row, entry.fromDate || ec.user.nowTimestamp) &&
+        (!row.workTypeEnumId || row.workTypeEnumId === entry.workTypeEnumId) &&
+        (!row.emplPositionClassId || row.emplPositionClassId === positionClassOf(entry))
+    )
+}
 // The labor event an entry needs now (record#ProductionCostEvent's TimeEntry source), or null when its events already match:
-// what should be recorded (its hours while its timesheet is approved and it is not being deleted, else nothing) less what
-// its events recorded. A first approval values it at the costing rate (unvalued without one); a reopen or deletion reverses
-// what was recorded; an hours change of an approved entry is a delta at the rate it was first valued at (F35).
+// what should be recorded (its hours while its timesheet is approved, it is on a production run and it is not being deleted,
+// else nothing) less what its events recorded. A first approval values it at the costing rate (unvalued without one); a
+// reopen or deletion reverses what was recorded; an hours change of an approved entry is a delta at the rate it was valued
+// at; a change of what values it (its work type, position class or date choosing another costing rate, or its work effort
+// moving it to another operation or run; F35) reverses the recording, and the next event records it afresh.
 function laborEvent(timeEntryId, removed = false) {
     const entry = one(TIME, {timeEntryId})
     if (!entry) denied("SOURCE_INVALID", "Time entry " + timeEntryId + " is not available")
     const run = runOfWork(entry.workEffortId)
-    if (!run) denied("SOURCE_INVALID", "Time entry " + timeEntryId + " is not on a production run")
-    const sheet = entry.timesheetId ? one(TIMESHEET, {timesheetId: entry.timesheetId}) : null
-    const should = !removed && sheet?.statusId === "TmshApproved" ? dec(entry.hours) : zero()
     const events = laborEventsOf(timeEntryId)
-    const recordedHours = events.reduce((sum, row) => sum.add(dec(row.quantity)), zero())
-    const delta = should.subtract(recordedHours)
+    const recorded = laborRecorded(events)
+    if (!run && recorded.net.compare(0) === 0)
+        denied("SOURCE_INVALID", "Time entry " + timeEntryId + " is not on a production run")
+    const sheet = entry.timesheetId ? one(TIMESHEET, {timesheetId: entry.timesheetId}) : null
+    const should = run && !removed && sheet?.statusId === "TmshApproved" ? dec(entry.hours) : zero()
+    const basis = recorded.basis
+    const fits = !basis || laborFits(basis, entry, run)
+    const delta = fits ? should.subtract(recorded.net) : recorded.net.negate()
     if (delta.compare(0) === 0) return null
-    const first = events.find(row => dec(row.quantity).compare(0) > 0) || null
+    const valuedSince = recorded.since.length > 0 && recorded.since.every(row => row.amount != null)
+    const reversal = should.compare(0) === 0 || !fits
     let rate = null,
         amount = null,
         currency = null,
         rateId = null
-    if (recordedHours.compare(0) === 0) {
+    if (!basis) {
         const row = costingRate(entry)
         if (row) {
             rate = dec(row.rateAmount)
@@ -1169,22 +1214,28 @@ function laborEvent(timeEntryId, removed = false) {
             amount = lib.money(delta.multiply(rate), currency)
         }
     } else {
-        const valued = events.every(row => row.amount != null)
-        rate = first?.rateAmount == null ? null : dec(first.rateAmount)
-        currency = first?.amountUomId || null
-        rateId = first?.rateId || null
-        if (valued && rate != null)
-            amount =
-                should.compare(0) === 0
-                    ? zero().subtract(events.reduce((sum, row) => sum.add(dec(row.amount)), zero()))
-                    : lib.money(delta.multiply(rate), currency)
+        rate = basis.rateAmount == null ? null : dec(basis.rateAmount)
+        currency = basis.amountUomId || null
+        rateId = basis.rateId || null
+        if (valuedSince && rate != null)
+            amount = reversal
+                ? zero().subtract(recorded.since.reduce((sum, row) => sum.add(dec(row.amount)), zero()))
+                : lib.money(delta.multiply(rate), currency)
     }
+    // a reversal is the recording's own run and operation; a new recording or delta the entry's
+    const eventRun = basis && !fits ? one(WORK, {workEffortId: basis.workEffortId}) : run
     return {
-        run,
+        run: eventRun,
         costEventTypeEnumId: "PcetLabor",
         costComponentEnumId: "PrcLabor",
-        operationWorkEffortId: entry.workEffortId !== run.workEffortId ? entry.workEffortId : null,
+        operationWorkEffortId:
+            basis && !fits
+                ? basis.operationWorkEffortId || null
+                : entry.workEffortId !== run.workEffortId
+                  ? entry.workEffortId
+                  : null,
         productId: null,
+        timeEntryId: entry.timeEntryId,
         quantity: delta,
         quantityUomId: "TF_hr",
         rateAmount: rate,
@@ -1196,13 +1247,20 @@ function laborEvent(timeEntryId, removed = false) {
         ledgerStatusEnumId: "PclAwaitingClose",
         acctgTransId: null,
         accountingDate: null,
-        originalCostEventId: first?.productionCostEventId || null,
+        originalCostEventId: basis?.productionCostEventId || null,
         eventDate: entry.fromDate || ec.user.nowTimestamp,
-        comments: removed ? "Time entry deleted" : should.compare(0) === 0 ? "Timesheet reopened" : null
+        comments: removed
+            ? "Time entry deleted"
+            : !fits
+              ? "Time entry changed; recorded again"
+              : should.compare(0) === 0
+                ? "Timesheet reopened"
+                : null
     }
 }
 // sync#ProductionLaborCost: the entries of a timesheet or a list, each on its own: an entry not on a production run, or of a
-// run whose owner's policy leaves laborCostSync off, is passed over; one that fails is logged and named, the others go on.
+// run whose owner's policy leaves laborCostSync off, is passed over unless it has labor recorded to bring to it; one that
+// fails is logged and named, the others go on. A recording that no longer fits is reversed and then recorded afresh.
 function syncLabor(p) {
     const ids = !blank(p.timesheetId)
         ? Array.from(find(TIME, {timesheetId: p.timesheetId}).selectField("timeEntryId").list()).map(row => row.timeEntryId)
@@ -1215,23 +1273,27 @@ function syncLabor(p) {
         try {
             const entry = one(TIME, {timeEntryId})
             const run = entry ? runOfWork(entry.workEffortId) : null
-            if (!run || productionPolicy().runPolicy(run).laborCostSync !== "Y") continue
+            const on = !!run && productionPolicy().runPolicy(run).laborCostSync === "Y"
+            if (!entry || (!on && laborRecorded(laborEventsOf(timeEntryId)).net.compare(0) === 0)) continue
             event = laborEvent(timeEntryId, removed)
         } catch (error) {
             ec.logger.error("Production labor cost of time entry " + timeEntryId + " was not recorded: " + error.message)
             failedTimeEntryIds.push(timeEntryId)
             continue
         }
-        if (!event) continue
-        const events = laborEventsOf(timeEntryId)
-        const revision = events.reduce((max, row) => Math.max(max, Number(row.sourceRevision || 0)), 0) + 1
-        const out = call("mantle.work.ProductionServices.record#ProductionCostEvent", {
-            sourceEntityName: TIME,
-            sourceId: timeEntryId,
-            sourceRevision: revision,
-            sourceRemoved: removed
-        })
-        if (out.productionCostEventId) productionCostEventIds.push(out.productionCostEventId)
+        // at most a reversal of a recording that no longer fits and its new recording, in the caller's transaction (F-P10-7)
+        for (let step = 0; event && step < 2; step++) {
+            const revision =
+                laborEventsOf(timeEntryId).reduce((max, row) => Math.max(max, Number(row.sourceRevision || 0)), 0) + 1
+            const out = call("mantle.work.ProductionServices.record#ProductionCostEvent", {
+                sourceEntityName: TIME,
+                sourceId: timeEntryId,
+                sourceRevision: revision,
+                sourceRemoved: removed
+            })
+            if (!out.productionCostEventId) break
+            productionCostEventIds.push(out.productionCostEventId)
+        }
     }
     return {productionCostEventIds, failedTimeEntryIds}
 }
