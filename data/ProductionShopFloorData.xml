@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The shop floor and production time (design-manufacturing §4, §3 ProductionTime, §12 M7; impl-manufacturing P10, F18):
+    the production work types of a person's time, the costing rate purpose of the labor cost event (a RateAmount by
+    position class and work type, design Y2), the machine runtime modes, the instruction step kinds and the labor and
+    machine cost event types. -->
+<entity-facade-xml type="seed">
+    <!-- the production work types (F18): set-up, run and rework time on an operation -->
+    <moqui.basic.Enumeration enumId="WktpProductionSetup" description="Production set-up" enumTypeId="WorkType"/>
+    <moqui.basic.Enumeration enumId="WktpProductionRun" description="Production run" enumTypeId="WorkType"/>
+    <moqui.basic.Enumeration enumId="WktpProductionRework" description="Production rework" enumTypeId="WorkType"/>
+
+    <!-- the costing rate of production time: a RateAmount of this purpose by emplPositionClassId and workTypeEnumId values
+        an approved entry's labor cost event, never the person's own vendor rate (design ProductionTime, review Y2) -->
+    <moqui.basic.Enumeration enumId="RaprProductionCost" description="Production costing" enumTypeId="RatePurpose"/>
+
+    <moqui.basic.EnumerationType enumTypeId="MachineRuntimeMode" description="Machine Runtime Mode"/>
+    <moqui.basic.Enumeration enumId="MrmSetup" description="Set-up" sequenceNum="1" enumTypeId="MachineRuntimeMode"/>
+    <moqui.basic.Enumeration enumId="MrmRun" description="Run" sequenceNum="2" enumTypeId="MachineRuntimeMode"/>
+
+    <!-- what an operator records against an instruction (InstructionAcknowledgment) -->
+    <moqui.basic.EnumerationType enumTypeId="InstructionStepType" description="Instruction Step Type"/>
+    <moqui.basic.Enumeration enumId="IstAcknowledge" description="Instruction acknowledged" sequenceNum="1"
+            enumTypeId="InstructionStepType"/>
+    <moqui.basic.Enumeration enumId="IstEvidence" description="Evidence recorded" sequenceNum="2"
+            enumTypeId="InstructionStepType"/>
+
+    <!-- the labor and machine cost events (record#ProductionCostEvent's TimeEntry and MachineRuntimeEvent sources), awaiting
+        the cost close -->
+    <moqui.basic.Enumeration description="Labor" enumId="PcetLabor" enumTypeId="ProductionCostEventType" sequenceNum="20"/>
+    <moqui.basic.Enumeration description="Machine runtime" enumId="PcetMachine" enumTypeId="ProductionCostEventType"
+            sequenceNum="21"/>
+</entity-facade-xml>

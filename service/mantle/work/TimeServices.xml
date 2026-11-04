@@ -382,6 +382,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="mantle.ledger.OtherAutoPostServices.post#WorkEffortCost" disable-authz="true"
                         in-map="{timeEntryIdList:[timeEntryId]}"/>
             </if>
+            <!-- and a production entry's labor cost event brought to its hours (sync#ProductionLaborCost, with the run owner's
+                ProductionPolicy laborCostSync; nothing for other entries) -->
+            <service-call name="mantle.work.ProductionServices.sync#ProductionLaborCost" disable-authz="true"
+                    in-map="{timeEntryIdList:[timeEntryId]}"/>
         </actions>
     </service>
     <service verb="create" noun="TimeEntryClockIn">
@@ -512,6 +516,9 @@ along with this software (see the LICENSE.md file). If not, see
                             ''}post it before deleting the entry"/>
                 </if>
             </if>
+            <!-- a production entry's labor cost event reversed (sync#ProductionLaborCost, laborCostSync) -->
+            <service-call name="mantle.work.ProductionServices.sync#ProductionLaborCost" disable-authz="true"
+                    in-map="{timeEntryIdList:[timeEntryId], deleting:true}"/>
             <service-call name="delete#mantle.work.time.TimeEntry" in-map="context"/>
         </actions>
     </service>
