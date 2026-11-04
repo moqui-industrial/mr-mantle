@@ -400,6 +400,8 @@ const operations = {lines, lateParts, notifyLate}
     inspectionSplit,
     startOfToday,
     DAY,
+    // P16: the buyers told of a supplier's response from the Supplier app (SupplierPortal.js)
+    buyersOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown purchase receipt operation " + op)
         return operations[op](parameters)

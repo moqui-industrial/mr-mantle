@@ -11,8 +11,11 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <#-- The body of a purchase order email (mantle.order.OrderServices.send#PurchaseOrder): the buyer's note, then the order as
-     printed by get#PurchaseOrderPrint, whose PDF is attached. -->
+     printed by get#PurchaseOrderPrint, whose PDF is attached; with
+     linkUrl, the supplier's own link to the Supplier app (impl-purchasing P16). -->
 <#if note><div style="font:11pt Helvetica,Arial,sans-serif;margin-bottom:16px">
 <#list String(note).split('\n') as noteLine>${noteLine}<br></#list>
 </div></#if>
+<#if linkUrl><p style="font:11pt Helvetica,Arial,sans-serif;margin-bottom:16px"><a href="${linkUrl}">Open this link</a> to acknowledge this order and send your bill.
+The link is yours alone; do not forward it.</p></#if>
 ${raw(printHtml)}

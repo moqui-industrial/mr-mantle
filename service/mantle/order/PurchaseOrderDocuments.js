@@ -339,9 +339,15 @@ function sendOf(po, p) {
         fromAddress: from,
         fromName
     }
+    // P16: the order's link for this revision (OrderAcknowledgement, with BillUpload beside it), when the organization has a
+    // Supplier site (SupplierPortal.js)
+    const linkUrl = ec.resource
+        .script("component://mr-mantle/service/mantle/order/SupplierPortal.js")
+        .orderLink(po.orderId, revision)
     const body = ec.resource.template("component://mr-mantle/template/order/PurchaseOrderEmail.html.fancy", {
         note: p.note || null,
-        printHtml: printed.printHtml
+        printHtml: printed.printHtml,
+        linkUrl
     })
     const already = sentTo(po.orderId, revision)
     const recipientResults = []

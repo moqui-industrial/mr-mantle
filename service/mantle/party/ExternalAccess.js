@@ -8,12 +8,23 @@ const {find, one, rows, call, denied} = lib
 const C = "mantle.party.ExternalAccessCapability"
 const issuedInvoice = ["InvoiceFinalized", "InvoiceSent", "InvoiceAcked", "InvoicePmtRecvd"]
 const closedOrder = ["OrderOpen", "OrderRequested", "OrderProposed", "OrderRejected", "OrderCancelled"]
+// a supplier's quote (Purchasing P11): a purchase order requested of the supplier or proposed by it (F32)
+const quoteStatuses = ["OrderRequested", "OrderProposed"]
 const internal = partyId => !!partyId && !!one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
-// Each record type: what it is for an outside party (organization, party) when it may be reached at all, and
-// the permission to issue or revoke its capabilities.
+// The purchase part of an order: the buying organization (internal) as customer, an outside supplier as vendor.
+function purchasePart(orderId) {
+    const part = rows("mantle.order.OrderPart", {orderId}).find(
+        row => internal(row.customerPartyId) && row.vendorPartyId && !internal(row.vendorPartyId)
+    )
+    return part
+        ? {organizationPartyId: part.customerPartyId, partyId: part.vendorPartyId, orderPartSeqId: part.orderPartSeqId}
+        : null
+}
+// Each record type: what it is for an outside party (organization, party) when it may be reached at all, the
+// permissions (any one of them) to issue or revoke its capabilities, and its page (by the first scope with one of its own).
 const records = {
     Invoice: {
-        permission: "RECEIVABLE_EDIT",
+        permissions: ["RECEIVABLE_EDIT"],
         scopes: ["InvoicePay"],
         page: {app: "billing", path: "/InvoicePay?token="},
         resolve(recordId) {
@@ -23,24 +34,42 @@ const records = {
             return {organizationPartyId: invoice.fromPartyId, partyId: invoice.toPartyId}
         }
     },
+    // a purchase order: AP's bill link (PAYABLE_EDIT, Accounting P18), and the buyer's link mailed with the order
+    // (PURCHASE_ORDER_EDIT, send#PurchaseOrder; Purchasing P16), which opens OrderAcknowledgement with BillUpload beside it
     Order: {
-        permission: "PAYABLE_EDIT",
+        permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"],
         scopes: ["BillUpload", "OrderAcknowledgement"],
         page: {app: "supplier", path: "/BillUpload?token="},
+        pages: {OrderAcknowledgement: "/OrderAcknowledgement?token="},
         resolve(recordId) {
             const order = one("mantle.order.OrderHeader", {orderId: recordId})
             if (!order || closedOrder.includes(order.statusId)) return null
-            const part = rows("mantle.order.OrderPart", {orderId: recordId}).find(
-                row => internal(row.customerPartyId) && row.vendorPartyId && !internal(row.vendorPartyId)
-            )
-            if (!part) return null
-            return {
-                organizationPartyId: part.customerPartyId,
-                partyId: part.vendorPartyId,
-                orderPartSeqId: part.orderPartSeqId
-            }
+            return purchasePart(recordId)
+        }
+    },
+    // a supplier's quote order while it is requested or proposed (Purchasing P16, F32): the RFQ's link mailed to the
+    // supplier (send#QuoteRequest), which opens QuoteResponse
+    Quote: {
+        permissions: ["PURCHASE_ORDER_EDIT"],
+        scopes: ["QuoteResponse"],
+        page: {app: "supplier", path: "/QuoteResponse?token="},
+        resolve(recordId) {
+            const order = one("mantle.order.OrderHeader", {orderId: recordId})
+            if (!order || !quoteStatuses.includes(order.statusId)) return null
+            return purchasePart(recordId)
         }
     }
+}
+// The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
+function requirePermissions(kind, organizationPartyId) {
+    const held = kind.permissions.find(permission => lib.entityLib.access.has(permission))
+    if (!held) denied("PERMISSION_DENIED", kind.permissions.join(" or ") + " authority is required")
+    lib.organization(organizationPartyId, held)
+}
+// The page a capability's link opens: the first of its scopes with a page of its own, else the record type's.
+function pagePath(kind, scopes) {
+    const scope = scopes.find(name => kind.pages?.[name])
+    return scope ? kind.pages[scope] : kind.page.path
 }
 const unavailable = () => {
     const error = new Error("This link is not available")
@@ -57,7 +86,7 @@ function requireIssuer(recordType, recordId) {
     if (!kind) denied("RECORD_TYPE_INVALID", "External access is not available for this record")
     const record = recordOf(recordType, recordId)
     if (!record) denied("RECORD_UNAVAILABLE", "This record cannot be shared outside the organization now")
-    lib.organization(record.organizationPartyId, kind.permission)
+    requirePermissions(kind, record.organizationPartyId)
     return record
 }
 function scopeList(scopes) {
@@ -87,6 +116,7 @@ function create(p) {
         scopes: scopes.join(","),
         tokenDigest: ec.user.singleUseCodeHash(token),
         issuerKind: p.issuerKind === "contact" ? "contact" : "organization",
+        recordRevision: p.recordRevision == null || p.recordRevision === "" ? null : Number(p.recordRevision),
         fromDate: ec.user.nowTimestamp,
         thruDate,
         createdByUserId: ec.user.userId
@@ -94,7 +124,7 @@ function create(p) {
     // the link: the record's page of the organization's first published site with the app
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
     const siteId = apps.sitesFor(kind.page.app, record.organizationPartyId)[0]
-    const url = siteId ? apps.pageUrl(siteId, kind.page.app, kind.page.path + encodeURIComponent(token)) : null
+    const url = siteId ? apps.pageUrl(siteId, kind.page.app, pagePath(kind, scopes) + encodeURIComponent(token)) : null
     return {capabilityId: out.capabilityId, token, url, thruDate, organizationPartyId: record.organizationPartyId}
 }
 // The capability a token names while it is in effect, or null. Every lookup counts against the requester's limit
@@ -148,7 +178,14 @@ function check(p) {
             unavailable()
         const record = recordOf(row.recordType, row.recordId)
         if (!record || record.organizationPartyId !== row.organizationPartyId || record.partyId !== row.partyId) unavailable()
-        return {via: "token", capabilityId: row.capabilityId, recordId: row.recordId, ...record}
+        return {
+            via: "token",
+            capabilityId: row.capabilityId,
+            recordId: row.recordId,
+            recordRevision: row.recordRevision ?? null,
+            thruDate: row.thruDate,
+            ...record
+        }
     }
     // a contact needs the organization the page serves, and a grant for this record type's app there
     const record = recordOf(p.recordType, p.recordId)
@@ -159,7 +196,7 @@ function check(p) {
         !contactOf(record.partyId, p.organizationPartyId, kind.page.app)
     )
         unavailable()
-    return {via: "contact", capabilityId: null, recordId: p.recordId, ...record}
+    return {via: "contact", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
 }
 // The outside parties a signed-in user is a contact of, for an app of an organization.
 function contactParties(organizationPartyId, app) {
@@ -169,7 +206,7 @@ function contactParties(organizationPartyId, app) {
 function requireCapabilityIssuer(row) {
     const kind = records[row.recordType]
     if (!kind) denied("RECORD_TYPE_INVALID", "External access is not available for this record")
-    lib.organization(row.organizationPartyId, kind.permission)
+    requirePermissions(kind, row.organizationPartyId)
 }
 function revoke(p) {
     const row = find(C, {capabilityId: p.capabilityId}).forUpdate(true).one()
@@ -179,15 +216,15 @@ function revoke(p) {
         call("update#" + C, {capabilityId: row.capabilityId, revokedDate: ec.user.nowTimestamp, revokedByUserId: ec.user.userId})
     return {capabilityId: row.capabilityId, revoked: true}
 }
-// End a record's links in effect for a scope made by one kind of issuer (the organization, or a contact); the caller has
-// checked who may. A new pay link replaces its issuer kind's earlier ones, never the other kind's.
+// End a record's links in effect for a scope made by one kind of issuer (the organization, or a contact; null for both); the
+// caller has checked who may. A new pay link replaces its issuer kind's earlier ones, never the other kind's.
 function revokeActive(recordType, recordId, scope, issuerKind = "organization") {
     for (const row of rows(C, {recordType, recordId}))
         if (
             !row.revokedDate &&
             lib.entityLib.active(row) &&
             scopeList(row.scopes).includes(scope) &&
-            (row.issuerKind || "organization") === issuerKind
+            (issuerKind == null || (row.issuerKind || "organization") === issuerKind)
         )
             call("update#" + C, {capabilityId: row.capabilityId, revokedDate: ec.user.nowTimestamp, revokedByUserId: ec.user.userId})
 }
@@ -209,11 +246,13 @@ function list(p) {
 // An invitation to an app's pages bound to an outside party (a customer for Billing, a supplier for Supplier): an
 // internal user with the record kind's permission in the organization the app serves. Redeeming it (redeem#Invitation)
 // gives the account's party a contact grant for that app, organization and party.
-const appKinds = {billing: {permission: "RECEIVABLE_EDIT"}, supplier: {permission: "PAYABLE_EDIT"}}
+// A supplier contact is invited by AP (PAYABLE_EDIT, Accounting P18) or by a buyer from Supplier360 (PURCHASE_ORDER_EDIT,
+// Purchasing P16).
+const appKinds = {billing: {permissions: ["RECEIVABLE_EDIT"]}, supplier: {permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"]}}
 function invite(p) {
     const app = appKinds[p.app]
     if (!app) denied("APP_INVALID", "Choose the app to invite the contact to")
-    lib.organization(p.organizationPartyId, app.permission)
+    requirePermissions(app, p.organizationPartyId)
     const party = one("mantle.party.Party", {partyId: p.partyId})
     if (!party || internal(p.partyId) || party.partyTypeEnumId !== "PtyOrganization")
         denied("PARTY_INVALID", "Choose an outside organization")

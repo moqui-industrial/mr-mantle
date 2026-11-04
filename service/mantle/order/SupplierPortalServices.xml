@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchasing's supplier pages (design-purchasing §13; impl-purchasing P16): the operations of the PASS Supplier app's
+    SupplierHome, QuoteResponse and OrderAcknowledgement (mr-pass Schema.js and Routes.js), called locally through
+    pass.Facade.call#Operation or remotely through Mantle's PassApi. Each takes the PASS input map (siteId, a token or the
+    signed-in contact, the record) and answers a result map; each checks the site's supplier mount and
+    check#AccessCapability's rule first (SupplierPortal.js). The quote's and order's internal fields never leave here. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="SupplierHome" authenticate="anonymous-all" allow-remote="false">
+        <description>The Supplier app's home: a link's one quote or purchase order (token), or the requested and proposed quotes,
+            purchase orders from approval on and bills sent of the suppliers the signed-in contact was invited
+            for; with the buying organization's public contact and the link's expiry. No token and no session is
+            AuthenticationRequired.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('getSupplierHome', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteInvitation" authenticate="anonymous-all" allow-remote="false">
+        <description>A quote order for its QuoteResponse link (token) or a signed-in contact of its supplier (orderId): the published
+            request's revision, response date, specification text and currency, the quote's lines with the
+            supplier's offer, its private draft, and its receipt once submitted. Never another supplier, the
+            internal request, a maximum price or a private file. A revoked, expired or forged token, or a quote
+            no longer requested or proposed, is NotFound.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('getQuoteInvitation', input)"/>
+        </actions>
+    </service>
+    <service verb="save" noun="QuoteResponse" authenticate="anonymous-all" allow-remote="false">
+        <description>The supplier's private draft of its quote for the request's current revision (reference, validity, delivery,
+            note, each line's price, promised date and item code); nothing is written to the quote. Throttled
+            per requester.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('saveQuoteResponse', input)"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="QuoteResponse" authenticate="anonymous-all" allow-remote="false">
+        <description>The supplier's quote for the request's current revision (confirm, operationId), through store#SupplierQuoteItem
+            and store#SupplierQuote on the supplier's claim of that quote: the quote moves to OrderProposed,
+            channel web, the file staged and scanned into OrderContent; a claim for the buyers to review
+            (PurchaseSupplierResponse). Its tiers become prices only when a buyer publishes them. A repeat
+            answers the first receipt; a request changed since it was opened is a Conflict. Throttled per
+            requester.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('submitQuoteResponse', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PublishedPurchaseOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>A purchase order for its link (token, OrderAcknowledgement scope) or a signed-in contact of its supplier
+            (orderId): its revision, buyer, lines with price, required and promised dates, terms, ship-to, a
+            subcontract order's service lines and the components in custody, a drop-ship order's deliveries, and
+            the acknowledgement of the revision. A link of an earlier revision is a Conflict
+            (SupersededRevision).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('getPublishedPurchaseOrder', input)"/>
+        </actions>
+    </service>
+    <service verb="acknowledge" noun="PurchaseOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>The supplier's acknowledgement of the order's current revision through record#Acknowledgement on its claim of
+            that order: accepted, accepted with changes or rejected, its reference, note, each line's promised
+            date and quantity (no ordered quantity, price, stock or payment changes), and a scanned file; a
+            claim for the buyers to review. A superseded revision is a Conflict; a repeat answers the first
+            receipt. Throttled per requester.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('acknowledgePurchaseOrder', input)"/>
+        </actions>
+    </service>
+    <service verb="report" noun="DropShipDelivery" authenticate="anonymous-all" allow-remote="false">
+        <description>A drop-ship supplier's report of what it shipped to the buyer's customer (each line's quantity, tracking code,
+            date), kept as the order's content (OctSupplierDeliveryReport) for the buyer to confirm through
+            finalize#DropShipPurchaseOrder; it ships and posts nothing. A repeat answers the first receipt.
+            Throttled per requester.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('reportDropShipDelivery', input)"/>
+        </actions>
+    </service>
+    <service verb="revoke" noun="QuoteCapabilities" allow-remote="false">
+        <description>End the supplier links (QuoteResponse capabilities) of an RFQ's quotes (requestId) or of the given quote
+            orders (orderId, orderIds), for close#QuoteRequest (P12) and any caller closing quotes. Internal: it only ends
+            access, so it checks no permission.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="revokedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="revokedCount" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('revokeQuotes', {requestId:requestId, orderId:orderId, orderIds:orderIds}).revokedCount"/>
+        </actions>
+    </service>
+    <service verb="revoke" noun="OrderCapabilities" authenticate="false" allow-remote="false">
+        <description>Internal to the SupplierPortalRevoke EECA: an order cancelled or rejected ends its supplier links, and a
+            quote leaving the quote statuses (awarded, declined, not awarded) ends its QuoteResponse links.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="statusId"/>
+            <parameter name="oldStatusId"/>
+        </in-parameters>
+        <out-parameters><parameter name="revokedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="revokedCount" from="ec.resource.script('component://mr-mantle/service/mantle/order/SupplierPortal.js')
+                .execute('revokeOrder', {orderId:orderId, statusId:statusId, oldStatusId:oldStatusId}).revokedCount"/>
+        </actions>
+    </service>
+</services>

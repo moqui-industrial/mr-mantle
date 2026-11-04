@@ -38,7 +38,29 @@ const revisionOf = order => Number(order.orderRevision ?? 1)
 const partyName = partyId => lib.partyNames([partyId])[partyId] || partyId || ""
 
 // ===== checks =====
+// P16: a supplier's response from its PASS page (SupplierPortal.js, after check#AccessCapability) runs Mantle's own verbs on
+// that one order as a claim for internal review: while its claim is set, the order's PURCHASE_ORDER_EDIT and organization
+// checks are the capability's, for that order only, and every other order is unavailable. Only SupplierPortal.js sets it
+// (asSupplier), never a request's input.
+const PORTAL_CLAIM = "SupplierPortalClaim"
+const portalClaim = () => ec.context.sharedMap[PORTAL_CLAIM] || null
+function asSupplier(claim, work) {
+    const shared = ec.context.sharedMap,
+        before = shared[PORTAL_CLAIM]
+    shared[PORTAL_CLAIM] = {
+        orderId: String(claim.orderId),
+        organizationPartyId: claim.organizationPartyId,
+        supplierPartyId: claim.supplierPartyId
+    }
+    try {
+        return work()
+    } finally {
+        if (before == null) delete shared[PORTAL_CLAIM]
+        else shared[PORTAL_CLAIM] = before
+    }
+}
 function requirePermission(...permissions) {
+    if (portalClaim() && permissions.includes("PURCHASE_ORDER_EDIT")) return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
@@ -61,7 +83,15 @@ function purchaseOrder(orderId, lock = false) {
     if (!parts.length || !parts.every(isPurchasePart)) denied("NOT_PURCHASE", "Order " + orderId + " is not a purchase order")
     if (parts.length > 1) denied("PURCHASE_PARTS", "Purchase order " + orderId + " has more than one part")
     const part = parts[0]
-    if (!facilityScope.owns(facilityScope.scope(), part.customerPartyId)) unavailable()
+    const claim = portalClaim()
+    if (claim) {
+        if (
+            claim.orderId !== String(orderId) ||
+            claim.organizationPartyId !== part.customerPartyId ||
+            claim.supplierPartyId !== part.vendorPartyId
+        )
+            unavailable()
+    } else if (!facilityScope.owns(facilityScope.scope(), part.customerPartyId)) unavailable()
     return {
         order,
         part,
@@ -553,6 +583,9 @@ const operations = {create, update, storeItem, removeItem, place, cancel, clone,
     costCenterOf,
     placedBy,
     requirePermission,
+    // P16: a supplier's claim from its PASS page (SupplierPortal.js)
+    asSupplier,
+    portalClaim,
     approvalWarnings,
     approveRefusal,
     holdAllowed,
