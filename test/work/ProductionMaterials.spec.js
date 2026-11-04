@@ -383,6 +383,17 @@ feature("a planner adds, changes and removes a manual line of a draft; release k
             productionRunLineId: manual.productionRunLineId,
             quantity: 3
         })
+        const afterChange = lineOf(workEffortId, "PM5_EXTRA")
+        // an edit form posting every field clears the empty ones (F-P5b-1)
+        const cleared = run("pm5_planner", P + "store#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId,
+            expectedRevision: revisionOf(workEffortId),
+            productionRunLineId: manual.productionRunLineId,
+            quantity: 3,
+            routingOperationWorkEffortId: state.operationIds[1],
+            clearEmpty: true
+        })
         const methodLine = run("pm5_planner", P + "store#ProductionMaterial", {
             operationKey: key(),
             workEffortId,
@@ -459,6 +470,8 @@ feature("a planner adds, changes and removes a manual line of a draft; release k
             manual,
             consume,
             changed,
+            afterChange,
+            cleared,
             methodLine,
             stale,
             output,
@@ -486,6 +499,12 @@ feature("a planner adds, changes and removes a manual line of a draft; release k
         n(r.consume[0].estimatedQuantity) == 2
         r.changed.error == ""
         r.changed.result.resultCode == "UPDATED"
+        r.afterChange.instructionText == "Stage beside the test bench"
+        r.afterChange.sourceFacilityId == plant
+        r.cleared.error == ""
+        r.extraLine.instructionText == null
+        r.extraLine.sourceFacilityId == null
+        r.extraLine.routingOperationWorkEffortId == state.operationIds[1]
         r.methodLine.error.includes("LINE_NOT_MANUAL")
         r.stale.error.includes("REVISION_CHANGED")
         r.output.error.includes("PRODUCT_INVALID")

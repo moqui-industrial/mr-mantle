@@ -281,7 +281,8 @@ function storeMaterial(p) {
         "routingOperationWorkEffortId",
         "sourceFacilityId",
         "instructionText",
-        "remove"
+        "remove",
+        "clearEmpty"
     ])
     if (begun.previous) return begun.previous
     const userScope = posting.scope()
@@ -323,8 +324,10 @@ function storeMaterial(p) {
         const quantity = blank(p.quantity) ? (line ? dec(line.quantity) : zero()) : dec(p.quantity)
         if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
         const stockUomId = stockUnitOf(product, p.quantityUomId)
-        // a field left empty keeps the line's value
-        const routingOperationWorkEffortId = str(p.routingOperationWorkEffortId) || line?.routingOperationWorkEffortId || null
+        // on a change, a field left empty keeps the line's value, or clears it with clearEmpty (an edit form that posts every
+        // field): a declared but absent parameter arrives as null, so "not given" and "cleared" look alike (F-P5b-1)
+        const given = field => (yes(p.clearEmpty) ? str(p[field]) : str(p[field]) || line?.[field] || null)
+        const routingOperationWorkEffortId = given("routingOperationWorkEffortId")
         if (routingOperationWorkEffortId && !draftOperations(run, lines).some(op => op.value === routingOperationWorkEffortId))
             denied(
                 "OPERATION_INVALID",
@@ -334,7 +337,7 @@ function storeMaterial(p) {
                     run.workEffortId +
                     "'s routing"
             )
-        const sourceFacilityId = str(p.sourceFacilityId) || line?.sourceFacilityId || null
+        const sourceFacilityId = given("sourceFacilityId")
         if (sourceFacilityId) {
             const facility = posting.facility(userScope, sourceFacilityId)
             if (facility.ownerPartyId !== run.ownerPartyId)
@@ -349,7 +352,7 @@ function storeMaterial(p) {
             conversionFactor: toDecimal(1),
             routingOperationWorkEffortId,
             sourceFacilityId,
-            instructionText: str(p.instructionText) || line?.instructionText || null
+            instructionText: given("instructionText")
         }
         if (line) {
             call("update#" + LINE, Object.assign({productionRunLineId: line.productionRunLineId}, fields))

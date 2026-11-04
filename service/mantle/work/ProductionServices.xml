@@ -1097,6 +1097,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sourceFacilityId"/>
             <parameter name="instructionText"/>
             <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="clearEmpty" type="Boolean" default="false"><description>On a change, an empty routing
+                operation, source facility or instruction clears it; otherwise an empty field keeps the line's value (an edit
+                form posting every field passes true)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode ADDED, UPDATED or REMOVED, workEffortId,
