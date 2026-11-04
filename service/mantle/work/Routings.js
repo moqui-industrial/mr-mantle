@@ -173,10 +173,28 @@ function detail(p) {
 }
 function list(p) {
     const s = policy().scope(p)
+    let query = find(W, {ownerPartyId: s.organizationPartyId, purposeEnumId: "WepRouting"})
+    // Manufacturing's Routings list (P2): its text search, by id and name ignoring case
+    const text = String(p.text || "").trim()
+    if (text) {
+        const factory = ec.entity.conditionFactory,
+            pattern = "%" + text.replace(/[\\%_]/g, character => "\\" + character) + "%"
+        query = query.condition(
+            factory.makeCondition(
+                ["workEffortId", "workEffortName"].map(field => factory.makeCondition(field, "like", pattern).ignoreCase()),
+                "or"
+            )
+        )
+    }
     return {
-        routingRows: rows(W, {ownerPartyId: s.organizationPartyId, purposeEnumId: "WepRouting"}).map(r =>
-            pick(map(r), ["workEffortId", ...names, "ownerPartyId", "methodDraft"])
-        ),
+        routingRows: Array.from(query.orderBy("workEffortName").list()).map(r => {
+            const operations = ops(r.workEffortId).filter(o => o.methodRemoved !== "Y")
+            return Object.assign(pick(map(r), ["workEffortId", ...names, "ownerPartyId", "methodDraft"]), {
+                lastReleaseDate: releases(r.workEffortId)[0]?.fromDate || null,
+                operationCount: operations.length,
+                draftOperationCount: ops(r.workEffortId).filter(o => o.methodDraft === "Y").length
+            })
+        }),
         organizationPartyId: s.organizationPartyId
     }
 }
@@ -449,6 +467,8 @@ function release(p) {
             Object.assign({methodReleaseDecisionId: id, itemSeqId: i + 1, lineEntityName: A, fromDate: iso(date)}, stamped[i])
         )
     call("update#" + W, {workEffortId: g.routing.workEffortId, methodDraft: "N", methodChangeReason: why})
+    // the release decides what was asked for: its approvers' RoutingRelease notices are read (MethodReleases.js)
+    ec.resource.script("component://mr-mantle/service/mantle/product/MethodReleases.js").clear(W, g.routing.workEffortId)
     return Object.assign(detail({workEffortId: g.routing.workEffortId, asOfDate: date}), {
         methodReleaseDecisionId: id,
         stampedLines: stamped,
@@ -456,25 +476,9 @@ function release(p) {
         findings: []
     })
 }
+// store#WorkCenter is WorkCenters.js's since Manufacturing P3 (capacities, alternates, the plant and a new line)
 function center(p) {
-    const s = policy().scope(p, "resources"),
-        why = policy().reason(p)
-    policy().facility(p.facilityId, s)
-    const old = one(WC, {facilityId: p.facilityId}),
-        data = Object.assign(
-            old ? pick(map(old), ["calendarId", "efficiencyPercent", "oeeTargetPercent"]) : {},
-            pick(p, ["calendarId", "efficiencyPercent", "oeeTargetPercent"])
-        )
-    for (const f of ["efficiencyPercent", "oeeTargetPercent"])
-        if (data[f] != null && (toDecimal(data[f]).compare(0) < 0 || toDecimal(data[f]).compare(100) > 0))
-            throw new Error("Work-center percentages must be between zero and 100")
-    if (data.calendarId) {
-        const c = one("mantle.work.calendar.Calendar", {calendarId: data.calendarId})
-        if (!c || c.ownerPartyId !== s.organizationPartyId) throw new Error("Calendar is not in the work-center organization")
-    }
-    policy().audit([...Object.keys(data), "changeReason"], why)
-    call((old ? "update#" : "create#") + WC, Object.assign(data, {facilityId: p.facilityId, changeReason: why}))
-    return {workCenter: Object.assign({facilityId: p.facilityId}, data)}
+    return ec.resource.script("component://mr-mantle/service/mantle/work/WorkCenters.js").execute("center", p)
 }
 function rate(p) {
     const s = policy().scope(p, "resources"),
@@ -638,7 +642,11 @@ function access(p) {
     try {
         const id = p.workEffortId || p.routingWorkEffortId,
             row = one(W, {workEffortId: id}),
-            g = get(row?.purposeEnumId === "WepRoutingTask" ? row.parentWorkEffortId : id, p.need || "read")
+            // an operation template (a routing task with no routing, OperationTemplates.js) by its own organization
+            g =
+                row?.purposeEnumId === "WepRoutingTask" && !row.parentWorkEffortId
+                    ? {scope: policy().scope({organizationPartyId: row.ownerPartyId}, p.need || "read")}
+                    : get(row?.purposeEnumId === "WepRoutingTask" ? row.parentWorkEffortId : id, p.need || "read")
         return {
             recordVisible: true,
             record: pick(map(row), ["workEffortId", "ownerPartyId", "workEffortName", "purposeEnumId"]),
@@ -651,4 +659,4 @@ function access(p) {
 function execute(op, p) {
     return {list, detail, store, operation, resource, validate, release, center, rate, costBasis, access}[op](p)
 }
-;({execute, released, get})
+;({execute, released, get, ops, lock, revision, validateOperation, detail, opFields})

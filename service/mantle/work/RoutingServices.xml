@@ -70,6 +70,9 @@
     </service>
     <service verb="find" noun="Routings" allow-remote="false">
         <implements service="mantle.work.RoutingServices.define#RoutingParameters"/>
+        <in-parameters>
+            <parameter name="text"><description>Manufacturing's list search, by id and name ignoring case</description></parameter>
+        </in-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('list',context))</script>
         </actions>
@@ -120,9 +123,22 @@
         </actions>
     </service>
     <service verb="store" noun="WorkCenter" allow-remote="false">
+        <description>The WorkCenter extension of a facility (WorkCenters.js), under METHOD_RESOURCES in the facility's
+            organization: its plant, calendar, efficiency, OEE target and scheduling policy, audit-logged with the change
+            reason. With no facilityId and a facilityName and plantFacilityId it makes a new production line (FcTpLine) under
+            the plant, owned by the plant's owner. Refuses a facility, plant or calendar of another organization, a percentage
+            outside zero to 100 and an unknown scheduling policy. Facility.capacity (people capacity) is never written.</description>
         <implements service="mantle.work.RoutingServices.define#RoutingParameters"/>
+        <in-parameters>
+            <parameter name="plantFacilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="schedulingPolicyEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+        </out-parameters>
         <actions>
-            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('center',context))</script>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/WorkCenters.js').execute('center',context))</script>
         </actions>
     </service>
     <service verb="store" noun="WorkCenterRate" allow-remote="false">
@@ -201,6 +217,211 @@
         </out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('costBasis',context))</script>
+        </actions>
+    </service>
+    <!-- Manufacturing P2 (impl-manufacturing): operation templates, their instructions, copies, the release request and
+        the CSV import (OperationTemplates.js, MethodReleases.js, MethodTransfer.js) -->
+    <service verb="define" noun="OperationTemplateParameters" type="interface">
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="changeReason"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+    </service>
+    <service verb="find" noun="OperationTemplates" allow-remote="false">
+        <description>The method organization's operation templates (routing tasks with no routing), searched by id and
+            name ignoring case, without the archived ones unless includeArchived, a page at a time; with workEffortId, that
+            template with its instruction history and expected revision. Each row has the instruction in effect at
+            asOfDate (now) and its inspection template's name; standard times only for an editor or a cost reader. Needs
+            METHOD_VIEW in the organization.</description>
+        <implements service="mantle.work.RoutingServices.define#OperationTemplateParameters"/>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="includeArchived" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="templateRows" type="List"/>
+            <parameter name="templateCount" type="Long"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="template" type="Map"/>
+            <parameter name="instructionRows" type="List"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="methodAccess" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/OperationTemplates.js').execute('findTemplates', context)"/>
+            <set field="templateRows" from="result.templateRows"/>
+            <set field="templateCount" from="result.templateCount"/>
+            <set field="pageIndex" from="result.pageIndex"/>
+            <set field="pageSize" from="result.pageSize"/>
+            <set field="template" from="result.template"/>
+            <set field="instructionRows" from="result.instructionRows"/>
+            <set field="expectedRevision" from="result.expectedRevision"/>
+            <set field="organizationPartyId" from="result.organizationPartyId"/>
+            <set field="methodAccess" from="result.methodAccess"/>
+        </actions>
+    </service>
+    <service verb="store" noun="OperationTemplate" allow-remote="false">
+        <description>Create an operation template of the method organization, or change one at its expected revision: its
+            name and description, setup, run and machine standards with their time unit, batch quantity and unit, the work
+            center it needs, the evidence an operator records, its production inspection template and whether it is
+            archived (an archived template blocks new copies; the routings that copied it keep their operations). Every field
+            is audit-logged with the change reason. Needs METHOD_EDIT; refuses a work center, unit or inspection template
+            outside the organization or the production context.</description>
+        <implements service="mantle.work.RoutingServices.define#OperationTemplateParameters"/>
+        <in-parameters>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="estimatedSetupTime" type="BigDecimal"/>
+            <parameter name="estimatedWorkTime" type="BigDecimal"/>
+            <parameter name="timeUomId"/>
+            <parameter name="methodMachineSetupTime" type="BigDecimal"/>
+            <parameter name="methodMachineRunTime" type="BigDecimal"/>
+            <parameter name="methodBatchQuantity" type="BigDecimal"/>
+            <parameter name="methodQuantityUomId"/>
+            <parameter name="methodWorkCenterId"/>
+            <parameter name="methodRequiredEvidence"/>
+            <parameter name="methodInspectionTemplateId"/>
+            <parameter name="methodArchived"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="template" type="Map"/>
+            <parameter name="instructionRows" type="List"/>
+            <parameter name="expectedRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/OperationTemplates.js').execute('storeTemplate', context)"/>
+            <set field="template" from="result.template"/>
+            <set field="instructionRows" from="result.instructionRows"/>
+            <set field="expectedRevision" from="result.expectedRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="OperationInstruction" allow-remote="false">
+        <description>Publish the next instruction of an operation template, from a file or text: a WectInstruction
+            WorkEffortContent row whose file is stored once with its SHA-256 checksum. It takes effect at fromDate (now; never
+            earlier, and after the last published), and the instruction in effect then ends at that date (audit-logged
+            fromDate and thruDate). Needs METHOD_EDIT; refuses an archived template.</description>
+        <implements service="mantle.work.RoutingServices.define#OperationTemplateParameters"/>
+        <in-parameters>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="contentText"/>
+            <parameter name="filename"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortContentId"/>
+            <parameter name="template" type="Map"/>
+            <parameter name="instructionRows" type="List"/>
+            <parameter name="expectedRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/OperationTemplates.js').execute('storeInstruction', context)"/>
+            <set field="workEffortContentId" from="result.workEffortContentId"/>
+            <set field="template" from="result.template"/>
+            <set field="instructionRows" from="result.instructionRows"/>
+            <set field="expectedRevision" from="result.expectedRevision"/>
+        </actions>
+    </service>
+    <service verb="copy" noun="RoutingOperations" allow-remote="false">
+        <description>Copy operation templates or another routing's operations into a routing's draft, in order after its
+            operations (with replaceExisting its current operations are marked removed instead). Each copy keeps its source
+            (methodSourceWorkEffortId), standards, evidence, inspection template and resources; predecessors among the copied
+            operations follow them. The source and the routings' released operations are never changed. Needs METHOD_EDIT
+            in the routing's organization; refuses an archived template and an operation of another organization.</description>
+        <implements service="mantle.work.RoutingServices.define#OperationTemplateParameters"/>
+        <in-parameters>
+            <parameter name="sourceWorkEffortIds" type="List" required="true"/>
+            <parameter name="replaceExisting" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="copiedOperationIds" type="List"/>
+            <parameter name="operationRows" type="List"/>
+            <parameter name="expectedRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/OperationTemplates.js').execute('copyOperations', context)"/>
+            <set field="copiedOperationIds" from="result.copiedOperationIds"/>
+            <set field="operationRows" from="result.operationRows"/>
+            <set field="expectedRevision" from="result.expectedRevision"/>
+        </actions>
+    </service>
+    <service verb="request" noun="RoutingRelease" allow-remote="false">
+        <description>A method engineer (METHOD_EDIT in the routing's organization) asks for the routing's draft to be
+            released: its checks run first, and a draft that fails them is answered with its findings and not sent. A draft
+            that passes notifies the organization's users holding METHOD_APPROVE (topic RoutingRelease), replacing an earlier
+            request. The approver releases on the routing (release#RoutingDraft), which marks the notices read.</description>
+        <implements service="mantle.work.RoutingServices.define#OperationTemplateParameters"/>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="notified" type="Boolean"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/product/MethodReleases.js').execute('requestRouting', context)"/>
+            <set field="valid" from="result.valid"/>
+            <set field="findings" from="result.findings"/>
+            <set field="notified" from="result.notified"/>
+            <set field="notificationMessageId" from="result.notificationMessageId"/>
+            <set field="message" from="result.message"/>
+        </actions>
+    </service>
+    <service verb="import" noun="RoutingCsv" allow-remote="false" transaction="ignore">
+        <description>Import routing versions from a UTF-8 CSV file or text (MethodTransfer.js): columns routingName,
+            operationName, quantityUomId, and optionally sequenceNum, setupTime, runTime, machineSetupTime, machineRunTime,
+            timeUomId (TF_hr), batchQuantity (1) and workCenterId. A version is the rows of one routing name: the
+            organization's routing of that name takes them as draft operations, else a new routing is made. With preview each
+            row is checked as store#RoutingOperation checks it and nothing is written; else each ready version is written in
+            its own transaction, and a version with a bad row fails whole and is named. Nothing is released. Needs
+            METHOD_EDIT in the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="csvText"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="delimiter"/>
+            <parameter name="preview" type="Boolean" default="true"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="versionRows" type="List"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="importedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/product/MethodTransfer.js').execute('importRoutingCsv', context)"/>
+            <set field="versionRows" from="result.versionRows"/>
+            <set field="preview" from="result.preview"/>
+            <set field="readyCount" from="result.readyCount"/>
+            <set field="importedCount" from="result.importedCount"/>
+            <set field="failedCount" from="result.failedCount"/>
+            <set field="skippedCount" from="result.skippedCount"/>
+        </actions>
+    </service>
+    <service verb="import" noun="RoutingVersion" allow-remote="false">
+        <description>One checked version of import#RoutingCsv, in the transaction its caller gives it: the routing when it
+            is new (store#Routing), then its operations as drafts (store#RoutingOperation).</description>
+        <in-parameters>
+            <parameter name="version" type="Map" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/MethodTransfer.js"/>
+            <set field="recordId" from="ec.resource.script(module).execute('importRoutingVersion', context).recordId"/>
         </actions>
     </service>
 </services>

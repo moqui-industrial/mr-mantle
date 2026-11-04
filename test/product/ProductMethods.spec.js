@@ -685,16 +685,22 @@ feature("release validates the output unit against stock and every routed batch 
 })
 feature("generic record callbacks guard method child rows, decisions, financial rates and the raw audit source", {
     when() {
+        const rate = as(
+            "john.doe",
+            () => one("mantle.work.production.WorkCenterRate", {facilityId: "MTH_CENTER"}).workCenterRateId
+        )
         const ids = as("john.doe", () => ({
             line: firstLine,
             decision: one("mantle.work.method.MethodReleaseDecision", {
                 methodEntityName: "mantle.product.bom.ProductBom",
                 methodId: bomId
             }).methodReleaseDecisionId,
-            rate: one("mantle.work.production.WorkCenterRate", {facilityId: "MTH_CENTER"}).workCenterRateId,
+            rate,
+            // this spec's rate's audit row (another spec's rates have their own)
             audit: one("moqui.entity.EntityAuditLog", {
                 changedEntityName: "mantle.work.production.WorkCenterRate",
-                changedFieldName: "rateAmount"
+                changedFieldName: "rateAmount",
+                pkPrimaryValue: rate
             }).auditHistorySeqId
         }))
         const pairs = [

@@ -108,6 +108,9 @@
     </service>
     <service verb="find" noun="Boms" allow-remote="false">
         <implements service="mantle.product.BomServices.define#BomReadParameters"/>
+        <in-parameters>
+            <parameter name="text"><description>Manufacturing's list search, by id and name ignoring case</description></parameter>
+        </in-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('list',context))</script>
         </actions>
@@ -329,6 +332,111 @@
         </out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('createContent',context))</script>
+        </actions>
+    </service>
+    <!-- Manufacturing P2 (impl-manufacturing): the release request, the clone and the CSV import -->
+    <service verb="request" noun="BomRelease" allow-remote="false">
+        <description>A method engineer (METHOD_EDIT in the BOM's organization) asks for the BOM's draft to be released: the
+            draft's checks run as of fromDate, and a draft that fails them is answered with its findings and not sent. A
+            draft that passes notifies the organization's users holding METHOD_APPROVE (topic BomRelease, MethodReleases.js),
+            replacing an earlier request. Nothing waiting to release sends nothing. The approver releases on the BOM
+            (release#BomDraft), which marks the notices read.</description>
+        <in-parameters>
+            <parameter name="productBomId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="notified" type="Boolean"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/MethodReleases.js"/>
+            <set field="requested" from="ec.resource.script(module).execute('requestBom', context)"/>
+            <set field="valid" from="requested.valid"/>
+            <set field="findings" from="requested.findings"/>
+            <set field="notified" from="requested.notified"/>
+            <set field="notificationMessageId" from="requested.notificationMessageId"/>
+            <set field="message" from="requested.message"/>
+        </actions>
+    </service>
+    <service verb="clone" noun="Bom" allow-remote="false">
+        <description>Copy a BOM into a new method of its organization: another method code of the product, or another
+            product (productId). The header and the lines are the source's released method as of asOfDate (now), else its
+            draft; the lines become drafts of the new method, checked as store#BomItem checks them, and nothing is
+            released. Needs METHOD_EDIT in the organization; refuses a method key that exists.</description>
+        <in-parameters>
+            <parameter name="productBomId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="methodCode" required="true"/>
+            <parameter name="bomName"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productBom" type="Map"/>
+            <parameter name="draftItemRows" type="List"/>
+            <parameter name="sourceProductBomId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/MethodTransfer.js"/>
+            <set field="cloned" from="ec.resource.script(module).execute('cloneBom', context)"/>
+            <set field="productBom" from="cloned.productBom"/>
+            <set field="draftItemRows" from="cloned.draftItemRows"/>
+            <set field="sourceProductBomId" from="cloned.sourceProductBomId"/>
+        </actions>
+    </service>
+    <service verb="import" noun="BomCsv" allow-remote="false" transaction="ignore">
+        <description>Import BOM versions from a UTF-8 CSV file or text (MethodTransfer.js): columns productId,
+            componentProductId, quantity, and optionally methodCode (MAIN), bomName, baseQuantity, baseUomId, quantityUomId,
+            scrapFactor, sequenceNum and role (Consume, Byproduct). A version is the rows of one product and method code.
+            With preview each version is checked as store#BomItem checks a line and nothing is written; else each ready
+            version is written in its own transaction as draft lines (and its method when new). A version with a bad row
+            fails whole and is named with its row messages; a pick kit's rows are skipped. Nothing is released. Needs
+            METHOD_EDIT in the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="csvText"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="delimiter"/>
+            <parameter name="preview" type="Boolean" default="true"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="versionRows" type="List"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="importedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/product/MethodTransfer.js').execute('importBomCsv', context)"/>
+            <set field="versionRows" from="result.versionRows"/>
+            <set field="preview" from="result.preview"/>
+            <set field="readyCount" from="result.readyCount"/>
+            <set field="importedCount" from="result.importedCount"/>
+            <set field="failedCount" from="result.failedCount"/>
+            <set field="skippedCount" from="result.skippedCount"/>
+        </actions>
+    </service>
+    <service verb="import" noun="BomVersion" allow-remote="false">
+        <description>One checked version of import#BomCsv, in the transaction its caller gives it: the method when it is
+            new (store#Bom), then its lines as drafts (store#BomItem), each checking METHOD_EDIT again.</description>
+        <in-parameters>
+            <parameter name="version" type="Map" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/product/MethodTransfer.js"/>
+            <set field="recordId" from="ec.resource.script(module).execute('importBomVersion', context).recordId"/>
         </actions>
     </service>
 </services>

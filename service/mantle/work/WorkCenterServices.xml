@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's work centers (design-manufacturing §6 and §12 M5, crosscut CX-WORKCENTER; impl-manufacturing P3), over
+    WorkCenters.js: the read of one center for FacilityDetail, and its dated capacities and alternates. The WorkCenter
+    extension itself is mantle.work.RoutingServices.store#WorkCenter and its rates store#WorkCenterRate (Products P8, with
+    the separate cost authority). Writes need METHOD_RESOURCES in the work center's organization; reads a production or
+    method read permission and the facility in the user's facility scope, and a rate needs cost read. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="WorkCenter" allow-remote="false">
+        <description>One facility of the user's organizations as a work center: whether it is one, its extension with the
+            plant, calendar and scheduling policy names, its capacities and alternates in effect now or ahead (every one with
+            includeEnded), its people capacity (Facility.capacity, apart from production capacity), and what the user may
+            change (canEdit with METHOD_RESOURCES in its organization; canEditRate and canApproveRate with the cost
+            authority too). Its rates (rateList) only for a user with cost read (PRODUCT_COST_VIEW, ACCOUNTING_VIEW and the
+            cost permissions): without it rateList is not in the answer. Refuses a user without a production or method read
+            permission (PERMISSION_DENIED) and a facility outside the scope like a missing one (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="isWorkCenter" type="Boolean"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="peopleCapacity"/>
+            <parameter name="workCenter" type="Map"/>
+            <parameter name="capacityList" type="List"/>
+            <parameter name="alternateList" type="List"/>
+            <parameter name="rateList" type="List"/>
+            <parameter name="costRead" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canEditRate" type="Boolean"/>
+            <parameter name="canApproveRate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkCenters.js').execute('read', context)"/>
+            <set field="isWorkCenter" from="result.isWorkCenter"/>
+            <set field="facilityId" from="result.facilityId"/>
+            <set field="facilityName" from="result.facilityName"/>
+            <set field="peopleCapacity" from="result.peopleCapacity"/>
+            <set field="workCenter" from="result.workCenter"/>
+            <set field="capacityList" from="result.capacityList"/>
+            <set field="alternateList" from="result.alternateList"/>
+            <set field="rateList" from="result.rateList"/>
+            <set field="costRead" from="result.costRead"/>
+            <set field="canEdit" from="result.canEdit"/>
+            <set field="canEditRate" from="result.canEditRate"/>
+            <set field="canApproveRate" from="result.canApproveRate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="WorkCenterCapacity" allow-remote="false">
+        <description>A new dated capacity of a work center, or with workCenterCapacityId the end of one (only its thruDate,
+            now by default). The capacity is for a product, a product type or every product, and is a quantity in a unit per
+            a time (WccbRate) or a number of parallel slots (WccbSlots, the default when parallelSlots is given). It starts
+            now or later (a day given as today starts now); a new row ends the row of the same basis and product in effect at
+            its start, and one that starts later bounds it. Needs METHOD_RESOURCES in the center's organization and a change
+            reason; refuses a facility that is not a work center (WORK_CENTER_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="workCenterCapacityId"/>
+            <parameter name="facilityId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="capacityBasisEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="productTypeEnumId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="perDuration" type="BigDecimal"/>
+            <parameter name="durationUomId"/>
+            <parameter name="parallelSlots" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workCenterCapacity" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="workCenterCapacity" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkCenters.js')
+                    .execute('capacity', context).workCenterCapacity"/>
+        </actions>
+    </service>
+    <service verb="store" noun="WorkCenterAlternate" allow-remote="false">
+        <description>A new dated alternate of a work center (another work center of the same organization, for a product or
+            every product, in sequence order, with the qualification it carries), or with workCenterAlternateId the end of
+            one. Refuses an alternate of another organization or that is not a work center, the center itself, and one
+            already in effect then. Needs METHOD_RESOURCES in the center's organization and a change reason.</description>
+        <in-parameters>
+            <parameter name="workCenterAlternateId"/>
+            <parameter name="facilityId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="alternateFacilityId"/>
+            <parameter name="productId"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="qualification"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workCenterAlternate" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="workCenterAlternate" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkCenters.js')
+                    .execute('alternate', context).workCenterAlternate"/>
+        </actions>
+    </service>
+</services>

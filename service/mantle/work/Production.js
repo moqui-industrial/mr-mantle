@@ -41,6 +41,7 @@ const str = value => (blank(value) ? null : String(value))
 const text = value => (value == null ? null : dec(value).compare(0) === 0 ? "0" : String(dec(value).toNumber()))
 const day = value => (value == null ? "" : ec.l10n.format(new Date(lib.ms(value)), "yyyy-MM-dd HH:mm"))
 const methodPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
+const productionPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionPolicy.js")
 
 // ===== the run =====
 // A production run of the user's organizations (its owner, and its facility's owner): a missing one and one outside the
@@ -703,11 +704,23 @@ function issuePlan(userScope, p) {
             "QUANTITY_EXCEEDS_AVAILABLE",
             "Only " + text(asset.availableToPromiseTotal) + " of asset " + asset.assetId + " is free to issue"
         )
+    // the scrap allowance: the over-consumption tolerance of the policy the run was released under (impl-manufacturing P4);
+    // none without a policy, so the line's remainder is the limit
     const totals = materialTotals(line)
-    if (unit.stockQuantity.compare(totals.remaining) > 0)
+    const allowance = productionPolicy().overConsumeAllowance(run, line)
+    const issuable = dec(line.stockQuantity).add(allowance).subtract(totals.net)
+    if (unit.stockQuantity.compare(issuable) > 0)
         denied(
             "QUANTITY_EXCEEDS_REMAINING",
-            "Line " + line.productionRunLineId + " has " + text(totals.remaining) + " left to issue"
+            "Line " +
+                line.productionRunLineId +
+                " has " +
+                (allowance.compare(0) > 0
+                    ? text(issuable.compare(0) > 0 ? issuable : zero()) +
+                      " left to issue, its scrap allowance of " +
+                      text(allowance) +
+                      " included"
+                    : text(totals.remaining) + " left to issue")
         )
     return {run, line, operationWorkEffortId, unit, asset}
 }
