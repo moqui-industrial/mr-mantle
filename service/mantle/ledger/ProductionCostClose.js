@@ -325,7 +325,7 @@ function centerRate(facilityId, at) {
     const when = ms(at)
     return (
         rows("mantle.work.production.WorkCenterRate", {facilityId, componentTypeEnumId: "PccOverhead"})
-            .filter(row => (row.state || "approved") === "approved" && current(row, when))
+            .filter(row => row.state === "approved" && current(row, when))
             .sort((a, b) => ms(a.fromDate) - ms(b.fromDate))
             .at(-1) || null
     )
@@ -435,7 +435,8 @@ function weightsOf(lines, policy, currency, quantityOf, explicit) {
         const own = primary?.bomItemId
             ? one("mantle.product.bom.ProductBomItem", {bomItemId: primary.bomItemId})?.allocationShare
             : null
-        if (primary) weights.set(primary.productionRunLineId, own != null ? dec(own) : toDecimal(100).subtract(others))
+        // a BOM line's share is a fraction of one (Boms.js), so the primary takes what the others leave of one
+        if (primary) weights.set(primary.productionRunLineId, own != null ? dec(own) : toDecimal(1).subtract(others))
     } else if (method === "PcmSalesValue") {
         for (const line of lines) {
             const price = salesPrice(line.productId, currency)
@@ -486,9 +487,10 @@ function calculate(p, lock = false) {
     const currency = lib.preference(org).baseCurrencyUomId || null
     if (mode === "close" && run.statusId !== "WeComplete")
         finding("RUN_NOT_COMPLETE", "Work order " + run.workEffortId + " is " + statusText(run.statusId) + "; complete it first")
+    // the review's proposed day for the close; an adjustment after the close is dated today (an open period, R-SA-11)
     const day = !blank(p.accountingDate)
         ? entityLib.calendarDateText(p.accountingDate)
-        : run.productionCostAccountingDate
+        : mode === "close" && run.productionCostAccountingDate
           ? entityLib.calendarDateText(run.productionCostAccountingDate)
           : today()
     if (day > today()) finding("DATE_FUTURE", "The cost close cannot be dated in the future")
@@ -1139,8 +1141,11 @@ function closeCheck(p) {
 
 // ===== by-product receipt (receive#ProductionOutput) =====
 // The cost a by-product line is received at (design ByProducts, D12): its co-product share, under the policy in effect now,
-// of the run's frozen estimate for the primary output's target (its approved standard), over the line's target quantity.
-// Without a frozen estimate there is nothing to allocate (BYPRODUCT_NOT_COSTED).
+// of the run's frozen estimate, over the line's target quantity. The primary output is received at its frozen standard
+// (rule 1), which Products' rollup already nets of the by-products' shares (Costs.js scales the primary's lines by its
+// share), so the run's whole estimate is the primary's target at its standard over the primary's weight: under quantity a
+// by-product unit in the primary's unit costs what a primary unit does. Without a frozen estimate there is nothing to
+// allocate (BYPRODUCT_NOT_COSTED).
 function byproductCost(run, line, quantity) {
     const standard = run.productStandardCostId ? one(STANDARD, {productStandardCostId: run.productStandardCostId}) : null
     const lines = production()
@@ -1151,9 +1156,16 @@ function byproductCost(run, line, quantity) {
         denied("BYPRODUCT_NOT_COSTED", "By-product " + line.productId + " has no frozen estimate to take its share of")
     const policy = policyAt(run.ownerPartyId)
     const currency = standard.priceUomId || lib.preference(run.ownerPartyId).baseCurrencyUomId || null
-    const estimate = dec(standard.unitCost).multiply(dec(primary.stockQuantity))
     const weighting = weightsOf(lines, policy, currency, row => dec(row.stockQuantity), null)
     if (weighting.findings.length) denied("BYPRODUCT_NOT_COSTED", weighting.findings.map(row => row.message).join("; "))
+    const primaryWeight = dec(weighting.weights.get(primary.productionRunLineId))
+    const totalWeight = lines.reduce((sum, row) => sum.add(dec(weighting.weights.get(row.productionRunLineId))), zero())
+    if (primaryWeight.compare(0) <= 0)
+        denied("BYPRODUCT_NOT_COSTED", "The primary output takes no share, so the run's estimate cannot be shared")
+    const estimate = dec(standard.unitCost)
+        .multiply(dec(primary.stockQuantity))
+        .multiply(totalWeight)
+        .divide(primaryWeight, 10, "HALF_UP")
     const shares = split(estimate, lines, weighting.weights, currency)
     const mine = shares?.find(row => row.line.productionRunLineId === line.productionRunLineId)
     if (!mine || mine.amount.compare(0) <= 0 || dec(line.stockQuantity).compare(0) <= 0)

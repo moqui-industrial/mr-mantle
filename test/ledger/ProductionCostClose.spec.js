@@ -433,10 +433,11 @@ feature("a by-product is received as its own stock at its co-product share of th
         received.error == ""
         received.result.costSource == "allocation"
         assets.every(asset => asset.productId == "PCC_BY" && asset.ownerPartyId == org)
-        // 2 of the 12 output units by quantity: 2/12 of the estimate 50 = 8.33 for the 2
+        // 2 of the 12 output units by quantity: the primary's standard 5 a unit is its own 10/12, so the run's estimate is 60
+        // and the 2 take 10, 5 a unit as the primary's
         near(
             assets.reduce((sum, asset) => sum + n(asset.quantityOnHandTotal) * n(asset.acquireCost), 0),
-            8.3333
+            10
         )
         received.result.productionCostEventIds.length >= 1
     }
@@ -472,13 +473,14 @@ feature(
             previewed.overheadRows.length == 1
             n(previewed.overheadRows[0].amount) == 20
             n(previewed.overheadRows[0].basisQuantity) == 2
-            // WIP: issued 20, relieved 50 + 8.33, absorbed 65 and overhead 20: 46.67 left to variance
-            near(previewed.totals.residual, 46.6667)
+            // WIP: issued 20, relieved 50 + 10, absorbed 65 and overhead 20: 45 left to variance
+            near(previewed.totals.residual, 45)
             near(previewed.totals.runCost, 105)
             previewed.outputRows.length == 2
             near(previewed.outputRows.find(row => row.lineRoleEnumId == "PrlrOutput").share, 87.5)
             near(previewed.outputRows.find(row => row.lineRoleEnumId == "PrlrByproduct").share, 17.5)
             near(previewed.outputRows.find(row => row.lineRoleEnumId == "PrlrOutput").variance, 37.5)
+            near(previewed.outputRows.find(row => row.lineRoleEnumId == "PrlrByproduct").variance, 7.5)
             previewed.policy.productionAllocationPolicyId == state.policyId
             // the ledger lines balance
             const debit = previewed.ledgerRows.reduce((sum, row) => sum + (n(row.debit) || 0), 0)
@@ -487,7 +489,7 @@ feature(
             near(previewed.ledgerRows.find(row => row.glAccountId == accounts.GatOverheadApplied).credit, 40)
             near(previewed.ledgerRows.find(row => row.glAccountId == accounts.GatLaborApplied).credit, 15)
             near(previewed.ledgerRows.find(row => row.glAccountId == accounts.GatOutsideProcessAccrued).credit, 30)
-            near(previewed.ledgerRows.find(row => row.glAccountId == accounts.GatProductionVariance).debit, 46.6667)
+            near(previewed.ledgerRows.find(row => row.glAccountId == accounts.GatProductionVariance).debit, 45)
         }
     }
 )
@@ -551,9 +553,10 @@ feature("the close posts once, closing the run in the same transaction, and a re
         })
         const closed = run("pcc_poster", C + "get#CostClose", {workEffortId: r.workEffortId})
         const notices = rows("moqui.security.user.NotificationMessage", {topic: "ProductionCostReview", recordId: r.workEffortId})
-        return {previewed, posted, retried, after, events, allocations, transactions, closed, notices}
+        const afterClose = preview("pcc_poster", r.workEffortId)
+        return {previewed, posted, retried, after, events, allocations, transactions, closed, notices, afterClose}
     },
-    then({previewed, posted, retried, after, events, allocations, transactions, closed, notices}) {
+    then({previewed, posted, retried, after, events, allocations, transactions, closed, notices, afterClose}) {
         previewed.blocked == false
         posted.error == ""
         posted.result.resultCode == "CLOSED"
@@ -573,13 +576,16 @@ feature("the close posts once, closing the run in the same transaction, and a re
             .every(event => event.ledgerStatusEnumId == "PclClosePosted" && event.closeAcctgTransId == posted.result.acctgTransId)
         allocations.every(row => row.productionAllocationPolicyId == state.policyId && row.adjustment == "N")
         allocations.filter(row => row.destinationEnumId == "PcdByproduct").length == 1
-        // WIP for the run ends at zero: the GL entries net the run's WIP
+        // the entries balance, and the run's WIP (its stock postings with the close's allocations) ends at zero
         const lines = entriesOf(posted.result.acctgTransId)
         near(
             Object.values(lines).reduce((sum, value) => sum + value, 0),
             0
         )
-        near(lines[accounts.GatProductionVariance], 46.6667)
+        near(lines[accounts.GatProductionVariance], 45)
+        afterClose.mode == "adjustment"
+        near(afterClose.totals.before, 0)
+        codes(afterClose).includes("NOTHING_TO_ADJUST")
         closed.closed == true
         closed.allocationRows.length == allocations.length
         notices.every(notice =>
@@ -594,6 +600,8 @@ feature("a labor event after the close is previewed and posted as an adjustment"
     when() {
         const r = state.byRun
         const late = labor(r, 0.5, 5, {afterClose: "Y"})
+        // the review's proposed day is the close's; an adjustment is dated today, an open period
+        call("update#" + WORK, {workEffortId: r.workEffortId, productionCostAccountingDate: "2020-01-15"})
         const previewed = preview("pcc_poster", r.workEffortId)
         const posted = post("pcc_poster", previewed)
         const again = preview("pcc_poster", r.workEffortId)
@@ -602,6 +610,7 @@ feature("a labor event after the close is previewed and posted as an adjustment"
     then({late, previewed, posted, again, after}) {
         previewed.error == ""
         previewed.mode == "adjustment"
+        !codes(previewed).includes("PERIOD_CLOSED")
         previewed.absorptionRows.length == 1
         previewed.absorptionRows[0].productionCostEventId == late
         previewed.absorptionRows[0].afterClose == true

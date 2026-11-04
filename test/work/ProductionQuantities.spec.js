@@ -869,15 +869,15 @@ feature("a draft's by-product is planned, estimated by quantity and received at 
         x.produce[0].typeEnumId == "WeptProduce"
         n(x.produce[0].estimatedQuantity) == 2
         x.late.error.includes("RUN_NOT_DRAFT")
-        // 2 of the 12 output units by quantity take 2/12 of the estimate 50
+        // 2 of the 12 output units by quantity: the primary's standard 5 is its own share, so the run's estimate is 60
         x.byproductReceipt.error == ""
         x.byproductReceipt.result.costSource == "allocation"
         x.byproductCosts.length == 1
-        // the share is a currency amount, 8.33 for the line's 2, so a unit takes 4.165
-        Math.abs(x.byproductCosts[0] - 4.165) < 0.0001
+        // and a by-product unit takes 5, as a primary unit does
+        Math.abs(x.byproductCosts[0] - 5) < 0.0001
         x.read.outputRows.length == 2
         x.read.allocation.available == true
-        x.read.allocation.totalCost == "50"
+        x.read.allocation.totalCost == "60"
         x.read.allocation.rows.find(row => row.lineRoleEnumId == "PrlrByproduct").sharePercent == "16.67"
         x.readerRead.allocation == null
     }
