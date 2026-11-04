@@ -1,0 +1,635 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's reports (design-manufacturing §9 and Home's Kpis, §12 M10; impl-manufacturing P16): the eight read-only
+    report contracts and the dashboard provider over the production records, in ProductionReports.js. Each checks
+    PRODUCTION_VIEW and the user's organizations and facilities itself, answers its scope, as-of time, units, currencies and
+    the partitions it could not read, and returns money only with ACCOUNTING_VIEW (left out, never zero). A list a screen
+    pages comes with its page fields; pageNoLimit (an export) answers every row up to 2000. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="ReportParameters" type="interface">
+        <description>The scope every production report takes: an organization of the user's (else all of them), a facility (a
+            plant takes the facilities under it), the period (fromDate inclusive; thruDate exclusive, a day at midnight through
+            its end; 30 days to now by default) and the page of its list.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+    </service>
+    <service verb="get" noun="ProductionStatusReport" allow-remote="false">
+        <description>The production runs of the scope by status (open by default; 'all' or a comma list), due date,
+            completion date (completedFrom, completedThru), output product and assignee (WorkOrderStatusReport): each
+            run's target, good and remaining quantity in its stock unit, due and completion dates, days late and what
+            blocks it (on hold, a short component), with the totals per unit and the count per status. The period
+            parameters are not used. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an organization or facility
+            outside the user's scope (RECORD_UNAVAILABLE) and a period of more than a year or ending before it starts
+            (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope, as-of time, units, currencies and the partitions it
+            could not read (complete false), and leaves money out without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="productId"/>
+            <parameter name="statusId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueFrom" type="Timestamp"/>
+            <parameter name="dueThru" type="Timestamp"/>
+            <parameter name="completedFrom" type="Timestamp"/>
+            <parameter name="completedThru" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="statusCounts" type="List"/>
+            <parameter name="statusRows" type="List"/>
+            <parameter name="statusRowsCount" type="Integer"/>
+            <parameter name="statusRowsPageIndex" type="Integer"/>
+            <parameter name="statusRowsPageSize" type="Integer"/>
+            <parameter name="statusRowsPageMaxIndex" type="Integer"/>
+            <parameter name="statusRowsPageRangeLow" type="Integer"/>
+            <parameter name="statusRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('status', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="statusCounts" from="report.statusCounts"/>
+            <set field="statusRows" from="report.statusRows"/>
+            <set field="statusRowsCount" from="report.statusRowsCount"/>
+            <set field="statusRowsPageIndex" from="report.statusRowsPageIndex"/>
+            <set field="statusRowsPageSize" from="report.statusRowsPageSize"/>
+            <set field="statusRowsPageMaxIndex" from="report.statusRowsPageMaxIndex"/>
+            <set field="statusRowsPageRangeLow" from="report.statusRowsPageRangeLow"/>
+            <set field="statusRowsPageRangeHigh" from="report.statusRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionMaterialReport" allow-remote="false">
+        <description>The lines of the runs with a material issue or an output receipt in the period, or of one run
+            (MaterialReport): each material line's required, issued, returned, net issued and remaining quantity, each
+            output line's good, held and remaining quantity, with the lots and facilities of its stock and an output's
+            component lots (lineage); by product (a material or an output), lot and movement type (issue, return or
+            receipt), with totals per role and unit. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an
+            organization or facility outside the user's scope (RECORD_UNAVAILABLE) and a period of more than a year or
+            ending before it starts (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope, as-of time, units, currencies
+            and the partitions it could not read (complete false), and leaves money out without ACCOUNTING_VIEW
+            (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="productId"/>
+            <parameter name="lotId"/>
+            <parameter name="movementType"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="lineRowsCount" type="Integer"/>
+            <parameter name="lineRowsPageIndex" type="Integer"/>
+            <parameter name="lineRowsPageSize" type="Integer"/>
+            <parameter name="lineRowsPageMaxIndex" type="Integer"/>
+            <parameter name="lineRowsPageRangeLow" type="Integer"/>
+            <parameter name="lineRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('material', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="lineRows" from="report.lineRows"/>
+            <set field="lineRowsCount" from="report.lineRowsCount"/>
+            <set field="lineRowsPageIndex" from="report.lineRowsPageIndex"/>
+            <set field="lineRowsPageSize" from="report.lineRowsPageSize"/>
+            <set field="lineRowsPageMaxIndex" from="report.lineRowsPageMaxIndex"/>
+            <set field="lineRowsPageRangeLow" from="report.lineRowsPageRangeLow"/>
+            <set field="lineRowsPageRangeHigh" from="report.lineRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="OperationPerformanceReport" allow-remote="false">
+        <description>Each work center's OEE over the period, 7 days to now by default (OperationPerformanceReport):
+            planned production time (its work hours less planned stops and outages), downtime (its unplanned stops and
+            outages, unioned), run time (its machine runtime outside the downtime, else planned time less downtime),
+            availability (run over planned time), performance (the ideal hours of the units counted over run time),
+            quality (good over the units counted, each unit once and a rework run's output not again) and OEE, each Not
+            calculable with its reason where its figures are missing; its machine and labor hours and its counts; the
+            plant's figures over the calculable centers; and the downtime by reason (reasonCode filters it). A product
+            narrows the units counted. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an organization or facility
+            outside the user's scope (RECORD_UNAVAILABLE) and a period of more than a year or ending before it starts
+            (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope, as-of time, units, currencies and the partitions it
+            could not read (complete false), and leaves money out without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="productId"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="downtimeRows" type="List"/>
+            <parameter name="centerRows" type="List"/>
+            <parameter name="centerRowsCount" type="Integer"/>
+            <parameter name="centerRowsPageIndex" type="Integer"/>
+            <parameter name="centerRowsPageSize" type="Integer"/>
+            <parameter name="centerRowsPageMaxIndex" type="Integer"/>
+            <parameter name="centerRowsPageRangeLow" type="Integer"/>
+            <parameter name="centerRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('performance', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totals" from="report.totals"/>
+            <set field="downtimeRows" from="report.downtimeRows"/>
+            <set field="centerRows" from="report.centerRows"/>
+            <set field="centerRowsCount" from="report.centerRowsCount"/>
+            <set field="centerRowsPageIndex" from="report.centerRowsPageIndex"/>
+            <set field="centerRowsPageSize" from="report.centerRowsPageSize"/>
+            <set field="centerRowsPageMaxIndex" from="report.centerRowsPageMaxIndex"/>
+            <set field="centerRowsPageRangeLow" from="report.centerRowsPageRangeLow"/>
+            <set field="centerRowsPageRangeHigh" from="report.centerRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionLossReport" allow-remote="false">
+        <description>The production losses recorded in the period (approved by default; statusId for another) by
+            product, reason and type, with the good output of the same products, the loss rate and, with
+            ACCOUNTING_VIEW, the loss's cost from its scrap cost events (LossReport); the totals per unit, the trend by
+            week and the cost per currency. By product, reason, loss type and operation. Requires PRODUCTION_VIEW
+            (PERMISSION_DENIED); refuses an organization or facility outside the user's scope (RECORD_UNAVAILABLE) and a
+            period of more than a year or ending before it starts (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope,
+            as-of time, units, currencies and the partitions it could not read (complete false), and leaves money out
+            without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="productId"/>
+            <parameter name="reasonCode"/>
+            <parameter name="lossTypeEnumId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="statusId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="trendRows" type="List"/>
+            <parameter name="costTotals" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="lossRows" type="List"/>
+            <parameter name="lossRowsCount" type="Integer"/>
+            <parameter name="lossRowsPageIndex" type="Integer"/>
+            <parameter name="lossRowsPageSize" type="Integer"/>
+            <parameter name="lossRowsPageMaxIndex" type="Integer"/>
+            <parameter name="lossRowsPageRangeLow" type="Integer"/>
+            <parameter name="lossRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('loss', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="trendRows" from="report.trendRows"/>
+            <set field="costTotals" from="report.costTotals"/>
+            <set field="lossRows" from="report.lossRows"/>
+            <set field="lossRowsCount" from="report.lossRowsCount"/>
+            <set field="lossRowsPageIndex" from="report.lossRowsPageIndex"/>
+            <set field="lossRowsPageSize" from="report.lossRowsPageSize"/>
+            <set field="lossRowsPageMaxIndex" from="report.lossRowsPageMaxIndex"/>
+            <set field="lossRowsPageRangeLow" from="report.lossRowsPageRangeLow"/>
+            <set field="lossRowsPageRangeHigh" from="report.lossRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionQualityReport" allow-remote="false">
+        <description>The production inspections created in the period (QualityReport) by template and product:
+            inspections and those open, samples, readings and failed readings, accepted, rejected and held quantity, the
+            failure rate, re-inspections, the results and the average hours from submission to first disposition, with
+            totals per unit. By template, product, operation, lot and result. Requires PRODUCTION_VIEW
+            (PERMISSION_DENIED); refuses an organization or facility outside the user's scope (RECORD_UNAVAILABLE) and a
+            period of more than a year or ending before it starts (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope,
+            as-of time, units, currencies and the partitions it could not read (complete false), and leaves money out
+            without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="inspectionTemplateId"/>
+            <parameter name="productId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="lotId"/>
+            <parameter name="resultEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="qualityRows" type="List"/>
+            <parameter name="qualityRowsCount" type="Integer"/>
+            <parameter name="qualityRowsPageIndex" type="Integer"/>
+            <parameter name="qualityRowsPageSize" type="Integer"/>
+            <parameter name="qualityRowsPageMaxIndex" type="Integer"/>
+            <parameter name="qualityRowsPageRangeLow" type="Integer"/>
+            <parameter name="qualityRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('quality', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="qualityRows" from="report.qualityRows"/>
+            <set field="qualityRowsCount" from="report.qualityRowsCount"/>
+            <set field="qualityRowsPageIndex" from="report.qualityRowsPageIndex"/>
+            <set field="qualityRowsPageSize" from="report.qualityRowsPageSize"/>
+            <set field="qualityRowsPageMaxIndex" from="report.qualityRowsPageMaxIndex"/>
+            <set field="qualityRowsPageRangeLow" from="report.qualityRowsPageRangeLow"/>
+            <set field="qualityRowsPageRangeHigh" from="report.qualityRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionCostReport" allow-remote="false">
+        <description>The cost evidence of the runs completed in the period, or open now (basis open), or of one run
+            (ProductionCostReport): each run's good quantity, cost close state and its count of events, unvalued events
+            and events awaiting the close; with ACCOUNTING_VIEW its material, labor, machine, overhead and outside cost,
+            total, output relief, WIP, the cost close's output allocation and variance with their GL transactions, and
+            with Products' cost read too the frozen estimate for its good quantity, in one currency (currencyUomId, else
+            the run's), with totals per unit and per currency. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an
+            organization or facility outside the user's scope (RECORD_UNAVAILABLE) and a period of more than a year or
+            ending before it starts (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope, as-of time, units, currencies
+            and the partitions it could not read (complete false), and leaves money out without ACCOUNTING_VIEW
+            (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="productId"/>
+            <parameter name="basis"><description>completed (default) or open</description></parameter>
+            <parameter name="currencyUomId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="quantityTotals" type="List"/>
+            <parameter name="moneyTotals" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="costRows" type="List"/>
+            <parameter name="costRowsCount" type="Integer"/>
+            <parameter name="costRowsPageIndex" type="Integer"/>
+            <parameter name="costRowsPageSize" type="Integer"/>
+            <parameter name="costRowsPageMaxIndex" type="Integer"/>
+            <parameter name="costRowsPageRangeLow" type="Integer"/>
+            <parameter name="costRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('cost', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="quantityTotals" from="report.quantityTotals"/>
+            <set field="moneyTotals" from="report.moneyTotals"/>
+            <set field="costRows" from="report.costRows"/>
+            <set field="costRowsCount" from="report.costRowsCount"/>
+            <set field="costRowsPageIndex" from="report.costRowsPageIndex"/>
+            <set field="costRowsPageSize" from="report.costRowsPageSize"/>
+            <set field="costRowsPageMaxIndex" from="report.costRowsPageMaxIndex"/>
+            <set field="costRowsPageRangeLow" from="report.costRowsPageRangeLow"/>
+            <set field="costRowsPageRangeHigh" from="report.costRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="BomVarianceReport" allow-remote="false">
+        <description>The runs released in the period, or one run (BillOfMaterialsVarianceReport): each material line's
+            planned quantity (the frozen line, scaled to the good output by default; quantityBasis target for the whole
+            target) against the net issued quantity, the variance and its percentage, its substitute, its BOM and
+            release date, and with ACCOUNTING_VIEW its actual cost and the usage variance at actual cost; each run's
+            target, good and yield, and its standard hours against the hours recorded on it. By BOM, product, run and
+            operation. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an organization or facility outside the
+            user's scope (RECORD_UNAVAILABLE) and a period of more than a year or ending before it starts
+            (PERIOD_TOO_LONG, PERIOD_INVALID). Answers its scope, as-of time, units, currencies and the partitions it
+            could not read (complete false), and leaves money out without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="productBomId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="productId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="quantityBasis"><description>good (default) or target</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="yieldRows" type="List"/>
+            <parameter name="moneyTotals" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="lineRowsCount" type="Integer"/>
+            <parameter name="lineRowsPageIndex" type="Integer"/>
+            <parameter name="lineRowsPageSize" type="Integer"/>
+            <parameter name="lineRowsPageMaxIndex" type="Integer"/>
+            <parameter name="lineRowsPageRangeLow" type="Integer"/>
+            <parameter name="lineRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('variance', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="yieldRows" from="report.yieldRows"/>
+            <set field="moneyTotals" from="report.moneyTotals"/>
+            <set field="lineRows" from="report.lineRows"/>
+            <set field="lineRowsCount" from="report.lineRowsCount"/>
+            <set field="lineRowsPageIndex" from="report.lineRowsPageIndex"/>
+            <set field="lineRowsPageSize" from="report.lineRowsPageSize"/>
+            <set field="lineRowsPageMaxIndex" from="report.lineRowsPageMaxIndex"/>
+            <set field="lineRowsPageRangeLow" from="report.lineRowsPageRangeLow"/>
+            <set field="lineRowsPageRangeHigh" from="report.lineRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionPlanningReport" allow-remote="false">
+        <description>The suggestions of the current supply plans of the scope, or of one plan (PlanningReport, over the
+            PlanningRun records of SupplyPlanning): each suggestion's product, facility, method, state, level, required,
+            available, held and suggested quantity, the quantity converted to supply, its dates, provenance (demand and
+            supply) and exception; each plan's facilities, age and whether it is stale; totals per unit and, with a
+            bucket (day or week), per required-by period. By plan, product and method. The period parameters are not
+            used. Requires PRODUCTION_VIEW (PERMISSION_DENIED); refuses an organization or facility outside the user's
+            scope (RECORD_UNAVAILABLE) and a period of more than a year or ending before it starts (PERIOD_TOO_LONG,
+            PERIOD_INVALID). Answers its scope, as-of time, units, currencies and the partitions it could not read
+            (complete false), and leaves money out without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <in-parameters>
+            <parameter name="planningRunId"/>
+            <parameter name="productId"/>
+            <parameter name="methodEnumId"/>
+            <parameter name="bucket"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="planRows" type="List"/>
+            <parameter name="totalRows" type="List"/>
+            <parameter name="stale" type="Boolean"/>
+            <parameter name="suggestionRows" type="List"/>
+            <parameter name="suggestionRowsCount" type="Integer"/>
+            <parameter name="suggestionRowsPageIndex" type="Integer"/>
+            <parameter name="suggestionRowsPageSize" type="Integer"/>
+            <parameter name="suggestionRowsPageMaxIndex" type="Integer"/>
+            <parameter name="suggestionRowsPageRangeLow" type="Integer"/>
+            <parameter name="suggestionRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('planning', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="planRows" from="report.planRows"/>
+            <set field="totalRows" from="report.totalRows"/>
+            <set field="stale" from="report.stale"/>
+            <set field="suggestionRows" from="report.suggestionRows"/>
+            <set field="suggestionRowsCount" from="report.suggestionRowsCount"/>
+            <set field="suggestionRowsPageIndex" from="report.suggestionRowsPageIndex"/>
+            <set field="suggestionRowsPageSize" from="report.suggestionRowsPageSize"/>
+            <set field="suggestionRowsPageMaxIndex" from="report.suggestionRowsPageMaxIndex"/>
+            <set field="suggestionRowsPageRangeLow" from="report.suggestionRowsPageRangeLow"/>
+            <set field="suggestionRowsPageRangeHigh" from="report.suggestionRowsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionDashboard" allow-remote="false">
+        <description>The Kpis of Manufacturing Home and the provider Insights registers (crosscut §3.17), for the scope
+            over the period (this month to now by default): completed work orders, on-time completion, OEE with its
+            factors, utilization (booked over available hours), the scrap rate and, with ACCOUNTING_VIEW only, the WIP
+            value; each with value, valueText (Not calculable or Unavailable where its figures are missing or its source
+            failed, never zero), detail, and the report and parameters it opens with the same filters. Requires
+            PRODUCTION_VIEW (PERMISSION_DENIED); refuses an organization or facility outside the user's scope
+            (RECORD_UNAVAILABLE) and a period of more than a year or ending before it starts (PERIOD_TOO_LONG,
+            PERIOD_INVALID). Answers its scope, as-of time, units, currencies and the partitions it could not read
+            (complete false), and leaves money out without ACCOUNTING_VIEW (withheldText).</description>
+        <implements service="mantle.work.ProductionReportServices.define#ReportParameters"/>
+        <out-parameters>
+            <parameter name="scope" type="Map"><description>organizationPartyIds (null: every one), organizationText, facilityId,
+                facilityText, fromDate, thruDate and periodText</description></parameter>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="unitList" type="List"/>
+            <parameter name="unitsText"/>
+            <parameter name="currencyUomIds" type="List"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="currencyText"/>
+            <parameter name="partitions" type="List"><description>Each partition not read: name and message</description>
+            </parameter>
+            <parameter name="partitionsText"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="withheldText"/>
+            <parameter name="kpis" type="List"><description>kpiId, title, value, valueText, detail, currencyUomId, reportName
+                and parameters</description></parameter>
+            <parameter name="completedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionReports.js')
+                    .execute('dashboard', context)"/>
+            <set field="scope" from="report.scope"/>
+            <set field="asOf" from="report.asOf"/>
+            <set field="asOfText" from="report.asOfText"/>
+            <set field="unitList" from="report.unitList"/>
+            <set field="unitsText" from="report.unitsText"/>
+            <set field="currencyUomIds" from="report.currencyUomIds"/>
+            <set field="currencyText" from="report.currencyText"/>
+            <set field="partitions" from="report.partitions"/>
+            <set field="partitionsText" from="report.partitionsText"/>
+            <set field="complete" from="report.complete"/>
+            <set field="financialRead" from="report.financialRead"/>
+            <set field="withheldText" from="report.withheldText"/>
+            <set field="kpis" from="report.kpis"/>
+            <set field="completedCount" from="report.completedCount"/>
+        </actions>
+    </service>
+</services>
