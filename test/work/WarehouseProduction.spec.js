@@ -612,6 +612,7 @@ feature("output is received into quarantine with generated serials at the run's 
         retry.result.alreadyApplied == true
         rows("mantle.product.receipt.AssetReceipt", {productionOutputLineId: lineOf(state.run1, "WPD_FIN").productionRunLineId})
             .length == 2
+        // no ProductionPolicy row and no loss: the limit is still the target less what was received (impl-manufacturing F-P7-2)
         over.error.includes("OVER_RECEIPT")
         outsider.error.includes("RECORD_UNAVAILABLE")
         nobody.error.includes("PERMISSION_DENIED")

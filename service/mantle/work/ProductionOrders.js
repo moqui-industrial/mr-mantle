@@ -11,7 +11,8 @@
 //   shortage policy of the ProductionPolicy in effect at the release time (impl-manufacturing F-P4-4): all components
 //   usable, or a staged release a supervisor approves (PsrAllUsable), or a staged release (PsrStaged); a staged release
 //   leaves its short lines blocked for issue until the stock covers them. Unrelease and cancel need a run with no stock or
-//   time fact. Complete waits for the quantity reconciliation and close is the cost close's.
+//   time fact. Complete needs the quantity reconciliation (ProductionQuantities.js, impl-manufacturing P7) and close is the
+//   cost close's.
 // - batch#ProductionAction: an action on several runs, a result per run.
 // - get#ProductionLifecycle: a run's actions with what each would do or why it is refused (the Lifecycle dialog's impact
 //   preview), its shortages and its status history.
@@ -42,7 +43,17 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const blockedEquipment = ["AstDeactivated", "AstOnHold", "AstDelivered"]
 const partyRoles = {Manager: "Supervisor", Assignee: "Operator"}
 // the reasons a release or another action waits for something, not a failure (batch#ProductionAction's outcome)
-const blockedReasons = ["SHORTAGE", "METHOD_CHANGED", "RUN_HAS_FACTS", "RUN_STARTED", "COMPLETE_UNAVAILABLE"]
+const blockedReasons = [
+    "SHORTAGE",
+    "METHOD_CHANGED",
+    "RUN_HAS_FACTS",
+    "RUN_STARTED",
+    "QUANTITIES_UNRECONCILED",
+    "OUTPUT_HELD",
+    "LOSS_PENDING",
+    "MATERIAL_UNISSUED",
+    "OPERATION_OPEN"
+]
 const zero = () => toDecimal(0)
 const dec = value => toDecimal(value ?? 0)
 const blank = value => value == null || String(value).trim() === ""
@@ -53,6 +64,7 @@ const yes = value => value === true || value === "true" || value === "Y"
 const production = () => ec.resource.script("component://mr-mantle/service/mantle/work/Production.js")
 const productionPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionPolicy.js")
 const payables = () => ec.resource.script("component://mr-mantle/service/mantle/account/Payables.js")
+const quantities = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuantities.js")
 const statusText = statusId => (statusId ? one(STATUS, {statusId})?.description || statusId : "")
 const facilityName = facility => (facility ? facility.facilityName || facility.facilityId : "")
 
@@ -157,11 +169,16 @@ function factsOf(run) {
     const issuances = find(ISSUANCE, {workEffortId: run.workEffortId}).count()
     const receipts = find(RECEIPT, {workEffortId: run.workEffortId}).count()
     const timeEntries = find(TIME).condition("workEffortId", "in", workEffortIds).count()
+    // impl-manufacturing P7: the quantity events and losses recorded on it
+    const quantityEvents = find("mantle.work.production.ProductionQuantityEvent", {workEffortId: run.workEffortId}).count()
+    const losses = find("mantle.work.production.ProductionLoss", {workEffortId: run.workEffortId}).count()
     const parts = []
     if (issuances) parts.push(issuances + (issuances === 1 ? " issue" : " issues"))
     if (receipts) parts.push(receipts + (receipts === 1 ? " receipt" : " receipts"))
     if (timeEntries) parts.push(timeEntries + (timeEntries === 1 ? " time entry" : " time entries"))
-    return {issuances, receipts, timeEntries, any: parts.length > 0, text: parts.join(", ")}
+    if (quantityEvents) parts.push(quantityEvents + (quantityEvents === 1 ? " quantity event" : " quantity events"))
+    if (losses) parts.push(losses + (losses === 1 ? " loss" : " losses"))
+    return {issuances, receipts, timeEntries, quantityEvents, losses, any: parts.length > 0, text: parts.join(", ")}
 }
 
 // ===== the actions =====
@@ -299,12 +316,8 @@ function check(run, action, p, lines = production().linesOf(run.workEffortId)) {
         }
     if (definition.reason && blank(p.reason) && blank(p.reasonCode))
         return {allowed: false, reasonCode: "REASON_REQUIRED", message: "Give the reason to " + label.toLowerCase()}
-    if (action === "complete")
-        return {
-            allowed: false,
-            reasonCode: "COMPLETE_UNAVAILABLE",
-            message: "Completing a work order needs its quantity reconciliation, which is not offered yet"
-        }
+    // the quantity reconciliation, settled operations and material disposition (impl-manufacturing P7)
+    if (action === "complete") return quantities().completeCheck(run, p, lines)
     if (action === "release") return releaseGate(run, lines, p)
     if (action === "requestStaged" || action === "approveStaged") {
         const shortages = shortagesOf(run, lines)
@@ -449,6 +462,8 @@ function apply(run, action, p, key, gate) {
         // the short lines of a staged release stay blocked for issue until the stock covers them
         for (const short of gate.shortages || [])
             call("update#" + LINE, {productionRunLineId: short.productionRunLineId, stagedShortQuantity: short.short})
+        // the shortage notice to the planners (impl-manufacturing P5b)
+        ec.resource.script("component://mr-mantle/service/mantle/work/ProductionMaterials.js").notifyShortage(run, gate.shortages)
         clearStagedRequests(run)
         notifySupervisors("ProductionRelease", run, {organizationPartyId: run.ownerPartyId, releasedByUserId: ec.user.userId})
         return Object.assign(answer, {
@@ -481,7 +496,8 @@ function apply(run, action, p, key, gate) {
     else if (action === "cancel") {
         cancelOperations(run, "Work order cancelled")
         setStatus(run, "WeCancelled", why, {actualCompletionDate: ec.user.nowTimestamp})
-    } else if (action === "approveStaged") {
+    } else if (action === "complete") quantities().complete(run, p, why)
+    else if (action === "approveStaged") {
         call("update#" + WORK, {
             workEffortId: run.workEffortId,
             productionRevision: revisionOf(run) + 1,
@@ -508,7 +524,14 @@ function apply(run, action, p, key, gate) {
     }
     const after = one(WORK, {workEffortId: run.workEffortId})
     return Object.assign(answer, {
-        resultCode: {unrelease: "UNRELEASED", start: "STARTED", hold: "HELD", resume: "RESUMED", cancel: "CANCELLED"}[action],
+        resultCode: {
+            unrelease: "UNRELEASED",
+            start: "STARTED",
+            hold: "HELD",
+            resume: "RESUMED",
+            cancel: "CANCELLED",
+            complete: "COMPLETED"
+        }[action],
         statusId: after.statusId,
         revision: revisionOf(after)
     })
@@ -519,7 +542,17 @@ function transition(p) {
         p,
         "ProductionTransition",
         ["PRODUCTION_PLAN", "PRODUCTION_SUPERVISE"],
-        ["workEffortId", "action", "toStatusId", "expectedRevision", "reason", "reasonCode", "reexplode"]
+        [
+            "workEffortId",
+            "action",
+            "toStatusId",
+            "expectedRevision",
+            "reason",
+            "reasonCode",
+            "reexplode",
+            "finishRemainder",
+            "acceptMaterialVariance"
+        ]
     )
     if (begun.previous) return begun.previous
     const userScope = posting.scope()

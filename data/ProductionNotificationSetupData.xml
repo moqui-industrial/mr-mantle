@@ -24,4 +24,9 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="ProductionStagedRelease" inboxEnumId="NinNotifications"
             description="Staged release to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" titleTemplate="Approve a staged release of ${workEffortName}"/>
+    <!-- impl-manufacturing P5b: a release that leaves lines short (a staged release) tells the organization's planners
+        (PRODUCTION_PLAN holders), who replenish them (ProductionMaterials.js notifyShortage) -->
+    <moqui.security.user.NotificationTopic topic="ProductionShortage" inboxEnumId="NinNotifications"
+            description="Work order short of material" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Work order ${workEffortId} is short: ${shortText}"/>
 </entity-facade-xml>
