@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's quantities, by-products and loss (design-manufacturing Quantities, ByProducts, ScrapLoss and §12.2; §12 M4
+    and M6; impl-manufacturing P7; ProductionQuantities.js): the quantity facts of a run's output and their losses, written
+    only by mantle.work.ProductionServices' record#ProductionQuantity, record#ProductionLoss, change#ProductionQuantity and
+    approve#ProductionException. A file of its own so it merges apart from the other production entities. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- One quantity fact of a run's output line (M4): a good or held (pending) quantity with the output receipt it was
+        received by, a process loss, scrap or rework with its ProductionLoss, a target change with the target before and
+        after it, or an overproduction request a supervisor decides. Never updated but for its approval: a correction is a
+        new event. The quantity is in the line's stock unit; a target change's quantity is its delta. -->
+    <entity entity-name="ProductionQuantityEvent" package="mantle.work.production" cache="never">
+        <field name="productionQuantityEventId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="quantityEventTypeEnumId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="previousTargetQuantity" type="number-decimal"/>
+        <field name="targetQuantity" type="number-decimal"/>
+        <field name="runRevision" type="number-integer"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="productionLossId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="reason" type="text-medium"/>
+        <field name="approvalStatusEnumId" type="id" enable-audit-log="true"/>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time" enable-audit-log="true"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" related="mantle.work.production.ProductionRunLine" short-alias="productionRunLine"/>
+        <relationship type="one" title="ProductionQuantityEventType" related="moqui.basic.Enumeration" short-alias="eventType">
+            <key-map field-name="quantityEventTypeEnumId"/></relationship>
+        <relationship type="one" title="ProductionApproval" related="moqui.basic.Enumeration" short-alias="approvalStatus">
+            <key-map field-name="approvalStatusEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" related="mantle.work.production.ProductionLoss" short-alias="productionLoss"/>
+        <index name="PRODQTYEVT_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+
+    <!-- A production loss (M6, R-MFG-20) by one of its paths: issued components scrapped in WIP (PltComponentScrap: a scrap
+        cost event, no stock movement), received or held output of an open run scrapped (PltOutputScrap: the asset issued
+        back to the run, assetIssuanceId, so the loss reaches production variance at the cost close), output scrapped before
+        it was stock (PltOutputScrap without an asset), a process loss (PltProcessLoss: a quantity only) and rework
+        (PltRework: units sent to rework, reworkWorkEffortId). The reason is an active production reason of the run's owner,
+        its name and category kept as recorded. A loss above its reason's approval threshold waits for a supervisor
+        (PlsPending) and has no effect until approved (PlsApproved; PlsRefused). Free stock outside a run is scrapped in
+        Warehouse (scrap#Asset). -->
+    <entity entity-name="ProductionLoss" package="mantle.work.production" cache="never">
+        <field name="productionLossId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="lossTypeEnumId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="lotId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="fromHeld" type="text-indicator"><description>Y: the scrapped output asset was held (quarantine, on hold
+            or defective) when it was issued back</description></field>
+        <field name="reasonCode" type="text-short"/>
+        <field name="reasonName" type="text-medium"/>
+        <field name="reasonCategoryEnumId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time" enable-audit-log="true"/>
+        <field name="assetIssuanceId" type="id"/>
+        <field name="reworkWorkEffortId" type="id"/>
+        <field name="lossDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" related="mantle.work.production.ProductionRunLine" short-alias="productionRunLine"/>
+        <relationship type="one" title="ProductionLossType" related="moqui.basic.Enumeration" short-alias="lossType">
+            <key-map field-name="lossTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" related="mantle.product.issuance.AssetIssuance" short-alias="assetIssuance"/>
+        <relationship type="one" title="Rework" related="mantle.work.effort.WorkEffort" short-alias="reworkWorkEffort">
+            <key-map field-name="reworkWorkEffortId" related="workEffortId"/></relationship>
+        <index name="PRODLOSS_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+
+    <!-- The output asset issued back to its run by an output scrap (record#ProductionLoss): the issuance names its loss, so
+        its cost event is the output's scrap (PcetOutputScrap), not a material issue. -->
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="productionLossId" type="id"/>
+        <relationship type="one" related="mantle.work.production.ProductionLoss" short-alias="productionLoss"/>
+    </extend-entity>
+    <!-- A supervisor's approval of output beyond an output line's target and the policy's overproduction tolerance
+        (approve#ProductionException): how much more may be received, who approved it and when, audit-logged. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="overApprovedQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="overApprovedByUserId" type="id" enable-audit-log="true"/>
+        <field name="overApprovedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

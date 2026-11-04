@@ -864,11 +864,17 @@ function outputPlan(userScope, p) {
         denied("BYPRODUCT_NOT_COSTED", "By-product " + line.productId + " is received once its cost allocation exists")
     const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
     const unit = unitOf(line, p.quantity, p.quantityUomId)
-    const left = dec(line.stockQuantity).subtract(receivedOf(line))
+    // what the line may still take: its target and the run's overproduction tolerance, with a supervisor's approval beyond
+    // it, less the good, held and lost quantity it accounts for (impl-manufacturing P7, ProductionQuantities.js)
+    const left = ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuantities.js").receivableLeft(run, line)
     if (unit.stockQuantity.compare(left) > 0)
         denied(
             "OVER_RECEIPT",
-            "Line " + line.productionRunLineId + " has " + text(left.compare(0) > 0 ? left : zero()) + " left to receive"
+            "Line " +
+                line.productionRunLineId +
+                " has " +
+                text(left.compare(0) > 0 ? left : zero()) +
+                " left to receive; more needs a supervisor's approval of the overproduction"
         )
     const facility = posting.facility(userScope, str(p.facilityId) || run.facilityId)
     if (facility.ownerPartyId !== run.ownerPartyId)
@@ -896,7 +902,8 @@ function outputPlan(userScope, p) {
         expirationDate: p.expirationDate,
         mfgPartyId: run.ownerPartyId
     })
-    const inspect = quality.outputNeedsInspection(facility, product.productId, policy)
+    // held when the caller reports it produced-held (record#ProductionQuantity's pending, impl-manufacturing P7)
+    const inspect = p.hold === true || p.hold === "true" || quality.outputNeedsInspection(facility, product.productId, policy)
     const operation = inspect
         ? Object.assign({}, policy.operation, {receiptSteps: 3})
         : Object.assign({}, policy.operation, {receiptSteps: 1})
@@ -1126,5 +1133,7 @@ function subcontractPlan(userScope, p) {
     text,
     // impl-manufacturing P5a's release gate and operations (ProductionOrders.js)
     laterReleases,
-    routingsOf: routingsOfRun
+    routingsOf: routingsOfRun,
+    // impl-manufacturing P7's target change and draft outputs (ProductionQuantities.js)
+    writeProducts
 })
