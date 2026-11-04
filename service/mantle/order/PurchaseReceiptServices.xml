@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchasing's receipt progress (impl-purchasing P5; design-purchasing §9): the late-receipt notice over PurchaseReceipts.js,
+    which also gives an app's worklists each purchase line's expected, received, accepted, rejected and held quantities.
+    Purchasing posts no stock: receipts are mantle.shipment.WarehouseTaskServices', inspections
+    mantle.product.QualityServices'. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="notify" noun="LateReceipts" allow-remote="false">
+        <description>The nightly late-receipt notice (ServiceJob notify_LateReceipts, topic PurchaseLateReceipt): each
+            purchase order part with a stock line still to come whose due date (the line's required date, else the part's
+            promised delivery, else its open receipt's expected arrival) is before today is told once per due date to its
+            buying organization's users holding PURCHASE_ORDER_EDIT, naming the late lines and what is still to come. Without
+            an organization each internal organization runs in its own transaction, and one that fails is logged while the
+            others go on; within one, a part that fails is logged and the others go on. Optionally for one organization,
+            and as of a time.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="notifiedCount" type="Integer"/>
+            <parameter name="lateCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseReceipts.js')
+                    .execute('notifyLate', context)"/>
+            <set field="notifiedCount" from="answer.notifiedCount"/>
+            <set field="lateCount" from="answer.lateCount"/>
+        </actions>
+    </service>
+</services>
