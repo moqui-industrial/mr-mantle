@@ -1362,8 +1362,10 @@ along with this software (see the LICENSE.md file). If not, see
             Closed; a Cancelled one counts as neither, and at least one must be done) it moves to Completed with the resolution
             Fixed for a bug, else Completed. The followers of the request and its Reporter's and Assignee's users are told on the
             topic RequestUpdate. Run by the WorkEffort status rule of entity/Work.eecas.xml for the item whose status changed;
-            each request on its own, a failure logged. A purchase request (RqtPurchase), purchase RFQ (RqtPurchaseRfq) or stock
-            request (RqtInventory) is left alone: its progress is its sourcing or movements (CX-REQUEST, R-XC-40).
+            each request on its own, a failure logged. A purchase request (RqtPurchase with its organization as an OrgInternal
+            RequestParty, as Purchasing's are), purchase RFQ (RqtPurchaseRfq) or stock request (RqtInventory) is left alone: its
+            progress is its sourcing or movements (CX-REQUEST, R-XC-40); a Purchase-type request of Commons or Projects with no
+            organization follows its work as before.
         </description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="changedList" type="List"/></out-parameters>
@@ -1382,7 +1384,11 @@ along with this software (see the LICENSE.md file). If not, see
                         if (request == null || ['ReqCompleted', 'ReqCancelled', 'ReqDraft'].includes(request.statusId)) continue
                         // CX-REQUEST (R-XC-40, impl-purchasing P10): a purchase, purchase RFQ or stock request follows its
                         // sourcing or its movements (get#PurchaseRequestProgress, get#InventoryRequestProgress), never its work
-                        if (['RqtPurchase', 'RqtPurchaseRfq', 'RqtInventory'].includes(request.requestTypeEnumId)) continue
+                        if (['RqtPurchaseRfq', 'RqtInventory'].includes(request.requestTypeEnumId)) continue
+                        // a purchase request is Purchasing's when it names its organization (an OrgInternal RequestParty);
+                        // a Commons or Projects request of the Purchase type, with none, follows its work as before
+                        if (request.requestTypeEnumId === 'RqtPurchase' && ec.entity.find('mantle.request.RequestParty')
+                                .condition({requestId: request.requestId, roleTypeId: 'OrgInternal'}).count() > 0) continue
                         // a project's requests and work only (a personal task on a Commons request moves nothing)
                         const projectId = request.rootWorkEffortId || item.rootWorkEffortId
                         if (!projectId || !item.rootWorkEffortId) continue

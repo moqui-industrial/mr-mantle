@@ -475,37 +475,51 @@ feature("a cancel releases the unsourced demand and its commitment, and names th
     }
 })
 
-feature("a project's work item linked to a purchase request completes and the request stays in progress (CX-REQUEST)", {
-    when() {
-        call("mantle.work.ProjectServices.create#Project", {
-            workEffortId: "PURREQP",
-            workEffortName: "Purchase request project",
-            visibilityEnumId: "WevWorkGroup",
-            assignToPartyId: "EX_JOHN_DOE",
-            assignRoleTypeId: "ProjectManager"
-        })
-        call("mantle.work.ProjectServices.store#ProjectSetting", {
-            workEffortId: "PURREQP",
-            settingTypeEnumId: "WstModules",
-            settingValue: "requests"
-        })
-        const created = run(state.requester, R + "create#PurchaseRequest", {
-            organizationPartyId: org,
-            requestName: "Project supplies",
-            rootWorkEffortId: "PURREQP"
-        })
-        run(state.requester, R + "store#PurchaseRequestItem", {requestId: created.requestId, productId: product, quantity: 1})
-        run(state.requester, R + "submit#PurchaseRequest", {requestId: created.requestId})
-        approve(created.requestId)
-        const task = call(R + "make#RequestWorkItem", {
-            requestId: created.requestId,
-            workEffortName: "Fit the parts"
-        }).workEffortId
-        call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: task, statusId: "WeInProgress"})
-        call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: task, statusId: "WeComplete"})
-        return {status: statusOf(created.requestId)}
-    },
-    then(r) {
-        r.status == "ReqInProgress"
+feature(
+    "a project's work item linked to a purchase request completes and the request stays in progress, while a Purchase-type project request with no organization completes (CX-REQUEST)",
+    {
+        when() {
+            call("mantle.work.ProjectServices.create#Project", {
+                workEffortId: "PURREQP",
+                workEffortName: "Purchase request project",
+                visibilityEnumId: "WevWorkGroup",
+                assignToPartyId: "EX_JOHN_DOE",
+                assignRoleTypeId: "ProjectManager"
+            })
+            call("mantle.work.ProjectServices.store#ProjectSetting", {
+                workEffortId: "PURREQP",
+                settingTypeEnumId: "WstModules",
+                settingValue: "requests"
+            })
+            const created = run(state.requester, R + "create#PurchaseRequest", {
+                organizationPartyId: org,
+                requestName: "Project supplies",
+                rootWorkEffortId: "PURREQP"
+            })
+            run(state.requester, R + "store#PurchaseRequestItem", {requestId: created.requestId, productId: product, quantity: 1})
+            run(state.requester, R + "submit#PurchaseRequest", {requestId: created.requestId})
+            approve(created.requestId)
+            const task = call(R + "make#RequestWorkItem", {
+                requestId: created.requestId,
+                workEffortName: "Fit the parts"
+            }).workEffortId
+            call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: task, statusId: "WeInProgress"})
+            call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: task, statusId: "WeComplete"})
+            // a Purchase-type request of the project with no organization (Commons' or Projects' own) follows its work as before
+            const plain = call(R + "create#Request", {
+                requestName: "Plain purchase",
+                requestTypeEnumId: "RqtPurchase",
+                rootWorkEffortId: "PURREQP",
+                statusId: "ReqSubmitted"
+            }).requestId
+            const plainTask = call(R + "make#RequestWorkItem", {requestId: plain, workEffortName: "Buy it"}).workEffortId
+            call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: plainTask, statusId: "WeInProgress"})
+            call("mantle.work.TaskServices.set#TaskStatus", {workEffortId: plainTask, statusId: "WeComplete"})
+            return {status: statusOf(created.requestId), plainStatus: statusOf(plain)}
+        },
+        then(r) {
+            r.status == "ReqInProgress"
+            r.plainStatus == "ReqCompleted"
+        }
     }
-})
+)
