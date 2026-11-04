@@ -403,12 +403,31 @@ feature(
             const stoppedStatus = statusOf(orderId)
             const overridden = run(state.second, P + "decide#PurchaseApproval", {
                 orderId,
-                budgetOverrideReason: "Urgent repair"
+                budgetOverrideReason: "Urgent repair",
+                operationKey: orderId + "-approve"
             })
+            // a retry with the operation key answers the first result: one decision, one commitment
+            const retried = run(state.second, P + "decide#PurchaseApproval", {
+                orderId,
+                budgetOverrideReason: "Urgent repair",
+                operationKey: orderId + "-approve"
+            })
+            const decisionCount = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId}).length
             const reserved = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, statusId: "BcReserved"})
             const cancelled = run(state.buyer, P + "cancel#PurchaseOrder", {orderId, reason: "No longer needed"})
             const released = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, statusId: "BcReleased"})
-            return {preview, buyerPreview, stopped, stoppedStatus, overridden, reserved, cancelled, released}
+            return {
+                preview,
+                buyerPreview,
+                stopped,
+                stoppedStatus,
+                overridden,
+                retried,
+                decisionCount,
+                reserved,
+                cancelled,
+                released
+            }
         },
         then(r) {
             r.preview.preview.budgetResult == "STOP"
@@ -417,6 +436,9 @@ feature(
             r.stoppedStatus == "OrderPlaced"
             r.overridden.error == ""
             r.overridden.statusId == "OrderApproved"
+            r.retried.alreadyApplied == true
+            r.retried.purchaseApprovalDecisionId == r.overridden.purchaseApprovalDecisionId
+            r.decisionCount == 1
             r.reserved.length == 1
             r.reserved[0].stageEnumId == "BcsOrder"
             r.reserved[0].decisionEnumId == "BcdOverridden"
