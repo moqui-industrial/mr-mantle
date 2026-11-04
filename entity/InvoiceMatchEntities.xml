@@ -35,6 +35,11 @@ along with this software (see the LICENSE.md file). If not, see
             <description>Y: on the ordered basis a line whose order line has no accepted receipt is a match
                 exception.</description>
         </field>
+        <field name="serviceAcceptanceRequired" type="text-indicator" enable-audit-log="true">
+            <description>The service-acceptance rule (impl-manufacturing P14): Y or empty, on the received basis a service
+                line (a PtService product) matches the quantity its ServiceAcceptance rows accepted, since a service has no
+                receipt; N, a service line matches its ordered quantity.</description>
+        </field>
         <field name="quantityTolerancePercent" type="number-decimal" enable-audit-log="true"/>
         <field name="quantityToleranceQuantity" type="number-decimal" enable-audit-log="true"/>
         <field name="priceTolerancePercent" type="number-decimal" enable-audit-log="true"/>

@@ -419,6 +419,8 @@ along with this software (see the LICENSE.md file). If not, see
             PO price); then Purchasing's service acceptance (mantle.order.purchase.ServiceAcceptance, the accept#ServiceItem
             contract) of the dispatch's service order item with the output receipt and its inspection as evidence, under this
             entry point's check (§2). A retry with the same operation key answers the first, so the line is accepted once.
+            The acceptance writes the outside-processing accrual cost event once (the accepted quantity at the order line's
+            price, awaiting the cost close; impl-manufacturing P14).
             Requires STOCK_ISSUE; refuses a shipment that is not a subcontract dispatch (NOT_SUBCONTRACT), a facility that is
             not in custody (NOT_CUSTODY), an order not with its custodian (CUSTODIAN_MISMATCH), stock missing at the vendor
             facility (MATERIAL_SHORT), and the refusals of the issue, the output receipt and the acceptance
@@ -444,8 +446,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RECEIVED, shipmentId, workEffortId,
                 operationWorkEffortId, vendorFacilityId, issues (line, asset, quantity, assetIssuanceId), output (the
-                output receipt's result), serviceAcceptanceId, orderId, orderItemSeqId, acceptedQuantity, and the operation
-                fields.</description></parameter>
+                output receipt's result), serviceAcceptanceId, orderId, orderItemSeqId, acceptedQuantity, accrualCostEventId,
+                and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -488,12 +490,16 @@ along with this software (see the LICENSE.md file). If not, see
                         workEffortId: plan.operationWorkEffortId || plan.run.workEffortId,
                         assetReceiptId: received.result.assetReceiptIds[0] || null,
                         qualityInspectionId: received.result.qualityInspectionIds[0] || null, comments: comments})"/>
+            <!-- the outside-processing accrual of the accepted service, once with its acceptance (impl-manufacturing P14) -->
+            <set field="accrualEventIds" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .recordAll('mantle.order.purchase.ServiceAcceptance', [accepted.serviceAcceptanceId])"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.order.purchase.ServiceAcceptance',
                     accepted.serviceAcceptanceId, {resultCode: 'RECEIVED', shipmentId: shipmentId,
                         workEffortId: plan.run.workEffortId, operationWorkEffortId: plan.operationWorkEffortId,
                         vendorFacilityId: plan.vendorFacility.facilityId, issues: issues, output: received.result,
                         serviceAcceptanceId: accepted.serviceAcceptanceId, orderId: plan.orderId,
-                        orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity})"/>
+                        orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity,
+                        accrualCostEventId: accrualEventIds[0] || null})"/>
         </actions>
     </service>
 
@@ -1702,6 +1708,244 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuality.js')
                     .execute('createInspection', context)"/>
             <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+
+    <!-- ===== outside processing (impl-manufacturing P14; ProductionSubcontracts.js) ===== -->
+    <service verb="request" noun="SubcontractService" allow-remote="false">
+        <description>Ask for an operation of a released run to be done by a supplier (design-manufacturing
+            SubcontractOperations New outside processing, R-MFG-05): a ProductionSubcontract with the supplier, the service
+            product, its quantity and unit, the required date, the lead time, the vendor-custody facility and the price basis
+            (a buyer's or price reader's note); an RqTpProduct Requirement of the service at the run's facility, proposed,
+            of the run's organization (OrgInternal) and supplier (Supplier), dated from the required date less the lead
+            time; and its RequirementSupply demand link (RstOperationDemand) to the operation, which covers nothing. The
+            request goes into the organization's current supply plans whose facility set covers the run's facility, as an
+            outside-processing suggestion a buyer converts to a draft service purchase order line (convert#PlanningSuggestions;
+            Purchasing approves and places the order). A retry with the same operation key answers the first. Requires
+            PRODUCTION_PLAN (PERMISSION_DENIED); refuses an operation outside the user's organizations or not of a run
+            (RECORD_UNAVAILABLE), a run not released (RUN_NOT_RELEASED), an operation already subcontracted
+            (SUBCONTRACT_EXISTS), a product that is not a service (NOT_SERVICE, PRODUCT_REQUIRED), no quantity
+            (QUANTITY_INVALID), a party that is not a supplier (SUPPLIER_INVALID), a facility that is not a vendor-custody
+            facility of the organization (NOT_CUSTODY) or not in the supplier's custody (CUSTODIAN_MISMATCH) and a lead time
+            outside 0 to 365 days (LEAD_TIME_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="productId" required="true"><description>The service product</description></parameter>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="quantityUomId"><description>The product's unit when empty</description></parameter>
+            <parameter name="supplierPartyId"/>
+            <parameter name="requiredByDate" type="Timestamp"><description>The operation's (else the run's) estimated
+                completion when empty</description></parameter>
+            <parameter name="leadTimeDays" type="BigDecimal"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="priceBasisNote"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REQUESTED, productionSubcontractId, requirementId,
+                organizationPartyId, workEffortId, operationWorkEffortId, planningRunIds (the plans it is in), and the
+                operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractRequest', 'PRODUCTION_PLAN', ['operationWorkEffortId',
+                    'productId', 'quantity', 'quantityUomId', 'supplierPartyId', 'requiredByDate', 'leadTimeDays',
+                    'vendorFacilityId', 'priceBasisNote', 'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <!-- the operation locked, so two requests for it queue and the second is refused -->
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="lockedOperation" for-update="true"
+                    disable-authz="true"><field-map field-name="workEffortId" from="operationWorkEffortId"/></entity-find-one>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('request', context)"/>
+            <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,
+                    'mantle.work.production.ProductionSubcontract', requested.productionSubcontractId, requested)"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionSubcontract" allow-remote="false">
+        <description>Change an outside-processing agreement (design-manufacturing SubcontractDetail Agreement) at the revision
+            the user read: before its purchase line the supplier, quantity, unit, required date and lead time (its
+            requirement, supplier, demand link and plan suggestions follow), the vendor-custody facility and the change
+            reason, under PRODUCTION_PLAN; the price basis note under a buyer's or price reader's permission
+            (PURCHASE_ORDER_EDIT, SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT or ACCOUNTING_VIEW). Once on a purchase order only
+            the lead time, vendor facility and price basis change; the order is the buyer's. A retry with the same operation
+            key answers the first. Refuses a subcontract outside the user's organizations (RECORD_UNAVAILABLE), a stale
+            revision (REVISION_CHANGED), a closed subcontract (SUBCONTRACT_CLOSED), an ordered one's supplier, quantity,
+            unit or date (SUBCONTRACT_ORDERED), and request#SubcontractService's checks of the values.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="productionSubcontractId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="leadTimeDays" type="BigDecimal"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="priceBasisNote"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode STORED, productionSubcontractId, revision,
+                organizationPartyId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'SubcontractStore', ['PRODUCTION_PLAN', 'PURCHASE_ORDER_EDIT',
+                    'SUPPLIER_PRICE_VIEW', 'SUPPLIER_PRICE_EDIT', 'ACCOUNTING_VIEW'], ['productionSubcontractId',
+                    'expectedRevision', 'supplierPartyId', 'quantity', 'quantityUomId', 'requiredByDate', 'leadTimeDays',
+                    'vendorFacilityId', 'priceBasisNote', 'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('store', context)"/>
+            <set field="result" from="posting.complete(begun.op, stored.organizationPartyId,
+                    'mantle.work.production.ProductionSubcontract', stored.productionSubcontractId, stored)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractMaterials" allow-remote="false">
+        <description>The components of a subcontracted operation (design-manufacturing SubcontractDetail Materials): each
+            material line of the operation (else of the run) with its owner (the run's organization, also at the vendor),
+            quantity and unit, what was sent to the vendor-custody facility and returned from it, what is held there now,
+            what was consumed there (issued to the run from it), issued in all and left; and the subcontract dispatches and
+            returns of the operation. No cost is read. Requires PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or
+            STOCK_ISSUE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="vendorFacilityId"/>
+            <parameter name="vendorFacilityName"/>
+            <parameter name="custodianName"/>
+            <parameter name="materials" type="List"/>
+            <parameter name="shipments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('materials', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractStatus" allow-remote="false">
+        <description>The outside processing of an operation (design-manufacturing SubcontractDetail Agreement and
+            Acceptance): its run and operation, its subcontract (the agreement; the price basis only for a price reader), the
+            service purchase lines (OrderItemWorkEffort) with their order status, ordered, accepted (ServiceAcceptance, with
+            the output receipt and inspection as evidence), billed and remaining quantities and match exceptions, the unit
+            price and amount only for a buyer or price reader (PURCHASE_ORDER_EDIT, SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT
+            or ACCOUNTING_VIEW), the output line and its receipts on the operation (held for inspection or not), the dispatch
+            and return counts, the state, the outside-processing cost events (their amounts only with ACCOUNTING_VIEW) and
+            what the user may do. Requires PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or STOCK_ISSUE
+            (PERMISSION_DENIED); refuses an operation outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="operation" type="Map"/>
+            <parameter name="subcontract" type="Map"/>
+            <parameter name="serviceLines" type="List"/>
+            <parameter name="output" type="Map"/>
+            <parameter name="dispatchCount" type="Integer"/>
+            <parameter name="returnCount" type="Integer"/>
+            <parameter name="orderedQuantity"/>
+            <parameter name="acceptedQuantity"/>
+            <parameter name="stateText"/>
+            <parameter name="stateColor"/>
+            <parameter name="costEvents" type="List"/>
+            <parameter name="priceRead" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="canRequest" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canEditAgreement" type="Boolean"/>
+            <parameter name="canEditPrice" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('status', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="SubcontractOperations" allow-remote="false">
+        <description>The outside-processing worklist (design-manufacturing SubcontractOperations): each operation of the
+            user's organizations' open runs (closed ones with includeClosed) that has a subcontract or a service purchase line,
+            with its run, plant, supplier, service product, order and its status, quantity, dispatches, output received,
+            service accepted, required date, state and whether it has an exception (a match exception, no supplier); the unit
+            price only for a buyer or price reader. Filtered by supplier, plant (with the facilities under it), run, order
+            status, state and exceptions only; soonest due first, a page at a time. Requires PRODUCTION_VIEW, PRODUCTION_PLAN
+            or PURCHASE_ORDER_EDIT (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="supplierPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="orderStatusId"/>
+            <parameter name="stateText"/>
+            <parameter name="exceptionsOnly" type="Boolean"/>
+            <parameter name="includeClosed" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="operationList" type="List"/>
+            <parameter name="operationListCount" type="Integer"/>
+            <parameter name="operationListPageIndex" type="Integer"/>
+            <parameter name="operationListPageSize" type="Integer"/>
+            <parameter name="operationListPageMaxIndex" type="Integer"/>
+            <parameter name="operationListPageRangeLow" type="Integer"/>
+            <parameter name="operationListPageRangeHigh" type="Integer"/>
+            <parameter name="canRequest" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('findOperations', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractOrder" allow-remote="false">
+        <description>An order as Manufacturing reads it (design-crosscut §3.6 Manufacturing row): a subcontract purchase order
+            or a sales order linked to a run the user sees: its header and items, each with its production links (a service
+            line's run and operation through OrderItemWorkEffort, with what was accepted; a sales line's supplying runs
+            through the run's demand order), prices only for a price reader (a purchase: PURCHASE_ORDER_EDIT,
+            SUPPLIER_PRICE_VIEW, SUPPLIER_PRICE_EDIT or ACCOUNTING_VIEW; a sale: PRICE_VIEW, PRICE_EDIT or ACCOUNTING_VIEW).
+            Read only: nothing is placed or approved here. Requires PRODUCTION_VIEW, PRODUCTION_PLAN or PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses an order linked to none of the user's runs (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subcontractOrder" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="subcontractOrder" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('order', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SubcontractShipment" allow-remote="false">
+        <description>A subcontract dispatch or return as Manufacturing reads it (design-crosscut §3.8 Manufacturing row, read
+            only): its lines with what was sent and reached the other end, the run and operation, the service order item, the
+            origin and destination, the vendor-custody facility and its custodian, and the owner of the stock (the run's
+            organization throughout, R-SA-08). Dispatch and return are Warehouse's (SubcontractShipmentDetail). Requires
+            PRODUCTION_VIEW, PRODUCTION_PLAN, PURCHASE_ORDER_EDIT or STOCK_ISSUE (PERMISSION_DENIED); refuses a shipment that
+            is not a subcontract dispatch of a run the user sees (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subcontractShipment" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="subcontractShipment" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
+                    .execute('shipment', context)"/>
         </actions>
     </service>
 </services>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Outside processing (design-manufacturing SubcontractDetail, crosscut CX-SUBCONTRACT and CX-PLANNING; impl-manufacturing
+    P14): the subcontract's status, the demand link of an outside-processing requirement to its operation, the
+    outside-processing method of a planning suggestion, and the two cost events of the service: its accrual at service
+    acceptance and the price variance of its matched bill. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.StatusType statusTypeId="ProductionSubcontract" description="Production subcontract"/>
+    <moqui.basic.StatusItem statusId="PscRequested" statusTypeId="ProductionSubcontract" description="Requested"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PscOrdered" statusTypeId="ProductionSubcontract" description="On a purchase order"
+            sequenceNum="2"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PscRequested" toStatusId="PscOrdered"
+            transitionName="Ordered"/>
+
+    <!-- the demand of an outside-processing requirement: the operation it is for (request#SubcontractService); it covers
+        nothing, so a requirement's covered quantity leaves it out -->
+    <moqui.basic.Enumeration enumId="RstOperationDemand" description="Operation demand" sequenceNum="9"
+            enumTypeId="RequirementSupplyType"/>
+
+    <!-- an outside-processing requirement in a supply plan, converted to a draft service purchase order line by a buyer
+        (PURCHASE_ORDER_EDIT), never netted -->
+    <moqui.basic.Enumeration enumId="PsmOutside" description="Outside processing" sequenceNum="4"
+            enumTypeId="PlanningSuggestionMethod"/>
+
+    <!-- the outside-processing events reach the GL only through the cost close (PclAwaitingClose, D12) -->
+    <moqui.basic.Enumeration description="Outside processing accepted" enumId="PcetOutsideAccrual"
+            enumTypeId="ProductionCostEventType" sequenceNum="20"/>
+    <moqui.basic.Enumeration description="Outside processing bill variance" enumId="PcetOutsideVariance"
+            enumTypeId="ProductionCostEventType" sequenceNum="21"/>
+</entity-facade-xml>

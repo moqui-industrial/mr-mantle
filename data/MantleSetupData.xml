@@ -76,6 +76,10 @@ along with this software (see the LICENSE.md file). If not, see
         the expected receipt of a purchase order part) -->
     <userPermissions userPermissionId="PURCHASE_ORDER_EDIT" description="Purchase Order Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_ORDER_EDIT" fromDate="0"/>
+    <!-- Purchasing's buyer fields of a supplier profile (mantle.party.SupplierServices; seeded by impl-manufacturing P14 with
+        the buyer group's grants, checked once Purchasing adds those fields) -->
+    <userPermissions userPermissionId="SUPPLIER_PROFILE_EDIT" description="Supplier Profile Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_PROFILE_EDIT" fromDate="0"/>
     <!-- Manufacturing's production runs (mantle.work.ProductionServices, impl-warehouse P16a; impl-manufacturing P1 seeds the
         rest of the production permissions and grants them to its groups): PRODUCTION_PLAN creates and releases a run,
         PRODUCTION_VIEW reads one (as STOCK_ISSUE does, for the warehouse that issues to it) -->
