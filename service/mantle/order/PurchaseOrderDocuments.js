@@ -214,11 +214,7 @@ function send(p) {
     orders.requirePermission("PURCHASE_ORDER_EDIT")
     const po = orders.purchaseOrder(p.orderId, true)
     const order = po.order
-    if (!sendStatuses.includes(order.statusId))
-        denied("ORDER_SEND_STATE", "Purchase order " + po.orderId + " is sent once it is approved")
     const revision = Number(order.orderRevision ?? 1)
-    if (!blank(p.orderRevision) && Number(p.orderRevision) !== revision)
-        denied("STALE_REVISION", "Purchase order " + po.orderId + " is at revision " + revision + "; review it again")
     const recipientList = blank(p.toAddresses)
         ? recipientsOf(po.supplierPartyId)
         : Array.from(
@@ -232,9 +228,21 @@ function send(p) {
     if (!recipientList.length)
         denied("RECIPIENT_REQUIRED", partyName(po.supplierPartyId) + " has no order or primary email address; give one")
     if (recipientList.length > 20) denied("RECIPIENT_LIMIT", "Send to at most 20 recipients at once")
-    const request = {orderId: po.orderId, orderRevision: revision, recipients: recipientList, note: p.note || null}
+    // the request as asked (the revision reviewed, not the current one), and its replay before the state checks: a retry
+    // of a send that went through answers its result though the send moved the order to Sent (or, without the commercial
+    // revision, its revision on)
+    const request = {
+        orderId: po.orderId,
+        orderRevision: blank(p.orderRevision) ? null : Number(p.orderRevision),
+        recipients: recipientList,
+        note: p.note || null
+    }
     const operation = lib.operation(p, "PurchaseOrderSend", po.organizationPartyId, request)
     if (operation.old) return lib.previous(operation)
+    if (!sendStatuses.includes(order.statusId))
+        denied("ORDER_SEND_STATE", "Purchase order " + po.orderId + " is sent once it is approved")
+    if (!blank(p.orderRevision) && Number(p.orderRevision) !== revision)
+        denied("STALE_REVISION", "Purchase order " + po.orderId + " is at revision " + revision + "; review it again")
 
     // the issued PDF: one for each print of the order, kept as its content
     const printed = printOf(po, null)

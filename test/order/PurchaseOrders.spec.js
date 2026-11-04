@@ -363,12 +363,8 @@ feature(
             const orderId = state.approvedId
             const revision = revisionOf(orderId)
             capture.clear()
-            const first = run(state.buyer, O + "send#PurchaseOrder", {
-                orderId,
-                orderRevision: revision,
-                operationKey: key(),
-                emailTemplateId: template
-            })
+            state.sendRequest = {orderId, orderRevision: revision, operationKey: key(), emailTemplateId: template}
+            const first = run(state.buyer, O + "send#PurchaseOrder", state.sendRequest)
             const message = capture.last()
             const sentCount = capture.count()
             const replayKey = key()
@@ -418,7 +414,7 @@ feature(
 )
 
 feature(
-    "the commercial revision: a note keeps the revision where the flag is on and moves it where it is off (Mantle's default)",
+    "the commercial revision: a note keeps the revision where the flag is on and moves it where it is off (Mantle's default); a send's retry still answers its first result",
     {
         when() {
             const orderId = state.approvedId
@@ -428,16 +424,24 @@ feature(
             policy({approvalGateEnabled: "N", commercialRevisionOnly: "N"})
             call("create#mantle.order.OrderNote", {orderId, noteDate: Number(ec.user.nowTimestamp) + 1, noteText: "Flag off"})
             const flagOff = revisionOf(orderId)
+            // a retry of the first send answers its result, though the revision it named has moved on since
+            capture.clear()
+            const replay = run(state.buyer, O + "send#PurchaseOrder", state.sendRequest)
+            const replayMails = capture.count()
             const audit = rows("moqui.entity.EntityAuditLog", {
                 changedEntityName: "mantle.order.OrderHeader",
                 changedFieldName: "orderRevision",
                 pkPrimaryValue: orderId
             })
-            return {before, flagOn, flagOff, audit}
+            return {before, flagOn, flagOff, replay, replayMails, audit}
         },
-        then({before, flagOn, flagOff, audit}) {
+        then({before, flagOn, flagOff, replay, replayMails, audit}) {
             flagOn == before
             flagOff == before + 1
+            replay.error == ""
+            replay.alreadyApplied == true
+            replay.successCount == 1
+            replayMails == 0
             audit.some(row => Number(row.newValueText) == before + 1)
         }
     }
