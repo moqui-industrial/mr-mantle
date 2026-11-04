@@ -104,6 +104,14 @@ function rateText(ctx, facilityId, date) {
 function bookedOperations(ctx, center, range, calendar) {
     const findings = []
     const booked = []
+    // an operation that runs past the range is prorated over all its work hours, so its calendar is read over its dates
+    // (at most a year beyond the range)
+    const workOf = interval => {
+        if (interval[0] >= range.fromMs && interval[1] <= range.thruMs) return calendar.work
+        const from = Math.max(Math.min(interval[0], range.fromMs), range.fromMs - maxDays * dayMs)
+        const thru = Math.min(Math.max(interval[1], range.thruMs), range.thruMs + maxDays * dayMs)
+        return time.calendarOf(ctx, center, from, thru).work
+    }
     for (const operation of time.openOperations(ctx, [center.facilityId], range.fromMs, range.thruMs, true)) {
         const run = time.runOfOperation(ctx, operation)
         let hours
@@ -118,7 +126,7 @@ function bookedOperations(ctx, center, range, calendar) {
             continue
         }
         const interval = time.intervalOf(operation, hours)
-        const worked = interval ? time.intersect(calendar.work, [interval]) : []
+        const worked = interval ? time.intersect(workOf(interval), [interval]) : []
         booked.push({operation, hours, interval, worked, workMs: time.length(worked)})
     }
     return {booked, findings}

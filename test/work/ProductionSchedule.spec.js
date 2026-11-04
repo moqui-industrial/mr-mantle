@@ -586,3 +586,55 @@ feature("a center's work hours a day, the work days a routing lead time counts i
         two == 24
     }
 })
+
+feature("an operation that runs past the range counts only its part inside it; a calendar's holiday starts in its zone", {
+    when() {
+        // line two works around the clock; its operations run Monday 6 to 8, so 7 to 12 holds half of each
+        const whole = run("ps12_reader", L + "get#WorkCenterLoad", {
+            facilityId: line2,
+            fromDate: at(0, "00:00"),
+            thruDate: at(1, "00:00")
+        })
+        const part = run("ps12_reader", L + "get#WorkCenterLoad", {
+            facilityId: line2,
+            fromDate: at(0, "07:00"),
+            thruDate: at(0, "12:00")
+        })
+        // a calendar in a fixed zone (UTC+14, else UTC-11 for a user there) with a holiday on the second Wednesday
+        const zone = state.timeZone === "Pacific/Kiritimati" ? "Pacific/Pago_Pago" : "Pacific/Kiritimati"
+        call("create#mantle.work.calendar.Calendar", {
+            calendarId: "PS12_CAL_TZ",
+            ownerPartyId: org,
+            calendarName: "Zoned shifts",
+            calendarKindEnumId: "CalkResource",
+            timeZone: zone
+        })
+        call("create#mantle.work.effort.WorkEffort", {
+            workEffortId: "PS12_TZ_HOLIDAY",
+            workEffortTypeEnumId: "WetEvent",
+            purposeEnumId: "WepHoliday",
+            statusId: "WeApproved",
+            workEffortName: "Zoned holiday",
+            allDayStart: dayText(9)
+        })
+        call("create#mantle.work.calendar.CalendarWorkEffort", {calendarId: "PS12_CAL_TZ", workEffortId: "PS12_TZ_HOLIDAY"})
+        const holidays = as("ps12_reader", () => {
+            const time = ec.resource.script("component://mr-mantle/service/mantle/work/ProductionCalendar.js")
+            const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
+            const center = {facilityId: "PS12_TZ", calendarId: "PS12_CAL_TZ", organizationPartyId: other, timeZone: zone}
+            return time.calendarOf(time.forCall(), center, lib.ms(at(8, "00:00")), lib.ms(at(11, "00:00"))).holidays
+        })
+        const [y, m, d] = dayText(9).split("-").map(Number)
+        const offset = (zone === "Pacific/Kiritimati" ? 14 : -11) * 3600000
+        return {whole, part, holidays, expected: Date.UTC(y, m - 1, d) - offset}
+    },
+    then({whole, part, holidays, expected}) {
+        whole.error == ""
+        part.error == ""
+        Number(whole.centerList[0].bookedHours) > 0
+        Number(part.centerList[0].bookedHours) * 2 == Number(whole.centerList[0].bookedHours)
+        holidays.length == 1
+        holidays[0].fromMs == expected
+        holidays[0].thruMs == expected + 86400000
+    }
+})

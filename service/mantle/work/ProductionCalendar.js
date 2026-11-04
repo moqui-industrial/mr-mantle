@@ -6,7 +6,9 @@
 // [from, thru). A center with no calendar works around the clock, and that is named as missing data by its callers. A stop
 // still open counts until now; an outage still open counts to the end of the range (only Maintenance ends it, F-P11-4). A
 // stop or outage takes the whole center for its interval (a line stops with its equipment). The module keeps no state between
-// calls: a caller makes a context (forCall) for its caches.
+// calls: a caller makes a context (forCall) for its caches. A holiday's day starts in the calendar's time zone (Calendar.timeZone,
+// else the user's) and a recurring shift expands in its recurrence's zone (else the user's), so a plant's calendar with its
+// zone reads alike to users in any zone (F-P12-1).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, ms, dateText} = lib
 const policy = ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
@@ -34,6 +36,21 @@ const addDay = day => {
     return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
 }
 const facilityName = facility => (facility ? facility.facilityName || facility.facilityId : "")
+// The start of a day (yyyy-MM-dd) in a time zone (an IANA name; none is the user's): the zone's offset read from the wall
+// time it formats, twice so a day that starts at a daylight saving change lands on it.
+function dayStartIn(day, zone) {
+    if (!zone) return dayStart(day)
+    const [y, m, d] = String(day).slice(0, 10).split("-").map(Number)
+    const utc = Date.UTC(y, m - 1, d)
+    const offsetAt = millis => {
+        const [date, clock] = ec.l10n.format(new Date(millis), "yyyy-MM-dd HH:mm:ss", null, zone).split(" ")
+        const [wy, wm, wd] = date.split("-").map(Number)
+        const [hh, mm, ss] = clock.split(":").map(Number)
+        return Date.UTC(wy, wm - 1, wd, hh, mm, ss) - millis
+    }
+    const first = utc - offsetAt(utc)
+    return utc - offsetAt(first)
+}
 
 // ===== intervals =====
 // Sorted and merged.
@@ -103,7 +120,11 @@ function centerOf(ctx, facilityId, date = ec.user.nowTimestamp) {
             parallelSlots: slots.length ? Math.max(1, ...slots) : 1,
             slotsConfigured: slots.length > 0,
             efficiency: workCenter.efficiencyPercent == null ? 100 : decimal(workCenter.efficiencyPercent).toNumber(),
-            calendarId: workCenter.calendarId || null
+            calendarId: workCenter.calendarId || null,
+            // the plant's zone: its calendar's (F-P12-1), else the user's; a recurrence expands in its own zone
+            timeZone:
+                (workCenter.calendarId && one("mantle.work.calendar.Calendar", {calendarId: workCenter.calendarId})?.timeZone) ||
+                null
         }
     }
     ctx.centers.set(key, center)
@@ -139,7 +160,7 @@ function calendarOf(ctx, center, fromMs, thruMs) {
         for (const instance of Array.from(out.instanceList || [])) {
             const holiday = instance.workEffort?.purposeEnumId === "WepHoliday"
             const span = instance.allDay
-                ? [dayStart(instance.startDay), dayStart(instance.endDay)]
+                ? [dayStartIn(instance.startDay, center.timeZone), dayStartIn(instance.endDay, center.timeZone)]
                 : [Number(instance.start), instance.end == null ? Number(instance.start) : Number(instance.end)]
             if (holiday) holidays.push({fromMs: span[0], thruMs: span[1], name: instance.workEffort?.workEffortName || "Holiday"})
             else {
@@ -160,7 +181,11 @@ function calendarOf(ctx, center, fromMs, thruMs) {
             .list()
     )) {
         const day = lib.calendarDateText(holiday.allDayStart)
-        holidays.push({fromMs: dayStart(day), thruMs: dayStart(addDay(day)), name: holiday.workEffortName || "Holiday"})
+        holidays.push({
+            fromMs: dayStartIn(day, center.timeZone),
+            thruMs: dayStartIn(addDay(day), center.timeZone),
+            name: holiday.workEffortName || "Holiday"
+        })
     }
     if (!configured) work = [[fromMs, thruMs]]
     const result = {
@@ -385,6 +410,7 @@ function workHoursPerDay(ctx, center, fromMs) {
     wall,
     dayOf,
     dayStart,
+    dayStartIn,
     facilityName,
     merge,
     subtract,
