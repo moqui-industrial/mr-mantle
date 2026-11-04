@@ -456,25 +456,9 @@ function release(p) {
         findings: []
     })
 }
+// store#WorkCenter is WorkCenters.js's since Manufacturing P3 (capacities, alternates, the plant and a new line)
 function center(p) {
-    const s = policy().scope(p, "resources"),
-        why = policy().reason(p)
-    policy().facility(p.facilityId, s)
-    const old = one(WC, {facilityId: p.facilityId}),
-        data = Object.assign(
-            old ? pick(map(old), ["calendarId", "efficiencyPercent", "oeeTargetPercent"]) : {},
-            pick(p, ["calendarId", "efficiencyPercent", "oeeTargetPercent"])
-        )
-    for (const f of ["efficiencyPercent", "oeeTargetPercent"])
-        if (data[f] != null && (toDecimal(data[f]).compare(0) < 0 || toDecimal(data[f]).compare(100) > 0))
-            throw new Error("Work-center percentages must be between zero and 100")
-    if (data.calendarId) {
-        const c = one("mantle.work.calendar.Calendar", {calendarId: data.calendarId})
-        if (!c || c.ownerPartyId !== s.organizationPartyId) throw new Error("Calendar is not in the work-center organization")
-    }
-    policy().audit([...Object.keys(data), "changeReason"], why)
-    call((old ? "update#" : "create#") + WC, Object.assign(data, {facilityId: p.facilityId, changeReason: why}))
-    return {workCenter: Object.assign({facilityId: p.facilityId}, data)}
+    return ec.resource.script("component://mr-mantle/service/mantle/work/WorkCenters.js").execute("center", p)
 }
 function rate(p) {
     const s = policy().scope(p, "resources"),
