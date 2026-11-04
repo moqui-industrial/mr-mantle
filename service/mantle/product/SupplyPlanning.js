@@ -79,6 +79,7 @@ const facilityName = facility => (facility ? facility.facilityName || facility.f
 const productionPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionPolicy.js")
 const methodPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
 const routings = () => ec.resource.script("component://mr-mantle/service/mantle/work/Routings.js")
+const workCalendar = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionCalendar.js")
 
 // ===== scope =====
 function requireAny(permissions) {
@@ -457,23 +458,36 @@ function structureOf(ctx, productId) {
     return structure
 }
 // The lead days of a make suggestion: the BOM's lead and preparation days, or with the routing basis (PltRouting) its
-// routing's standard hours for the quantity, in days of 24 hours rounded up, and the BOM's preparation days.
+// routing's standard hours for the quantity, each operation's in work days of its work center (the center's average work
+// hours a day over the week from the plan date, by its calendar less holidays; days of 24 hours for a center without a
+// calendar, impl-manufacturing P12 and F82), rounded up, and the BOM's preparation days.
 function leadDaysOf(ctx, structure, quantity) {
     const prepare = structure.prepareDays || zero()
     if (ctx.policy.leadTimeBasisEnumId === "PltRouting" && structure.routingWorkEffortId) {
         try {
             const released = routings().released(structure.routingWorkEffortId, ctx.planDate)
-            let hours = 0
+            if (!ctx.calendar) ctx.calendar = {time: workCalendar(), context: workCalendar().forCall(), dayHours: new Map()}
+            const dayHoursOf = facilityId => {
+                if (!facilityId) return 24
+                if (!ctx.calendar.dayHours.has(facilityId)) {
+                    const center = ctx.calendar.time.centerOf(ctx.calendar.context, facilityId, ctx.planDate)
+                    const perDay = center ? ctx.calendar.time.workHoursPerDay(ctx.calendar.context, center, ms(ctx.planDate)) : 24
+                    ctx.calendar.dayHours.set(facilityId, perDay > 0 ? perDay : 24)
+                }
+                return ctx.calendar.dayHours.get(facilityId)
+            }
+            let days = 0
             for (const op of Array.from(released.operations || [])) {
                 const batch = dec(op.batchQuantity).compare(0) > 0 ? quantity.divide(dec(op.batchQuantity)) : quantity
                 const machine = dec(op.machineSetupTime).add(dec(op.machineRunTime).multiply(batch))
                 const labor = dec(op.setupTime).add(dec(op.runTime).multiply(batch))
                 const time = machine.compare(0) > 0 ? machine : labor
-                hours += methodPolicy()
+                const hours = methodPolicy()
                     .convert(time, op.timeUomId || "TF_min", "TF_hr", ctx.planDate)
                     .quantity.toNumber()
+                days += hours / dayHoursOf(op.workCenterFacilityId)
             }
-            return {lead: toDecimal(Math.ceil(hours / 24)), prepare, basis: "routing"}
+            return {lead: toDecimal(Math.max(0, Math.ceil(days - 1e-9))), prepare, basis: "routing"}
         } catch (error) {
             ec.logger.warn("Supply plan: routing lead time of " + structure.routingWorkEffortId + ": " + error.message)
         }
