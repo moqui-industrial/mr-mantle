@@ -120,9 +120,22 @@
         </actions>
     </service>
     <service verb="store" noun="WorkCenter" allow-remote="false">
+        <description>The WorkCenter extension of a facility (WorkCenters.js), under METHOD_RESOURCES in the facility's
+            organization: its plant, calendar, efficiency, OEE target and scheduling policy, audit-logged with the change
+            reason. With no facilityId and a facilityName and plantFacilityId it makes a new production line (FcTpLine) under
+            the plant, owned by the plant's owner. Refuses a facility, plant or calendar of another organization, a percentage
+            outside zero to 100 and an unknown scheduling policy. Facility.capacity (people capacity) is never written.</description>
         <implements service="mantle.work.RoutingServices.define#RoutingParameters"/>
+        <in-parameters>
+            <parameter name="plantFacilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="schedulingPolicyEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+        </out-parameters>
         <actions>
-            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('center',context))</script>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/WorkCenters.js').execute('center',context))</script>
         </actions>
     </service>
     <service verb="store" noun="WorkCenterRate" allow-remote="false">

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's planning reads (design-manufacturing §7 and §12 M5, M10), over ProductionPlanning.js. P3 builds the first
+    version of get#WorkCenterLoad, from capacity and released operations only; P12 adds the calendar, downtime and the
+    schedule. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="WorkCenterLoad" allow-remote="false">
+        <description>The work centers of the user's organizations (facilityId, the centers of plantFacilityId, or those whose
+            id or name has text, ignoring case), a page at a time, each with its parallel slots and rate capacities in effect
+            at the start of the range, its efficiency, its nominal hours (slots over the whole range at its efficiency, before
+            work hours, holidays and downtime), the hours of its released operations that overlap the range (machine time
+            where the routing operation has it, else labor, for the run's output quantity), their count and the utilization,
+            with a finding for each operation whose hours do not read. The range is fromDate (now) through thruDate (two
+            weeks on), at most a year. Needs PRODUCTION_VIEW (PERMISSION_DENIED); a facilityId of another organization or
+            that is not a work center is refused like a missing one (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="plantFacilityId"/>
+            <parameter name="text"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="centerList" type="List"/>
+            <parameter name="centerListCount" type="Long"/>
+            <parameter name="centerListPageIndex" type="Integer"/>
+            <parameter name="centerListPageSize" type="Integer"/>
+            <parameter name="centerListPageMaxIndex" type="Integer"/>
+            <parameter name="centerListPageRangeLow" type="Integer"/>
+            <parameter name="centerListPageRangeHigh" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="rangeText"/>
+            <parameter name="rangeHours"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionPlanning.js').execute('load', context)"/>
+            <set field="centerList" from="result.centerList"/>
+            <set field="centerListCount" from="result.centerListCount"/>
+            <set field="centerListPageIndex" from="result.centerListPageIndex"/>
+            <set field="centerListPageSize" from="result.centerListPageSize"/>
+            <set field="centerListPageMaxIndex" from="result.centerListPageMaxIndex"/>
+            <set field="centerListPageRangeLow" from="result.centerListPageRangeLow"/>
+            <set field="centerListPageRangeHigh" from="result.centerListPageRangeHigh"/>
+            <set field="fromDate" from="result.fromDate"/>
+            <set field="thruDate" from="result.thruDate"/>
+            <set field="rangeText" from="result.rangeText"/>
+            <set field="rangeHours" from="result.rangeHours"/>
+        </actions>
+    </service>
+</services>
