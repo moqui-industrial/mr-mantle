@@ -469,3 +469,67 @@ feature("Under an award approval policy the award waits for its approver, who pl
         placed == "OrderPlaced"
     }
 })
+
+feature(
+    "With the gate on an approved award's quote waits for its PO approval; a quote changed while the award waits fails by name",
+    {
+        when() {
+            // the approval gate on (P3/P4): the placed quote is not auto-approved and carries its price
+            call("create#mantle.order.purchase.PurchasePolicy", {
+                organizationPartyId: org,
+                fromDate: Number(ec.user.nowTimestamp) - 1000,
+                approvalGateEnabled: "Y",
+                changeReason: "Spec"
+            })
+            const award = (name, unitAmount, quantity) => {
+                const created = run(state.buyer, S + "create#QuoteRequest", {organizationPartyId: org, requestName: name})
+                run(state.buyer, S + "store#QuoteRequestItem", {requestId: created.requestId, productId: product, quantity})
+                const orderId = quote(created.requestId, supplierA, unitAmount)
+                const allocationsText = orderId + ":" + lineOf(orderId).orderItemSeqId + "::" + quantity
+                const pending = run(state.buyer, S + "commit#Award", {
+                    requestId: created.requestId,
+                    allocationsText,
+                    operationKey: key()
+                })
+                return {requestId: created.requestId, orderId, pending}
+            }
+            const gated = award("Award spec gate", 6, 2)
+            const direct = run(state.buyer, S + "commit#AwardGroup", {
+                requestId: gated.requestId,
+                orderId: gated.orderId,
+                lines: [{orderItemSeqId: lineOf(gated.orderId).orderItemSeqId, quantity: 2}],
+                operationKey: key()
+            })
+            const approve = target =>
+                run(state.approver, "mantle.order.PurchaseServices.approve#PurchaseSource", {
+                    recordEntityName: "mantle.request.Request",
+                    recordId: target.requestId,
+                    message: {awardKey: target.pending.awardKey, sourceRevision: target.pending.sourceRevision}
+                })
+            const gatedDecided = approve(gated)
+            const gatedOrder = one("mantle.order.OrderHeader", {orderId: gated.orderId})
+            const warnings = run(state.buyer, "mantle.order.PurchaseServices.check#PurchaseApprovalRequired", {
+                orderId: gated.orderId
+            })
+            // the supplier's price changes while the award waits: its approval places nothing
+            const stale = award("Award spec stale", 6, 2)
+            run(state.buyer, S + "store#SupplierQuoteItem", {
+                orderId: stale.orderId,
+                orderItemSeqId: lineOf(stale.orderId).orderItemSeqId,
+                unitAmount: 9
+            })
+            const staleDecided = approve(stale)
+            return {direct, gatedDecided, gatedOrder, warnings, stale, staleDecided}
+        },
+        then({direct, gatedDecided, gatedOrder, warnings, stale, staleDecided}) {
+            direct.error.includes("AWARD_APPROVAL_REQUIRED")
+            gatedDecided.error == ""
+            gatedOrder.statusId == "OrderPlaced"
+            gatedOrder.grandTotal.toNumber() == 12
+            String(warnings.approveWarnings).includes("PURCHASE_APPROVAL_REQUIRED")
+            staleDecided.error == ""
+            one("mantle.order.OrderHeader", {orderId: stale.orderId}).statusId == "OrderProposed"
+            lineOf(stale.orderId).unitAmount.toNumber() == 9
+        }
+    }
+)

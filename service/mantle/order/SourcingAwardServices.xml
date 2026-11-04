@@ -144,6 +144,8 @@ along with this software (see the LICENSE.md file). If not, see
                 and substituteApproved</description></parameter>
             <parameter name="operationKey" required="true"/>
             <parameter name="quoteRevision" type="Long"/>
+            <parameter name="quoteStamp"><description>The quote's terms as an award waiting for its approval saw them
+                (SOURCE_CHANGED when they changed since)</description></parameter>
             <parameter name="awardKey"/>
         </in-parameters>
         <out-parameters>

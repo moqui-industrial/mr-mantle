@@ -869,6 +869,8 @@ function planAward(rfq, allocations, p, ctx = contextOf(rfq)) {
             )
         const revision = Number(quote.order.orderRevision ?? 1)
         group.quoteRevision = revision
+        // the revision the award was made against (compared, or submitted for approval): commit#AwardGroup checks it under lock
+        group.expectedRevision = quoteRevisions[quote.orderId] ?? revision
         if (quoteRevisions[quote.orderId] != null && quoteRevisions[quote.orderId] !== revision)
             groupFail(
                 "SOURCE_CHANGED",
@@ -967,6 +969,27 @@ function envelope(rfq, operationKey, group, fields) {
 }
 
 // ===== the award's approval (PurchaseAwardApproval, D8) =====
+// A quote's terms as an award saw them: its lines (product, quantity, unit, price) and validity. The order's revision does not
+// count a line's change on a purchase order outside commercialRevisionOnly (increment#OrderRevision's item kind), so an award
+// waiting for its approval keeps this stamp, and a quote changed since fails SOURCE_CHANGED when it is placed.
+function quoteStamp(orderId) {
+    const lines = rows(ORDER_ITEM, {orderId})
+        .map(line =>
+            [
+                line.orderItemSeqId,
+                line.itemTypeEnumId,
+                line.productId,
+                plain(line.quantity),
+                plain(line.unitAmount),
+                line.quantityUomId
+            ]
+                .map(value => (value == null ? "" : String(value)))
+                .join("|")
+        )
+        .sort()
+    const validThru = rows(PART, {orderId})[0]?.validThruDate
+    return lib.hash({lines, validThru: validThru == null ? null : ms(validThru)})
+}
 // The award as an approval source: the RFQ at the award's revision (the time it was submitted), its amount in the RFQ's
 // currency (each group at the day's rate; none when a rate is missing), the categories of its products, the submitter.
 function awardSource(rfq, plan, revision, submitterUserId, awardKey) {
@@ -1065,7 +1088,7 @@ function preview(p) {
     }
 }
 // Each group placed in its own transaction (commit#AwardGroup), a failure named while the others go on.
-function placeAll(rfq, plan, operationKey, awardKey) {
+function placeAll(rfq, plan, operationKey, awardKey, quoteStamps = {}) {
     const results = []
     for (const group of plan.groups) {
         if (!group.quote || group.lines.every(row => ["INVITATION_UNAVAILABLE", "ITEM_UNAVAILABLE"].includes(row.errorCode))) {
@@ -1083,7 +1106,8 @@ function placeAll(rfq, plan, operationKey, awardKey) {
                     substituteApproved: !!row.allocation.substituteApproved
                 })),
                 operationKey,
-                quoteRevision: group.quoteRevision ?? null,
+                quoteRevision: group.expectedRevision ?? group.quoteRevision ?? null,
+                quoteStamp: quoteStamps[group.orderId] || null,
                 awardKey: awardKey || null
             })
             results.push(
@@ -1145,13 +1169,21 @@ function commit(p) {
         const state = approvalsScript().progress(source)
         if (state.missing)
             denied("POLICY_MISSING", "No award approval policy covers " + money(source.amount, source.currencyUomId))
+        // each quote's revision as submitted: a quote changed while the award waits fails SOURCE_CHANGED when it is placed
+        const submittedRevisions = Object.assign(
+            Object.fromEntries(plan.groups.filter(group => group.quote).map(group => [group.orderId, group.quoteRevision])),
+            quoteRevisions
+        )
         const result = {
             requestId: rfq.requestId,
             resultStatus: "PENDING_APPROVAL",
             awardKey: operation.operationKey,
             sourceRevision: submitted,
             allocations,
-            quoteRevisions,
+            quoteRevisions: submittedRevisions,
+            quoteStamps: Object.fromEntries(
+                plan.groups.filter(group => group.quote).map(group => [group.orderId, quoteStamp(group.orderId)])
+            ),
             amountText: money(source.amount, source.currencyUomId),
             stepText: state.current ? approvalsScript().stepText(state, state.current) : "",
             groupRows: plan.groups.map(group =>
@@ -1208,6 +1240,12 @@ function commitGroup(p) {
     if (!operationKey) denied("OPERATION_KEY_REQUIRED", "An operation key is required")
     const requestId = String(p.requestId || "")
     const po = ordersScript().purchaseOrder(p.orderId, true)
+    // an award where the organization's award approval is in effect is placed only as an approved award (decide#AwardApproval)
+    if (!awardKey && awardPolicyInEffect(po.organizationPartyId))
+        denied(
+            "AWARD_APPROVAL_REQUIRED",
+            "The award of RFQ " + requestId + " needs its approval before quote " + po.orderId + " is placed"
+        )
     const supplierName = partyName(po.supplierPartyId)
     const links = rows(ITEM_ORDER, {orderId: po.orderId}).filter(link => link.requestId === requestId)
     if (!links.length) denied("INVITATION_UNAVAILABLE", "Order " + po.orderId + " is not a quote of RFQ " + requestId)
@@ -1216,7 +1254,10 @@ function commitGroup(p) {
             return {orderId: po.orderId, statusId: po.order.statusId, existing: true, allocatedQuantity: ""}
         denied("QUOTE_CLOSED", supplierName + "'s quote " + po.orderId + " is " + statusText(po.order.statusId).toLowerCase())
     }
-    if (!blank(p.quoteRevision) && Number(p.quoteRevision) !== Number(po.order.orderRevision ?? 1))
+    if (
+        (!blank(p.quoteRevision) && Number(p.quoteRevision) !== Number(po.order.orderRevision ?? 1)) ||
+        (!blank(p.quoteStamp) && quoteStamp(po.orderId) !== String(p.quoteStamp))
+    )
         denied("SOURCE_CHANGED", supplierName + "'s quote " + po.orderId + " changed since it was compared")
     if (sourcingScript().expired(po.part))
         denied("QUOTE_EXPIRED", supplierName + "'s quote " + po.orderId + " expired " + dateText(po.part.validThruDate))
@@ -1390,6 +1431,18 @@ function commitGroup(p) {
         internalNote: "Y",
         userId: ec.user.userId
     })
+    // the awarded prices kept: a line repriced (update#OrderItem without a price) or a zero total would let Mantle's
+    // autoApprove#Order approve the placed order with the gate off, so the group is refused by name instead (F-P12-4)
+    for (const entry of chosen) {
+        const kept = one(ORDER_ITEM, {orderId: po.orderId, orderItemSeqId: entry.line.orderItemSeqId})
+        if (!kept || dec(kept.unitAmount).compare(entry.price.price) !== 0)
+            denied(
+                "AWARD_PRICE_LOST",
+                "Line " + entry.line.orderItemSeqId + " of quote " + po.orderId + " lost its awarded price"
+            )
+    }
+    if (dec(one(ORDER, {orderId: po.orderId}).grandTotal).compare(0) <= 0)
+        denied("AWARD_PRICE_LOST", supplierName + "'s quote " + po.orderId + " totals zero; it is not placed")
     // Place from Quote: Mantle's OrderPlaced rules run, and with the approval gate on the order waits for its decision (P3/P4)
     call("mantle.order.OrderServices.place#Order", {orderId: po.orderId})
     const statusId = one(ORDER, {orderId: po.orderId}).statusId
@@ -1419,6 +1472,9 @@ function recordDecision(p) {
     requireOpen(rfq)
     const decision = String(p.decision || "approve")
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse the award")
+    // the RFQ changed after the award was submitted: it may be refused, not approved (the buyer awards it again)
+    if (decision === "approve" && sourcingScript().revisionOf(rfq.requestId) > revision)
+        denied("STALE_REVISION", "RFQ " + rfq.requestId + " changed after its award was submitted; refuse it and award again")
     const reason = text(p.reason)
     if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing the award")
     const plan = planAward(rfq, Array.from(pending.allocations || []), {quoteRevisions: ""})
@@ -1485,10 +1541,18 @@ function decide(p) {
             stepText: recorded.stepText || "",
             groupRows: []
         }
-    const pending = lib.json(op.resultJson, {})
-    const rfq = sourcingScript().rfqOf(p.requestId)
-    const plan = planAward(rfq, Array.from(pending.allocations || []), {quoteRevisions: ""})
-    const result = placeAll(rfq, plan, String(p.awardKey), String(p.awardKey))
+    // the placing under the RFQ's lock, as commit#Award's (another award or a close waits); an approval placed already by a
+    // concurrent decision answers its result
+    const rfq = sourcingScript().rfqOf(p.requestId, true)
+    const current = one(OPERATION, {operationKey: String(p.awardKey)})
+    if (current.status === "complete") return Object.assign(lib.json(current.resultJson, {}), {alreadyApplied: true})
+    const pending = lib.json(current.resultJson, {})
+    // each quote at its revision when the award was submitted (SOURCE_CHANGED for one changed since)
+    const quoteRevisions = Object.entries(pending.quoteRevisions || {})
+        .map(([orderId, revision]) => orderId + ":" + revision)
+        .join(",")
+    const plan = planAward(rfq, Array.from(pending.allocations || []), {quoteRevisions})
+    const result = placeAll(rfq, plan, String(p.awardKey), String(p.awardKey), pending.quoteStamps || {})
     call("update#" + OPERATION, {
         operationKey: String(p.awardKey),
         status: "complete",
@@ -1569,7 +1633,10 @@ function close(p) {
     const isPreview = truthy(p.preview)
     const rfq = sourcingScript().rfqOf(p.requestId, !isPreview)
     requireOpen(rfq)
-    const pendingAward = find(OPERATION, {operationType: "QuoteAward", resultId: rfq.requestId, status: "pending"}).count() > 0
+    const pendingAward =
+        find(OPERATION, {operationType: "QuoteAward", resultId: rfq.requestId})
+            .condition("status", "in", ["pending", "approved"])
+            .count() > 0
     if (pendingAward && !isPreview)
         denied("AWARD_PENDING", "An award of RFQ " + rfq.requestId + " waits for its approval; close it once it is decided")
     const ctx = contextOf(rfq)
