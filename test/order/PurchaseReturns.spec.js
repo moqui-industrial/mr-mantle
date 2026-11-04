@@ -2,10 +2,9 @@
 // authorizes a supplier return of their organization with the supplier's RMA, which makes its outbound shipment, and records
 // a later RMA number; a return with no items, another organization's and a user without the permission are refused. A
 // replacement (PURCHASE_ORDER_EDIT) of an authorized return is a purchase order from the supplier at no price, approved, with
-// its expected receipt, linked from the return item, never more than the item leaves open; a retry answers the first. The
-// organization does not settle returns separately (Mantle's default), so an item asking for a replacement already has
-// Mantle's own placed replacement order from the authorization, which the replacement approves rather than ordering twice;
-// an item asking for a credit gets a new order.
+// its expected receipt, linked from the return item, never more than the item leaves open; a retry answers the first. Mantle's
+// own response processing at authorization orders nothing for a supplier return, so the replacement is this service's. With
+// the buying policy's approval gate on, the replacement (zero total) is still approved: it commits no new spend.
 // Standalone: a spec-local organization, supplier, facility and users, with artifact authorization disabled (the rules are
 // the services' own permission checks). Run: ./moq test mr-mantle --spec PurchaseReturns
 const helper = () => ec.resource.script("component://mr-mantle/test/ledger/AccountingReceivablesFixtures.js")
@@ -178,6 +177,13 @@ feature("a replacement is an approved purchase order at no price with its expect
             returnId: ids.returnId,
             lineList: [{returnItemSeqId: itemSeq, quantity: 3}]
         })
+        // the approval gate on: the replacement, at no price, is approved all the same
+        svc("create#mantle.order.purchase.PurchasePolicy", {
+            organizationPartyId: org,
+            fromDate: Number(ec.user.nowTimestamp) - 1,
+            approvalGateEnabled: "Y",
+            changeReason: "Spec"
+        })
         const operationKey = key()
         const created = as("buyer", R + "create#ReplacementOrder", {operationKey, returnId: ids.returnId})
         const retry = as("buyer", R + "create#ReplacementOrder", {operationKey, returnId: ids.returnId})
@@ -192,6 +198,7 @@ feature("a replacement is an approved purchase order at no price with its expect
             retry,
             nothing,
             part: orderId ? one("mantle.order.OrderPart", {orderId, orderPartSeqId: "01"}) : null,
+            order: orderId ? one("mantle.order.OrderHeader", {orderId}) : null,
             lines: orderId ? rows("mantle.order.OrderItem", {orderId}) : [],
             item: one("mantle.order.return.ReturnItem", {returnId: ids.returnId, returnItemSeqId: itemSeq}),
             receipt: created.result?.shipmentId ? one("mantle.shipment.Shipment", {shipmentId: created.result.shipmentId}) : null
@@ -210,6 +217,7 @@ feature("a replacement is an approved purchase order at no price with its expect
         r.lines.length == 1
         String(r.lines[0].quantity) == "2"
         r.lines[0].unitAmount.isZero()
+        r.order.grandTotal.isZero()
         r.item.replacementOrderId == r.created.result.orderId
         String(r.item.replacedQuantity) == "2"
         r.receipt.shipmentTypeEnumId == "ShpTpPurchase"
