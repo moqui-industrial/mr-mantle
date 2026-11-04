@@ -43,7 +43,8 @@
 // - quality = good / every unit counted, by the units' ideal hours (or by count when they share one unit);
 // - the units: an operation's good and lost quantities from its completion (P10) when it has them, else its run's
 //   quantity events in the period (P7): good, held, scrap, process loss and rework, each unit once. A rework run's output
-//   is left out, since its units were counted as rework where they were made.
+//   is left out, since its units were counted as rework where they were made. Held output is outside accepted good
+//   (design §3 Quantities): a unit still held is counted but not good, one released is good and one scrapped from held is scrap.
 // A factor whose figures are missing (no planned time, no units, an operation without standards) is "Not calculable", never
 // zero, with the reason; OEE is then not calculable either.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -178,6 +179,16 @@ function begin(p, options = {}) {
         currencies: new Set(),
         withheld: []
     }
+}
+// A query's rows, at most cap of them: a larger set is named as a partition not read in full, so the totals are marked
+// incomplete rather than cut silently.
+function cappedList(report, name, query, cap) {
+    const list = Array.from(query.limit(cap + 1).list())
+    if (list.length > cap) {
+        report.partitions.push({name, message: "More than " + cap + " match; the first " + cap + " are read. Narrow the filters"})
+        list.length = cap
+    }
+    return list
 }
 // Read one independent partition: its value, or null with the partition named (and logged) when it fails.
 function partition(report, name, read) {
@@ -530,7 +541,7 @@ const intervalHours = list => time.hoursOf(list)
 function centersOf(report) {
     let query = find(CENTER)
     if (report.facilityIds) query = query.condition("facilityId", "in", report.facilityIds)
-    const centerRows = Array.from(query.limit(500).list())
+    const centerRows = cappedList(report, "Work centers", query, 500)
     const facilities = byId(
         rowsIn(
             FACILITY,
@@ -546,7 +557,8 @@ function centersOf(report) {
         .sort((a, b) => String(a.facilityName || a.facilityId).localeCompare(String(b.facilityName || b.facilityId)))
 }
 // The units counted at each center: {centerId: [{operation, run, good, total, uomId}]}, from the operations' completions
-// (P10's complete#ProductionOperation: good with the held, and the losses) or else their runs' quantity events in the period (P7); rework runs left out.
+// (P10's complete#ProductionOperation: good with the held, and the losses) or else their runs' quantity events in the period (P7); rework runs left out;
+// held output not good until released (a unit scrapped from held is a loss, counted once).
 function creditsOf(report, ctx, centerIds) {
     const {fromDate, thruDate} = report.period
     const credits = new Map(centerIds.map(id => [id, []]))
@@ -592,6 +604,34 @@ function creditsOf(report, ctx, centerIds) {
     const operations = rowsIn(WORK, "parentWorkEffortId", Array.from(runs.keys()))
     // an operation completed on the shop floor (complete#ProductionOperation) carries its own good and lost quantity
     const hasCounts = operation => operation.productionGoodQuantity != null
+    // held output is outside accepted good until it is disposed (design §3 Quantities): a run's output still held now, or
+    // scrapped from held, is not good; a released unit is. Per run: its output's held quantity now (Quantities' outputFigures,
+    // which the dispositions reduce) and its approved scrap from held, with those losses' ids (their quantity events)
+    const heldByRun = new Map()
+    const heldOf = run => {
+        if (heldByRun.has(run.workEffortId)) return heldByRun.get(run.workEffortId)
+        const line = outputs.get(run.workEffortId)
+        const out = {held: 0, scrapped: 0, lossIds: new Set()}
+        if (line)
+            partition(report, "Held output of work order " + run.workEffortId, () => {
+                out.held = num(quantities().outputFigures(run, line).held) || 0
+                for (const loss of rows(LOSS, {
+                    workEffortId: run.workEffortId,
+                    productionRunLineId: line.productionRunLineId,
+                    lossTypeEnumId: "PltOutputScrap",
+                    statusId: "PlsApproved",
+                    fromHeld: "Y"
+                })) {
+                    out.scrapped += num(loss.quantity) || 0
+                    out.lossIds.add(loss.productionLossId)
+                }
+            })
+        heldByRun.set(run.workEffortId, out)
+        return out
+    }
+    const heldNote = (centerId, held) => {
+        if (held.held > 0 || held.scrapped > 0) notes.get(centerId).add("Held output counts good only once it is released")
+    }
     const idealOf = (operation, run) => {
         const output = outputs.get(run.workEffortId)
         if (!output || dec(output.stockQuantity).compare(0) <= 0) throw new Error("its work order has no output quantity")
@@ -628,10 +668,17 @@ function creditsOf(report, ctx, centerIds) {
         const own = events.filter(event => event.workEffortId === run.workEffortId)
         const ofType = type =>
             own.filter(event => event.quantityEventTypeEnumId === type).reduce((sum, event) => sum + num(event.quantity), 0)
-        const good = ofType("PqetGood")
-        const total = countedEventTypes.reduce((sum, type) => sum + ofType(type), 0)
+        // a held unit is counted once: as good when released, as scrap when scrapped from held (its scrap event not again)
+        const held = heldOf(run)
+        const pending = ofType("PqetPending")
+        const scrapFromHeld = own
+            .filter(event => event.quantityEventTypeEnumId === "PqetScrap" && held.lossIds.has(event.productionLossId))
+            .reduce((sum, event) => sum + num(event.quantity), 0)
+        const good = ofType("PqetGood") + Math.max(0, pending - held.held - held.scrapped)
+        const total = countedEventTypes.reduce((sum, type) => sum + ofType(type), 0) - Math.min(scrapFromHeld, pending)
         if (total > 0) {
             notes.get(centerId).add("Counts from the work orders' output: each operation is credited with its run's quantities")
+            heldNote(centerId, held)
             add(centerId, operation, run, good, total)
         }
     }
@@ -651,8 +698,17 @@ function creditsOf(report, ctx, centerIds) {
         if (reworkRunIds.has(run.workEffortId)) continue
         if (!outputs.has(run.workEffortId))
             outputs.set(run.workEffortId, rows(LINE, {workEffortId: run.workEffortId, lineRoleEnumId: "PrlrOutput"})[0])
-        const good = num(operation.productionGoodQuantity) || 0
-        add(operation.workCenterFacilityId, operation, run, good, good + (num(operation.productionLossQuantity) || 0))
+        // its completion counts its held output as good (good + pending): what of it is still held or was scrapped from
+        // held is not good, the unit counted once
+        const produced = num(operation.productionGoodQuantity) || 0
+        const pendingHere = rows(QEVENT, {
+            operationWorkEffortId: operation.workEffortId,
+            quantityEventTypeEnumId: "PqetPending"
+        }).reduce((sum, event) => sum + (num(event.quantity) || 0), 0)
+        const held = pendingHere > 0 ? heldOf(run) : {held: 0, scrapped: 0}
+        const good = Math.max(0, produced - Math.min(pendingHere, held.held + held.scrapped))
+        if (pendingHere > 0) heldNote(operation.workCenterFacilityId, held)
+        add(operation.workCenterFacilityId, operation, run, good, produced + (num(operation.productionLossQuantity) || 0))
     }
     return {credits, notes}
 }
@@ -900,7 +956,7 @@ function lossReport(p) {
             if (!blank(p.reasonCode)) query = query.condition("reasonCode", p.reasonCode)
             if (!blank(p.lossTypeEnumId)) query = query.condition("lossTypeEnumId", p.lossTypeEnumId)
             if (!blank(p.operationWorkEffortId)) query = query.condition("operationWorkEffortId", p.operationWorkEffortId)
-            return Array.from(query.limit(5000).list())
+            return cappedList(report, "Losses", query, 5000)
         }) || []
     const goodEvents =
         partition(report, "Good output", () => {
@@ -908,7 +964,7 @@ function lossReport(p) {
                 .condition("eventDate", "greater-equals", fromDate)
                 .condition("eventDate", "less-than", thruDate)
             if (!blank(p.operationWorkEffortId)) query = query.condition("operationWorkEffortId", p.operationWorkEffortId)
-            return Array.from(query.limit(5000).list())
+            return cappedList(report, "Good output", query, 5000)
         }) || null
     // the runs of the scope (organization and facility) the losses and good output belong to
     const runIds = unique(losses.map(row => row.workEffortId).concat((goodEvents || []).map(row => row.workEffortId)))
@@ -1089,7 +1145,7 @@ function qualityReport(p) {
             if (!blank(p.lotId)) query = query.condition("lotId", p.lotId)
             if (!blank(p.resultEnumId)) query = query.condition("resultEnumId", p.resultEnumId)
             if (!blank(p.operationWorkEffortId)) query = query.condition("operationWorkEffortId", p.operationWorkEffortId)
-            return Array.from(query.limit(5000).list())
+            return cappedList(report, "Inspections", query, 5000)
         }) || []
     // production inspections of the scope's runs
     const runs = byId(runsOf(report, narrowTo(unique(inspections.map(row => row.workEffortId)))), "workEffortId")
@@ -1540,7 +1596,12 @@ function planningReport(p) {
             if (!blank(p.productId)) query = query.condition("productId", p.productId)
             if (!blank(p.methodEnumId)) query = query.condition("methodEnumId", p.methodEnumId)
             if (report.facilityIds) query = query.condition("facilityId", "in", report.facilityIds)
-            const suggestions = Array.from(query.orderBy("planningLevel").orderBy("requiredByDate").limit(2000).list())
+            const suggestions = cappedList(
+                report,
+                "Supply plan " + run.planningRunId + " suggestions",
+                query.orderBy("planningLevel").orderBy("requiredByDate"),
+                2000
+            )
             const products = productNames(suggestions.map(row => row.productId))
             const facilityText = facilityNames(suggestions.map(row => row.facilityId))
             for (const row of suggestions) {

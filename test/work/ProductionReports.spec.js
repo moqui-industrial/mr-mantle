@@ -169,6 +169,11 @@ spec({
             locationSeqId: "PICK1",
             locationTypeEnumId: "FltPick"
         })
+        call("create#mantle.facility.FacilityLocation", {
+            facilityId: plant,
+            locationSeqId: "HOLD1",
+            locationTypeEnumId: "FltQuarantine"
+        })
         call("create#mantle.facility.Facility", {
             facilityId: "PRR_OTHER_PLANT",
             facilityTypeEnumId: "FcTpWarehouse",
@@ -524,3 +529,53 @@ feature(
         }
     }
 )
+
+// last, since it adds a run at the plant: held output is outside accepted good (design §3 Quantities), so the shop floor's
+// completion count (good with the held) counts a held unit in the total but not as good until it is released
+feature("OEE's quality does not count held output as good: a completion of 1 good and 1 held counts 2 units, 1 good", {
+    when() {
+        const c = releasedRun(2)
+        const started = run("prr_super", P + "transition#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: c.workEffortId,
+            action: "start",
+            expectedRevision: revision(c.workEffortId)
+        })
+        const operation = rows("mantle.work.effort.WorkEffort", {parentWorkEffortId: c.workEffortId})[0]
+        const opStarted = run("prr_operator", P + "start#ProductionOperation", {
+            operationKey: key(),
+            operationWorkEffortId: operation.workEffortId
+        })
+        const completed = run("prr_operator", P + "complete#ProductionOperation", {
+            operationKey: key(),
+            operationWorkEffortId: operation.workEffortId,
+            good: 1,
+            pending: 1,
+            toLocationSeqId: "PICK1",
+            heldLocationSeqId: "HOLD1"
+        })
+        const out = report("prr_reader", "OperationPerformanceReport", Object.assign({facilityId: plant}, period()))
+        const center = (out.centerRows || []).find(row => row.facilityId === plant) || {}
+        return {
+            started,
+            opStarted,
+            completed,
+            operation: one("mantle.work.effort.WorkEffort", {workEffortId: operation.workEffortId}),
+            out,
+            center
+        }
+    },
+    then({started, opStarted, completed, operation, out, center}) {
+        started.error == ""
+        opStarted.error == ""
+        completed.error == ""
+        // the completion's own count holds the held unit with the good, as P10 writes it
+        operation.productionGoodQuantity.toNumber() == 2
+        out.error == ""
+        // 12 units counted: run A's 10 and this completion's 2, of which 9 are good (the held one is not, yet)
+        center.totalQuantity == 12
+        center.goodQuantity == 9
+        close(center.quality, 0.75)
+        center.notesText.includes("Held output counts good only once it is released")
+    }
+})
