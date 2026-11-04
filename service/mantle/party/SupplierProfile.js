@@ -31,6 +31,15 @@ function supplierParty(partyId) {
         denied("SUPPLIER_UNAVAILABLE", "Choose an available supplier")
     return supplier
 }
+// The supplier of a buying change (the buying fields, buyer, category): not owned by another organization. A shared (_NA_)
+// or unowned supplier, or the organization's own, passes; the finance fields keep Accounting's rule (supplierParty only).
+function buyingSupplier(partyId, organizationPartyId) {
+    const supplier = supplierParty(partyId)
+    const owner = supplier.ownerPartyId
+    if (owner && owner !== "_NA_" && owner !== organizationPartyId)
+        denied("SUPPLIER_UNAVAILABLE", "The supplier belongs to another organization")
+    return supplier
+}
 function validate(values) {
     if (values.settlementTermId && !one("mantle.account.invoice.SettlementTerm", {settlementTermId: values.settlementTermId}))
         denied("TERM_INVALID", "Choose an existing payment term")
@@ -73,7 +82,8 @@ function store(p) {
     if (financeGiven.length && buyingGiven.length && !access.has("SUPPLIER_PROFILE_EDIT"))
         denied("PERMISSION_DENIED", "SUPPLIER_PROFILE_EDIT authority is required")
     const supplierPartyId = p.supplierPartyId
-    supplierParty(supplierPartyId)
+    if (buyingGiven.length) buyingSupplier(supplierPartyId, organizationPartyId)
+    else supplierParty(supplierPartyId)
     const fromMillis = blank(p.fromDate) ? ms(ec.user.nowTimestamp) : ms(p.fromDate)
     if (!Number.isFinite(fromMillis)) denied("DATE_INVALID", "Choose a valid start")
     const all = Array.from(find(PROFILE, {organizationPartyId, supplierPartyId}).forUpdate(true).list())
@@ -92,11 +102,15 @@ function store(p) {
             .sort((a, b) => ms(b.fromDate) - ms(a.fromDate))[0]
         selfBillingDefault = matchPolicy?.selfBillingDefault || "N"
     }
-    // an approval decision that changes the status is the purchase approver's; the same status given again is no decision
+    // an approval decision that changes the status is the purchase approver's, and so is clearing a status (no status is
+    // usable where the policy does not require approval, which would lift a rejection or suspension); the same status given
+    // again is no decision
+    const newStatus = blank(p.approvalStatusId) ? null : p.approvalStatusId,
+        oldStatus = currentRow?.approvalStatusId || null
     if (
         given(p, "approvalStatusId") &&
-        decidedStatuses.includes(p.approvalStatusId) &&
-        p.approvalStatusId !== currentRow?.approvalStatusId &&
+        newStatus !== oldStatus &&
+        (decidedStatuses.includes(newStatus) || newStatus == null) &&
         !access.has("PURCHASE_APPROVE")
     )
         denied("PERMISSION_DENIED", "PURCHASE_APPROVE authority is required")
@@ -199,7 +213,7 @@ function classify(partyId, partyClassificationId) {
 function storeBuyer(p) {
     const organizationPartyId = workflowLib.organization(p.organizationPartyId, "SUPPLIER_PROFILE_EDIT", true)
     const supplierPartyId = p.supplierPartyId
-    supplierParty(supplierPartyId)
+    buyingSupplier(supplierPartyId, organizationPartyId)
     if (!one("mantle.party.PartyRole", {partyId: supplierPartyId, roleTypeId: "Supplier"}))
         denied("SUPPLIER_UNAVAILABLE", "Choose an available supplier")
     const at = blank(p.fromDate) ? ms(ec.user.nowTimestamp) : ms(p.fromDate)
@@ -238,20 +252,22 @@ function storeBuyer(p) {
 
 // set#SupplierCategory: a supplier's category for the organization's buyers (SUPPLIER_PROFILE_EDIT), or none.
 function setCategory(p) {
-    workflowLib.organization(p.organizationPartyId, "SUPPLIER_PROFILE_EDIT", false)
-    supplierParty(p.supplierPartyId)
+    const organizationPartyId = workflowLib.organization(p.organizationPartyId, "SUPPLIER_PROFILE_EDIT", false)
+    buyingSupplier(p.supplierPartyId, organizationPartyId)
     if (!one("mantle.party.PartyRole", {partyId: p.supplierPartyId, roleTypeId: "Supplier"}))
         denied("SUPPLIER_UNAVAILABLE", "Choose an available supplier")
-    if (!blank(p.partyClassificationId)) {
-        classify(p.supplierPartyId, p.partyClassificationId)
-        return {changed: true}
-    }
     const inEffect = rows("mantle.party.PartyClassificationAppl", {partyId: p.supplierPartyId}).filter(
         row =>
             current(row, ms(ec.user.nowTimestamp)) &&
             one("mantle.party.PartyClassification", {partyClassificationId: row.partyClassificationId})
                 ?.classificationTypeEnumId === "PcltSupplierCategory"
     )
+    if (!blank(p.partyClassificationId)) {
+        // the category already in effect alone is no change
+        if (inEffect.length === 1 && inEffect[0].partyClassificationId === p.partyClassificationId) return {changed: false}
+        classify(p.supplierPartyId, p.partyClassificationId)
+        return {changed: true}
+    }
     for (const row of inEffect)
         call("mantle.party.PartyServices.remove#PartyClassification", {
             partyId: p.supplierPartyId,

@@ -23,12 +23,12 @@ along with this software (see the LICENSE.md file). If not, see
             The finance fields, the default payment term of the supplier's bills (settlementTermId) and self-billing
             (selfBillingIndicator, Y or N), need SUPPLIER_TERMS_EDIT in the organization. The buying fields (impl-purchasing
             P2), the default currency and Incoterm, the approval status (SupplierApproval) and a dated purchase block with
-            its reason, need SUPPLIER_PROFILE_EDIT; an approval decision (Approved or Rejected) needs PURCHASE_APPROVE too.
+            its reason, need SUPPLIER_PROFILE_EDIT; an approval decision (Approved or Rejected) or clearing the status needs PURCHASE_APPROVE too.
             A supplier's first row takes self-billing from the organization's match policy (selfBillingDefault) unless the
             change gives it. Each field is audit-logged with the reason. Refuses an unknown term, currency, Incoterm or
             status (TERM_INVALID, PROFILE_INVALID), a block without its start or reason or ending before it starts
-            (BLOCK_INVALID), a supplier another user keeps private (SUPPLIER_UNAVAILABLE) and a start before the row in
-            effect (DATE_INVALID). SupplierProfile.js.</description>
+            (BLOCK_INVALID), a supplier another user keeps private, or with buying fields one owned by another organization
+            (SUPPLIER_UNAVAILABLE), and a start before the row in effect (DATE_INVALID). SupplierProfile.js.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="supplierPartyId" required="true"/>
@@ -91,8 +91,8 @@ along with this software (see the LICENSE.md file). If not, see
             (impl-drawers-commons §4): the relationships of the organization's people to the supplier in effect then end
             there, and the buyer's starts; with no buyer they only end. Another organization's buyers of a shared supplier
             are left alone. Requires SUPPLIER_PROFILE_EDIT in the organization; refuses a buyer who is not a person of the
-            organization (BUYER_INVALID), a party not in the Supplier role or another user's private contact
-            (SUPPLIER_UNAVAILABLE) and a start before the buyer in effect (DATE_INVALID).</description>
+            organization (BUYER_INVALID), a party not in the Supplier role, another user's private contact or a supplier
+            owned by another organization (SUPPLIER_UNAVAILABLE) and a start before the buyer in effect (DATE_INVALID).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="supplierPartyId" required="true"/>
@@ -113,7 +113,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="set" noun="SupplierCategory" allow-remote="false">
         <description>A supplier's category (a PartyClassification of PcltSupplierCategory), replacing the one in effect, or
             with none given the category ends. Requires SUPPLIER_PROFILE_EDIT in the organization; refuses a classification
-            of another type (CLASSIFICATION_INVALID) and a party not in the Supplier role (SUPPLIER_UNAVAILABLE).</description>
+            of another type (CLASSIFICATION_INVALID) and a party not in the Supplier role or owned by another organization
+            (SUPPLIER_UNAVAILABLE); the category already in effect is no change.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="supplierPartyId" required="true"/>

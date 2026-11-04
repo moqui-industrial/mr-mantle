@@ -8,7 +8,9 @@
 const prefix = "PUR_POLICY_SPEC"
 const org = prefix + "_ORG"
 const supplier = prefix + "_SUPPLIER",
-    blocked = prefix + "_BLOCKED"
+    blocked = prefix + "_BLOCKED",
+    otherOrg = prefix + "_OTHER_ORG",
+    otherSupplier = prefix + "_OTHER_SUPPLIER"
 const users = {}
 const call = (name, parameters) => ec.service.sync().name(name).parameters(parameters).disableAuthz().call() || {}
 const one = (entity, key) => ec.entity.find(entity).condition(key).disableAuthz().one()
@@ -77,6 +79,12 @@ spec({
             call("create#mantle.party.Organization", {partyId, organizationName: name})
             call("create#mantle.party.PartyRole", {partyId, roleTypeId: "Supplier"})
         }
+        // a supplier of another organization, which the organization's buying changes refuse
+        call("create#mantle.party.Party", {partyId: otherOrg, partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.PartyRole", {partyId: otherOrg, roleTypeId: "OrgInternal"})
+        call("create#mantle.party.Party", {partyId: otherSupplier, partyTypeEnumId: "PtyOrganization", ownerPartyId: otherOrg})
+        call("create#mantle.party.Organization", {partyId: otherSupplier, organizationName: "Policy Spec Other Supplier"})
+        call("create#mantle.party.PartyRole", {partyId: otherSupplier, roleTypeId: "Supplier"})
         call("create#mantle.party.PartyClassification", {
             partyClassificationId: prefix + "_CAT",
             classificationTypeEnumId: "PcltSupplierCategory",
@@ -245,10 +253,17 @@ feature(
                 changeReason: "Approved"
             })
             const approved = (login(users.buyer), check(supplier, minutes(90)))
+            // a buyer may not clear the decided status (no status would pass where approval is not required)
+            const cleared = refused(supplierService + "store#SupplierProfile", {
+                organizationPartyId: org,
+                supplierPartyId: supplier,
+                approvalStatusId: "",
+                fromDate: minutes(3)
+            })
             login("john.doe")
-            return {noReason, blockedNow, warn, stop, approved}
+            return {noReason, blockedNow, warn, stop, approved, cleared}
         },
-        then({noReason, blockedNow, warn, stop, approved}) {
+        then({noReason, blockedNow, warn, stop, approved, cleared}) {
             noReason.includes("BLOCK_INVALID")
             blockedNow.result == "STOP"
             blockedNow.reasonCode == "SUPPLIER_BLOCKED"
@@ -259,6 +274,7 @@ feature(
             stop.result == "STOP"
             stop.usable == false
             approved.result == "OK"
+            cleared.includes("PERMISSION_DENIED: PURCHASE_APPROVE")
         }
     }
 )
@@ -290,6 +306,18 @@ feature("a new supplier starts Pending where the policy requires approval, and t
             buyerPartyId: users.approver,
             fromDate: minutes(5)
         })
+        // the category in effect again is no change; another organization's supplier is refused each buying change
+        const sameCategory = svc(supplierService + "set#SupplierCategory", {
+            organizationPartyId: org,
+            supplierPartyId: created.partyId,
+            partyClassificationId: prefix + "_CAT"
+        })
+        const otherKey = {organizationPartyId: org, supplierPartyId: otherSupplier}
+        const otherRefused = [
+            refused(supplierService + "store#SupplierBuyer", Object.assign({buyerPartyId: users.buyer}, otherKey)),
+            refused(supplierService + "set#SupplierCategory", Object.assign({partyClassificationId: prefix + "_CAT"}, otherKey)),
+            refused(supplierService + "store#SupplierProfile", Object.assign({currencyUomId: "USD"}, otherKey))
+        ]
         login("john.doe")
         const party = one("mantle.party.Party", {partyId: created.partyId})
         const relationships = rows("mantle.party.PartyRelationship", {
@@ -297,9 +325,9 @@ feature("a new supplier starts Pending where the policy requires approval, and t
             relationshipTypeEnumId: "PrtSupplier"
         }).sort((a, b) => Number(a.fromDate) - Number(b.fromDate))
         const category = rows("mantle.party.PartyClassificationAppl", {partyId: created.partyId})
-        return {noneRefused, created, first, outsider, second, party, relationships, category}
+        return {noneRefused, created, first, outsider, second, party, relationships, category, sameCategory, otherRefused}
     },
-    then({noneRefused, created, first, outsider, second, party, relationships, category}) {
+    then({noneRefused, created, first, outsider, second, party, relationships, category, sameCategory, otherRefused}) {
         noneRefused.includes("PERMISSION_DENIED")
         created.approvalStatusId == "SupaPending"
         party.ownerPartyId == org
@@ -312,5 +340,7 @@ feature("a new supplier starts Pending where the policy requires approval, and t
         relationships[0].thruDate != null
         relationships[1].fromPartyId == users.approver
         relationships[1].fromRoleTypeId == "Buyer"
+        sameCategory.changed == false
+        otherRefused.every(message => message.includes("SUPPLIER_UNAVAILABLE"))
     }
 })
