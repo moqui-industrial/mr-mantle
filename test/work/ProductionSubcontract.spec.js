@@ -636,16 +636,10 @@ feature("a run reader without a buyer's permission sees no purchase price; the b
     }
 })
 
-feature("with the service-acceptance rule off a service line matches its ordered quantity", {
+feature("with the service-acceptance rule on a line with nothing accepted is refused; off it matches its ordered quantity", {
     when() {
         const admin = "PSC_ADMIN"
         user(admin, ["ACCOUNTING_ADMIN"])
-        const stored = run("psc_admin", M + "store#MatchPolicy", {
-            organizationPartyId: org,
-            productId: "PSC_COAT",
-            serviceAcceptanceRequired: "N",
-            changeReason: "Bill services as ordered"
-        })
         login("psc_ap")
         const invoiceId = call("mantle.account.InvoiceServices.import#Bill", {
             organizationPartyId: org,
@@ -666,13 +660,22 @@ feature("with the service-acceptance rule off a service line matches its ordered
             amount: 4
         })
         const invoiceItemSeqId = rows("mantle.account.invoice.InvoiceItem", {invoiceId})[0].invoiceItemSeqId
-        const applied = run("psc_matcher", M + "apply#InvoiceMatch", {
-            invoiceId,
-            allocationList: [{invoiceItemSeqId, orderId: state.orderId, orderItemSeqId: secondItem.orderItemSeqId, quantity: "3"}]
+        const allocationList = [
+            {invoiceItemSeqId, orderId: state.orderId, orderItemSeqId: secondItem.orderItemSeqId, quantity: "3"}
+        ]
+        // the default rule (Y): nothing accepted on the line, nothing to bill
+        const unaccepted = run("psc_matcher", M + "apply#InvoiceMatch", {invoiceId, allocationList})
+        const stored = run("psc_admin", M + "store#MatchPolicy", {
+            organizationPartyId: org,
+            productId: "PSC_COAT",
+            serviceAcceptanceRequired: "N",
+            changeReason: "Bill services as ordered"
         })
-        return {stored, applied}
+        const applied = run("psc_matcher", M + "apply#InvoiceMatch", {invoiceId, allocationList})
+        return {unaccepted, stored, applied}
     },
-    then({stored, applied}) {
+    then({unaccepted, stored, applied}) {
+        unaccepted.error.includes("MISSING_RECEIPT")
         stored.error == ""
         applied.error == ""
         // the same price as ordered: no variance event

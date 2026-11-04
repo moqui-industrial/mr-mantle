@@ -125,10 +125,14 @@ function isProductLine(line) {
 }
 // The service-acceptance rule of a policy (impl-manufacturing P14): a service line (a PtService product) has no receipt,
 // so on the received basis it matches what its ServiceAcceptance rows accepted (Purchasing's accept#ServiceItem, a
-// subcontract's receive#SubcontractOutput); with the rule off (N) it matches its ordered quantity.
+// subcontract's receive#SubcontractOutput); with the rule off (N) it matches its ordered quantity. A service line that was
+// received (an AssetReceipt on it) keeps the receipt rules it had before the rule (P14 review: Mantle's default unchanged).
 function isServiceItem(item) {
     const product = item.productId ? one("mantle.product.Product", {productId: item.productId}) : null
-    return product?.productTypeEnumId === "PtService"
+    if (product?.productTypeEnumId !== "PtService") return false
+    return !(
+        find("mantle.product.receipt.AssetReceipt", {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}).count() > 0
+    )
 }
 const acceptanceRule = policy => (policy.serviceAcceptanceRequired || "Y") !== "N"
 function serviceAcceptedOf(orderId, orderItemSeqId) {
@@ -1167,7 +1171,7 @@ function legacyBills(organizationPartyId, p) {
     const wanted = Math.max(1, Math.min(200, Number(p.limit) || 100))
     const out = []
     let after = p.afterInvoiceId || null
-    for (let read = 0; out.length < wanted && read < 5000; ) {
+    for (let read = 0; out.length < wanted && read < 5000;) {
         let query = find(I, {toPartyId: organizationPartyId})
             .condition("fromPartyId", "not-equals", organizationPartyId)
             .condition("statusId", "not-equals", "InvoiceCancelled")
