@@ -70,13 +70,15 @@ const same = (field, a, b) => comparable(field, a) === comparable(field, b)
 // buying fields SUPPLIER_PROFILE_EDIT, and an approval decision (Approved or Rejected) PURCHASE_APPROVE too, each in the
 // organization. A supplier's first row takes self-billing from the organization's match policy (selfBillingDefault) unless
 // the change gives it.
-function store(p) {
+// decided: a purchase approval decision of mantle.order.PurchaseServices.decide#SupplierApproval (PurchaseApprovals.js),
+// whose caller checked PURCHASE_APPROVE and the organization.
+function store(p, decided = false) {
     const financeGiven = financeFields.filter(field => given(p, field)),
         buyingGiven = buyingFields.filter(field => given(p, field))
     if (!financeGiven.length && !buyingGiven.length) denied("PROFILE_EMPTY", "Give a supplier profile field to change")
     const organizationPartyId = workflowLib.organization(
         p.organizationPartyId,
-        financeGiven.length ? "SUPPLIER_TERMS_EDIT" : "SUPPLIER_PROFILE_EDIT",
+        decided ? null : financeGiven.length ? "SUPPLIER_TERMS_EDIT" : "SUPPLIER_PROFILE_EDIT",
         true
     )
     if (financeGiven.length && buyingGiven.length && !access.has("SUPPLIER_PROFILE_EDIT"))
@@ -111,6 +113,7 @@ function store(p) {
         given(p, "approvalStatusId") &&
         newStatus !== oldStatus &&
         (decidedStatuses.includes(newStatus) || newStatus == null) &&
+        !decided &&
         !access.has("PURCHASE_APPROVE")
     )
         denied("PERMISSION_DENIED", "PURCHASE_APPROVE authority is required")
@@ -199,6 +202,11 @@ function create(p) {
             approvalStatusId: "SupaPending",
             changeReason: "New supplier"
         }).supplierProfileId
+    // its PurchaseSupplierApproval notice to the purchase approvers (impl-purchasing P4, F49)
+    if (supplierProfileId)
+        ec.resource
+            .script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
+            .notifyNewSupplier(organizationPartyId, partyId)
     return {partyId, supplierProfileId, approvalStatusId: supplierProfileId ? "SupaPending" : null}
 }
 // A supplier category (PcltSupplierCategory) on a supplier, replacing its category in effect.
@@ -278,6 +286,8 @@ function setCategory(p) {
 
 const operations = {store, create, storeBuyer, setCategory}
 ;({
+    // a purchase approval decision's status change (PurchaseApprovals.js decideSupplier, which checked PURCHASE_APPROVE)
+    storeDecision: p => store(p, true),
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown supplier operation " + op)
         return operations[op](parameters)

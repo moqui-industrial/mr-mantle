@@ -11,9 +11,10 @@ const COMMITMENT = "mantle.other.budget.BudgetCommitment"
 const POLICY = "mantle.other.budget.BudgetControlPolicy"
 const ORDER = "mantle.order.OrderHeader"
 const INVOICE = "mantle.account.invoice.Invoice"
-// who may reserve and release spending against a budget: the approvers of the documents that spend, budget editors and
-// finance administrators; converting is also a bill editor's, since a bill's approval converts its order's commitment
-const reservePermissions = ["INVOICE_APPROVE", "BUDGET_EDIT", "ACCOUNTING_ADMIN"]
+// who may reserve and release spending against a budget: the approvers of the documents that spend (a bill's, and a purchase
+// order's: Purchasing's decide#PurchaseApproval reserves at its approval, impl-purchasing P4), budget editors and finance
+// administrators; converting is also a bill editor's, since a bill's approval converts its order's commitment
+const reservePermissions = ["INVOICE_APPROVE", "PURCHASE_APPROVE", "BUDGET_EDIT", "ACCOUNTING_ADMIN"]
 const commitPermissions = reservePermissions.concat(["PAYABLE_EDIT"])
 // a source document whose open commitments a user releases without BUDGET_OVERRIDE: closed or cancelled
 const closedSources = {

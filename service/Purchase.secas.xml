@@ -29,4 +29,15 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
         </actions>
     </seca>
+    <!-- P4: a commercial change of a purchase order after an approval decision (a key field, not a status, file or note)
+        supersedes the earlier revision's decisions, and a placed order's approval starts again (design ApprovalPolicies).
+        Every order's revision passes here, so the condition leaves out the kinds that are not commercial, and the service
+        returns at once for an order with no decision. -->
+    <seca id="OrderRevisionPurchaseApproval" service="mantle.order.OrderServices.increment#OrderRevision" when="post-service">
+        <condition><expression>orderId &amp;&amp; !['status', 'content', 'note'].includes(revisionKind)</expression></condition>
+        <actions>
+            <service-call name="mantle.order.PurchaseServices.handle#PurchaseApprovalRevision" disable-authz="true"
+                    in-map="{orderId:orderId, revisionKind:revisionKind}"/>
+        </actions>
+    </seca>
 </secas>

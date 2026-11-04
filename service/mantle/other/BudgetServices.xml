@@ -607,7 +607,7 @@ along with this software (see the LICENSE.md file). If not, see
             users holding BUDGET_OVERRIDE, unless such a user gives an override reason; a Warn reserves with a warning. The
             same source revision answers the first commitment (a different amount or account is refused); a new revision
             releases the open commitment of the earlier one and holds its amount less what the earlier ones passed on to
-            later stages. Needs INVOICE_APPROVE, BUDGET_EDIT or ACCOUNTING_ADMIN in the organization.</description>
+            later stages. Needs INVOICE_APPROVE, PURCHASE_APPROVE, BUDGET_EDIT or ACCOUNTING_ADMIN in the organization.</description>
         <implements service="mantle.other.BudgetServices.define#CommitmentSource"/>
         <out-parameters>
             <parameter name="budgetCommitmentId"/>
@@ -631,7 +631,7 @@ along with this software (see the LICENSE.md file). If not, see
             effect) becomes an actual commitment, converting its purchase order lines' open commitments (through their
             billing links, each used once) first; an account's lines are decided together, keyed by the bill's approved
             version (change#InvoiceState's approval of a bill calls this). The control policy decides the part not already held, as reserve#Commitment
-            does. Needs INVOICE_APPROVE, PAYABLE_EDIT, BUDGET_EDIT or ACCOUNTING_ADMIN in the organization.</description>
+            does. Needs INVOICE_APPROVE, PURCHASE_APPROVE, PAYABLE_EDIT, BUDGET_EDIT or ACCOUNTING_ADMIN in the organization.</description>
         <implements service="mantle.other.BudgetServices.define#CommitmentSource"/>
         <in-parameters>
             <parameter name="fromCommitmentId"/>
@@ -657,8 +657,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="release" noun="Commitment" allow-remote="false">
         <description>Release what is left of a source's open commitments (a closed order, a cancelled request): optionally
             one line, stage or revision. Releasing again releases nothing. Refuses a source still open (SOURCE_OPEN)
-            unless the user holds BUDGET_OVERRIDE or ACCOUNTING_ADMIN. Needs INVOICE_APPROVE, BUDGET_EDIT or
-            ACCOUNTING_ADMIN in the organization.</description>
+            unless the user holds BUDGET_OVERRIDE or ACCOUNTING_ADMIN. Needs INVOICE_APPROVE, PURCHASE_APPROVE, BUDGET_EDIT
+            or ACCOUNTING_ADMIN in the organization.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="sourceEntityName" required="true"/>
