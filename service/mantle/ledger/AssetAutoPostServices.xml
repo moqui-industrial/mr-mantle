@@ -184,6 +184,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="assetReceiptId" required="true"/></in-parameters>
         <out-parameters><parameter name="acctgTransId"/></out-parameters>
         <actions>
+            <!-- with the owner's forwardReceiptRepostEnabled a dated delta, leaving the posted history (impl-manufacturing F32) -->
+            <script>forwardReceiptHandled = ec.resource.script('component://mr-mantle/service/mantle/ledger/ReceiptAdjustments.js').repost({assetReceiptId})</script>
+            <if condition="forwardReceiptHandled"><return/></if>
             <entity-find-one entity-name="mantle.product.receipt.AssetReceipt" value-field="assetReceipt" for-update="true"/>
             <if condition="assetReceipt == null"><return error="true" message="Could not find Asset Receipt with ID ${assetReceiptId}"/></if>
             <!-- only fail if null to allow setting to zero to delete original TX and not create new one -->

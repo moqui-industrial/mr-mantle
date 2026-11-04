@@ -414,7 +414,8 @@ function release(userScope, run, p) {
     let methodDate = run.productionMethodDate || now,
         revision = Number(run.productionRevision || 0),
         routingId = run.productionRoutingId
-    const later = laterReleases(run, lines, now)
+    // a split's or backorder's new run keeps its source's method as of its method date (impl-manufacturing P9)
+    const later = p.keepMethod === true ? [] : laterReleases(run, lines, now)
     const reexploded = false
     if (later.length) {
         if (p.reexplode !== true && p.reexplode !== "true")
@@ -1153,5 +1154,7 @@ function subcontractPlan(userScope, p) {
     // impl-manufacturing P5b's manual material lines (ProductionMaterials.js) and P7's target change and draft outputs
     // (ProductionQuantities.js)
     writeProducts,
-    lineAnswer
+    lineAnswer,
+    // impl-manufacturing P9's amendment (ProductionChanges.js): the method as of a date
+    method
 })
