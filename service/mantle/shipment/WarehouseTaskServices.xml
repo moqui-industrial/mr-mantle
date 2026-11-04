@@ -1455,7 +1455,8 @@ along with this software (see the LICENSE.md file). If not, see
             (the line less what its other receipts expect), never below what was received on it; each product's shipment
             item follows. The receipt is locked first, as the receive guard locks it, so a revision made while a receive
             holds the receipt waits for it and then applies to what was received (the framework's scripts have no
-            skip-locked find to answer ReceiptInProgress at once: impl-warehouse F175). Requires STOCK_RECEIVE or
+            skip-locked find to answer ReceiptInProgress at once: impl-warehouse F175). The order may be approved, sent or
+            held for a change (a purchase revision's Change hold, impl-purchasing P9). Requires STOCK_RECEIVE or
             PURCHASE_ORDER_EDIT; refuses an order outside the user's organizations (RECORD_UNAVAILABLE) or not a purchase
             (NOT_PURCHASE). A retry with the same operation key answers the first.</description>
         <in-parameters>
@@ -1495,7 +1496,11 @@ along with this software (see the LICENSE.md file). If not, see
                     part.orderPartSeqId, null)).filter(Boolean))].sort()
                 for (const shipmentId of receiptIds)
                     lib.find('mantle.shipment.Shipment', {shipmentId}).forUpdate(true).one()
-                partList = Array.from(parts).map(part => receiving.purchasePart(userScope, orderId, part.orderPartSeqId))
+                // a held order only while a purchase revision's Change hold is open (impl-purchasing P9)
+                const changeHeld = Array.from(lib.find('mantle.order.OrderHoldReason', {orderId, holdTypeEnumId: 'OhtChange'})
+                    .list()).some(row => !row.releasedDate)
+                partList = Array.from(parts).map(part => receiving.purchasePart(userScope, orderId, part.orderPartSeqId,
+                    changeHeld ? ['OrderApproved', 'OrderSent', 'OrderHold'] : ['OrderApproved', 'OrderSent']))
                 const items = Array.from(lib.find('mantle.order.OrderItem', {orderId}).orderBy('orderItemSeqId').list())
                     .filter(item => partList.some(part => part.orderPartSeqId === item.orderPartSeqId) && item.productId)
                 adjusted = []

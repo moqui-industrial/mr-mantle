@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- Purchase order revisions and acknowledgements (impl-purchasing P9; entity/PurchaseRevisionEntities.xml) -->
+    <!-- the supplier's response to a revision (OrderPart.acknowledgementEnumId) -->
+    <moqui.basic.EnumerationType description="Purchase Acknowledgement" enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakAccepted" description="Accepted" sequenceNum="1" enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakChanged" description="Accepted with changes" sequenceNum="2"
+            enumTypeId="PurchaseAcknowledgement"/>
+    <moqui.basic.Enumeration enumId="PakRejected" description="Rejected" sequenceNum="3" enumTypeId="PurchaseAcknowledgement"/>
+    <!-- the supplier's evidence of an acknowledgement, kept on the order in the supplier's role -->
+    <moqui.basic.Enumeration enumId="OctSupplierAcknowledgement" description="Supplier acknowledgement"
+            enumTypeId="OrderContentType"/>
+    <!-- the buying policy's substitution rule (PurchasePolicy.substitutionEnumId, F49): empty is not allowed -->
+    <moqui.basic.EnumerationType description="Purchase Substitution" enumTypeId="PurchaseSubstitution"/>
+    <moqui.basic.Enumeration enumId="PsbNotAllowed" description="Not allowed" sequenceNum="1" enumTypeId="PurchaseSubstitution"/>
+    <moqui.basic.Enumeration enumId="PsbAllowed" description="Allowed on a line nothing was received or billed on"
+            sequenceNum="2" enumTypeId="PurchaseSubstitution"/>
+
+    <!-- A reminder to acknowledge a purchase order's revision (mantle.order.OrderServices.send#PurchaseReminder): from the
+        buying organization's order or primary address; the service passes subject, fromAddress and fromName in
+        bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_PURCHASE_REMINDER" description="Purchase Order Reminder"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+</entity-facade-xml>

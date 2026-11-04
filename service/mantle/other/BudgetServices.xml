@@ -699,6 +699,30 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="budgetCommitmentIds" from="released.budgetCommitmentIds"/>
         </actions>
     </service>
+    <service verb="lower" noun="SourceCommitments" allow-remote="false">
+        <description>Internal to a revision of the source in its own checked operation (Purchasing's
+            mantle.order.OrderServices.apply#PurchaseRevision): each line the new revision lowers below what its earlier
+            revisions hold open gives up the difference. Its open commitments are released and what it still needs (less
+            what they passed on to later stages) is held at the new revision on the same account and budget line. A line
+            raised or kept is left to the approval of the new revision (reserve#Commitment); no permission of its own, as
+            release#ClosedSourceCommitments.</description>
+        <in-parameters>
+            <parameter name="sourceEntityName" required="true"/>
+            <parameter name="sourceId" required="true"/>
+            <parameter name="sourceRevision" required="true"/>
+            <parameter name="stageEnumId"/>
+            <parameter name="lines" type="List"><description>Each line's sourceItemId and its amount at the new
+                revision.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="loweredLines" type="List"><description>Each lowered line's sourceItemId, fromAmount, amount,
+                releasedIds and the new budgetCommitmentId.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="loweredLines" from="ec.resource.script('component://mr-mantle/service/mantle/other/Budgets.js')
+                .execute('lowerSource', context).loweredLines"/>
+        </actions>
+    </service>
     <service verb="record" noun="BlockedCommitment" allow-remote="false">
         <description>Internal to the commitment services, run in its own transaction while the refusing caller rolls
             back: keep a refused Stop as a blocked commitment (once per source key) and send its BudgetOverride

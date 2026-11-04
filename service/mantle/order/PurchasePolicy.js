@@ -64,6 +64,14 @@ const fields = [
         label: "Revisions count commercial changes only",
         kind: "indicator",
         default: "N"
+    },
+    // P9: whether a revision may put another product on a line (F49); empty is not allowed
+    {
+        name: "substitutionEnumId",
+        group: "controls",
+        label: "Substitution on a revision",
+        kind: "PurchaseSubstitution",
+        default: "PsbNotAllowed"
     }
 ]
 const fieldNames = fields.map(field => field.name)

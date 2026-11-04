@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase order revisions and acknowledgements (design-purchasing §6 OrderChanges and Acknowledgements; impl-purchasing
+    P9, §2, §4, F17, F18, F36, F57): no revision or acknowledgement record. A revision is OrderHeader.orderRevision and its
+    time, with the changed key fields in the audit log; the supplier's acknowledgement is the part's supplier reference and
+    date, the revision it acknowledged and its outcome, and a promise per line, all audit-logged ("true": the first value set
+    on an empty field is the change that matters, F57), so each acknowledgement's history is the audit log and a print as of a
+    time reads the part's reference, dates and terms back. The buying policy's substitution rule (F49) and a reminder's
+    occurrence on the order's email (send#PurchaseReminder dedupes on revision, template and occurrence). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="OrderPart" package="mantle.order">
+        <!-- the supplier's reference and date, the delivery promise and the terms a revision changes (F36) -->
+        <field name="otherPartyOrderId" type="text-short" enable-audit-log="true"/>
+        <field name="otherPartyOrderDate" type="date-time" enable-audit-log="true"/>
+        <field name="estimatedDeliveryDate" type="date-time" enable-audit-log="true"/>
+        <field name="tradeTermEnumId" type="id" enable-audit-log="true"/>
+        <field name="settlementTermId" type="id" enable-audit-log="true">
+            <description>Settlement (payment) term for auto order payments and set on Invoice(s) based on this OrderPart</description></field>
+        <!-- the supplier's acknowledgement (mantle.order.OrderServices.record#Acknowledgement) -->
+        <field name="acknowledgedRevision" type="number-integer" enable-audit-log="true">
+            <description>The order revision the supplier acknowledged; the order is unacknowledged while it is not the
+                order's current revision.</description></field>
+        <field name="acknowledgementEnumId" type="id" enable-audit-log="true">
+            <description>The supplier's response to the acknowledged revision (PurchaseAcknowledgement): accepted, accepted
+                with changes for the buyer to review, or rejected.</description></field>
+        <field name="acknowledgedDate" type="date-time" enable-audit-log="true">
+            <description>When the acknowledgement was recorded.</description></field>
+        <field name="acknowledgementNote" type="text-medium" enable-audit-log="true">
+            <description>The supplier's exception or late reason, as entered.</description></field>
+        <relationship type="one" title="PurchaseAcknowledgement" related="moqui.basic.Enumeration"
+                short-alias="acknowledgement"><key-map field-name="acknowledgementEnumId" related="enumId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <!-- the supplier's promise per line; the requested date stays requiredByDate, for on-time delivery -->
+        <field name="promisedDate" type="date-time" enable-audit-log="true"/>
+        <field name="promisedQuantity" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <!-- a currency change on a part nothing was received or billed on (apply#PurchaseRevision), read back as of a time -->
+        <field name="currencyUomId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+    <extend-entity entity-name="OrderHoldReason" package="mantle.order">
+        <field name="appliedRevision" type="number-integer">
+            <description>On a purchase revision's Change hold (sourceId the revision it started from): the revision
+                apply#PurchaseRevision wrote under it, waiting for its approval. Empty while the change is only started, so
+                a revision moved by something else (a note, a receipt's status) does not read as an applied change.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
+        <field name="reminderOccurrence" type="text-short">
+            <description>A reminder's occurrence (send#PurchaseReminder, by default its day): a recipient gets one reminder
+                per revision, template and occurrence; empty for the order as sent.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="substitutionEnumId" type="id" enable-audit-log="true">
+            <description>Whether a revision may put another product on a line (PurchaseSubstitution); empty is not
+                allowed.</description></field>
+        <relationship type="one" title="PurchaseSubstitution" related="moqui.basic.Enumeration" short-alias="substitution">
+            <key-map field-name="substitutionEnumId" related="enumId"/></relationship>
+    </extend-entity>
+</entities>
