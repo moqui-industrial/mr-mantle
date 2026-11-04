@@ -177,7 +177,28 @@ const sources = {
 // variance, both awaiting the cost close
 const subcontracts = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionSubcontracts.js")
 sources["mantle.order.purchase.ServiceAcceptance"] = id => subcontracts().acceptanceEvent(id)
-sources["mantle.account.invoice.InvoiceMatchLine"] = id => subcontracts().billVarianceEvent(id)
+sources["mantle.account.invoice.InvoiceMatchLine"] = (id, removed, revision) =>
+    revision > 1 ? matchReversal(id, revision) : subcontracts().billVarianceEvent(id)
+// impl-manufacturing P15 (F115): a later revision of a bill match line's variance is its reversal once the match was
+// unapplied (the cost close records it): the first revision's amount negated, linked to it
+function matchReversal(id, revision) {
+    const event = subcontracts().billVarianceEvent(id)
+    const invoiceMatchId = String(id).split("|")[0]
+    if (one("mantle.account.invoice.InvoiceMatch", {invoiceMatchId})?.statusId !== "ImUnapplied")
+        denied("SOURCE_INVALID", "Match " + invoiceMatchId + " is not unapplied")
+    const original = find(EVENT, {
+        sourceEntityName: "mantle.account.invoice.InvoiceMatchLine",
+        sourceId: String(id),
+        costComponentEnumId: event.costComponentEnumId,
+        sourceRevision: revision - 1
+    }).one()
+    if (!original) denied("SOURCE_INVALID", "Match line " + id + " has no variance to reverse")
+    return Object.assign(event, {
+        amount: zero().subtract(dec(original.amount)),
+        originalCostEventId: original.productionCostEventId,
+        reasonCode: "MATCH_UNAPPLIED"
+    })
+}
 // P10: an approved production time entry's labor (a delta per revision: approval, reopen, an hours change, a deletion) and a
 // closed machine runtime interval, both awaiting the cost close (ProductionShopFloor.js)
 const shopFloor = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionShopFloor.js")
@@ -189,7 +210,7 @@ function record(p) {
     if (!Object.hasOwn(sources, p.sourceEntityName)) throw new Error("Unknown production cost source " + p.sourceEntityName)
     const sourceId = String(p.sourceId ?? "")
     const sourceRevision = blank(p.sourceRevision) ? 1 : Number(p.sourceRevision)
-    const event = sources[p.sourceEntityName](sourceId, p.sourceRemoved === true || p.sourceRemoved === "true")
+    const event = sources[p.sourceEntityName](sourceId, p.sourceRemoved === true || p.sourceRemoved === "true", sourceRevision)
     // a source whose events already say what it should (a labor delta of nothing) records none
     if (!event) return {productionCostEventId: null, existing: false}
     const run = event.run

@@ -658,6 +658,13 @@ landed costs and repairs cost data. Every read checks Accounting's report read i
   (`PccValuationTieOut`).
 - **Manufacturing's cost close** has its GL account types seeded: `GatLaborApplied`, `GatOverheadApplied`,
   `GatOutsideProcessAccrued` and `GatProductionVariance` (no DefaultSettings default: each organization maps them).
+  `mantle.ledger.ProductionCostServices` (`ProductionCostClose.js`, impl-manufacturing P15) posts it: the effective-dated
+  `ProductionAllocationPolicy` (`store#AllocationPolicy`, `ACCOUNTING_ADMIN`), `preview#CostClose` (`ACCOUNTING_GL_POST`
+  or `PRODUCTION_COST_POST`: the events awaiting the close absorbed by cost component, overhead per work-center hour or
+  of labor, scrap, the co-product split and the residual to variance; adjustment mode after the close) and
+  `post#CostClose` (`PRODUCTION_COST_POST`: one `AttManufacturing` transaction, a `ProductionCostAllocation` per line,
+  the run closed through `transition#ProductionOrder`), with the `PccProductionWip` and `PccProductionCostClose`
+  checklist rows (`check#ProductionClose`).
 
 ## Budgets (P15)
 

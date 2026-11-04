@@ -591,7 +591,10 @@ feature("the supplier's bill matches against the accepted quantity and writes th
         evaluated.error == ""
         excess.error.includes("QUANTITY_EXCESS")
         applied.error == ""
-        const variances = rows("mantle.work.production.ProductionCostEvent", {costEventTypeEnumId: "PcetOutsideVariance"})
+        // this spec's variances (another spec's run may have its own, ProductionCostClose's)
+        const variances = rows("mantle.work.production.ProductionCostEvent", {costEventTypeEnumId: "PcetOutsideVariance"}).filter(
+            row => row.organizationPartyId === org
+        )
         variances.length == 1
         variances[0].workEffortId == state.first.runId
         n(variances[0].amount) == 3
@@ -679,6 +682,8 @@ feature("with the service-acceptance rule on a line with nothing accepted is ref
         stored.error == ""
         applied.error == ""
         // the same price as ordered: no variance event
-        rows("mantle.work.production.ProductionCostEvent", {costEventTypeEnumId: "PcetOutsideVariance"}).length == 1
+        rows("mantle.work.production.ProductionCostEvent", {costEventTypeEnumId: "PcetOutsideVariance"}).filter(
+            row => row.organizationPartyId === org
+        ).length == 1
     }
 })

@@ -4,7 +4,8 @@
 // - find#ProductionOrders: the runs of the user's organizations, paged, with their display text and the saved finds' filters
 //   (Ready, Late, Blocked, Mine, By product).
 // - transition#ProductionOrder: the one path to a run's status. Each action checks its design state and its permission
-//   (PRODUCTION_PLAN to release and unrelease, PRODUCTION_SUPERVISE to start, hold, resume, cancel and complete), refuses the
+//   (PRODUCTION_PLAN to release and unrelease, PRODUCTION_SUPERVISE to start, hold, resume, cancel and complete,
+//   PRODUCTION_COST_POST to close once Accounting's cost close is posted, impl-manufacturing P15), refuses the
 //   generic transitions (In Planning to Complete, a close outside Accounting's cost close), and takes an operation key and
 //   the expected revision. Release goes through release#ProductionOrder after the release gate: the method valid as of the
 //   run's method date, the product usable, a later release of its methods found with a re-explosion offered, and the
@@ -201,7 +202,10 @@ const actions = {
     cancel: {permission: "PRODUCTION_SUPERVISE", from: ["WeInPlanning", "WeApproved", "WeOnHold"], label: "Cancel", reason: true},
     complete: {permission: "PRODUCTION_SUPERVISE", from: ["WeInProgress"], label: "Complete"},
     requestStaged: {permission: "PRODUCTION_PLAN", from: ["WeInPlanning"], label: "Request staged release"},
-    approveStaged: {permission: "PRODUCTION_SUPERVISE", from: ["WeInPlanning"], label: "Approve staged release"}
+    approveStaged: {permission: "PRODUCTION_SUPERVISE", from: ["WeInPlanning"], label: "Approve staged release"},
+    // impl-manufacturing P15: Accounting's post#CostClose closes a completed run once its cost close is posted, in the same
+    // transaction; it is not a Lifecycle action
+    close: {permission: "PRODUCTION_COST_POST", from: ["WeComplete"], label: "Close", costClose: true}
 }
 // A hold before start resumes as released, one after start as running (F9).
 const resumeStatus = run => (run.actualStartDate ? "WeInProgress" : "WeApproved")
@@ -331,6 +335,14 @@ function check(run, action, p, lines = production().linesOf(run.workEffortId)) {
         return {allowed: false, reasonCode: "REASON_REQUIRED", message: "Give the reason to " + label.toLowerCase()}
     // the quantity reconciliation, settled operations and material disposition (impl-manufacturing P7)
     if (action === "complete") return quantities().completeCheck(run, p, lines)
+    if (action === "close")
+        return run.productionCostClosedDate
+            ? {allowed: true, impact: ["Closes the work order; its cost close is posted"]}
+            : {
+                  allowed: false,
+                  reasonCode: "COST_CLOSE_NOT_POSTED",
+                  message: "Work order " + run.workEffortId + " is closed by Accounting's cost close, which is not posted"
+              }
     if (action === "release") return releaseGate(run, lines, p)
     if (action === "requestStaged" || action === "approveStaged") {
         const shortages = shortagesOf(run, lines)
@@ -518,6 +530,7 @@ function apply(run, action, p, key, gate) {
         cancelOperations(run, "Work order cancelled")
         setStatus(run, "WeCancelled", why, {actualCompletionDate: ec.user.nowTimestamp})
     } else if (action === "complete") quantities().complete(run, p, why)
+    else if (action === "close") setStatus(run, "WeClosed", why || "Cost closed")
     else if (action === "approveStaged") {
         call("update#" + WORK, {
             workEffortId: run.workEffortId,
@@ -551,7 +564,8 @@ function apply(run, action, p, key, gate) {
             hold: "HELD",
             resume: "RESUMED",
             cancel: "CANCELLED",
-            complete: "COMPLETED"
+            complete: "COMPLETED",
+            close: "CLOSED"
         }[action],
         statusId: after.statusId,
         revision: revisionOf(after)
@@ -562,7 +576,7 @@ function transition(p) {
     const begun = posting.begin(
         p,
         "ProductionTransition",
-        ["PRODUCTION_PLAN", "PRODUCTION_SUPERVISE"],
+        ["PRODUCTION_PLAN", "PRODUCTION_SUPERVISE", "PRODUCTION_COST_POST"],
         [
             "workEffortId",
             "action",
@@ -583,7 +597,8 @@ function transition(p) {
     if (settled) return settled
     const action = str(p.action) || (blank(p.toStatusId) ? null : actionFor(run, p.toStatusId))
     if (!action) denied("ACTION_REQUIRED", "Choose what to do with work order " + run.workEffortId)
-    if (action === "close")
+    // close is the cost close's (post#CostClose, PRODUCTION_COST_POST), never a production user's
+    if (action === "close" && !access.has("PRODUCTION_COST_POST"))
         denied("CLOSE_BY_COST_CLOSE", "A work order is closed by Accounting's cost close, after it is complete")
     if (!actions[action]) denied("ACTION_INVALID", "Unknown work order action " + action)
     requireRevision(run, p.expectedRevision)
@@ -676,7 +691,7 @@ function lifecycle(p) {
         : zero()
     const remaining = output ? dec(output.stockQuantity).subtract(received) : zero()
     const actionRows = Object.keys(actions)
-        .filter(action => actions[action].from.includes(run.statusId))
+        .filter(action => actions[action].from.includes(run.statusId) && !actions[action].costClose)
         .map(action => {
             let result
             try {

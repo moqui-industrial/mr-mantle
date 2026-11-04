@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting's production cost close (design-accounting ProductionCostClose and CostingPolicies; impl-manufacturing P15;
+    loads after ProductionCostData, whose enumeration types it extends):
+    the allocation policy's overhead bases and co-product methods, the scrap destination of an allocation, the cost review's
+    decisions, and the two period close checks. -->
+<entity-facade-xml type="seed">
+    <!-- the overhead basis of ProductionAllocationPolicy; the default is a rate per work-center hour (impl-manufacturing §4) -->
+    <moqui.basic.EnumerationType description="Production Overhead Basis" enumTypeId="ProductionOverheadBasis"/>
+    <moqui.basic.Enumeration description="Rate per work-center hour" enumId="PobWorkCenterHour"
+            enumTypeId="ProductionOverheadBasis" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Percentage of direct labor" enumId="PobLaborPercent"
+            enumTypeId="ProductionOverheadBasis" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="No overhead" enumId="PobNone" enumTypeId="ProductionOverheadBasis" sequenceNum="3"/>
+
+    <!-- the co-product method; the default is quantity normalized to the primary output's unit -->
+    <moqui.basic.EnumerationType description="Production Co-product Method" enumTypeId="ProductionCoproductMethod"/>
+    <moqui.basic.Enumeration description="Quantity in a common unit" enumId="PcmQuantity" enumTypeId="ProductionCoproductMethod"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Fixed shares on the output lines" enumId="PcmFixedShare"
+            enumTypeId="ProductionCoproductMethod" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Relative sales value" enumId="PcmSalesValue" enumTypeId="ProductionCoproductMethod"
+            sequenceNum="3"/>
+
+    <!-- the scrap of issued material moved out of WIP at the close -->
+    <moqui.basic.Enumeration description="Scrap" enumId="PcdScrap" enumTypeId="ProductionCostDestination" sequenceNum="5"/>
+
+    <!-- Accounting's decisions on a cost review (P6's PcrRequested): returned to Manufacturing, or closed by the cost close -->
+    <moqui.basic.StatusItem statusId="PcrReturned" statusTypeId="ProductionCostReview" description="Returned to production"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PcrClosed" statusTypeId="ProductionCostReview" description="Cost closed" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrRequested" toStatusId="PcrReturned"
+            transitionName="Return"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrRequested" toStatusId="PcrClosed"
+            transitionName="Close"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrReturned" toStatusId="PcrRequested"
+            transitionName="Request again"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PcrReturned" toStatusId="PcrClosed"
+            transitionName="Close"/>
+
+    <!-- The production rows of the period close checklist (CloseServices.define#CloseCheck), shown without blocking -->
+    <moqui.basic.Enumeration enumId="PccProductionWip" enumTypeId="PeriodCloseCheck" sequenceNum="92"
+            description="Production WIP against the WIP account and open runs" optionIndicator="N"
+            enumCode="mantle.ledger.ProductionCostServices.check#ProductionClose"/>
+    <moqui.basic.Enumeration enumId="PccProductionCostClose" enumTypeId="PeriodCloseCheck" sequenceNum="94"
+            description="Production runs awaiting cost close" optionIndicator="N"
+            enumCode="mantle.ledger.ProductionCostServices.check#ProductionClose"/>
+</entity-facade-xml>
