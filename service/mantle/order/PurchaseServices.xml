@@ -351,4 +351,48 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="approveWarnings" from="ec.resource.script(module).approvalWarnings(orderId)"/>
         </actions>
     </service>
+
+    <!-- P6: a supplier prepayment asked for from a purchase order, and the match-exception notice to the buyers
+        (PurchaseBills.js) -->
+    <service verb="request" noun="SupplierPrepayment" allow-remote="false">
+        <description>Ask for a supplier to be paid ahead of its bill (design §6 Bills and money, R-PUR-36): a promised
+            payment (PmntPromised) from the buying organization to the supplier, linked to the purchase order's part through
+            add#OrderPartPayment, for finance to pay and the bill's settlement to apply. The amount is at most the part's
+            total less the payments already linked to it, and all of that when none is given. Refuses an order that is not a
+            purchase order (NOT_PURCHASE), not placed or already closed (ORDER_STATE_INVALID) and an amount not above zero
+            or beyond what is left (AMOUNT_INVALID). Needs PAYABLE_EDIT in the buying organization. The same operationKey and
+            request answers the first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseBills.js"/>
+            <set field="requested" from="ec.resource.script(module).execute('prepayment', context)"/>
+            <set field="paymentId" from="requested.paymentId"/>
+            <set field="alreadyApplied" from="!!requested.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="notify" noun="MatchException" authenticate="false" allow-remote="false">
+        <description>Tell the buyers of a bill's organization (its users holding PURCHASE_ORDER_EDIT, other than the user
+            acting) that the bill's match holds it, on the PurchaseMatchException topic. Called by the PurchaseMatch SECAs
+            when apply#InvoiceMatch or reevaluate#InvoiceMatch holds a supplier bill; a notice that cannot be sent is logged
+            and the match stands. Checks no permission.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="resultText"/>
+        </in-parameters>
+        <out-parameters><parameter name="sent" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseBills.js"/>
+            <set field="sent" from="!!ec.resource.script(module).execute('matchException', context).sent"/>
+        </actions>
+    </service>
 </services>
