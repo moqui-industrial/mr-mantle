@@ -199,8 +199,22 @@ spec({
             materialCost: 5,
             complete: "Y"
         })
-        // the costing rates of production run and set-up time (design Y2), from yesterday so they are the latest started
-        // (RateAmount names no organization: a demo rate would otherwise match too), and a plain task with time of its own
+        // the costing rates of production run and set-up time (design Y2) for the operator's position class, a class of this
+        // spec's own: RateAmount names no organization, so a rate of no class would also cost other components' production
+        // time (and a demo rate of no class would cost this spec's); from yesterday so they are the latest started; and a
+        // plain task with time of its own
+        call("create#mantle.humanres.position.EmplPositionClass", {emplPositionClassId: "PSF_CLASS", title: "Spec assembler"})
+        call("create#mantle.humanres.position.EmplPosition", {
+            emplPositionId: "PSF_POSITION",
+            organizationPartyId: org,
+            emplPositionClassId: "PSF_CLASS"
+        })
+        call("create#mantle.humanres.position.EmplPositionParty", {
+            emplPositionId: "PSF_POSITION",
+            partyId: "PSF_OPERATOR",
+            roleTypeId: "Employee",
+            fromDate: new Date("2000-01-01T00:00:00Z")
+        })
         const rateFrom = new Date(Date.now() - 86400000)
         for (const [rateAmountId, workTypeEnumId, rateAmount] of [
             ["PSF_RATE", "WktpProductionRun", 20],
@@ -210,6 +224,7 @@ spec({
                 rateAmountId,
                 rateTypeEnumId: "RatpStandard",
                 ratePurposeEnumId: "RaprProductionCost",
+                emplPositionClassId: "PSF_CLASS",
                 workTypeEnumId,
                 rateCurrencyUomId: "USD",
                 timePeriodUomId: "TF_hr",
