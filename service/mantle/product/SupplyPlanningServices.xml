@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The shared supply plan (design-crosscut CX-PLANNING, §3.20 and §4.2; design-manufacturing §7 SupplyPlanning;
+    impl-manufacturing P13), over SupplyPlanning.js: run a plan, read it, keep the organization's one plan schedule, and
+    convert its make suggestions into draft production runs. Each checks its Moqui permission and the organization itself;
+    the apps' SupplyPlanning mounts call these after their own access check. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="PlanScope" type="interface">
+        <description>The organization and facility set a plan is for: the organization given, else the first facility's
+            owner, else the user's active organization; the facilities given (each a warehouse or plant of the
+            organization, netted with the facilities under it), else the plan schedule's, else the organization's top
+            warehouses and plants.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+    </service>
+    <service verb="run" noun="SupplyPlan" allow-remote="false">
+        <description>Calculate the supply plan of an organization's facility set (one current run per organization and
+            facility set; the last one is superseded, its unconverted suggestions ended and their requirements reused or
+            rejected). Nets each product once, after its parents, at each facility with the facilities under it: open sales
+            demand less its reservations (a kit's as its components'), each run's remaining WeptConsume and WeptProduce
+            (drafts included; a kit assembly's shown, not netted), transfers in transit to it, open purchase order lines,
+            available stock and the
+            minimum stock, over the horizon. A shortage is a transfer from a facility of the set with a surplus, else a make
+            suggestion with a released BOM (its components exploded through get#BomExplosion's requirements as the next
+            level's demand, dated by the lead and preparation days), else a buy suggestion from a supplier price, else a
+            NO_SOURCE exception; each is checked with check#ProductUsable (PRODUCT_NOT_USABLE). Held stock is a
+            pending-release line with its inspection's due date, netted only by the schedule's organization option for what
+            is due within the lead time. Each suggestion stands on a Requirement of the organization (RequirementParty
+            OrgInternal) in the stock unit. Requires SUPPLY_PLAN_RUN (PERMISSION_DENIED); refuses an organization or facility
+            outside the user's (RECORD_UNAVAILABLE) and a horizon outside 1 to 730 days (PLAN_INVALID).</description>
+        <implements service="mantle.product.SupplyPlanningServices.define#PlanScope"/>
+        <in-parameters>
+            <parameter name="productIds" type="List"><description>Plan these products (and their components) only; every
+                product with demand when empty.</description></parameter>
+            <parameter name="horizonDays" type="Integer"><description>The schedule's, else the production policy's planning
+                horizon when empty.</description></parameter>
+            <parameter name="planDate" type="Timestamp"><description>Now when empty.</description></parameter>
+            <parameter name="scheduled" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="planningRunId"/>
+            <parameter name="suggestionCount" type="Integer"/>
+            <parameter name="exceptionCount" type="Integer"/>
+            <parameter name="findings" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('runPlan', context)"/>
+            <set field="planningRunId" from="out.planningRunId"/>
+            <set field="suggestionCount" from="out.suggestionCount"/>
+            <set field="exceptionCount" from="out.exceptionCount"/>
+            <set field="findings" from="out.findings"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SupplyPlan" allow-remote="false">
+        <description>A supply plan as SupplyPlanning shows it: the run given, else the current run of the scope's facility
+            set (none before the first), with its freshness (stale when superseded or older than the production policy's
+            freshness limit); its suggestions (filtered by method, product or exceptions) with their requirement, covered and
+            remaining quantity, supply links, dates, source and exception, and whether the user may convert each; the held
+            lines pending release; the selected suggestion's demand and supply as of the run; and the organization's plan
+            schedule. Requires SUPPLY_PLAN_RUN, PRODUCTION_PLAN or PRODUCTION_VIEW; refuses an organization, facility or run
+            outside the user's (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.product.SupplyPlanningServices.define#PlanScope"/>
+        <in-parameters>
+            <parameter name="planningRunId"/>
+            <parameter name="planningSuggestionId"><description>The suggestion whose demand and supply to
+                explain.</description></parameter>
+            <parameter name="methodEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="exceptionsOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="facilityIds" type="List"/>
+            <parameter name="facilityNames"/>
+            <parameter name="run" type="Map"/>
+            <parameter name="suggestions" type="List"/>
+            <parameter name="selected" type="Map"/>
+            <parameter name="pendingRelease" type="List"/>
+            <parameter name="demandSupply" type="List"/>
+            <parameter name="schedule" type="Map"/>
+            <parameter name="canRun" type="Boolean"/>
+            <parameter name="canSchedule" type="Boolean"/>
+            <parameter name="canConvertMake" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('getPlan', context)"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="organizationName" from="out.organizationName"/>
+            <set field="facilityIds" from="out.facilityIds"/>
+            <set field="facilityNames" from="out.facilityNames"/>
+            <set field="run" from="out.run"/>
+            <set field="suggestions" from="out.suggestions"/>
+            <set field="selected" from="out.selected || null"/>
+            <set field="pendingRelease" from="out.pendingRelease"/>
+            <set field="demandSupply" from="out.demandSupply"/>
+            <set field="schedule" from="out.schedule"/>
+            <set field="canRun" from="out.canRun"/>
+            <set field="canSchedule" from="out.canSchedule"/>
+            <set field="canConvertMake" from="out.canConvertMake"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PlanSchedule" allow-remote="false">
+        <description>Keep the organization's one plan schedule (D20): the facility set it plans, every how many hours, the
+            next run, the horizon (the production policy's when empty), whether it is active, and the organization's option
+            to net held quantity whose inspection is due within the lead time (off by default), each change audit-logged
+            with who made it. The run_ScheduledSupplyPlans job runs an active schedule when due, as the user who last kept it.
+            Requires SUPPLY_PLAN_RUN (PERMISSION_DENIED); refuses an organization or facility outside the user's
+            (RECORD_UNAVAILABLE) and an interval outside 1 to 744 hours or a horizon outside 1 to 730 days
+            (SCHEDULE_INVALID).</description>
+        <implements service="mantle.product.SupplyPlanningServices.define#PlanScope"/>
+        <in-parameters>
+            <parameter name="intervalHours" type="Integer"/>
+            <parameter name="nextRunDate" type="Timestamp"/>
+            <parameter name="horizonDays" type="Integer"/>
+            <parameter name="active"/>
+            <parameter name="netHeldQuantity"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schedule" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('storeSchedule', context)"/>
+            <set field="schedule" from="out.schedule"/>
+        </actions>
+    </service>
+    <service verb="run" noun="ScheduledSupplyPlans" allow-remote="false">
+        <description>The run_ScheduledSupplyPlans job: each active plan schedule that is due runs run#SupplyPlan as the user who
+            last kept it (with that user's permissions), in its own transaction, and moves its next run on by its interval;
+            one that fails is logged and its message kept on the schedule, and the others go on.</description>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('runScheduled', context)"/>
+            <set field="results" from="out.results"/>
+        </actions>
+    </service>
+    <service verb="convert" noun="PlanningSuggestions" allow-remote="false">
+        <description>Convert selected suggestions of a plan into supply, each suggestion a group in its own transaction with
+            the operation key operationKey/suggestion, so one that fails is named with its reason and the others go on, and
+            a retry answers each group's first result. A make suggestion becomes a draft run through
+            mantle.work.ProductionServices.create#ProductionOrder (never released) for the requirement's remaining quantity,
+            with the method as of methodDate (the plan date when empty), on the facility given or the routing's work center
+            under the suggestion's facility, then RequirementSupply and WorkRequirementFulfillment WrfDelivers, the
+            requirement Ordered. The requirement is locked first: one already covered answers its existing run (resultCode
+            EXISTING), whoever covered it. Buy and transfer suggestions are not converted here (METHOD_NOT_CONVERTED).
+            Requires PRODUCTION_PLAN for make (PERMISSION_DENIED); refuses a suggestion outside the user's organizations
+            (RECORD_UNAVAILABLE), a stale plan (PLAN_STALE), an exception (SUGGESTION_EXCEPTION), a superseded or converted
+            suggestion (SUGGESTION_CLOSED), a product that cannot be produced (PRODUCT_NOT_USABLE) and
+            create#ProductionOrder's refusals.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="planningSuggestionIds" type="List"/>
+            <parameter name="planningSuggestionId"/>
+            <parameter name="methodDate" type="Timestamp"/>
+            <parameter name="facilityId"><description>The facility of the runs, for every suggestion converted; each
+                suggestion's own when empty.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>Per suggestion: planningSuggestionId, ok, resultCode CREATED or
+                EXISTING, requirementId, workEffortId, quantity and facilityId, or reasonCode and message.</description>
+            </parameter>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('convert', context)"/>
+            <set field="results" from="out.results"/>
+            <set field="createdCount" from="out.createdCount"/>
+            <set field="existingCount" from="out.existingCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+        </actions>
+    </service>
+    <service verb="convert" noun="PlanningSuggestion" allow-remote="false">
+        <description>One group of convert#PlanningSuggestions: one suggestion, under its requirement's lock, with its own
+            operation key; its checks and refusals are convert#PlanningSuggestions'.</description>
+        <in-parameters>
+            <parameter name="planningSuggestionId" required="true"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="methodDate" type="Timestamp"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
+                    .execute('convertOne', context)"/>
+        </actions>
+    </service>
+</services>
