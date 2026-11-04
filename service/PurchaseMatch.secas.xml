@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The match-exception notice (design-purchasing §10 MatchExceptions; impl-purchasing P6): when a match holds a supplier
+    bill, the buyers of its organization are told on the PurchaseMatchException topic (notify#MatchException). Only a match
+    that placed a hold, never a replayed one, and only a re-evaluation that held the bill; nothing else changes. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="InvoiceMatchHeldPurchaseNotice" service="mantle.account.InvoiceMatchServices.apply#InvoiceMatch"
+            when="post-service" run-on-error="false">
+        <condition><expression>invoiceHoldId &amp;&amp; !alreadyApplied</expression></condition>
+        <actions>
+            <service-call name="mantle.order.PurchaseServices.notify#MatchException" disable-authz="true"
+                    in-map="{invoiceId:invoiceId, resultText:resultText}"/>
+        </actions>
+    </seca>
+    <seca id="InvoiceMatchReevaluatedPurchaseNotice" service="mantle.account.InvoiceMatchServices.reevaluate#InvoiceMatch"
+            when="post-service" run-on-error="false">
+        <condition><expression>held &amp;&amp; invoiceId</expression></condition>
+        <actions>
+            <service-call name="mantle.order.PurchaseServices.notify#MatchException" disable-authz="true"
+                    in-map="{invoiceId:invoiceId, resultText:resultText}"/>
+        </actions>
+    </seca>
+</secas>

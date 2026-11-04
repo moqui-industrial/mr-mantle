@@ -4491,8 +4491,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="request" noun="HoldRelease" allow-remote="false">
         <description>Ask for an open hold to be released: the request is recorded on the hold and the BillHoldRelease
-            notification goes to the organization's users who may release it (INVOICE_HOLD_RELEASE). Refuses a released hold. Needs PAYABLE_EDIT in the
-            organization.</description>
+            notification goes to the organization's users who may release it (INVOICE_HOLD_RELEASE). Refuses a released hold
+            and a customer invoice's hold. Needs, in the organization, PAYABLE_EDIT (AP), INVOICE_MATCH (a match operator) or
+            PURCHASE_ORDER_EDIT (a buyer who resolved the source: design-purchasing §10 RequestHoldRelease); asking releases
+            nothing.</description>
         <in-parameters>
             <parameter name="invoiceHoldId" required="true"/>
             <parameter name="organizationPartyId"/>
@@ -4506,8 +4508,17 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.invoice.InvoiceHold" value-field="hold" disable-authz="true"/>
             <if condition="hold == null"><return error="true" message="HOLD_UNAVAILABLE: The hold is not available"/></if>
             <set field="invoiceLib" value="component://mr-mantle/service/mantle/account/InvoiceWorkflowLib.js"/>
-            <set field="scope" from="ec.resource.script(invoiceLib).writeInvoice({invoiceId:hold.invoiceId,
+            <!-- AP, a match operator or a buyer asks (impl-purchasing P6); the organization is checked and locked -->
+            <set field="scope" from="ec.resource.script(invoiceLib).invoice({invoiceId:hold.invoiceId,
                 organizationPartyId:organizationPartyId})"/>
+            <if condition="scope.receivable">
+                <return error="true" message="PAYABLE_ONLY: Only a bill's hold release is asked for"/></if>
+            <!-- the domain check (an administrator passes, a project client never does), as writeInvoice's was -->
+            <if condition="!['PAYABLE_EDIT', 'INVOICE_MATCH', 'PURCHASE_ORDER_EDIT'].some(permission =&gt;
+                    ec.resource.script(invoiceLib).has(permission))">
+                <return error="true" message="PERMISSION_DENIED: PAYABLE_EDIT, INVOICE_MATCH or PURCHASE_ORDER_EDIT authority is required"/></if>
+            <set field="scope" from="ec.resource.script(invoiceLib).invoice({invoiceId:hold.invoiceId,
+                organizationPartyId:scope.organizationPartyId}, null, true)"/>
             <entity-find-one entity-name="mantle.account.invoice.InvoiceHold" value-field="hold" for-update="true"
                     disable-authz="true"/>
             <if condition="hold.releasedDate">

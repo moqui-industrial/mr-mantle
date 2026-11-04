@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- A supplier bill whose match holds it, for the buyers of its organization (notify#MatchException, impl-purchasing
+        P6). The buyer resolves the source or asks for the hold's release on the bill; the notice has no approve service. -->
+    <moqui.security.user.NotificationTopic topic="PurchaseMatchException" inboxEnumId="NinNotifications"
+            description="Supplier bill held on its match" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Bill ${invoiceId} is held on its match"/>
+</entity-facade-xml>
