@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- A late purchase receipt (mantle.order.PurchaseReceiptServices.notify#LateReceipts, impl-purchasing P5): once a day,
+        each order part past its due date with something still to come is told once per due date to its organization's
+        buyers (PURCHASE_ORDER_EDIT). No link template: the order's screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="PurchaseLateReceipt" inboxEnumId="NinNotifications"
+            description="Late purchase receipt" typeString="warning" showAlert="N" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Order ${orderId} from ${supplierName} is late: due ${dueDay}"/>
+    <moqui.service.job.ServiceJob jobName="notify_LateReceipts" description="Tell buyers of late purchase receipts"
+            serviceName="mantle.order.PurchaseReceiptServices.notify#LateReceipts" cronExpression="0 15 6 * * ?" paused="N"
+            transactionTimeout="1800"/>
+</entity-facade-xml>
