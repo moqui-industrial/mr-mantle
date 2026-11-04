@@ -14,12 +14,17 @@
 //   of an order not yet approved is passed over by name (DROP_SHIP_PENDING when none is routed); what the customer lines do
 //   not cover stays to convert;
 // - supply: the lines of the organization's purchase requests at the facilities that are not yet ordered count as supply
-//   to the plan: an approved request's (In Progress), and a submitted one's that a conversion made (it covers the plan's
-//   demand while it waits for approval), so an approved request's demand is not suggested again; a draft's do not count.
+//   to the plan, in the product's stock unit: an approved request's (In Progress), and a submitted one's that a conversion
+//   made (it covers the plan's demand while it waits for approval), so an approved request's demand is not suggested again;
+//   a draft's do not count. A submitted request refused at its revision is shown and not netted (review R1), so its demand
+//   is suggested again rather than hidden while the request waits to be changed or cancelled; a line whose unit has no
+//   conversion to the stock unit is shown and not netted, named (review R2).
 // Nothing here checks a permission of its own: convert#PlanningSuggestions checked PURCHASE_ORDER_EDIT and the
 // organization, and the services called check theirs again.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const policyModule = ec.resource.script("component://mr-mantle/service/mantle/order/PurchasePolicy.js")
+const purchaseRequests = () => ec.resource.script("component://mr-mantle/service/mantle/request/PurchaseRequests.js")
+const methodPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
 const {find, one, rows, call, probe, denied, ms} = lib
 
 const SUGGESTION = "mantle.request.requirement.PlanningSuggestion",
@@ -32,7 +37,8 @@ const SUGGESTION = "mantle.request.requirement.PlanningSuggestion",
     ITEM_ORDER = "mantle.request.RequestItemOrder",
     ORDER = "mantle.order.OrderHeader",
     PART = "mantle.order.OrderPart",
-    ITEM = "mantle.order.OrderItem"
+    ITEM = "mantle.order.OrderItem",
+    DECISION = "mantle.order.purchase.PurchaseApprovalDecision"
 const R = "mantle.request.RequestServices."
 const routes = ["order", "request", "dropShip"]
 const deadOrderStatuses = ["OrderCancelled", "OrderRejected"]
@@ -315,6 +321,7 @@ function requestSupply(organizationPartyId, facilityIds, productId) {
     if (!items.length) return []
     const lines = []
     const requests = new Map()
+    let stockUnit = null
     for (const item of items) {
         if (!requests.has(item.requestId)) {
             const request = one(REQUEST, {requestId: item.requestId})
@@ -349,23 +356,45 @@ function requestSupply(organizationPartyId, facilityIds, productId) {
             },
             zero()
         )
-        const open = dec(item.quantity).subtract(ordered)
+        let open = dec(item.quantity).subtract(ordered)
         if (open.compare(0) <= 0) continue
+        const name = item.requestId + " line " + item.requestItemSeqId
+        let label = (request.statusId === "ReqSubmitted" ? "Submitted purchase request " : "Purchase request ") + name
+        let notNetted = false
+        // a refused request covers nothing until it is changed and sent again (or cancelled): shown, not netted (review R1)
+        if (request.statusId === "ReqSubmitted" && refusedNow(item.requestId)) {
+            label = "Refused purchase request " + name + ", not netted until it is changed or cancelled"
+            notNetted = true
+        }
+        // the line in the product's stock unit (F-P14b-4, review R2)
+        if (stockUnit == null) stockUnit = one("mantle.product.Product", {productId})?.amountUomId || ""
+        if (item.quantityUomId && stockUnit && item.quantityUomId !== stockUnit)
+            try {
+                open = methodPolicy().convert(open, item.quantityUomId, stockUnit, ec.user.nowTimestamp).quantity
+            } catch (error) {
+                label += ", not netted: " + String(error.message || error)
+                notNetted = true
+            }
         lines.push({
-            kind: "request",
-            label:
-                (request.statusId === "ReqSubmitted" ? "Submitted purchase request " : "Purchase request ") +
-                item.requestId +
-                " line " +
-                item.requestItemSeqId,
+            kind: notNetted ? "requestNotNetted" : "request",
+            label,
             requestId: item.requestId,
             requestItemSeqId: item.requestItemSeqId,
             date: item.requiredByDate || request.responseRequiredDate || null,
             quantity: open,
-            supply: true
+            supply: true,
+            notNetted
         })
     }
     return lines
+}
+// Whether a submitted purchase request was refused at its revision (a decision PadRefused not superseded; PurchaseApprovals'
+// progress): it waits for its requester to change it, so it is no supply.
+function refusedNow(requestId) {
+    const revision = purchaseRequests().revisionOf(requestId)
+    return rows(DECISION, {sourceEntityName: REQUEST, sourceId: requestId}).some(
+        row => row.decisionEnumId === "PadRefused" && !row.supersededDate && Number(row.sourceRevision) === revision
+    )
 }
 const ended = row => !!row.thruDate && ms(row.thruDate) <= ms(ec.user.nowTimestamp)
 // A cancelled purchase request's coverage of the plan's demand ended (its RequirementSupply RstPurchaseRequest rows), so

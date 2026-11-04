@@ -830,7 +830,7 @@ function plan(ctx, nodes) {
                 const heldWithin = ctx.planDate && lead ? ms(ctx.planDate) + dec(lead.lead).toNumber() * dayMs : ms(ctx.planDate)
                 for (const line of stockLines(ctx, node, productId)) {
                     if (line.kind === "held") line.netted = ctx.netHeld && line.date != null && ms(line.date) <= heldWithin
-                    else line.netted = true
+                    else line.netted = !line.notNetted
                     lines.push(line)
                 }
                 // demand beyond the horizon waits for a later run
@@ -1103,7 +1103,8 @@ const kindLabels = {
     planned: "Planned make",
     operation: "Outside operation",
     reorder: "Reorder rule",
-    request: "Purchase request"
+    request: "Purchase request",
+    requestNotNetted: "Purchase request, not netted"
 }
 const warningLabels = {
     LATE_RELEASE: "Release date has passed",
@@ -1592,7 +1593,9 @@ function convertOne(p) {
         )
     if (suggestion.methodEnumId === "PsmOutside") return convertOutside(p, suggestion, run, requirement, remaining)
     if (suggestion.methodEnumId === "PsmBuy") {
-        const buyRoute = str(p.route) || routes().routeOf(run.organizationPartyId, null)
+        // the route asked for checked against the buying policy here too, so a direct call cannot take the order route
+        // the policy refuses (ROUTE_NOT_ALLOWED; review R3)
+        const buyRoute = routes().routeOf(run.organizationPartyId, str(p.route))
         if (buyRoute === "request" || buyRoute === "dropShip")
             return routes().convert(buyRoute, p, {suggestion, run, requirement, remaining, buyChecks, coveredOf})
         return convertBuy(p, suggestion, run, requirement, remaining)

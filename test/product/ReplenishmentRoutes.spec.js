@@ -7,7 +7,9 @@
 // (F-P10-7); a cancelled request's coverage ends; the plan's drop-ship route moves a customer-order shortage's sales line to
 // the supplier's drop-ship facility and buys it, refusing a suggestion with no customer line or an order not approved; a
 // customer-order shortage converted to a draft order keeps its sales line, and its receipt reserves the received stock for
-// it (STOCK_RECEIVE); held stock of a bought product nets within its supplier's lead time where the schedule says so.
+// it (STOCK_RECEIVE), on hold at the dock, which its putaway keeps; held stock of a bought product nets within its supplier's
+// lead time where the schedule says so. Review: a refused request is shown and not netted; a request line in another unit
+// nets in the stock unit; a supplier with no drop-ship price is refused by name.
 // Standalone: a spec-local organization (its accounting configuration, a warehouse, the buying policy with the approval
 // gate on, so a drop-ship order waits at Placed), a supplier with a drop-ship facility, a customer, products and users in
 // spec-local groups. Run: ./moq test mr-mantle --spec ReplenishmentRoutes
@@ -197,17 +199,34 @@ spec({
         state.buyer2 = user("BUYER2", ["PURCHASE_ORDER_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.planner = user("PLANNER", ["SUPPLY_PLAN_RUN"])
         state.approver = user("APPROVER", ["PURCHASE_APPROVE"])
-        state.receiver = user("RECEIVER", ["STOCK_RECEIVE"])
+        state.receiver = user("RECEIVER", ["STOCK_RECEIVE", "STOCK_MOVE"])
         product(prefix + "_REQ")
         product(prefix + "_CAN")
         product(prefix + "_DROP")
         product(prefix + "_PEG")
         product(prefix + "_HELD", {standardLeadTimeDays: 10})
+        product(prefix + "_UNIT")
+        // a box of ten, the unit of a hand-filed request line (F-P14b-4)
+        call("create#moqui.basic.Uom", {uomId: prefix + "_BOX", uomTypeEnumId: "UT_OTHER_MEASURE", abbreviation: "box"})
+        call("create#moqui.basic.UomConversion", {
+            uomConversionId: prefix + "_BOX_EA",
+            uomId: prefix + "_BOX",
+            toUomId: "OTH_ea",
+            conversionFactor: 10,
+            fromDate: since
+        })
+        // the dock and a bin, so received stock on hold is put away (F-P14b-3)
+        for (const [locationSeqId, locationTypeEnumId] of [
+            ["REC", "FltReceiving"],
+            ["BIN", "FltBulk"]
+        ])
+            call("create#mantle.facility.FacilityLocation", {facilityId: warehouse, locationSeqId, locationTypeEnumId})
         // minimum stock beside the customer demand: the request route's rest line
         for (const [productId, minimumStock] of [
             [prefix + "_REQ", 5],
             [prefix + "_CAN", 3],
-            [prefix + "_HELD", 5]
+            [prefix + "_HELD", 5],
+            [prefix + "_UNIT", 20]
         ])
             call("create#mantle.facility.ProductFacility", {productId, facilityId: warehouse, minimumStock})
         state.reqSale = salesOrder(prefix + "_REQ", 2)
@@ -316,6 +335,13 @@ feature(
             const canSuggestion = suggestionOf(canPlan, prefix + "_CAN")
             const canConverted = convert(state.buyer, [canSuggestion?.planningSuggestionId])
             const canRequestId = ((canConverted.results || [])[0] || {}).requestId
+            // refused, it covers nothing: shown, not netted, and its demand suggested again (review R1)
+            const refused = run(state.approver, R + "decide#PurchaseRequestApproval", {
+                requestId: canRequestId,
+                decision: "refuse",
+                reason: "Not this month"
+            })
+            const refusedSuggestion = suggestionOf(plan([prefix + "_CAN"]), prefix + "_CAN")
             const cancelled = run(state.buyer, R + "cancel#PurchaseRequest", {requestId: canRequestId, reason: "Not needed"})
             setPolicy({planBuyToRequest: "N"})
             return {
@@ -328,6 +354,8 @@ feature(
                 whileSourced,
                 canSuggestion,
                 canRequestId,
+                refused,
+                refusedSuggestion,
                 cancelled
             }
         },
@@ -341,6 +369,8 @@ feature(
             whileSourced,
             canSuggestion,
             canRequestId,
+            refused,
+            refusedSuggestion,
             cancelled
         }) {
             whileSubmitted == null
@@ -356,6 +386,11 @@ feature(
             whileSourced == null
             canSuggestion.quantity != null
             canRequestId != null
+            refused.error == ""
+            n(refusedSuggestion.quantity) == 3
+            JSON.parse(refusedSuggestion.provenanceJson).some(
+                line => line.kind == "requestNotNetted" && line.label.startsWith("Refused purchase request") && !line.netted
+            )
             cancelled.error == ""
             supplyOf(canSuggestion.requirementId).length == 1
             supplyOf(canSuggestion.requirementId)[0].thruDate != null
@@ -371,6 +406,10 @@ feature(
             const suggestion = suggestionOf(planned, prefix + "_DROP")
             const plain = suggestionOf(planned, prefix + "_HELD")
             const noCustomer = convert(state.buyer, [plain?.planningSuggestionId], {route: "dropShip"})
+            const notDropShippable = convert(state.buyer, [suggestion?.planningSuggestionId], {
+                route: "dropShip",
+                supplierPartyId: customer
+            })
             const converted = convert(state.buyer, [suggestion?.planningSuggestionId], {route: "dropShip"})
             const result = (converted.results || [])[0] || {}
             const salesItem = one("mantle.order.OrderItem", state.dropSale)
@@ -379,11 +418,12 @@ feature(
                 salesOrderItemSeqId: state.dropSale.orderItemSeqId
             })[0]
             const pendingItem = one("mantle.order.OrderItem", state.dropPending)
-            return {suggestion, noCustomer, converted, result, salesItem, dropLine, pendingItem}
+            return {suggestion, noCustomer, notDropShippable, converted, result, salesItem, dropLine, pendingItem}
         },
-        then({suggestion, noCustomer, converted, result, salesItem, dropLine, pendingItem}) {
+        then({suggestion, noCustomer, notDropShippable, converted, result, salesItem, dropLine, pendingItem}) {
             n(suggestion.quantity) == 4
             noCustomer.results[0].reasonCode == "NO_CUSTOMER_LINE"
+            notDropShippable.results[0].reasonCode == "NOT_DROP_SHIPPABLE"
             converted.error == ""
             result.ok == true
             result.route == "dropShip"
@@ -434,7 +474,8 @@ feature(
                 facilityId: warehouse,
                 ownerPartyId: org,
                 assetTypeEnumId: "AstTpInventory",
-                statusId: "AstAvailable",
+                statusId: "AstOnHold",
+                locationSeqId: "REC",
                 hasQuantity: "Y",
                 receivedDate: ec.user.nowTimestamp
             }).assetId
@@ -476,9 +517,51 @@ feature(
                 orderItemSeqId: state.pegSale.orderItemSeqId
             })
             const after = run(state.receiver, G + "get#ReceiptPegs", {shipmentId})
-            return {suggestion, result, read, buyerReserve, other, notPegged, reserved, again, reservations, assetId, after}
+            // its putaway from the dock keeps the reservation on the stock, now available (F-P14b-3)
+            const putAway = run(state.receiver, "mantle.shipment.WarehouseTaskServices.putaway#Stock", {
+                operationKey: key(),
+                assetId,
+                toLocationSeqId: "BIN",
+                reason: "Spec bin"
+            })
+            const kept = rows("mantle.product.issuance.AssetReservation", {
+                orderId: state.pegSale.orderId,
+                orderItemSeqId: state.pegSale.orderItemSeqId
+            })
+            const stored = one("mantle.product.asset.Asset", {assetId})
+            return {
+                suggestion,
+                result,
+                read,
+                buyerReserve,
+                other,
+                notPegged,
+                reserved,
+                again,
+                reservations,
+                assetId,
+                after,
+                putAway,
+                kept,
+                stored
+            }
         },
-        then({suggestion, result, read, buyerReserve, other, notPegged, reserved, again, reservations, assetId, after}) {
+        then({
+            suggestion,
+            result,
+            read,
+            buyerReserve,
+            other,
+            notPegged,
+            reserved,
+            again,
+            reservations,
+            assetId,
+            after,
+            putAway,
+            kept,
+            stored
+        }) {
             result.ok == true
             result.orderId != null
             one("mantle.order.OrderHeader", {orderId: result.orderId}).statusId == "OrderOpen"
@@ -497,6 +580,11 @@ feature(
             reservations.filter(row => row.assetId == assetId).reduce((total, row) => total + n(row.quantity), 0) == 4
             reservations.every(row => n(row.quantityNotAvailable || 0) == 0)
             after.pegRows.some(row => row.orderId == state.pegSale.orderId && row.reservedHereText == "4")
+            putAway.error == ""
+            stored.statusId == "AstAvailable"
+            stored.locationSeqId == "BIN"
+            kept.filter(row => row.assetId == assetId).reduce((total, row) => total + n(row.quantity), 0) == 4
+            kept.every(row => n(row.quantityNotAvailable || 0) == 0)
         }
     }
 )
@@ -537,5 +625,33 @@ feature("held stock of a bought product is netted within its supplier's lead tim
         n(notNetted.quantity) == 5
         n(notNetted.pendingReleaseQuantity) == 5
         netted == null
+    }
+})
+
+feature("an approved request line in another unit is supply in the stock unit (F-P14b-4)", {
+    when() {
+        const created = run(state.buyer, R + "create#PurchaseRequest", {
+            organizationPartyId: org,
+            requestName: "Boxes",
+            facilityId: warehouse
+        })
+        const stored = run(state.buyer, R + "store#PurchaseRequestItem", {
+            requestId: created.requestId,
+            productId: prefix + "_UNIT",
+            quantity: 2,
+            quantityUomId: prefix + "_BOX",
+            maximumAmount: 80
+        })
+        const submitted = run(state.buyer, R + "submit#PurchaseRequest", {requestId: created.requestId})
+        const approved = run(state.approver, R + "decide#PurchaseRequestApproval", {requestId: created.requestId})
+        const covered = suggestionOf(plan([prefix + "_UNIT"]), prefix + "_UNIT")
+        return {stored, submitted, approved, covered}
+    },
+    then({stored, submitted, approved, covered}) {
+        stored.error == ""
+        submitted.error == ""
+        approved.statusId == "ReqInProgress"
+        // 2 boxes of 10 cover the minimum of 20; unconverted, 18 would be suggested
+        covered == null
     }
 })
