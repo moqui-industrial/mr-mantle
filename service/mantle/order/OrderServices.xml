@@ -2707,8 +2707,10 @@ General Order Placement and eCommerce Usage
                 <set field="statusOnly" from="hasOriginal &amp;&amp; statusId != originalValue.statusId
                     &amp;&amp; postalContactMechId == originalValue.postalContactMechId &amp;&amp; carrierPartyId == originalValue.carrierPartyId
                     &amp;&amp; shipmentMethodEnumId == originalValue.shipmentMethodEnumId &amp;&amp; customerPartyId == originalValue.customerPartyId"/>
+                <!-- the send's own Approved to Sent is the issue of the revision, not a change of it (send#PurchaseOrder) -->
+                <set field="issuedOnly" from="statusOnly &amp;&amp; statusId == 'OrderSent' &amp;&amp; originalValue.statusId == 'OrderApproved'"/>
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision"
-                        in-map="{orderId:orderId, revisionKind:(statusOnly ? 'status' : null)}"/>
+                        in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : null))}"/>
             </else></if>
         </actions>
     </service>
@@ -2888,12 +2890,14 @@ General Order Placement and eCommerce Usage
         <in-parameters>
             <parameter name="orderId"/>
             <parameter name="revisionKind"><description>Empty or commercial: counts. content, note or status: not counted
-                where the order counts commercial changes only. item: counted only there.</description></parameter>
+                where the order counts commercial changes only. item: counted only there. issued (the issued purchase
+                order's PDF and its Approved to Sent): never counted on an order with a purchase part, else as status.</description></parameter>
         </in-parameters>
         <actions>
             <if condition="!orderId"><return/></if>
             <if condition="revisionKind &amp;&amp; revisionKind != 'commercial'">
                 <set field="commercialOnly" from="false"/>
+                <set field="purchaseOrder" from="false"/>
                 <entity-find entity-name="mantle.order.OrderPart" list="revisionParts" disable-authz="true">
                     <econdition field-name="orderId"/></entity-find>
                 <iterate list="revisionParts" entry="revisionPart">
@@ -2906,6 +2910,7 @@ General Order Placement and eCommerce Usage
                         <econdition field-name="partyId" from="revisionPart.vendorPartyId"/>
                         <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find-count>
                     <if condition="vendorInternal &gt; 0"><continue/></if>
+                    <set field="purchaseOrder" from="true"/>
                     <entity-find entity-name="mantle.order.purchase.PurchasePolicy" list="revisionPolicies" limit="1"
                             disable-authz="true">
                         <date-filter/>
@@ -2915,6 +2920,7 @@ General Order Placement and eCommerce Usage
                     <set field="commercialOnly" from="revisionPolicies.length &gt; 0
                         &amp;&amp; revisionPolicies[0].commercialRevisionOnly == 'Y'"/>
                 </iterate>
+                <if condition="revisionKind == 'issued' &amp;&amp; purchaseOrder"><return/></if>
                 <if condition="revisionKind == 'item' ? !commercialOnly : commercialOnly"><return/></if>
             </if>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true">

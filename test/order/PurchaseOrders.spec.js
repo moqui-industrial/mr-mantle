@@ -414,7 +414,7 @@ feature(
 )
 
 feature(
-    "the commercial revision: a note keeps the revision where the flag is on and moves it where it is off (Mantle's default); a send's retry still answers its first result",
+    "the commercial revision: a note keeps the revision where the flag is on and moves it where it is off (Mantle's default), while the issued PDF and Approved to Sent never move it; a send's retry still answers its first result",
     {
         when() {
             const orderId = state.approvedId
@@ -424,6 +424,20 @@ feature(
             policy({approvalGateEnabled: "N", commercialRevisionOnly: "N"})
             call("create#mantle.order.OrderNote", {orderId, noteDate: Number(ec.user.nowTimestamp) + 1, noteText: "Flag off"})
             const flagOff = revisionOf(orderId)
+            // with the flag off, the send's own writes still do not count: the issued PDF, and Approved to Sent after an
+            // un-send (which, a status change, counts)
+            call("create#mantle.order.OrderContent", {
+                orderId,
+                orderContentTypeEnumId: "OctPurchaseOrderIssued",
+                contentLocation: "dbresource://mantle/spec/issued-again.pdf",
+                contentDate: ec.user.nowTimestamp
+            })
+            const issuedOff = revisionOf(orderId)
+            const partSeqId = rows("mantle.order.OrderPart", {orderId})[0].orderPartSeqId
+            call("mantle.order.OrderServices.update#OrderStatus", {orderId, orderPartSeqId: partSeqId, statusId: "OrderApproved"})
+            const unsent = revisionOf(orderId)
+            call("mantle.order.OrderServices.update#OrderStatus", {orderId, orderPartSeqId: partSeqId, statusId: "OrderSent"})
+            const resent = revisionOf(orderId)
             // a retry of the first send answers its result, though the revision it named has moved on since
             capture.clear()
             const replay = run(state.buyer, O + "send#PurchaseOrder", state.sendRequest)
@@ -433,11 +447,14 @@ feature(
                 changedFieldName: "orderRevision",
                 pkPrimaryValue: orderId
             })
-            return {before, flagOn, flagOff, replay, replayMails, audit}
+            return {before, flagOn, flagOff, issuedOff, unsent, resent, replay, replayMails, audit}
         },
-        then({before, flagOn, flagOff, replay, replayMails, audit}) {
+        then({before, flagOn, flagOff, issuedOff, unsent, resent, replay, replayMails, audit}) {
             flagOn == before
             flagOff == before + 1
+            issuedOff == flagOff
+            unsent == flagOff + 1
+            resent == unsent
             replay.error == ""
             replay.alreadyApplied == true
             replay.successCount == 1

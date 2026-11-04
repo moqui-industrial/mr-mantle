@@ -23,10 +23,11 @@ along with this software (see the LICENSE.md file). If not, see
     </eeca>
 
     <!-- Order Revision Triggers (note OrderItem handled in handle#OrderItemChange, OrderPart handled in handle#OrderPartChange) -->
-    <!-- a file and a note are not commercial changes where the order counts those only (increment#OrderRevision) -->
+    <!-- a file and a note are not commercial changes where the order counts those only (increment#OrderRevision); the
+        issued purchase order's own PDF never counts (send#PurchaseOrder) -->
     <eeca id="OrderContentRevision" entity="mantle.order.OrderContent" on-create="true" on-update="true" on-delete="true" run-on-error="false">
         <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision"
-                in-map="{orderId:orderId, revisionKind:'content'}"/></actions></eeca>
+                in-map="{orderId:orderId, revisionKind:(orderContentTypeEnumId == 'OctPurchaseOrderIssued' ? 'issued' : 'content')}"/></actions></eeca>
     <eeca id="OrderPartPartyRevision" entity="mantle.order.OrderPartParty" on-create="true" on-update="true" on-delete="true" run-on-error="false">
         <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/></actions></eeca>
     <eeca id="OrderPartContactMechRevision" entity="mantle.order.OrderPartContactMech" on-create="true" on-update="true" on-delete="true" run-on-error="false">
