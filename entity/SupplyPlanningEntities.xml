@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The shared supply plan (design-crosscut CX-PLANNING, §3.20 and §4.2; design-manufacturing §7 SupplyPlanning;
+    impl-manufacturing P13): a planning run's snapshot (PlanningRun), its buy, make and transfer suggestions with their
+    demand provenance (PlanningSuggestion), each on a Requirement of the organization (a RequirementParty in the OrgInternal
+    role, R-SA-15) in the stock unit (Requirement.quantityUomId), the one covered-demand link from a requirement to the
+    supply that covers it (RequirementSupply), and the organization's one plan schedule (PlanSchedule, D20).
+    mantle.product.SupplyPlanningServices (SupplyPlanning.js) writes them; nothing else does. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Requirement" package="mantle.request.requirement">
+        <field name="quantityUomId" type="id"><description>The unit of quantity: the product's stock unit (requirement
+            quantity stays in the stock unit and is converted when supply is created, R-SA-15)</description></field>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+    </extend-entity>
+
+    <entity entity-name="PlanningRun" package="mantle.request.requirement" cache="never">
+        <description>One calculation of the supply plan for an organization and a set of facilities (each a warehouse or
+            plant, with the lines and other facilities under it): when it was made and as of when, its horizon and time
+            fence, whether held quantity was netted, and its counts. One run per organization and facility set is current
+            (isCurrent Y); a new run supersedes the last, whose unconverted suggestions it ends. A run older than the
+            production policy's freshness limit, or superseded, is stale: its suggestions cannot be converted.</description>
+        <field name="planningRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="facilitySetKey" type="text-medium"><description>The facility ids of the run, sorted and joined with
+            commas: the identity of its facility set</description></field>
+        <field name="productScope" type="text-long"><description>The product ids the run was limited to, comma separated;
+            empty for every product with demand</description></field>
+        <field name="planDate" type="date-time"><description>As of when demand, supply and methods were read</description></field>
+        <field name="horizonDate" type="date-time"/>
+        <field name="horizonDays" type="number-integer"/>
+        <field name="timeFenceDays" type="number-integer"/>
+        <field name="freshnessLimitHours" type="number-integer"/>
+        <field name="netHeldQuantity" type="text-indicator"><description>Y: held quantity whose inspection is due within the
+            lead time was netted (the schedule's organization option)</description></field>
+        <field name="isCurrent" type="text-indicator"/>
+        <field name="revision" type="number-integer"><description>The count of runs of this organization and facility set,
+            this one included</description></field>
+        <field name="supersededByRunId" type="id"/>
+        <field name="supersededDate" type="date-time"/>
+        <field name="scheduled" type="text-indicator"><description>Y: started by the plan schedule</description></field>
+        <field name="startedByUserId" type="id"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="suggestionCount" type="number-integer"/>
+        <field name="exceptionCount" type="number-integer"/>
+        <field name="findingsJson" type="text-very-long"><description>Named findings that are not a suggestion's (a product
+            the run could not read, a limit reached)</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="many" related="mantle.request.requirement.PlanningRunFacility" short-alias="facilities">
+            <key-map field-name="planningRunId"/></relationship>
+        <relationship type="many" related="mantle.request.requirement.PlanningSuggestion" short-alias="suggestions">
+            <key-map field-name="planningRunId"/></relationship>
+        <index name="PLANRUN_ORG_SET"><index-field name="organizationPartyId"/><index-field name="facilitySetKey"/>
+            <index-field name="isCurrent"/></index>
+    </entity>
+    <entity entity-name="PlanningRunFacility" package="mantle.request.requirement" cache="never">
+        <description>A facility of a planning run's set: a warehouse or plant whose stock, demand and supply are netted
+            together with those of the facilities under it (its lines, F16).</description>
+        <field name="planningRunId" type="id" is-pk="true"/>
+        <field name="facilityId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.request.requirement.PlanningRun"/>
+        <relationship type="one" related="mantle.facility.Facility"/>
+    </entity>
+    <entity entity-name="PlanningSuggestion" package="mantle.request.requirement" cache="never">
+        <description>A proposed supply of a planning run: make, buy or transfer a quantity of a product into a facility by a
+            date, on its Requirement, with the demand and supply that explain it (provenance) and its exception, if any. A
+            suggestion is not a second demand record: its requirement is the demand and RequirementSupply what covers it. A
+            make suggestion's components are demand of the next level (parentSuggestionId).</description>
+        <field name="planningSuggestionId" type="id" is-pk="true"/>
+        <field name="planningRunId" type="id"/>
+        <field name="requirementId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="facilityId" type="id"><description>The facility of the run's set the supply is for</description></field>
+        <field name="methodEnumId" type="id"><description>PlanningSuggestionMethod: make, buy or transfer</description></field>
+        <field name="stateEnumId" type="id"><description>PlanningSuggestionState</description></field>
+        <field name="quantity" type="number-decimal"><description>The net quantity, in the stock unit</description></field>
+        <field name="quantityUomId" type="id"/>
+        <field name="grossQuantity" type="number-decimal"><description>The demand of the product in the facility over the
+            horizon, before stock and supply</description></field>
+        <field name="availableQuantity" type="number-decimal"><description>The stock and open supply netted against
+            it</description></field>
+        <field name="pendingReleaseQuantity" type="number-decimal"><description>Held quantity awaiting its inspection,
+            shown and not netted unless the run netted held quantity</description></field>
+        <field name="pendingReleaseDate" type="date-time"/>
+        <field name="requiredByDate" type="date-time"/>
+        <field name="releaseDate" type="date-time"><description>When the supply must start: the required date less the
+            method's lead and preparation days (R-MFG-31)</description></field>
+        <field name="leadTimeDays" type="number-decimal"/>
+        <field name="prepareDays" type="number-decimal"/>
+        <field name="planningLevel" type="number-integer"><description>The product's level in the run's explosion: 0 for a
+            product with no parent, then one more than its deepest parent</description></field>
+        <field name="parentSuggestionId" type="id"/>
+        <field name="productBomId" type="id"/>
+        <field name="routingWorkEffortId" type="id"/>
+        <field name="supplierPartyId" type="id"/>
+        <field name="sourceFacilityId" type="id"><description>A transfer's facility of origin</description></field>
+        <field name="exceptionCode" type="id"><description>A reason the suggestion cannot be converted, as a code
+            (PRODUCT_NOT_USABLE, NO_SOURCE, METHOD_INVALID, BOM_CYCLE, UNIT_CONVERSION)</description></field>
+        <field name="exceptionMessage" type="text-long"/>
+        <field name="warningCodes" type="text-medium"><description>LATE_RELEASE, INSIDE_TIME_FENCE: shown, not
+            refused</description></field>
+        <field name="provenanceJson" type="text-very-long"><description>The demand and supply lines netted, as of the run:
+            each with its kind, document, date, quantity and whether it was netted</description></field>
+        <relationship type="one" related="mantle.request.requirement.PlanningRun"/>
+        <relationship type="one" related="mantle.request.requirement.Requirement"/>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" title="Source" related="mantle.facility.Facility">
+            <key-map field-name="sourceFacilityId" related="facilityId"/></relationship>
+        <relationship type="one" title="Supplier" related="mantle.party.Party">
+            <key-map field-name="supplierPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PlanningSuggestionMethod" related="moqui.basic.Enumeration" short-alias="method">
+            <key-map field-name="methodEnumId"/></relationship>
+        <relationship type="one" title="PlanningSuggestionState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.bom.ProductBom"/>
+        <index name="PLANSUGG_RUN"><index-field name="planningRunId"/><index-field name="productId"/></index>
+        <index name="PLANSUGG_RQMT"><index-field name="requirementId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Planning Suggestion Method" enumTypeId="PlanningSuggestionMethod"/>
+            <moqui.basic.Enumeration enumId="PsmMake" description="Make" sequenceNum="1" enumTypeId="PlanningSuggestionMethod"/>
+            <moqui.basic.Enumeration enumId="PsmBuy" description="Buy" sequenceNum="2" enumTypeId="PlanningSuggestionMethod"/>
+            <moqui.basic.Enumeration enumId="PsmTransfer" description="Transfer" sequenceNum="3"
+                    enumTypeId="PlanningSuggestionMethod"/>
+            <moqui.basic.EnumerationType description="Planning Suggestion State" enumTypeId="PlanningSuggestionState"/>
+            <moqui.basic.Enumeration enumId="PssProposed" description="Proposed" sequenceNum="1"
+                    enumTypeId="PlanningSuggestionState"/>
+            <moqui.basic.Enumeration enumId="PssPartial" description="Partly converted" sequenceNum="2"
+                    enumTypeId="PlanningSuggestionState"/>
+            <moqui.basic.Enumeration enumId="PssConverted" description="Converted" sequenceNum="3"
+                    enumTypeId="PlanningSuggestionState"/>
+            <moqui.basic.Enumeration enumId="PssException" description="Exception" sequenceNum="4"
+                    enumTypeId="PlanningSuggestionState"/>
+            <moqui.basic.Enumeration enumId="PssSuperseded" description="Superseded" sequenceNum="5"
+                    enumTypeId="PlanningSuggestionState"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="RequirementSupply" package="mantle.request.requirement" cache="never">
+        <description>The one covered-demand link (crosscut §3.20): a quantity of a requirement covered by a supply document,
+            a production run (workEffortId), a purchase order item or a purchase request item, made by a conversion under the
+            requirement's lock with its operation key. A supply canceled later ends its link (thruDate), which releases the
+            covered quantity; history stays.</description>
+        <field name="requirementSupplyId" type="id" is-pk="true"/>
+        <field name="requirementId" type="id"/>
+        <field name="supplyTypeEnumId" type="id"><description>RequirementSupplyType</description></field>
+        <field name="workEffortId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="requestId" type="id"/>
+        <field name="requestItemSeqId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="planningSuggestionId" type="id"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.request.requirement.Requirement" short-alias="requirement"/>
+        <relationship type="one" title="RequirementSupplyType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="supplyTypeEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one-nofk" related="mantle.order.OrderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.RequestItem">
+            <key-map field-name="requestId"/><key-map field-name="requestItemSeqId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.requirement.PlanningSuggestion"/>
+        <index name="RQMTSUP_RQMT"><index-field name="requirementId"/></index>
+        <index name="RQMTSUP_WORK"><index-field name="workEffortId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Requirement Supply Type" enumTypeId="RequirementSupplyType"/>
+            <moqui.basic.Enumeration enumId="RstProductionRun" description="Production run" sequenceNum="1"
+                    enumTypeId="RequirementSupplyType"/>
+            <moqui.basic.Enumeration enumId="RstPurchaseOrder" description="Purchase order" sequenceNum="2"
+                    enumTypeId="RequirementSupplyType"/>
+            <moqui.basic.Enumeration enumId="RstPurchaseRequest" description="Purchase request" sequenceNum="3"
+                    enumTypeId="RequirementSupplyType"/>
+            <moqui.basic.Enumeration enumId="RstTransfer" description="Transfer" sequenceNum="4"
+                    enumTypeId="RequirementSupplyType"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PlanSchedule" package="mantle.request.requirement" cache="never">
+        <description>The organization's one plan schedule (D20; it replaces Purchasing's proposed ReorderSchedule): the
+            facilities it plans, how often (every intervalHours) and when next, the horizon, whether it is active, and the
+            organization's option to net held quantity whose inspection is due within the lead time (off by default).
+            Written by store#PlanSchedule; the run_ScheduledSupplyPlans job runs the active schedules that are due.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="facilityIds" type="text-medium" enable-audit-log="true"><description>Comma separated</description></field>
+        <field name="intervalHours" type="number-integer" enable-audit-log="true"/>
+        <field name="nextRunDate" type="date-time" enable-audit-log="true"/>
+        <field name="horizonDays" type="number-integer" enable-audit-log="true"><description>Empty: the production
+            policy's planning horizon</description></field>
+        <field name="active" type="text-indicator" enable-audit-log="true"/>
+        <field name="netHeldQuantity" type="text-indicator" enable-audit-log="true"/>
+        <field name="lastRunDate" type="date-time"/>
+        <field name="lastPlanningRunId" type="id"/>
+        <field name="lastRunMessage" type="text-long"/>
+        <field name="changedByUserId" type="id" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+    </entity>
+</entities>
