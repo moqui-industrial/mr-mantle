@@ -782,5 +782,15 @@ feature("token lookups count before the lookup: past the limit even a good token
         refusedAt != null
         good.errorKind == "Tarpit"
         bad.errorKind == "Tarpit"
+    },
+    // the bucket this feature filled goes, so a later spec's links (mr-pass Portals, on a worker soon after) are not
+    // refused for this requester for the rest of the ten minutes; other limits' buckets stay
+    cleanup() {
+        const old = ec.artifactExecution.disableAuthz()
+        try {
+            ec.entity.find("moqui.security.public.AccountAttempt").condition("attemptCount", "greater", 100).deleteAll()
+        } finally {
+            if (!old) ec.artifactExecution.enableAuthz()
+        }
     }
 })
