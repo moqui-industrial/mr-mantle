@@ -652,6 +652,283 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <!-- ===== the runs' lifecycle (impl-manufacturing P5a; ProductionOrders.js) ===== -->
+    <service verb="find" noun="ProductionOrders" allow-remote="false">
+        <description>The production runs of the user's organizations (design-manufacturing WorkOrders), paged, each with its
+            product, planned and good quantity, what is left, due date, facility, status and readiness, as display text. Open
+            runs by default (statusId all, or a comma list, for others); a plant takes the lines under it. The saved finds'
+            filters: ready (released, no short line), late (open and past due), blocked (on hold or a line released short),
+            mine (the user assigned on the run or an operation), productId (By product); also assigneePartyId, demandOrderId (a
+            sales order's supplying runs), text (id or name, ignoring case) and the due range. Requires PRODUCTION_VIEW
+            (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="statusId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="demandOrderId"/>
+            <parameter name="text"/>
+            <parameter name="mine"/>
+            <parameter name="late"/>
+            <parameter name="ready"/>
+            <parameter name="blocked"/>
+            <parameter name="dueFrom" type="Timestamp"/>
+            <parameter name="dueThru" type="Timestamp"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderRows" type="List"/>
+            <parameter name="orderRowsCount" type="Integer"/>
+            <parameter name="orderRowsPageIndex" type="Integer"/>
+            <parameter name="orderRowsPageSize" type="Integer"/>
+            <parameter name="orderRowsPageMaxIndex" type="Integer"/>
+            <parameter name="orderRowsPageRangeLow" type="Integer"/>
+            <parameter name="orderRowsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('find', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionLifecycle" allow-remote="false">
+        <description>A run's lifecycle as WorkOrderDetail shows it: the run (status, revision, product, planned, good and
+            left, dates, method and release time, demand links, staged approval), each action open from its status with what
+            it would do (impact) or why it is refused (reasonCode, message: the user's permission, a reason to give, the
+            release gate's findings, facts), its shortages while a draft, its stock and time facts, and its status history with
+            the reasons. Reads only. Requires PRODUCTION_VIEW; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="actions" type="List"/>
+            <parameter name="shortages" type="List"/>
+            <parameter name="facts" type="Map"/>
+            <parameter name="history" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('lifecycle', context)"/>
+            <set field="run" from="found.run"/>
+            <set field="actions" from="found.actions"/>
+            <set field="shortages" from="found.shortages"/>
+            <set field="facts" from="found.facts"/>
+            <set field="history" from="found.history"/>
+        </actions>
+    </service>
+    <service verb="transition" noun="ProductionOrder" allow-remote="false">
+        <description>The one path to a production run's status (design-manufacturing WorkOrderDetail Lifecycle, the WorkOrders
+            board and bulk action; R-MFG-11): an action, or the move to toStatusId a board makes, on the run at its expected
+            revision, with an operation key (a retry answers the first result). release (PRODUCTION_PLAN) runs the release gate
+            and then release#ProductionOrder: the product usable (PRODUCT_NOT_USABLE), the method valid as of the method date
+            (METHOD_INVALID), no later release of its methods (METHOD_CHANGED, with reexplode offered: reexplode rewrites the
+            draft as of now, REEXPLODED, to review and release again), and the shortage policy in effect at the release time:
+            all components covered, or a staged release a supervisor approved at this revision (SHORTAGE otherwise), or a
+            staged release by the policy (PsrStaged); a staged release leaves its short lines blocked for issue until the
+            stock covers them, and the release notifies the organization's supervisors (ProductionRelease). unrelease
+            (PRODUCTION_PLAN) takes a released run that has no stock or time fact (RUN_HAS_FACTS) back to a draft, its
+            operations cancelled and its lines unfrozen. start, hold (a reason), resume (as released before a start, as
+            running after), cancel (a reason; a draft, released or held run with no fact) and complete need
+            PRODUCTION_SUPERVISE; complete is refused until the quantity reconciliation (COMPLETE_UNAVAILABLE) and close is the
+            cost close's (CLOSE_BY_COST_CLOSE). requestStaged (PRODUCTION_PLAN) asks the supervisors to approve a staged release
+            of a short draft (ProductionStagedRelease); approveStaged (PRODUCTION_SUPERVISE) approves it at the next revision.
+            Refuses a run outside the user's organizations (RECORD_UNAVAILABLE), no revision (REVISION_REQUIRED) or a changed
+            one (REVISION_CHANGED), an action from another status (STATUS_INVALID, RUN_NOT_DRAFT), a generic transition such as
+            In Planning to Complete (TRANSITION_INVALID), a missing reason (REASON_REQUIRED) or an inactive reason code
+            (REASON_INVALID), and a user without the action's permission (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action"><description>release, unrelease, start, hold, resume, cancel, complete, close,
+                requestStaged or approveStaged; else toStatusId</description></parameter>
+            <parameter name="toStatusId"><description>A board move: the status the card was moved to</description></parameter>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"><description>An active production reason of the run's organization</description>
+            </parameter>
+            <parameter name="reexplode" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode (RELEASED, REEXPLODED, UNRELEASED, STARTED, HELD,
+                RESUMED, CANCELLED, REQUESTED or APPROVED), workEffortId, action, fromStatusId, statusId, revision; for a
+                release releaseDate, operationWorkEffortIds, staged and shortages; and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('transition', context)"/>
+        </actions>
+    </service>
+    <service verb="batch" noun="ProductionAction" allow-remote="false">
+        <description>One action on several runs (design-manufacturing WorkOrders Selection): each run through
+            transition#ProductionOrder in its own transaction under "operationKey/workEffortId", at the revision given for
+            it in expectedRevisions or its current one, so a retry answers the runs already done. A result per run: outcome
+            success, blocked (SHORTAGE, METHOD_CHANGED, RUN_HAS_FACTS, COMPLETE_UNAVAILABLE) or failed, with its reason code
+            and message; one failure does not stop the others. Requires PRODUCTION_PLAN or PRODUCTION_SUPERVISE; each run
+            checks its action's own permission.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="workEffortIds" type="List" required="true"/>
+            <parameter name="expectedRevisions" type="Map"/>
+            <parameter name="reason"/>
+            <parameter name="reasonCode"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="successCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="batched" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('batch', context)"/>
+            <set field="results" from="batched.results"/>
+            <set field="successCount" from="batched.successCount"/>
+            <set field="blockedCount" from="batched.blockedCount"/>
+            <set field="failedCount" from="batched.failedCount"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionOrder" allow-remote="false">
+        <description>Change a draft run's header (design-manufacturing Overview UpdateRun): its name, description, priority,
+            estimated start and due dates, and its facility (one of the run owner's). A field left out is kept; the revision
+            counts up. Released work changes only through amend#ProductionOrder (P9) and a schedule change (P12). Requires
+            PRODUCTION_PLAN; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not a draft
+            (RUN_NOT_DRAFT), a changed revision (REVISION_CHANGED, REVISION_REQUIRED), an empty name (NAME_REQUIRED), a due
+            date before the start (DATES_INVALID) and another owner's facility (FACILITY_OWNER).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="priority" type="Integer"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode STORED, workEffortId, revision and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('store', context)"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionEquipment" allow-remote="false">
+        <description>Assign equipment to an open run, or end its assignment (design-manufacturing Overview Equipment): a
+            WorkEffortAssetAssign row from the given or estimated start to the given or estimated due date, Assigned; end
+            ends the current one now (a future one at its start). The revision counts up. Requires PRODUCTION_PLAN; refuses a
+            run outside the user's organizations (RECORD_UNAVAILABLE), a run done or cancelled (RUN_CLOSED), a changed revision
+            (REVISION_CHANGED, REVISION_REQUIRED), equipment not at a facility of the run's owner (RECORD_UNAVAILABLE), stock
+            (EQUIPMENT_INVALID), equipment deactivated, on hold, delivered or in maintenance now (EQUIPMENT_BLOCKED), equipment
+            another open run holds over the same time (EQUIPMENT_OVERLAP), dates out of order (DATES_INVALID), a second
+            assignment (ALREADY_ASSIGNED) and an end of none (NOT_ASSIGNED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default-value="false"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ASSIGNED or ENDED, workEffortId, assetId, revision
+                and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('storeEquipment', context)"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionParty" allow-remote="false">
+        <description>The guarded assignment of a run's people (design-manufacturing Overview People): a supervisor (Manager)
+            or operator (Assignee) who is a person of the run's organization, through
+            mantle.work.WorkEffortServices.add#WorkEffortParty, or with remove their removal through remove#WorkEffortParty.
+            An operator lacking a skill the run's operations require is assigned with a warning (the start checks it, P10).
+            An assignment grants no stock, cost or release permission. The revision counts up. Requires PRODUCTION_PLAN or
+            PRODUCTION_SUPERVISE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), a run done or cancelled
+            (RUN_CLOSED), a changed revision (REVISION_CHANGED, REVISION_REQUIRED), another role (ROLE_INVALID) and a party that
+            is not a person of the organization (PARTY_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+            <parameter name="remove" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ASSIGNED or REMOVED, workEffortId, partyId,
+                roleTypeId, revision, warnings and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('storeParty', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionResources" allow-remote="false">
+        <description>A run's equipment assignments and its supervisors and operators, current and ended, for Overview.
+            Requires PRODUCTION_VIEW; refuses a run outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="equipmentRows" type="List"/>
+            <parameter name="peopleRows" type="List"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('resources', context)"/>
+            <set field="equipmentRows" from="found.equipmentRows"/>
+            <set field="peopleRows" from="found.peopleRows"/>
+            <set field="revision" from="found.revision"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionOperations" allow-remote="false">
+        <description>A run's operations (design-manufacturing Operations): a released run's operation children, a draft's the
+            routing operations it will release, each with its sequence, work center, predecessors (the routing's as of the
+            method date), planned and actual dates, status, the material lines it consumes and its readiness with the reason:
+            the run not released or on hold, a predecessor not done, a line released short, else ready. A run with no routing
+            has none (routed false). Requires PRODUCTION_VIEW or PRODUCTION_OPERATE; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="operationRows" type="List"/>
+            <parameter name="draft" type="Boolean"/>
+            <parameter name="routed" type="Boolean"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('operations', context)"/>
+            <set field="operationRows" from="found.operationRows"/>
+            <set field="draft" from="found.draft"/>
+            <set field="routed" from="found.routed"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionPickList" allow-remote="false">
+        <description>The pick sheet of a run (design-manufacturing §11): each material line with its operation, what it
+            requires and has left, and the available stock of the run's owner to pick for it at the facilities the run nets
+            against (its line and the plant above it), oldest receipt first, with what stays short. Reads only. Requires
+            PRODUCTION_VIEW or STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters><parameter name="pickRows" type="List"/></out-parameters>
+        <actions>
+            <set field="pickRows" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
+                    .execute('pickList', context).pickRows"/>
+        </actions>
+    </service>
+
     <!-- ===== cost evidence (impl-manufacturing P6; ProductionCosts.js) ===== -->
     <service verb="record" noun="ProductionCostEvent" allow-remote="false">
         <description>Write the cost event of a source record of a production run (design-manufacturing ProductionCosts, §12

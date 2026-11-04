@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The production run's own transitions (design-manufacturing WorkOrderDetail States, F9; impl-manufacturing P5a): unrelease
+    (Approved to In Planning), hold before start (Approved to On Hold) and its resume as released (On Hold to Approved). The
+    framework accepts a transition of any status flow on any WorkEffort (call.rs check_status matches by from and to only),
+    so each carries the permission its guard in transition#ProductionOrder checks: a task or project, and a user without the
+    permission, still cannot take it through a generic update. transition#ProductionOrder is the path to a run's status and
+    checks the run's state and facts besides. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortProduction" statusTypeId="WorkEffort"
+            description="Production runs: unrelease, and hold before start with its resume as released"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeApproved" toStatusId="WeInPlanning"
+            transitionName="Unrelease" userPermissionId="PRODUCTION_PLAN"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeApproved" toStatusId="WeOnHold"
+            transitionName="Hold" userPermissionId="PRODUCTION_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProduction" statusId="WeOnHold" toStatusId="WeApproved"
+            transitionName="Resume as released" userPermissionId="PRODUCTION_SUPERVISE"/>
+</entity-facade-xml>
