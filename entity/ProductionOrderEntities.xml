@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The lifecycle of Manufacturing's production runs (design-manufacturing WorkOrderDetail, §12 M2 and M4; impl-manufacturing
+    P5a; ProductionOrders.js): the staged release a supervisor approves, and the short lines a staged release leaves blocked.
+    A file of its own so it merges apart from ProductionEntities.xml. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- A supervisor's approval of a staged release (transition#ProductionOrder approveStaged): the run's revision it was
+        given at, who gave it and when. It holds while the run stays at that revision; any change of the draft asks for it
+        again. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionStagedRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionStagedByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionStagedDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+    <!-- A material line released short under a staged release: what was short at release. Its issue stays blocked
+        (LINE_STAGED_SHORT) until the stock the run nets against covers what the line has left; the first issue after that
+        clears it. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="stagedShortQuantity" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+</entities>

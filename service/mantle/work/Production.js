@@ -669,6 +669,9 @@ function issuePlan(userScope, p) {
     const run = runOf(userScope, p.workEffortId)
     requireReleased(run)
     const line = lineOf(run, p.productionRunLineId, ["PrlrMaterial"], true)
+    // a line a staged release left short is issued once the stock covers it (impl-manufacturing P5a)
+    if (dec(line.stagedShortQuantity).compare(0) > 0)
+        ec.resource.script("component://mr-mantle/service/mantle/work/ProductionOrders.js").stagedBlock(run, line)
     const operationWorkEffortId = operationOf(run, str(p.operationWorkEffortId) || line.operationWorkEffortId)
     const unit = unitOf(line, p.quantity, p.quantityUomId)
     const asset = posting.stock(userScope, p.assetId, unit.stockQuantity)
@@ -1118,5 +1121,8 @@ function subcontractPlan(userScope, p) {
     subcontractPlan,
     materialTotals,
     costLines,
-    text
+    text,
+    // impl-manufacturing P5a's release gate and operations (ProductionOrders.js)
+    laterReleases,
+    routingsOf: routingsOfRun
 })
