@@ -173,8 +173,8 @@ along with this software (see the LICENSE.md file). If not, see
             (posting.stock's refusals), another product (PRODUCT_MISMATCH), stock that is not available, a quarantined one
             among them (HELD_STOCK), another owner's (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), more
             than the line has left beyond its scrap allowance (QUANTITY_EXCEEDS_REMAINING: the over-consumption tolerance of
-            the ProductionPolicy the run was released under, none without a policy; impl-manufacturing P4) and a closed fiscal period today (PERIOD_CLOSED, read
-            without locking).</description>
+            the ProductionPolicy the run was released under, none without a policy; impl-manufacturing P4) and a closed
+            fiscal period today (PERIOD_CLOSED, read without locking).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -612,10 +612,10 @@ along with this software (see the LICENSE.md file). If not, see
             code (reasonName and reasonCategoryEnumId required), a change (a dated row from fromDate, now when empty, that
             ends the one in effect) or, with active N, a deactivation that ends the row in effect. A reason is never
             deleted, so the events that name it keep it; each row's fields are audit-logged with the reason. Every reason is
-            checked before any is written, and one refused is named in results (REASON_INVALID, REASON_CHANGED for a stale
-            expectedFromDate, REASON_INACTIVE) while the others are stored; the save is refused when none is. Requires
-            PRODUCTION_POLICY_EDIT (PERMISSION_DENIED); refuses an organization outside the user's
-            (RECORD_UNAVAILABLE).</description>
+            checked before any is written, and one refused is named in results (REASON_INVALID, also for a deactivation
+            before a change already scheduled, REASON_CHANGED for a stale expectedFromDate, REASON_INACTIVE) while the
+            others are stored; the save is refused when none is. Requires PRODUCTION_POLICY_EDIT (PERMISSION_DENIED);
+            refuses an organization outside the user's (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="reasons" type="List" required="true"><description>Maps of reasonCode, reasonName,

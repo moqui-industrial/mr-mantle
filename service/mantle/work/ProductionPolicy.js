@@ -303,9 +303,11 @@ function store(p) {
     const scope = scopeOf(p)
     const why = String(p.changeReason || "").trim()
     if (!why) denied("POLICY_INVALID", "Give a reason for the policy change")
-    const now = ms(ec.user.nowTimestamp)
     const key = {organizationPartyId: scope.organizationPartyId, facilityId: scope.facility?.facilityId || ALL}
     find("mantle.party.Party", {partyId: scope.organizationPartyId}).forUpdate(true).one()
+    // now is read after the lock, so a change that waited on another starts after it and sees it (POLICY_CHANGED), and no
+    // row starts before a release that committed while it waited
+    const now = ms(ec.user.nowTimestamp)
     const all = rows(POLICY, key).sort((a, b) => ms(a.fromDate) - ms(b.fromDate))
     const inEffect = all.filter(row => current(row, now)).at(-1)
     if (ms(p.expectedFromDate) !== (inEffect ? ms(inEffect.fromDate) : null))
@@ -388,8 +390,9 @@ function findReasons(p) {
     return {organizationPartyId: scope.organizationPartyId, reasons, history, canEdit: scope.canEdit}
 }
 // One reason's change, checked before anything is written: the code, the values of the row in effect with the changes, and
-// for a deactivation the row in effect to end. Refuses a stale expectedFromDate (REASON_CHANGED), a new code without a
-// name or category, an invalid value (REASON_INVALID) and deactivating an inactive code (REASON_INACTIVE).
+// for a deactivation the row in effect at its start, to end there. Refuses a stale expectedFromDate (REASON_CHANGED), a new
+// code without a name or category, an invalid value, a deactivation before a scheduled change (REASON_INVALID) and
+// deactivating a code not active then (REASON_INACTIVE).
 function reasonPlan(organizationPartyId, given, now) {
     const reasonCode = String(given.reasonCode || "").trim()
     if (!/^[A-Za-z0-9_-]{1,40}$/.test(reasonCode)) denied("REASON_INVALID", "A reason code is 1 to 40 letters, digits, - or _")
@@ -405,8 +408,17 @@ function reasonPlan(organizationPartyId, given, now) {
     if (all.some(row => ms(row.fromDate) === at)) denied("REASON_INVALID", "A change of " + reasonCode + " already starts then")
     const deactivate = given.active === "N" || given.active === false
     if (deactivate) {
-        if (!inEffect) denied("REASON_INACTIVE", "Reason " + reasonCode + " is not active")
-        return {reasonCode, deactivate, inEffect, at}
+        // the row in effect at the deactivation's start ends there
+        const ending = all.filter(row => current(row, at)).at(-1)
+        if (!ending) denied("REASON_INACTIVE", "Reason " + reasonCode + " is not active")
+        // a later dated row would start the reason again; it is never deleted, so the deactivation waits for it
+        const scheduled = all.find(row => ms(row.fromDate) > at)
+        if (scheduled)
+            denied(
+                "REASON_INVALID",
+                "Reason " + reasonCode + " has a change from " + lib.dateText(scheduled.fromDate) + "; deactivate it from then"
+            )
+        return {reasonCode, deactivate, inEffect: ending, at}
     }
     const latest = inEffect || all.at(-1)
     const data = Object.fromEntries(reasonFields.map(name => [name, latest ? (latest[name] ?? null) : null]))

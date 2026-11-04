@@ -138,6 +138,12 @@ spec({
             parentFacilityId: plant,
             ownerPartyId: org
         })
+        call("create#mantle.facility.Facility", {
+            facilityId: "PPL_OTHER_PLANT",
+            facilityTypeEnumId: "FcTpWarehouse",
+            facilityName: "Other plant",
+            ownerPartyId: other
+        })
         call("create#mantle.facility.FacilityLocation", {
             facilityId: plant,
             locationSeqId: "PICK1",
@@ -317,10 +323,17 @@ feature("a stale, back-dated, invalid or unpermitted change is refused, and anot
             P + "store#ProductionPolicy",
             Object.assign({}, parameters, {shortageReleaseEnumId: "PcmManual"})
         )
+        // a plant of another organization: neither read nor changed, named alone or under this organization
+        const otherPlant = run("ppl_admin", P + "get#ProductionPolicy", {facilityId: "PPL_OTHER_PLANT"})
+        const otherPlantStore = run(
+            "ppl_admin",
+            P + "store#ProductionPolicy",
+            Object.assign({}, parameters, {facilityId: "PPL_OTHER_PLANT", expectedFromDate: null})
+        )
         const after = run("ppl_admin", P + "get#ProductionPolicy", {organizationPartyId: org})
-        return {reader, outsider, outsiderRead, issuerRead, stale, backDated, percent, choice, after}
+        return {reader, outsider, outsiderRead, issuerRead, stale, backDated, percent, choice, otherPlant, otherPlantStore, after}
     },
-    then({reader, outsider, outsiderRead, issuerRead, stale, backDated, percent, choice, after}) {
+    then({reader, outsider, outsiderRead, issuerRead, stale, backDated, percent, choice, otherPlant, otherPlantStore, after}) {
         reader.error.includes("PERMISSION_DENIED")
         outsider.error.includes("RECORD_UNAVAILABLE")
         outsiderRead.error.includes("RECORD_UNAVAILABLE")
@@ -329,6 +342,9 @@ feature("a stale, back-dated, invalid or unpermitted change is refused, and anot
         backDated.error.includes("POLICY_INVALID")
         percent.error.includes("POLICY_INVALID")
         choice.error.includes("POLICY_INVALID")
+        otherPlant.error.includes("RECORD_UNAVAILABLE")
+        otherPlantStore.error.includes("RECORD_UNAVAILABLE")
+        rows("mantle.work.production.ProductionPolicy", {facilityId: "PPL_OTHER_PLANT"}).length == 0
         n(after.policy.overProducePercent) == 5
         after.history.length == 1
     }
@@ -447,6 +463,18 @@ feature("reason codes are added, changed by dated rows and deactivated, never de
             changeReason: "Again",
             reasons: [{reasonCode: "SETUP", active: "N"}]
         })
+        // JAM has a change scheduled a day ahead: deactivating it now would end at that change, so it is refused
+        const scheduledFrom = new Date(Date.now() + 86400000).toISOString()
+        const scheduled = run("ppl_admin", P + "store#ProductionReasons", {
+            organizationPartyId: org,
+            changeReason: "Scheduled",
+            reasons: [{reasonCode: "JAM", fromDate: scheduledFrom, approvalThreshold: 35}]
+        })
+        const beforeScheduled = run("ppl_admin", P + "store#ProductionReasons", {
+            organizationPartyId: org,
+            changeReason: "Too early",
+            reasons: [{reasonCode: "JAM", active: "N"}]
+        })
         const reader = run("ppl_reader", P + "store#ProductionReasons", {
             organizationPartyId: org,
             changeReason: "Reader",
@@ -458,9 +486,9 @@ feature("reason codes are added, changed by dated rows and deactivated, never de
             includeInactive: true,
             reasonCode: "JAM"
         })
-        return {added, changed, stale, deactivated, again, reader, active, all}
+        return {added, changed, stale, deactivated, again, scheduled, beforeScheduled, reader, active, all}
     },
-    then({added, changed, stale, deactivated, again, reader, active, all}) {
+    then({added, changed, stale, deactivated, again, scheduled, beforeScheduled, reader, active, all}) {
         added.error == ""
         added.results.filter(row => row.resultCode === "STORED").length == 2
         added.results.find(row => row.reasonCode === "BAD CODE").errorCode == "REASON_INVALID"
@@ -470,6 +498,9 @@ feature("reason codes are added, changed by dated rows and deactivated, never de
         stale.error.includes("REASON_CHANGED")
         deactivated.results[0].resultCode == "DEACTIVATED"
         again.error.includes("REASON_INACTIVE")
+        scheduled.results[0].resultCode == "CHANGED"
+        beforeScheduled.error.includes("REASON_INVALID")
+        beforeScheduled.error.includes("has a change from")
         reader.error.includes("PERMISSION_DENIED")
         // the active list leaves SETUP out; the full list keeps it, inactive, with its rows
         active.reasons.map(row => row.reasonCode).join(",") == "JAM"
@@ -478,7 +509,7 @@ feature("reason codes are added, changed by dated rows and deactivated, never de
         active.reasons[0].reasonName == "Feeder jam"
         all.reasons.find(row => row.reasonCode === "SETUP").active == false
         all.reasons.find(row => row.reasonCode === "SETUP").activeText == "Inactive"
-        all.history.length == 2
+        all.history.length == 3
         rows("mantle.work.production.ProductionReason", {organizationPartyId: org, reasonCode: "SETUP"}).length == 1
         rows("mantle.work.production.ProductionReason", {organizationPartyId: org, reasonCode: "SETUP"})[0].thruDate != null
     }
