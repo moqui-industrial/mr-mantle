@@ -72,7 +72,9 @@ const fields = [
         label: "Substitution on a revision",
         kind: "PurchaseSubstitution",
         default: "PsbNotAllowed"
-    }
+    },
+    // P14b: the buy conversion's route (ReplenishmentRouteEntities.xml, crosscut §4.2)
+    {name: "planBuyToRequest", group: "controls", label: "Plan buys go to purchase requests", kind: "indicator", default: "N"}
 ]
 const fieldNames = fields.map(field => field.name)
 const groupLabels = {defaults: "Buying defaults", controls: "Purchase controls"}

@@ -108,6 +108,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canConvertMake" type="Boolean"/>
             <parameter name="canConvertOutside" type="Boolean"/>
             <parameter name="canConvertBuy" type="Boolean"/>
+            <parameter name="buyRoute"><description>The route the buying policy gives a buy conversion: order or request
+                (P14b)</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
@@ -127,6 +129,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canConvertMake" from="out.canConvertMake"/>
             <set field="canConvertOutside" from="out.canConvertOutside"/>
             <set field="canConvertBuy" from="out.canConvertBuy"/>
+            <set field="buyRoute" from="out.buyRoute"/>
         </actions>
     </service>
     <service verb="store" noun="PlanSchedule" allow-remote="false">
@@ -188,6 +191,16 @@ along with this software (see the LICENSE.md file). If not, see
             and the supplier's price, with a RequirementSupply of the line, the requirement Ordered; never placed or
             approved. A buy whose requirement another conversion already covered is refused DEMAND_ALREADY_COVERED, naming
             the supply, so no second order is made; a retry with the same operation key answers its first result (EXISTING).
+            The buy's route (impl-purchasing P14b, SupplyPlanningRoutes.js): where the organization's buying policy sends plan
+            buys to purchase requests (PurchasePolicy.planBuyToRequest), a buy suggestion becomes lines of a purchase request
+            of the organization for its facility, one request per organization and facility in this call, sent to its
+            approval (submit#PurchaseRequest) once the call's lines are in: a line per customer order line of the requirement
+            with a RequestItemOrder to it, and one for the rest, each a RequirementSupply RstPurchaseRequest (an order route
+            asked for under that policy is ROUTE_NOT_ALLOWED). With route dropShip (customer-order demand) each approved
+            customer order line of the requirement moves to the supplier's drop-ship facility through
+            mantle.order.DropShipServices.route#OrderItemToDropShip, which buys it, its purchase order line covering the
+            requirement (NO_CUSTOMER_LINE without one; DROP_SHIP_PENDING when no line's order is approved yet); what is not
+            covered stays to convert (PssPartial).
             Transfer suggestions are not converted here (METHOD_NOT_CONVERTED). An automatic conversion (automatic) leaves a
             suggestion whose reorder rule is snoozed (SUGGESTION_SNOOZED). Requires PRODUCTION_PLAN for make and
             PURCHASE_ORDER_EDIT for buy and outside processing (PERMISSION_DENIED); refuses a buy or outside-processing
@@ -206,12 +219,19 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="automatic" type="Boolean" default="false"><description>A conversion no person chose (a schedule's
                 or a policy's): a suggestion whose reorder rule is snoozed is left (SUGGESTION_SNOOZED).</description>
             </parameter>
+            <parameter name="route"><description>A buy suggestion's route: dropShip (its customer order lines to the
+                supplier's drop-ship facility), request or order; the buying policy's when empty (P14b).</description></parameter>
+            <parameter name="supplierPartyId"><description>The drop-ship route's supplier; each suggestion's own when
+                empty.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"><description>Per suggestion: planningSuggestionId, ok, resultCode CREATED or
                 EXISTING, requirementId, workEffortId, quantity and facilityId (make), or orderId and orderItemSeqId (buy
-                and outside processing), or reasonCode and message.</description>
+                and outside processing), requestId and requestItemSeqIds (the request route), route, routedLines and
+                pendingLines (the drop-ship route), or reasonCode and message.</description>
             </parameter>
+            <parameter name="requests" type="List"><description>The purchase requests the call made: requestId, submitted,
+                statusId, and the message when it stayed a draft.</description></parameter>
             <parameter name="createdCount" type="Integer"/>
             <parameter name="existingCount" type="Integer"/>
             <parameter name="failedCount" type="Integer"/>
@@ -220,6 +240,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
                     .execute('convert', context)"/>
             <set field="results" from="out.results"/>
+            <set field="requests" from="out.requests"/>
             <set field="createdCount" from="out.createdCount"/>
             <set field="existingCount" from="out.existingCount"/>
             <set field="failedCount" from="out.failedCount"/>
@@ -235,6 +256,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="facilityId"/>
             <parameter name="orderId"><description>Buy and outside processing: the draft order of the same supplier (and
                 facility, for a buy) an earlier group of the call made, which this line joins</description></parameter>
+            <parameter name="requestId"><description>The request route: the draft purchase request of the same organization and
+                facility an earlier group of the call made, which these lines join</description></parameter>
+            <parameter name="route"><description>A buy's route: order, request or dropShip; the policy's when
+                empty</description></parameter>
+            <parameter name="supplierPartyId"/>
             <parameter name="automatic" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
