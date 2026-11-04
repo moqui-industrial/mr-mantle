@@ -1,0 +1,79 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A purchase order as of its revision, or as of a date and time read back from the audit log
+     (mantle.order.OrderServices.get#PurchaseOrderPrint): its PDF is what send#PurchaseOrder mails and stores. orderId,
+     orderName, organizationName, supplierName, revisionText, asOfText (empty for the current order, whose print is the
+     same for a revision whatever its status), statusText (shown as of a time),
+     placedText, facilityName, currencyText, supplierReference, totalText and lines (seq, productText, description,
+     quantityText, unitText, priceText, amountText, requiredText, cancelledText). -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Purchase order')} ${orderId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+.sub { color: #59606b; margin: 0 0 6mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 38mm; font-weight: bold; }
+.lines { margin-top: 6mm; }
+.lines th { border-bottom: 1px solid #20252b; }
+.lines td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; white-space: nowrap; }
+.note { color: #59606b; font-size: 9pt; }
+.total td { border-bottom: none; font-weight: bold; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Purchase order')} ${orderId}</h1>
+<p class="sub">${revisionText}<#if asOfText> · ${ec.l10n.localize('as of')} ${asOfText}</#if></p>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Buyer')}</th><td>${organizationName}</td></tr>
+    <tr><th>${ec.l10n.localize('Supplier')}</th><td>${supplierName}</td></tr>
+    <#if orderName><tr><th>${ec.l10n.localize('Reference')}</th><td>${orderName}</td></tr></#if>
+    <#if supplierReference><tr><th>${ec.l10n.localize('Supplier reference')}</th><td>${supplierReference}</td></tr></#if>
+    <#if placedText><tr><th>${ec.l10n.localize('Placed')}</th><td>${placedText}</td></tr></#if>
+    <#if facilityName><tr><th>${ec.l10n.localize('Deliver to')}</th><td>${facilityName}</td></tr></#if>
+    <#if asOfText><tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr>
+</tbody></table>
+<table class="lines">
+    <thead><tr>
+        <th>#</th>
+        <th>${ec.l10n.localize('Item')}</th>
+        <th class="amount">${ec.l10n.localize('Quantity')}</th>
+        <th class="amount">${ec.l10n.localize('Unit price')}</th>
+        <th class="amount">${ec.l10n.localize('Amount')}</th>
+        <th>${ec.l10n.localize('Required by')}</th>
+    </tr></thead>
+    <tbody>
+    <#list lines as line>
+        <tr>
+            <td>${line.seq}</td>
+            <td>${line.productText}<#if line.description><br><span class="note">${line.description}</span></#if><#if line.cancelledText><br><span class="note">${ec.l10n.localize('Cancelled')} ${line.cancelledText}</span></#if></td>
+            <td class="amount">${line.quantityText} ${line.unitText}</td>
+            <td class="amount">${line.priceText}</td>
+            <td class="amount">${line.amountText}</td>
+            <td>${line.requiredText}</td>
+        </tr>
+    </#list>
+        <tr class="total">
+            <td></td><td></td><td></td>
+            <td class="amount">${ec.l10n.localize('Total')}</td>
+            <td class="amount">${totalText}</td>
+            <td></td>
+        </tr>
+    </tbody>
+</table>
+</body></html>
