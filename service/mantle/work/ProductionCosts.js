@@ -25,8 +25,23 @@ const EVENT = "mantle.work.production.ProductionCostEvent",
     ENTRY = "mantle.ledger.transaction.AcctgTransEntry"
 // a run's costs are put up for review once it has been released, and until it is closed or cancelled
 const reviewableStatuses = ["WeApproved", "WeInProgress", "WeOnHold", "WeComplete"]
-// the estimate's components by the event component they compare with
-const estimateFields = {PrcMaterial: "materialCost", PrcLabor: "laborCost", PrcMachine: "machineCost", PrcOutside: "outsideCost"}
+// the estimate's components by the event component they compare with; overhead is an estimate component only (no event
+// carries it: the cost close applies it, R-SA-18), so it is shown and not compared
+const estimateFields = {
+    PrcMaterial: "materialCost",
+    PrcLabor: "laborCost",
+    PrcMachine: "machineCost",
+    PrcOverhead: "overheadCost",
+    PrcOutside: "outsideCost"
+}
+// the frozen estimate's readers: Products' cost read (CostPolicy), so a financial reader sees it too
+const estimateReaders = [
+    "PRODUCT_COST_VIEW",
+    "PRODUCT_COST_ESTIMATE",
+    "PRODUCT_COST_APPROVE",
+    "ACCOUNTING_VIEW",
+    "ACCOUNTING_GL_POST"
+]
 
 const zero = () => toDecimal(0)
 const dec = value => toDecimal(value ?? 0)
@@ -291,17 +306,19 @@ function actualsOf(events) {
 // Estimate against actual per component, for a reader of both.
 function comparisonOf(estimate, actuals) {
     if (!estimate.available) return []
-    return estimate.components.map(component => {
-        const actual = actuals.components.find(row => row.componentEnumId === component.componentEnumId)
-        const actualAmount = actual ? dec(actual.amount) : zero()
-        return {
-            componentEnumId: component.componentEnumId,
-            componentText: component.componentText,
-            estimate: component.amount,
-            actual: text(actualAmount),
-            difference: text(actualAmount.subtract(dec(component.amount)))
-        }
-    })
+    return estimate.components
+        .filter(component => component.componentEnumId !== "PrcOverhead")
+        .map(component => {
+            const actual = actuals.components.find(row => row.componentEnumId === component.componentEnumId)
+            const actualAmount = actual ? dec(actual.amount) : zero()
+            return {
+                componentEnumId: component.componentEnumId,
+                componentText: component.componentText,
+                estimate: component.amount,
+                actual: text(actualAmount),
+                difference: text(actualAmount.subtract(dec(component.amount)))
+            }
+        })
 }
 // What stands in the way of the cost close, for every reader: unvalued events, events their movement did not post, and
 // events awaiting the close (P10's labor and machine, P14's accrual).
@@ -355,7 +372,7 @@ function get(p) {
     const production = ec.resource.script("component://mr-mantle/service/mantle/work/Production.js")
     const run = production.runOf(posting.scope(), p.workEffortId)
     const financial = access.has("ACCOUNTING_VIEW")
-    const estimateRead = financial || access.has("PRODUCT_COST_VIEW")
+    const estimateRead = estimateReaders.some(access.has)
     const canReview = access.has("PRODUCTION_COST_REVIEW")
     const events = Array.from(
         find(EVENT, {workEffortId: run.workEffortId}).orderBy("eventDate").orderBy("productionCostEventId").list()

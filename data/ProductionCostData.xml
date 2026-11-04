@@ -27,7 +27,8 @@ along with this software (see the LICENSE.md file). If not, see
             sequenceNum="3"/>
 
     <!-- the cost components of an event, the components of the frozen estimate (ProductStandardCost) with the output's
-        relief of WIP beside them; overhead is not an event (preview#CostClose computes it, R-SA-18) -->
+        relief of WIP beside them; overhead is a component of the estimate only, never of an event (preview#CostClose
+        computes it, R-SA-18) -->
     <moqui.basic.EnumerationType description="Production Cost Component" enumTypeId="ProductionCostComponent"/>
     <moqui.basic.Enumeration description="Material" enumId="PrcMaterial" enumTypeId="ProductionCostComponent" sequenceNum="1"/>
     <moqui.basic.Enumeration description="Labor" enumId="PrcLabor" enumTypeId="ProductionCostComponent" sequenceNum="2"/>
@@ -35,6 +36,8 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration description="Outside processing" enumId="PrcOutside" enumTypeId="ProductionCostComponent"
             sequenceNum="4"/>
     <moqui.basic.Enumeration description="Output" enumId="PrcOutput" enumTypeId="ProductionCostComponent" sequenceNum="5"/>
+    <moqui.basic.Enumeration description="Overhead" enumId="PrcOverhead" enumTypeId="ProductionCostComponent"
+            sequenceNum="6"/>
 
     <!-- an event without a value (no cost on the asset, no rate in effect on its date) waits for review, and the cost close
         refuses a run that has one (impl-manufacturing §4) -->

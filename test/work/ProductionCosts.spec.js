@@ -139,6 +139,7 @@ spec({
         user("PPC_FINANCE", ["ACCOUNTING_VIEW"])
         user("PPC_READER", ["PRODUCTION_VIEW"])
         user("PPC_POSTER", ["PRODUCTION_COST_POST"])
+        user("PPC_OTHER_POSTER", ["PRODUCTION_COST_POST"], other)
         user("PPC_NOBODY", ["METHOD_VIEW"])
         user("PPC_OUTSIDER", ["PRODUCTION_VIEW", "ACCOUNTING_VIEW", "PRODUCTION_COST_REVIEW"], other)
         call("create#mantle.facility.Facility", {
@@ -161,7 +162,7 @@ spec({
                 amountUomId: "OTH_ea",
                 ownerPartyId: org
             })
-        // the approved estimate release freezes: 5 a unit, 3 material and 2 labor
+        // the approved estimate release freezes: 5 a unit, 3 material, 1.5 labor and 0.5 overhead
         call("create#mantle.product.cost.ProductStandardCost", {
             productStandardCostId: "PPC_STD",
             productId: "PPC_FIN",
@@ -174,7 +175,8 @@ spec({
             unitCost: 5,
             totalCost: 5,
             materialCost: 3,
-            laborCost: 2,
+            laborCost: 1.5,
+            overheadCost: 0.5,
             complete: "Y"
         })
         ec.artifactExecution.enableAuthz()
@@ -378,6 +380,7 @@ feature("a cost estimator reads the frozen estimate and no actuals, a financial 
         estimator.estimate.unitCost == "5"
         estimator.estimate.totalCost == "50"
         estimator.estimate.components.find(row => row.componentEnumId == "PrcMaterial").amount == "30"
+        estimator.estimate.components.find(row => row.componentEnumId == "PrcOverhead").amount == "5"
         // actual values and ledger links are left out, never zero
         estimator.actuals == null
         estimator.comparison == null
@@ -392,6 +395,8 @@ feature("a cost estimator reads the frozen estimate and no actuals, a financial 
         finance.actuals.wipBalance == "-30"
         finance.events.every(row => row.acctgTransId != null && row.amount != null)
         finance.comparison.find(row => row.componentEnumId == "PrcMaterial").actual == "20"
+        // overhead is the estimate's only: the cost close applies it, so it is not compared
+        !finance.comparison.some(row => row.componentEnumId == "PrcOverhead")
         finance.canReview == false
         reader.error == ""
         reader.events.length == 2
@@ -452,6 +457,7 @@ feature("a review request sets the run's review status and notifies Accounting w
             workEffort,
             audited,
             poster: notices("PPC_POSTER", state.reviewRun),
+            otherPoster: notices("PPC_OTHER_POSTER", state.reviewRun),
             estimatorNotices: notices("PPC_READER", state.reviewRun)
         }
     },
@@ -468,6 +474,7 @@ feature("a review request sets the run's review status and notifies Accounting w
         workEffort,
         audited,
         poster,
+        otherPoster,
         estimatorNotices
     }) {
         reader.error.includes("PERMISSION_DENIED")
@@ -488,8 +495,10 @@ feature("a review request sets the run's review status and notifies Accounting w
         after.review.statusId == "PcrRequested"
         after.review.canRequest == false
         after.review.blockCode == "REVIEW_REQUESTED"
-        // one notice to the cost close poster, with the run and its revision; none to a production reader
+        // one notice to the organization's cost close poster, with the run and its revision; none to another
+        // organization's poster or to a production reader
         poster.length == 1
+        otherPoster.length == 0
         JSON.parse(poster[0].messageJson).workEffortId == state.reviewRun
         JSON.parse(poster[0].messageJson).sourceRevision == revision
         estimatorNotices.length == 0

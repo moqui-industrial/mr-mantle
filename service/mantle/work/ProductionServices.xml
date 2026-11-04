@@ -686,7 +686,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A production run's cost evidence (design-manufacturing ProductionCosts Costs and CloseReview): the run,
             its cost events (type, component, product, quantity, source, valuation and ledger state; each amount, rate and
             ledger link only with ACCOUNTING_VIEW), the frozen estimate it was released with for its output quantity (with
-            PRODUCT_COST_VIEW or ACCOUNTING_VIEW), the actual cost by component with the material issued and returned, the
+            Products' cost read: PRODUCT_COST_VIEW, _ESTIMATE or _APPROVE, ACCOUNTING_VIEW or ACCOUNTING_GL_POST), the actual cost by component with the material issued and returned, the
             output's relief and the WIP balance (with ACCOUNTING_VIEW), the estimate against the actual (with both), the
             exceptions that stand in the way of the cost close (unvalued, not posted and awaiting-close events) and the cost
             review (its status, whether the user may request it now and why not, a closed-period warning). A value the user
@@ -696,7 +696,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="run" type="Map"/>
             <parameter name="events" type="List"/>
-            <parameter name="estimate" type="Map"><description>Only with PRODUCT_COST_VIEW or ACCOUNTING_VIEW</description>
+            <parameter name="estimate" type="Map"><description>Only with Products' cost read</description>
             </parameter>
             <parameter name="actuals" type="Map"><description>Only with ACCOUNTING_VIEW</description></parameter>
             <parameter name="comparison" type="List"><description>Only with both</description></parameter>
