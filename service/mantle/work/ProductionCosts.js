@@ -173,6 +173,11 @@ const sources = {
     "mantle.work.production.ProductionLoss": productionLossId =>
         ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuantities.js").lossCostEvent(productionLossId)
 }
+// P14: outside processing, derived in ProductionSubcontracts.js: a service acceptance's accrual and a bill match line's price
+// variance, both awaiting the cost close
+const subcontracts = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionSubcontracts.js")
+sources["mantle.order.purchase.ServiceAcceptance"] = id => subcontracts().acceptanceEvent(id)
+sources["mantle.account.invoice.InvoiceMatchLine"] = id => subcontracts().billVarianceEvent(id)
 
 // Writes the event of a source revision once, inside the caller's transaction; a second call answers the first event.
 function record(p) {
