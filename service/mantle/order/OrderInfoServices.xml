@@ -35,6 +35,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <auto-parameters entity-name="mantle.order.OrderItem"/></parameter></parameter>
             <parameter name="orderItemNoParentCount" type="Integer"/>
             <parameter name="allItemsAuditLogList" type="List"><parameter name="orderItem" type="Map"/></parameter>
+            <parameter name="itemOtherAuditLogList" type="List"><description>The changes of the lines' unit, cancelled quantity
+                and description, newest first (impl-purchasing P3, F36)</description><parameter name="orderItem" type="Map"/>
+            </parameter>
+            <parameter name="revisionHistoryList" type="List"><description>The changes of the order's revision, oldest
+                first (impl-purchasing P3, F36)</description><parameter name="auditLog" type="Map"/></parameter>
             <parameter name="orderItemWithChildrenSet" type="Set"><parameter name="orderItemSeqId"/></parameter>
             <parameter name="productItemTypes" type="List"><parameter name="itemTypeEnumId"/></parameter>
 
@@ -245,6 +250,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="changedFieldName,pkSecondaryValue,newValueText,oldValueText,changeReason,changedByUserId,changedDate"/>
                 <order-by field-name="-changedDate"/>
             </entity-find>
+            <!-- the other audit-logged line fields, apart so allItemsAuditLogList's readers still see quantity and price only -->
+            <entity-find entity-name="moqui.entity.EntityAuditLog" list="itemOtherAuditLogList">
+                <econdition field-name="changedEntityName" value="mantle.order.OrderItem"/>
+                <econdition field-name="changedFieldName" operator="in" value="quantityUomId,quantityCancelled,itemDescription"/>
+                <econdition field-name="pkPrimaryValue" from="orderId"/>
+                <select-field field-name="changedFieldName,pkSecondaryValue,newValueText,oldValueText,changeReason,changedByUserId,changedDate"/>
+                <order-by field-name="-changedDate"/>
+            </entity-find>
 
             <!-- get orderPromoCodeDetailList -->
             <entity-find entity-name="mantle.product.store.OrderPromoCodeDetail" list="orderPromoCodeDetailList">
@@ -337,6 +350,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="statusHistoryList">
                 <econdition field-name="changedEntityName" value="mantle.order.OrderHeader"/>
                 <econdition field-name="changedFieldName" value="statusId"/>
+                <econdition field-name="pkPrimaryValue" from="orderId"/>
+                <order-by field-name="changedDate"/>
+            </entity-find>
+            <entity-find entity-name="moqui.entity.EntityAuditLog" list="revisionHistoryList">
+                <econdition field-name="changedEntityName" value="mantle.order.OrderHeader"/>
+                <econdition field-name="changedFieldName" value="orderRevision"/>
                 <econdition field-name="pkPrimaryValue" from="orderId"/>
                 <order-by field-name="changedDate"/>
             </entity-find>
@@ -574,6 +593,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="userAccount" type="Map"/>
                 <parameter name="changeReasonEnum" type="Map"/>
             </parameter></parameter>
+            <parameter name="itemOtherAuditList" type="List"><description>The changes of the line's unit, cancelled quantity
+                and description (impl-purchasing P3, F36)</description><parameter name="itemOtherAudit" type="Map">
+                <parameter name="auditLog" type="Map"/>
+                <parameter name="userAccount" type="Map"/>
+            </parameter></parameter>
 
             <parameter name="orderItemTotalOut" type="Map"><description>Result from mantle.order.OrderServices.get#OrderItemTotal with getChildrenTotals=true</description></parameter>
             <parameter name="orderItemQuantity" type="BigDecimal"/>
@@ -618,7 +642,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- item quantity and unitAmount EntityAuditLog records -->
             <entity-find entity-name="moqui.entity.EntityAuditLog" list="itemAuditLogList">
                 <econdition field-name="changedEntityName" value="mantle.order.OrderItem"/>
-                <econdition field-name="changedFieldName" operator="in" value="quantity,unitAmount"/>
+                <econdition field-name="changedFieldName" operator="in" value="quantity,unitAmount,quantityUomId,quantityCancelled,itemDescription"/>
                 <econdition field-name="pkPrimaryValue" from="orderId"/>
                 <econdition field-name="pkSecondaryValue" from="orderItemSeqId"/>
                 <select-field field-name="changedFieldName,pkSecondaryValue,newValueText,oldValueText,changeReason,changedByUserId,changedDate"/>
@@ -626,6 +650,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="itemQuantityAuditList" from="[]"/>
             <set field="itemUnitAmountAuditList" from="[]"/>
+            <set field="itemOtherAuditList" from="[]"/>
             <iterate list="itemAuditLogList" entry="auditLog">
                 <entity-find-one entity-name="mantle.party.PersonWithUserAccount" value-field="userAccount">
                     <field-map field-name="userId" from="auditLog.changedByUserId"/></entity-find-one>
@@ -633,7 +658,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <field-map field-name="enumId" from="auditLog.changeReason"/></entity-find-one>
                 <if condition="auditLog.changedFieldName == 'quantity'"><then>
                     <script>itemQuantityAuditList.push({auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum})</script>
-                </then><else>
+                </then><else-if condition="auditLog.changedFieldName != 'unitAmount'">
+                    <script>itemOtherAuditList.push({auditLog:auditLog, userAccount:userAccount})</script>
+                </else-if><else>
                     <script>itemUnitAmountAuditList.push({auditLog:auditLog, userAccount:userAccount, changeReasonEnum:changeReasonEnum})</script>
                 </else></if>
             </iterate>

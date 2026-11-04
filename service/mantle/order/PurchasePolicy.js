@@ -56,7 +56,15 @@ const fields = [
         default: "PusWarn"
     },
     {name: "approvalGateEnabled", group: "controls", label: "Purchase approval gate", kind: "indicator", default: "N"},
-    {name: "selfApprovalAllowed", group: "controls", label: "Buyers approve their own orders", kind: "indicator", default: "N"}
+    {name: "selfApprovalAllowed", group: "controls", label: "Buyers approve their own orders", kind: "indicator", default: "N"},
+    // P3: the commercial revision (PurchaseOrderEntities.xml, increment#OrderRevision)
+    {
+        name: "commercialRevisionOnly",
+        group: "controls",
+        label: "Revisions count commercial changes only",
+        kind: "indicator",
+        default: "N"
+    }
 ]
 const fieldNames = fields.map(field => field.name)
 const groupLabels = {defaults: "Buying defaults", controls: "Purchase controls"}

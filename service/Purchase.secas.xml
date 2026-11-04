@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The purchase approval gate on Mantle's approval (design-purchasing §6 automation, D8; impl-purchasing P3, §2):
+    autoApprove#Order approves only when check#OrderPreApprove has no warning, so a purchase part of an organization whose
+    buying policy has the approval gate on is not approved without a current decision (a prepaid or zero-total purchase order
+    too). approve#Order refuses on the same warning. With the gate off (no PurchasePolicy row, the default) nothing is
+    added. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="OrderPreApprovePurchase" service="mantle.order.OrderInfoServices.check#OrderPreApprove" when="post-service">
+        <actions>
+            <service-call name="mantle.order.PurchaseServices.check#PurchaseApprovalRequired" out-map="purchaseOut"
+                    disable-authz="true" in-map="{orderId:orderId}"/>
+            <if condition="purchaseOut.approveWarnings?.length">
+                <set field="results.approveWarnings"
+                        from="Array.from(results.approveWarnings ?? []).concat(Array.from(purchaseOut.approveWarnings))"/>
+            </if>
+        </actions>
+    </seca>
+</secas>

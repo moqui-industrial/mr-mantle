@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase orders (design-purchasing §6; impl-purchasing P3, F7, F18, F36, F42): the approval decision, a fact of its own
+    (§2), the audit log on the purchase order's key fields Mantle did not log (the header's revision, a line's unit,
+    cancelled quantity and description), so the order as of a date and time is read back from the audit log
+    (mantle.order.OrderServices.get#PurchaseOrderPrint), the buying policy's commercial revision flag, and the content type
+    of an issued purchase order's PDF (send#PurchaseOrder). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PurchaseApprovalDecision" package="mantle.order.purchase" cache="never">
+        <description>One approval decision on a purchase source (a purchase order now; requests, awards and agreements in
+            later phases) at a revision: who decided, what, when and why, and the policy rows it was evaluated against.
+            Written only by mantle.order.PurchaseServices.decide#PurchaseApproval. A decision is current while the source's
+            revision is the one it names; check#PurchaseApprovalRequired reads it.</description>
+        <field name="purchaseApprovalDecisionId" type="id" is-pk="true"/>
+        <field name="sourceEntityName" type="text-medium"><description>mantle.order.OrderHeader for a purchase
+            order</description></field>
+        <field name="sourceId" type="id"/>
+        <field name="sourceRevision" type="number-integer"><description>The source's revision the decision is bound to
+            (OrderHeader.orderRevision)</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="policyFromDate" type="date-time"><description>The PurchasePolicy row in effect (its fromDate), empty
+            when the organization has none</description></field>
+        <field name="approvalPolicyId" type="id"><description>The approval policy row and step (P4); empty under the
+            no-policy rule, one step by a purchase approver</description></field>
+        <field name="stepSeqId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" title="PurchaseApprovalDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="PUR_APR_DEC_SOURCE"><index-field name="sourceId"/><index-field name="sourceRevision"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Approval Decision" enumTypeId="PurchaseApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PadApproved" description="Approved" sequenceNum="1"
+                    enumTypeId="PurchaseApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PadRefused" description="Refused" sequenceNum="2"
+                    enumTypeId="PurchaseApprovalDecision"/>
+            <!-- the PDF of a purchase order as sent, stored once per print (send#PurchaseOrder) -->
+            <moqui.basic.Enumeration enumId="OctPurchaseOrderIssued" description="Issued purchase order"
+                    enumTypeId="OrderContentType"/>
+        </seed-data>
+    </entity>
+
+    <!-- the key fields of a purchase order the audit log did not cover (F18, F36), logged on create and update ("update"
+        leaves out the first value set on an empty field, such as the first cancelled quantity), so the order as of a time
+        reads the first change after it -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="orderRevision" type="number-integer" enable-audit-log="true"/>
+    </extend-entity>
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="itemDescription" type="text-medium" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="quantityCancelled" type="number-decimal" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- the commercial revision (crosscut CX-ORDER-AUTHORITY, X2) for the organization's purchase orders, behind its flag -->
+    <extend-entity entity-name="PurchasePolicy" package="mantle.order.purchase">
+        <field name="commercialRevisionOnly" type="text-indicator" enable-audit-log="true"><description>Y: a purchase
+            order's revision counts only commercial changes (lines, parties, addresses, terms): a stored file or PDF, a note
+            and a status change (place, approve, send, hold) no longer move it, so an approval decision and a send stay
+            bound to it (increment#OrderRevision); N with no row, Mantle's counting</description></field>
+    </extend-entity>
+</entities>

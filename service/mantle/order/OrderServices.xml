@@ -1212,7 +1212,11 @@ General Order Placement and eCommerce Usage
         </actions>
     </service>
     <service verb="approve" noun="Order">
-        <description>For manual order approval, requires ORDER_APPROVE permission. An order (or the part given) with an open
+        <description>For manual order approval, by direction (X4; impl-purchasing P3, F33): a sales or internal part requires
+            ORDER_APPROVE; a purchase part (an internal organization buying from a party that is not one) whose buying
+            organization's policy has the approval gate on requires PURCHASE_ORDER_APPROVE and an approval decision for the
+            order's revision (PurchaseServices.decide#PurchaseApproval; PURCHASE_APPROVAL_REQUIRED), and with the gate off
+            (the default) PURCHASE_ORDER_APPROVE or ORDER_APPROVE, as before. An order (or the part given) with an open
             hold reason is released, not approved (ORDER_HOLD_OPEN). A sales order is checked against its customers' credit
             policies first (mantle.account.CreditServices.evaluate#OrderCredit): a Hold result puts the part on a Credit
             hold instead of approving it (the order when it has one part), keeping its reservations, and answers creditHeld;
@@ -1230,8 +1234,9 @@ General Order Placement and eCommerce Usage
             <parameter name="heldPartSeqIds" type="List"/>
         </out-parameters>
         <actions>
-            <if condition="!ec.user.hasPermission('ORDER_APPROVE')">
-                <return error="true" message="Order Approve permission required"/></if>
+            <set field="approveRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+                .approveRefusal(orderId, orderPartSeqId)"/>
+            <if condition="approveRefusal"><return error="true" message="${approveRefusal}"/></if>
             <set field="creditHeld" from="false"/>
             <entity-find entity-name="mantle.order.OrderHoldReason" list="openHolds" disable-authz="true">
                 <econdition field-name="orderId"/>
@@ -1284,8 +1289,12 @@ General Order Placement and eCommerce Usage
             status to return to (returnStatusId, by default the status before the hold, so an order held before its
             approval goes back to Placed and its approval runs its checks again). A reason of the same type already open
             for the part is answered (alreadyHeld). Refuses an order that is not placed, processing, approved or held
-            (ORDER_HOLD_STATE). A Credit reason is placed only by the credit policy (CreditServices.evaluate#OrderCredit);
-            the other types need the permission their type names (enumCode). It checks no organization: its callers check
+            (ORDER_HOLD_STATE); a sent purchase order is first un-sent to Approved (D7), to which its release returns it. A
+            Credit reason is placed only by the credit policy (CreditServices.evaluate#OrderCredit); the other types need the
+            permission their type names (enumCode), and a Change or Purchase reason may also be placed under the order's
+            change permission for its direction (PURCHASE_ORDER_EDIT on a purchase part, ORDER_CHANGE_APPLY or
+            SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. It
+            checks no organization: its callers check
             the order's organization before calling it (as the credit services do).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
@@ -1304,7 +1313,8 @@ General Order Placement and eCommerce Usage
                 <field-map field-name="enumId" from="holdTypeEnumId"/></entity-find-one>
             <if condition="holdType?.enumTypeId != 'OrderHoldType'">
                 <return error="true" message="HOLD_TYPE_INVALID: Choose a hold type"/></if>
-            <if condition="holdTypeEnumId != 'OhtCredit' &amp;&amp; !ec.user.hasPermission(holdType.enumCode)">
+            <if condition="holdTypeEnumId != 'OhtCredit' &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+                    .holdAllowed(orderId, orderPartSeqId, holdTypeEnumId, holdType.enumCode)">
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"
                     disable-authz="true"/>
@@ -1318,6 +1328,13 @@ General Order Placement and eCommerce Usage
                     <return error="true" message="ORDER_UNAVAILABLE: Order ${orderId} part ${orderPartSeqId} not found"/></if>
             </if>
             <set field="currentStatusId" from="(orderPart ?? orderHeader).statusId"/>
+            <!-- a sent purchase order un-sends to Approved first (D7): Mantle has no Sent to Hold transition -->
+            <if condition="currentStatusId == 'OrderSent' &amp;&amp; ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+                    .allPurchase(orderId, orderPartSeqId)">
+                <service-call name="mantle.order.OrderServices.update#OrderStatus" disable-authz="true"
+                        in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId || null, statusId:'OrderApproved'}"/>
+                <set field="currentStatusId" value="OrderApproved"/>
+            </if>
             <if condition="!['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderHold'].includes(currentStatusId)">
                 <return error="true" message="ORDER_HOLD_STATE: Order ${orderId} cannot be held in its status"/></if>
             <entity-find entity-name="mantle.order.OrderHoldReason" list="openList" disable-authz="true">
@@ -2647,7 +2664,10 @@ General Order Placement and eCommerce Usage
                                 in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                     </if>
                 </if>
-                <!-- NOTE: no need to increment#OrderRevision, will be done when part updated -->
+                <!-- NOTE: no need to increment#OrderRevision, will be done when part updated; where the order counts commercial
+                    changes only (impl-purchasing P3) a line's quantity or price counts here -->
+                <service-call name="mantle.order.OrderServices.increment#OrderRevision"
+                        in-map="{orderId:orderId, revisionKind:'item'}"/>
             </then><else>
                 <!-- increment order revision if anything else changes on an item -->
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/>
@@ -2667,6 +2687,7 @@ General Order Placement and eCommerce Usage
             <parameter name="disableShippingCalc"/>
             <parameter name="disableTaxCalc"/>
             <parameter name="partTotal" type="BigDecimal"/>
+            <parameter name="statusId"/>
             <parameter name="originalValue" type="Map"/>
         </in-parameters>
         <actions>
@@ -2682,7 +2703,12 @@ General Order Placement and eCommerce Usage
                 <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                         in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
             </then><else>
-                <service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/>
+                <!-- a status-only update (place, approve, send, hold) is not a commercial change (impl-purchasing P3) -->
+                <set field="statusOnly" from="hasOriginal &amp;&amp; statusId != originalValue.statusId
+                    &amp;&amp; postalContactMechId == originalValue.postalContactMechId &amp;&amp; carrierPartyId == originalValue.carrierPartyId
+                    &amp;&amp; shipmentMethodEnumId == originalValue.shipmentMethodEnumId &amp;&amp; customerPartyId == originalValue.customerPartyId"/>
+                <service-call name="mantle.order.OrderServices.increment#OrderRevision"
+                        in-map="{orderId:orderId, revisionKind:(statusOnly ? 'status' : null)}"/>
             </else></if>
         </actions>
     </service>
@@ -2855,11 +2881,42 @@ General Order Placement and eCommerce Usage
         </actions>
     </service>
     <service verb="increment" noun="OrderRevision">
+        <description>Add one to the order's revision (OrderHeader.orderRevision, audit-logged). The commercial revision
+            (crosscut CX-ORDER-AUTHORITY, X2; impl-purchasing P3): for an order with a purchase part whose buying
+            organization's policy sets commercialRevisionOnly, a stored file, a note and a status-only part update no longer
+            count, and a line's quantity or price does; every other order counts as before.</description>
         <in-parameters>
             <parameter name="orderId"/>
+            <parameter name="revisionKind"><description>Empty or commercial: counts. content, note or status: not counted
+                where the order counts commercial changes only. item: counted only there.</description></parameter>
         </in-parameters>
         <actions>
             <if condition="!orderId"><return/></if>
+            <if condition="revisionKind &amp;&amp; revisionKind != 'commercial'">
+                <set field="commercialOnly" from="false"/>
+                <entity-find entity-name="mantle.order.OrderPart" list="revisionParts" disable-authz="true">
+                    <econdition field-name="orderId"/></entity-find>
+                <iterate list="revisionParts" entry="revisionPart">
+                    <if condition="commercialOnly || !revisionPart.customerPartyId || !revisionPart.vendorPartyId"><continue/></if>
+                    <entity-find-count entity-name="mantle.party.PartyRole" count-field="customerInternal" disable-authz="true">
+                        <econdition field-name="partyId" from="revisionPart.customerPartyId"/>
+                        <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find-count>
+                    <if condition="customerInternal == 0"><continue/></if>
+                    <entity-find-count entity-name="mantle.party.PartyRole" count-field="vendorInternal" disable-authz="true">
+                        <econdition field-name="partyId" from="revisionPart.vendorPartyId"/>
+                        <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find-count>
+                    <if condition="vendorInternal &gt; 0"><continue/></if>
+                    <entity-find entity-name="mantle.order.purchase.PurchasePolicy" list="revisionPolicies" limit="1"
+                            disable-authz="true">
+                        <date-filter/>
+                        <econdition field-name="organizationPartyId" from="revisionPart.customerPartyId"/>
+                        <order-by field-name="-fromDate"/>
+                    </entity-find>
+                    <set field="commercialOnly" from="revisionPolicies.length &gt; 0
+                        &amp;&amp; revisionPolicies[0].commercialRevisionOnly == 'Y'"/>
+                </iterate>
+                <if condition="revisionKind == 'item' ? !commercialOnly : commercialOnly"><return/></if>
+            </if>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true">
                 <field-map field-name="orderId"/></entity-find-one>
             <!-- TODO: not using <select-field field-name="orderId,orderRevision"/> because of issue in EntityValue where a bunch of stuff gets set to null -->
@@ -3152,6 +3209,91 @@ General Order Placement and eCommerce Usage
             <set field="result" from="posting.complete(begun.op, accepted.organizationPartyId,
                     'mantle.order.purchase.ServiceAcceptance', accepted.serviceAcceptanceId,
                     Object.assign({resultCode: 'ACCEPTED'}, accepted))"/>
+        </actions>
+    </service>
+    <!-- ===== Purchasing's purchase order send and print (design-purchasing §6 OrderDetail, R-PUR-02; impl-purchasing P3,
+        F42; PurchaseOrderDocuments.js) ===== -->
+    <service verb="send" noun="PurchaseOrder" allow-remote="false">
+        <description>Send an approved purchase order's current revision to its supplier, on send#Invoice's path (F42): the
+            print (get#PurchaseOrderPrint) rendered to a PDF stored once per print as an OrderContent of type
+            OctPurchaseOrderIssued named by its revision; each recipient (toAddresses, else the supplier's EmailOrder
+            addresses, else its EmailPrimary ones) gets it through send#EmailTemplate (MANTLE_PURCHASE_ORDER_EMAIL by
+            default) in its own transaction, recorded as an OrderEmailMessage with the revision; a recipient the revision was
+            already sent to is skipped (ALREADY_SENT), an invalid one or a failed send named, and the others are sent. A send
+            to anyone, or a revision already sent (an order back from a hold), moves an approved order to Sent. The same operation key answers the first result. Requires
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an order outside the user's organizations (RECORD_UNAVAILABLE),
+            one that is not approved or sent (ORDER_SEND_STATE), a revision that is not the current one, naming it
+            (STALE_REVISION), and no recipient (RECIPIENT_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" type="Integer"><description>The revision reviewed; the current one when
+                empty</description></parameter>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="toAddresses"><description>Comma, semicolon or line separated; the supplier's order addresses when
+                empty.</description></parameter>
+            <parameter name="note"/>
+            <parameter name="subject"/>
+            <parameter name="emailTemplateId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="orderContentId"/>
+            <parameter name="contentHash"/>
+            <parameter name="recipientResults" type="List"><description>Each recipient's recipient, status (sent, queued,
+                skipped or failed), reasonCode and emailMessageId.</description></parameter>
+            <parameter name="successCount" type="Integer"/>
+            <parameter name="failureCount" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrderDocuments.js"/>
+            <set field="sent" from="ec.resource.script(module).execute('send', context)"/>
+            <set field="orderId" from="sent.orderId"/>
+            <set field="orderRevision" from="sent.orderRevision"/>
+            <set field="orderContentId" from="sent.orderContentId"/>
+            <set field="contentHash" from="sent.contentHash"/>
+            <set field="recipientResults" from="sent.recipientResults"/>
+            <set field="successCount" from="sent.successCount"/>
+            <set field="failureCount" from="sent.failureCount"/>
+            <set field="statusId" from="sent.statusId"/>
+            <set field="alreadyApplied" from="sent.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PurchaseOrderPrint" allow-remote="false">
+        <description>A purchase order's print (HTML for html-print or a PDF), as of its current revision or of a date and
+            time, read back from the audit log (F36): the header's status and revision, each line that existed then with its
+            product, quantity, unit, price, cancelled quantity, description and required date. Requires PURCHASE_ORDER_EDIT,
+            PURCHASE_APPROVE or PURCHASE_ORDER_APPROVE (PERMISSION_DENIED); refuses an order outside the user's
+            organizations (RECORD_UNAVAILABLE), a time to come (DATE_INVALID) and one before the order was entered
+            (ORDER_NOT_YET).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"><description>Now (the current revision) when empty</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="printHtml"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="revisionDate"/>
+            <parameter name="statusId"/>
+            <parameter name="asOfText"/>
+            <parameter name="contentHash"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrderDocuments.js"/>
+            <set field="printed" from="ec.resource.script(module).execute('print', context)"/>
+            <set field="orderId" from="printed.orderId"/>
+            <set field="printHtml" from="printed.printHtml"/>
+            <set field="orderRevision" from="printed.orderRevision"/>
+            <set field="revisionDate" from="printed.revisionDate"/>
+            <set field="statusId" from="printed.statusId"/>
+            <set field="asOfText" from="printed.asOfText"/>
+            <set field="contentHash" from="printed.contentHash"/>
+            <set field="fileName" from="printed.fileName"/>
         </actions>
     </service>
 </services>

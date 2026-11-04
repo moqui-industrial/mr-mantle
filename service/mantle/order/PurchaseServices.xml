@@ -14,7 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Purchasing's rules over purchase orders and their policies (impl-purchasing §2, §4). P2: the buying policy
     (PurchasePolicy, dated by organization) and the supplier check the order and RFQ services call (PurchasePolicy.js).
-    Later phases add the approval gate (check#PurchaseApprovalRequired, decide#PurchaseApproval) and the order verbs here. -->
+    P3: the buyer's purchase order verbs, the approval decision and the approval gate's check (PurchaseOrders.js); the
+    order's send and print are mantle.order.OrderServices'. Later phases add the approval policies here. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="PurchasePolicy" allow-remote="false">
@@ -90,6 +91,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="unapprovedSupplierEnumId"/>
             <parameter name="approvalGateEnabled"/>
             <parameter name="selfApprovalAllowed"/>
+            <parameter name="commercialRevisionOnly"/>
             <parameter name="changeReason" required="true"/>
         </in-parameters>
         <out-parameters>
@@ -143,6 +145,210 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="approvalStatusId" from="checked.approvalStatusId"/>
             <set field="supplierProfileId" from="checked.supplierProfileId"/>
             <set field="policyFromDate" from="checked.policyFromDate"/>
+        </actions>
+    </service>
+    <!-- ===== P3: purchase orders (PurchaseOrders.js; design-purchasing §6, impl-purchasing P3) ===== -->
+    <service verb="create" noun="PurchaseOrder" allow-remote="false">
+        <description>A draft purchase order (OrderOpen) of an organization from a supplier, with one purchase part (F7): the
+            supplier's currency from its profile, else the buying policy's, else the organization's; the receiving facility
+            given, else the policy's. The supplier check of the buying policy runs first: a Stop refuses with its reason
+            (SUPPLIER_BLOCKED, SUPPLIER_SUSPENDED, SUPPLIER_UNAPPROVED), a Warn is a warning message and supplierResult.
+            Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an organization outside the user's
+            (RECORD_UNAVAILABLE), a supplier that is not one or is another organization's (SUPPLIER_UNAVAILABLE), another
+            organization's facility (FACILITY_INVALID) and a currency that is not one (CURRENCY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="vendorPartyId" required="true"/>
+            <parameter name="orderName"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="supplierResult"/>
+            <parameter name="supplierMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="created" from="ec.resource.script(module).execute('create', context)"/>
+            <set field="orderId" from="created.orderId"/>
+            <set field="orderPartSeqId" from="created.orderPartSeqId"/>
+            <set field="supplierResult" from="created.supplierResult"/>
+            <set field="supplierMessage" from="created.supplierMessage"/>
+        </actions>
+    </service>
+    <service verb="update" noun="PurchaseOrder" allow-remote="false">
+        <description>A draft purchase order's name and receiving facility. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED);
+            refuses an order outside the user's organizations (RECORD_UNAVAILABLE), one that is not a purchase order
+            (NOT_PURCHASE) or has several parts (PURCHASE_PARTS), one that is not a draft (ORDER_NOT_DRAFT) and another
+            organization's facility (FACILITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderName"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters><parameter name="orderId"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="orderId" from="ec.resource.script(module).execute('update', context).orderId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PurchaseOrderItem" allow-remote="false">
+        <description>A draft purchase order's line. A new line names a product usable for buying (check#ProductUsable,
+            usage Purchase; PRODUCT_NOT_USABLE with its reason) at the supplier's price from the resolver unless a price is
+            given (PRICE_UNAVAILABLE when there is none the user may read); a pack is ordered as its pack product. A line
+            given by orderItemSeqId changes its quantity, unit, price, description, required date or cost centre. The cost
+            centre is the organization or one that rolls up to it (COST_CENTER_INVALID). Requires PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses an order outside the user's organizations (RECORD_UNAVAILABLE), one that is not a
+            draft (ORDER_NOT_DRAFT), a line not on it (ITEM_UNAVAILABLE), no product (PRODUCT_REQUIRED) and a quantity or
+            price that is not a number (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="itemTypeEnumId"/>
+            <parameter name="itemDescription"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="costCenterId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('storeItem', context)"/>
+            <set field="orderId" from="stored.orderId"/>
+            <set field="orderItemSeqId" from="stored.orderItemSeqId"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="PurchaseOrderItem" allow-remote="false">
+        <description>A draft purchase order's line removed. Requires PURCHASE_ORDER_EDIT; refuses as store#PurchaseOrderItem
+            does.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+        </in-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <script>ec.resource.script(module).execute('removeItem', context)</script>
+        </actions>
+    </service>
+    <service verb="place" noun="PurchaseOrder" allow-remote="false">
+        <description>Place a draft purchase order with lines (place#Order). The supplier check runs again: a Stop refuses, a
+            Warn is a warning. Mantle's OrderPlaced rules then run; where the buying policy's approval gate is on,
+            check#PurchaseApprovalRequired keeps autoApprove#Order from approving it (a prepaid or zero-total order too).
+            Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an order outside the user's organizations
+            (RECORD_UNAVAILABLE), one that is not a draft (ORDER_NOT_DRAFT) and one with no line (ORDER_EMPTY).</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="supplierResult"/>
+            <parameter name="supplierMessage"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="placed" from="ec.resource.script(module).execute('place', context)"/>
+            <set field="orderId" from="placed.orderId"/>
+            <set field="statusId" from="placed.statusId"/>
+            <set field="supplierResult" from="placed.supplierResult"/>
+            <set field="supplierMessage" from="placed.supplierMessage"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="PurchaseOrder" allow-remote="false">
+        <description>Cancel a purchase order nothing was received or billed on (cancel#Order), keeping the reason as an
+            internal note. A partly received order closes its remainder (OrderServices.close#PurchaseRemainders) instead.
+            Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an order outside the user's organizations
+            (RECORD_UNAVAILABLE), no reason (REASON_REQUIRED), a completed, rejected or cancelled order (ORDER_NOT_OPEN), a
+            received one (ORDER_RECEIVED) and a billed one (ORDER_BILLED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="cancelled" from="ec.resource.script(module).execute('cancel', context)"/>
+            <set field="orderId" from="cancelled.orderId"/>
+            <set field="statusId" from="cancelled.statusId"/>
+        </actions>
+    </service>
+    <service verb="clone" noun="PurchaseOrder" allow-remote="false">
+        <description>A new draft purchase order with a purchase order's lines and parties (clone#Order, without payments,
+            files or notes), for the same supplier, which the supplier check must not stop. A line whose product is no longer
+            usable for buying is named in a warning and unusableItemSeqIds, to fix before placing. Requires
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an order outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="unusableItemSeqIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="cloned" from="ec.resource.script(module).execute('clone', context)"/>
+            <set field="orderId" from="cloned.orderId"/>
+            <set field="unusableItemSeqIds" from="cloned.unusableItemSeqIds"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="PurchaseApproval" allow-remote="false">
+        <description>A purchase approver's decision on a placed purchase order at its revision, with design ApprovalPolicies'
+            no-policy rule: one step by a holder of PURCHASE_APPROVE; the user who entered or placed the order is refused
+            unless the buying policy allows self-approval; a supplier the policy stops is refused. The decision is kept as a
+            PurchaseApprovalDecision bound to the revision and the policy row, then approve#Order approves the order (which
+            needs PURCHASE_ORDER_APPROVE for a purchase part, and with the approval gate on finds the decision current). The
+            same operation key answers the first result. Requires PURCHASE_APPROVE (PERMISSION_DENIED); refuses an order
+            outside the user's organizations (RECORD_UNAVAILABLE), one that is not placed (ORDER_NOT_PLACED), a revision that
+            is not the current one, naming it (STALE_REVISION), self-approval (SELF_APPROVAL) and a decision other than
+            approve (DECISION_INVALID; refusal and the policies' steps are P4's).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" type="Integer"><description>The revision reviewed; the current one when
+                empty</description></parameter>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="purchaseApprovalDecisionId"/>
+            <parameter name="statusId"/>
+            <parameter name="creditHeld" type="Boolean"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="decided" from="ec.resource.script(module).execute('decide', context)"/>
+            <set field="orderId" from="decided.orderId"/>
+            <set field="orderRevision" from="decided.orderRevision"/>
+            <set field="purchaseApprovalDecisionId" from="decided.purchaseApprovalDecisionId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="creditHeld" from="decided.creditHeld"/>
+            <set field="alreadyApplied" from="decided.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="check" noun="PurchaseApprovalRequired" allow-remote="false">
+        <description>The approval gate's warning (design §6, D8): for each purchase part of the order whose buying
+            organization's policy has approvalGateEnabled, PURCHASE_APPROVAL_REQUIRED unless an approval decision is recorded
+            for the order's current revision. The Purchase SECA adds it to check#OrderPreApprove's approveWarnings, so
+            autoApprove#Order does not approve the order, and approve#Order refuses on it. With the gate off (the default)
+            nothing is added. It checks no permission: it runs as any user.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="approveWarnings" type="List"><parameter name="approveWarning"/></parameter>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
+            <set field="approveWarnings" from="ec.resource.script(module).approvalWarnings(orderId)"/>
         </actions>
     </service>
 </services>
