@@ -75,11 +75,15 @@ function productText(item) {
     const product = one("mantle.product.Product", {productId: item.productId})
     return product ? [product.pseudoId || product.productId, product.productName].filter(Boolean).join(" · ") : item.productId
 }
-function linesOf(orderId) {
+// The order's lines of the supplier's part (a purchase order or quote has one part; another part's lines are never shown).
+function linesOf(orderId, orderPartSeqId) {
     return rows(ITEM, {orderId})
         .filter(
             item =>
-                !item.parentItemSeqId && item.itemTypeEnumId !== "ItemShipping" && !String(item.itemTypeEnumId).includes("Tax")
+                (!orderPartSeqId || !item.orderPartSeqId || item.orderPartSeqId === orderPartSeqId) &&
+                !item.parentItemSeqId &&
+                item.itemTypeEnumId !== "ItemShipping" &&
+                !String(item.itemTypeEnumId).includes("Tax")
         )
         .sort((a, b) => String(a.orderItemSeqId).localeCompare(String(b.orderItemSeqId)))
 }
@@ -131,9 +135,24 @@ function served(siteId) {
     if (!mount?.targetId) unavailable()
     return mount.targetId
 }
+// A requested quote is the supplier's once the buyer published it to the supplier: its RFQ mailed to it, or a link made
+// for it (the send makes one; a buyer may share one); before that it is the buyer's draft, which a signed-in contact does
+// not see.
+const quoteSent = order =>
+    order.statusId !== "OrderRequested" ||
+    sourcing().sentAtOf(order.orderId) != null ||
+    rows("mantle.party.ExternalAccessCapability", {recordType: "Quote", recordId: order.orderId}).length > 0
 function checkQuote(p) {
     const organizationPartyId = served(p.siteId)
-    return access.check({token: p.token, scope: "QuoteResponse", recordType: "Quote", recordId: p.orderId, organizationPartyId})
+    const checked = access.check({
+        token: p.token,
+        scope: "QuoteResponse",
+        recordType: "Quote",
+        recordId: p.orderId,
+        organizationPartyId
+    })
+    if (checked.via === "contact" && !quoteSent(one(ORDER, {orderId: checked.recordId}))) unavailable()
+    return checked
 }
 function checkOrder(p) {
     const organizationPartyId = served(p.siteId)
@@ -338,8 +357,11 @@ function revokeRecord(recordType, recordId) {
 // the quote statuses (an award places it, a decline rejects it, Not awarded cancels it) ends its quote links.
 function revokeOrder(p) {
     let revoked = 0
-    if (quoteStatuses.includes(p.oldStatusId) && !quoteStatuses.includes(p.statusId)) revoked += revokeRecord("Quote", p.orderId)
-    if (["OrderCancelled", "OrderRejected"].includes(p.statusId)) revoked += revokeRecord("Order", p.orderId)
+    // the order's own status, not the caller's word for it
+    const statusId = one(ORDER, {orderId: p.orderId})?.statusId
+    if (!statusId || statusId !== p.statusId) return {revokedCount: 0}
+    if (quoteStatuses.includes(p.oldStatusId) && !quoteStatuses.includes(statusId)) revoked += revokeRecord("Quote", p.orderId)
+    if (["OrderCancelled", "OrderRejected"].includes(statusId)) revoked += revokeRecord("Order", p.orderId)
     return {revokedCount: revoked}
 }
 
@@ -371,8 +393,20 @@ function quoteDoc(order, token) {
         path: docPath("quote", order.orderId, token)
     }
 }
-function orderDoc(order, part, token) {
+function orderDoc(order, part, token, linkRevision = null) {
     const revision = Number(order.orderRevision ?? 1)
+    // a link of an earlier revision: only that the order was revised (SupersededRevision), nothing of the new revision
+    if (linkRevision != null && Number(linkRevision) < revision)
+        return {
+            kind: "order",
+            orderId: order.orderId,
+            reference: "Purchase order " + order.orderId + " · revision " + Number(linkRevision),
+            title: order.orderName || null,
+            stateText: "Revised",
+            dueText: null,
+            actionText: "View",
+            path: docPath("order", order.orderId, token)
+        }
     const acknowledged = Number(part.acknowledgedRevision ?? 0) === revision
     return {
         kind: "order",
@@ -416,8 +450,8 @@ function getSupplierHome(p) {
             row.recordType === "Quote"
                 ? quoteDoc(order, p.token)
                 : scopes.includes("OrderAcknowledgement")
-                  ? orderDoc(order, part, p.token)
-                  : Object.assign(orderDoc(order, part, p.token), {
+                  ? orderDoc(order, part, p.token, row.recordRevision)
+                  : Object.assign(orderDoc(order, part, p.token, row.recordRevision), {
                         actionText: "Send a bill",
                         path: "/BillUpload?token=" + encodeURIComponent(p.token)
                     })
@@ -446,8 +480,9 @@ function getSupplierHome(p) {
         for (const part of parts) {
             const order = one(ORDER, {orderId: part.orderId})
             if (!order) continue
-            if (quoteStatuses.includes(order.statusId)) documentList.push(quoteDoc(order, null))
-            else if (orderListStatuses.includes(order.statusId)) documentList.push(orderDoc(order, part, null))
+            if (quoteStatuses.includes(order.statusId)) {
+                if (quoteSent(order)) documentList.push(quoteDoc(order, null))
+            } else if (orderListStatuses.includes(order.statusId)) documentList.push(orderDoc(order, part, null))
         }
         for (const row of Array.from(
             find("mantle.account.invoice.SupplierBillSubmission")
@@ -503,7 +538,7 @@ function quoteView(checked) {
     const draftLines = Object.fromEntries(listOf(draftData.lines || []).map(line => [String(line.orderItemSeqId), line]))
     const currency = order.currencyUomId
     const proposed = order.statusId === "OrderProposed"
-    const lines = linesOf(orderId).map(item => {
+    const lines = linesOf(orderId, checked.orderPartSeqId).map(item => {
         const drafted = draftLines[item.orderItemSeqId] || {}
         const offered = proposed && item.unitAmount != null && dec(item.unitAmount).compare(0) > 0 ? item.unitAmount : null
         return {
@@ -554,8 +589,8 @@ function getQuoteInvitation(p) {
 // The response the page sent, checked against the quote's lines: the supplier's reference, validity, delivery, note and each
 // line's price, promised date and item code. Only these: the supplier sets no approval, award, other supplier, maximum
 // price or source demand.
-function responseOf(p, orderId, requirePrices) {
-    const items = Object.fromEntries(linesOf(orderId).map(item => [item.orderItemSeqId, item]))
+function responseOf(p, orderId, orderPartSeqId, requirePrices) {
+    const items = Object.fromEntries(linesOf(orderId, orderPartSeqId).map(item => [item.orderItemSeqId, item]))
     const lines = []
     for (const line of listOf(p.lines)) {
         const seq = text(line?.orderItemSeqId)
@@ -601,7 +636,7 @@ function saveQuoteResponse(p) {
     if (!view.capabilities.canSubmit) fail("Conflict", "This quote was already sent; it can no longer be changed here")
     if (!blank(p.rfqRevision) && Number(p.rfqRevision) !== view.quote.revision)
         fail("Conflict", "The request changed since you opened it. Review it and save again.")
-    const data = responseOf(p, checked.recordId, false)
+    const data = responseOf(p, checked.recordId, checked.orderPartSeqId, false)
     const draft = draftOf(checked.recordId, view.quote.revision)
     const values = {
         dataJson: JSON.stringify(data),
@@ -640,7 +675,7 @@ function submitQuoteResponse(p) {
         fail("Unprocessable", "Confirm that this is your quote and its terms")
     if (!blank(p.rfqRevision) && Number(p.rfqRevision) !== view.quote.revision)
         fail("Conflict", "The request changed since you opened it. Review it and send your quote again.")
-    const data = responseOf(p, checked.recordId, true)
+    const data = responseOf(p, checked.recordId, checked.orderPartSeqId, true)
     const staged = stageFile(p.file, "quote")
     let orderContentId = null
     try {
@@ -760,7 +795,7 @@ function orderView(checked) {
     const part = rows(PART, {orderId, orderPartSeqId: checked.orderPartSeqId})[0]
     const currency = order.currencyUomId
     const shipTo = dropShip().shipToOf({order, part, orderId})
-    const lines = linesOf(orderId).map(item => {
+    const lines = linesOf(orderId, checked.orderPartSeqId).map(item => {
         const delivered = shipTo ? dropShip().deliveredQuantity(item) : null
         return {
             orderItemSeqId: item.orderItemSeqId,
@@ -953,7 +988,7 @@ function reportDropShipDelivery(p) {
     const shipTo = dropShip().shipToOf({order, part, orderId: checked.recordId})
     if (!shipTo) fail("Unprocessable", "This order is not shipped to the buyer's customer")
     if (!deliveryStatuses.includes(order.statusId)) fail("Conflict", "This order is not open for delivery")
-    const items = Object.fromEntries(linesOf(checked.recordId).map(item => [item.orderItemSeqId, item]))
+    const items = Object.fromEntries(linesOf(checked.recordId, checked.orderPartSeqId).map(item => [item.orderItemSeqId, item]))
     const lines = []
     for (const line of listOf(p.lines)) {
         const item = items[text(line?.orderItemSeqId)]

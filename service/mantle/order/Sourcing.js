@@ -56,7 +56,7 @@ const reasonsOf = (values, reason) =>
 
 function requirePermission(...permissions) {
     // P16: a supplier's response from its PASS page answers its own quote (PurchaseOrders.js asSupplier)
-    if (orders().portalClaim() && permissions.includes("PURCHASE_ORDER_EDIT")) return
+    if (orders().claimed(permissions)) return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
@@ -789,6 +789,8 @@ const expired = part => !!part.validThruDate && ms(part.validThruDate) <= Number
 // new quote is entered straight in OrderProposed, for an RFQ's items when the RFQ is given (an unsolicited quote otherwise).
 function storeQuote(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim answers its one quote, never a new one
+    if (orders().portalClaim() && blank(p.orderId)) denied("RECORD_UNAVAILABLE", "This quote is not available")
     let po
     let created = false
     if (blank(p.orderId)) {
@@ -877,6 +879,12 @@ function storeQuote(p) {
 // (each change in the line's history), or a new line on a proposed quote with no RFQ item.
 function storeQuoteItem(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim prices, dates and codes the quote's own lines; it adds no line and changes no quantity, unit or text
+    if (
+        orders().portalClaim() &&
+        (blank(p.orderItemSeqId) || ["quantity", "quantityUomId", "itemDescription"].some(field => !blank(p[field])))
+    )
+        denied("RECORD_UNAVAILABLE", "This quote line is not available")
     const po = quoteOf(p.orderId, true)
     const values = {}
     if (given(p, "unitAmount") && !blank(p.unitAmount)) values.unitAmount = decimal(p.unitAmount, "price", true)

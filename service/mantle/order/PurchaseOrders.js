@@ -59,8 +59,11 @@ function asSupplier(claim, work) {
         else shared[PORTAL_CLAIM] = before
     }
 }
+// The claim stands in for PURCHASE_ORDER_EDIT alone: a check that also takes another permission (an approval's, a read's
+// list) is never the supplier's.
+const claimed = permissions => !!portalClaim() && permissions.length === 1 && permissions[0] === "PURCHASE_ORDER_EDIT"
 function requirePermission(...permissions) {
-    if (portalClaim() && permissions.includes("PURCHASE_ORDER_EDIT")) return
+    if (claimed(permissions)) return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
@@ -586,6 +589,7 @@ const operations = {create, update, storeItem, removeItem, place, cancel, clone,
     // P16: a supplier's claim from its PASS page (SupplierPortal.js)
     asSupplier,
     portalClaim,
+    claimed,
     approvalWarnings,
     approveRefusal,
     holdAllowed,

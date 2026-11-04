@@ -443,6 +443,7 @@ feature(
             // the buyer revises the order: the revision 1 link now says so, and its acknowledgement is refused
             call("update#mantle.order.OrderHeader", {orderId: prefix + "_PO", orderRevision: 2})
             const superseded = page("getPublishedPurchaseOrder", {token: token("PO_R1")})
+            const supersededHome = page("getSupplierHome", {token: token("PO_R1")})
             const late = page("acknowledgePurchaseOrder", {
                 token: token("PO_R1"),
                 operationId: key(),
@@ -452,9 +453,9 @@ feature(
             const bill = ec.resource
                 .script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
                 .check({token: token("PO_R1"), scope: "BillUpload", recordType: "Order", organizationPartyId: org})
-            return {view, changed, first, repeat, item, part, superseded, late, bill}
+            return {view, changed, first, repeat, item, part, superseded, supersededHome, late, bill}
         },
-        then({view, changed, first, repeat, item, part, superseded, late, bill}) {
+        then({view, changed, first, repeat, item, part, superseded, supersededHome, late, bill}) {
             view.order.revision === 1
             view.order.buyerName === "Portal Spec Buyer"
             view.lines[0].quantityText === "10"
@@ -471,6 +472,9 @@ feature(
             part.otherPartyOrderId === "SO-551"
             superseded.superseded.code === "SupersededRevision"
             superseded.order == null
+            supersededHome.documentList[0].stateText === "Revised"
+            supersededHome.documentList[0].reference.endsWith("revision 1")
+            supersededHome.documentList[0].dueText == null
             late.errorKind === "Conflict"
             late.errorMessage.includes("SupersededRevision")
             bill.recordId === prefix + "_PO"
@@ -487,6 +491,15 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
             app: "supplier",
             fromDate: since
         })
+        // a quote of supplier A on an RFQ not sent yet is the buyer's draft: the contact does not see it
+        const draftRfq = run(state.buyer, S + "create#QuoteRequest", {
+            organizationPartyId: org,
+            requestName: "Brackets not sent yet",
+            responseRequiredDate: new Date(Date.now() + 7 * 86400000)
+        }).requestId
+        run(state.buyer, S + "store#QuoteRequestItem", {requestId: draftRfq, productId: product, quantity: 5})
+        const unsentId = run(state.buyer, S + "store#QuoteInvitation", {requestId: draftRfq, supplierPartyId: supplierA}).orderId
+        const unsent = page("getQuoteInvitation", {orderId: unsentId}, state.contact)
         const home = page("getSupplierHome", {}, state.contact)
         const own = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO"}, state.contact)
         const competitor = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO_B"}, state.contact)
@@ -497,9 +510,12 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
             row => !row.revokedDate
         )
         const cancelled = page("getPublishedPurchaseOrder", {token: token("PO_R2")})
-        return {home, own, competitor, competitorQuote, live, cancelled}
+        return {home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId}
     },
-    then({home, own, competitor, competitorQuote, live, cancelled}) {
+    then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId}) {
+        unsentId != null
+        unsent.errorKind === "NotFound"
+        !home.documentList.some(doc => doc.orderId === unsentId)
         home.via === "contact"
         home.documentList.some(doc => doc.orderId === prefix + "_PO")
         home.documentList.some(doc => doc.orderId === state.quoteA)
