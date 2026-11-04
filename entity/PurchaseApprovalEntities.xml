@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase approval policies (design-purchasing ApprovalPolicies, Approvals; impl-purchasing P4, §2): the effective-dated
+    steps an organization's purchase orders, requests, awards and suppliers are approved in, by amount band, currency,
+    category or facility, each step with its approvers, quorum, self-approval, separation and expiry, its key fields
+    audit-logged; and the decision's record of being superseded by a later revision. PurchaseApprovals.js reads and writes
+    them (mantle.order.PurchaseServices store#PurchaseApprovalPolicy, preview#PurchaseApproval, decide#PurchaseApproval). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PurchaseApprovalPolicy" package="mantle.order.purchase" cache="never">
+        <description>One approval step of an organization's purchase source type (a purchase order, request, award or
+            supplier), effective-dated: a source whose amount is in the band (fromAmount up to, not including, thruAmount; no
+            thruAmount is no upper limit) in the currency, and of the category or facility when one is set, is approved in the
+            steps of its band by sequenceNum. Each step is decided by quorum distinct approvers: the user named, else the
+            members of the user group named, else any holder of PURCHASE_APPROVE in the organization, each holding
+            PURCHASE_APPROVE. A change ends the row in effect and starts the next (store#PurchaseApprovalPolicy); a decision
+            keeps the row it was evaluated against. With no row in effect for an organization and source type, one purchase
+            approver decides (the no-policy rule).</description>
+        <field name="purchaseApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="sourceTypeEnumId" type="id" enable-audit-log="true"><description>PurchaseApprovalSource: PasOrder,
+            PasRequest, PasAward, PasSupplier</description></field>
+        <field name="fromAmount" type="currency-amount" enable-audit-log="true"><description>The band's lower amount,
+            included; empty is zero</description></field>
+        <field name="thruAmount" type="currency-amount" enable-audit-log="true"><description>The band's upper amount, not
+            included; empty has no upper limit</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>The band's currency; a source in another
+            currency is not in the band</description></field>
+        <field name="productCategoryId" type="id" enable-audit-log="true"><description>Only a source with a line of a product
+            in the category</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>Only a source for the facility</description>
+        </field>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"><description>The step's place in its band,
+            from 1</description></field>
+        <field name="approverUserId" type="id" enable-audit-log="true"/>
+        <field name="approverUserGroupId" type="id" enable-audit-log="true"/>
+        <field name="quorum" type="number-integer" enable-audit-log="true"><description>The distinct approvers the step
+            needs (1 when empty)</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: the user who entered
+            or placed the source may decide the step; N: never; empty: as the buying policy's selfApprovalAllowed</description>
+        </field>
+        <field name="separateApprover" type="text-indicator" enable-audit-log="true"><description>Y: a user who decided an
+            earlier step of the source's revision may not decide this one</description></field>
+        <field name="expiryDays" type="number-integer" enable-audit-log="true"><description>Days a step's approval stays good
+            while later steps are waiting; empty never expires</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PurchaseApprovalSource" related="moqui.basic.Enumeration" short-alias="sourceType">
+            <key-map field-name="sourceTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserAccount" short-alias="approverUser">
+            <key-map field-name="approverUserId" related="userId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserGroup" short-alias="approverUserGroup">
+            <key-map field-name="approverUserGroupId" related="userGroupId"/></relationship>
+        <index name="PUR_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="sourceTypeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Approval Source" enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasOrder" description="Purchase order" sequenceNum="1"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasRequest" description="Purchase request" sequenceNum="2"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasAward" description="Award" sequenceNum="3"
+                    enumTypeId="PurchaseApprovalSource"/>
+            <moqui.basic.Enumeration enumId="PasSupplier" description="Supplier" sequenceNum="4"
+                    enumTypeId="PurchaseApprovalSource"/>
+        </seed-data>
+    </entity>
+
+    <!-- a decision a later revision of its source superseded (a key field changed after it; the SECA on
+        increment#OrderRevision), kept with the time it stopped counting -->
+    <extend-entity entity-name="PurchaseApprovalDecision" package="mantle.order.purchase">
+        <field name="supersededDate" type="date-time"/>
+        <relationship type="one-nofk" related="mantle.order.purchase.PurchaseApprovalPolicy"/>
+    </extend-entity>
+</entities>

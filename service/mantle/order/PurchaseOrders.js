@@ -11,6 +11,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const policy = ec.resource.script("component://mr-mantle/service/mantle/order/PurchasePolicy.js")
+// P4: the approval policies' steps, notices and budget (PurchaseApprovals.js)
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -249,9 +251,12 @@ function place(p) {
     if (!rows(ITEM, {orderId: po.orderId}).length) denied("ORDER_EMPTY", "Add a line before placing purchase order " + po.orderId)
     const checked = supplierCheck(po.organizationPartyId, po.supplierPartyId)
     call("mantle.order.OrderServices.place#Order", {orderId: po.orderId})
+    const statusId = one(ORDER, {orderId: po.orderId}).statusId
+    // P4: a placed order waiting for approval goes to its first step's approvers (PurchaseOrderApproval)
+    if (statusId === "OrderPlaced") approvals().notify(approvals().orderSource(po))
     return {
         orderId: po.orderId,
-        statusId: one(ORDER, {orderId: po.orderId}).statusId,
+        statusId,
         supplierResult: checked.result,
         supplierMessage: checked.message
     }
@@ -271,6 +276,10 @@ function cancel(p) {
     if (find("mantle.order.OrderItemBilling").condition("orderId", po.orderId).count() > 0)
         denied("ORDER_BILLED", "Purchase order " + po.orderId + " has been billed")
     call("mantle.order.OrderServices.cancel#Order", {orderId: po.orderId})
+    // P4 (D10): what is left of the order's budget commitments is released, and its approval notices read
+    if (one(ORDER, {orderId: po.orderId}).statusId === "OrderCancelled")
+        call("mantle.other.BudgetServices.release#ClosedSourceCommitments", {sourceEntityName: ORDER, sourceId: po.orderId})
+    approvals().clearNotices(approvals().orderSource(po))
     call("create#mantle.order.OrderNote", {
         orderId: po.orderId,
         noteDate: ec.user.nowTimestamp,
@@ -327,6 +336,20 @@ function currentDecision(orderId, revision) {
         }).sort((a, b) => ms(b.decisionDate) - ms(a.decisionDate))[0] || null
     )
 }
+// Whether the order's approval is complete at its revision (P4): every step its approval policy selects decided, or under
+// the no-policy rule an approval decision at the revision.
+function approvalComplete(order) {
+    if (!currentDecision(order.orderId, revisionOf(order))) return false
+    const part = rows(PART, {orderId: order.orderId}).find(isPurchasePart)
+    if (!part) return true
+    const source = approvals().orderSource({
+        orderId: order.orderId,
+        part,
+        organizationPartyId: part.customerPartyId,
+        supplierPartyId: part.vendorPartyId
+    })
+    return approvals().progress(source).complete
+}
 // The warnings of an order's purchase parts that need a decision: a part whose buying organization's policy has the
 // approval gate on and no approval decision for the order's revision. No permission check: the SECA runs as any user.
 function approvalWarnings(orderId) {
@@ -337,7 +360,7 @@ function approvalWarnings(orderId) {
             .filter(isPurchasePart)
             .map(part => part.customerPartyId)
     )
-    if (![...organizations].some(gateOn) || currentDecision(order.orderId, revisionOf(order))) return []
+    if (![...organizations].some(gateOn) || approvalComplete(order)) return []
     return [
         "PURCHASE_APPROVAL_REQUIRED: Purchase order " +
             order.orderId +
@@ -397,15 +420,19 @@ function placedBy(order, userId, partyId) {
         newValueText: "OrderPlaced"
     }).some(row => row.changedByUserId === userId)
 }
-// decide#PurchaseApproval with the no-policy rule (design ApprovalPolicies, R-PUR-14): one step by a holder of
-// PURCHASE_APPROVE on a placed order at its current revision; the user who entered or placed it is refused unless the policy
-// allows self-approval; a supplier the policy stops is refused. The decision is recorded, then approve#Order approves (which
-// checks PURCHASE_ORDER_APPROVE for a purchase part). A retry with the same operation key answers the first result.
+// decide#PurchaseApproval (design ApprovalPolicies, R-PUR-14; P3's no-policy rule, P4's steps): a holder of
+// PURCHASE_APPROVE decides the step waiting of a placed order at its current revision. The steps are the order's approval
+// policy's for its amount (PurchaseApprovals.js), else one step by any purchase approver; the step's approver, group,
+// self-approval (the user who entered or placed it, refused unless the step or the buying policy allows it), separation from
+// an earlier step and quorum are checked. A refusal (with its reason) rejects the order (OrderPlaced to OrderRejected). An
+// approval that completes the last step reserves the budget of the lines with no request (reserve#Commitment, at the order's
+// revision) and approves the order through approve#Order (PURCHASE_ORDER_APPROVE for a purchase part); one that leaves a step
+// waiting sends it to its approvers. A retry with the same operation key answers the first result.
 function decide(p) {
     requirePermission("PURCHASE_APPROVE")
     const po = purchaseOrder(p.orderId, true)
     const decision = String(p.decision || "approve")
-    if (decision !== "approve") denied("DECISION_INVALID", "Approve is the only decision of a purchase order without a policy")
+    if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse the purchase order")
     const request = {orderId: po.orderId, orderRevision: p.orderRevision == null ? null : Number(p.orderRevision), decision}
     const operation = blank(p.operationKey) ? null : lib.operation(p, "PurchaseApproval", po.organizationPartyId, request)
     if (operation?.old) return lib.previous(operation)
@@ -414,34 +441,63 @@ function decide(p) {
     const revision = revisionOf(po.order)
     if (p.orderRevision != null && !blank(p.orderRevision) && Number(p.orderRevision) !== revision)
         denied("STALE_REVISION", "Purchase order " + po.orderId + " is at revision " + revision + "; review it again")
-    const {policy: buying, row: policyRow} = policy.effective(po.organizationPartyId)
+    const reason = text(p.reason)
+    if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing purchase order " + po.orderId)
+    const source = approvals().orderSource(po)
+    const state = approvals().progress(source)
+    if (state.missing)
+        denied(
+            "POLICY_MISSING",
+            "No approval policy of " + partyName(po.organizationPartyId) + " covers purchase order " + po.orderId + "'s amount"
+        )
     const partyId = ec.user.userAccount?.partyId || null
-    if (buying.selfApprovalAllowed !== "Y" && placedBy(po.order, ec.user.userId, partyId))
-        denied("SELF_APPROVAL", "You entered or placed purchase order " + po.orderId + "; another approver decides it")
-    supplierCheck(po.organizationPartyId, po.supplierPartyId)
+    const refusal = approvals().refusalFor(source, state, ec.user.userId, partyId)
+    if (refusal) denied(refusal[0], refusal[1])
+    if (decision === "approve") supplierCheck(po.organizationPartyId, po.supplierPartyId)
+    const {row: policyRow} = policy.effective(po.organizationPartyId)
+    const step = state.current
     const created = call("create#" + DECISION, {
         sourceEntityName: ORDER,
         sourceId: po.orderId,
         sourceRevision: revision,
         organizationPartyId: po.organizationPartyId,
-        decisionEnumId: "PadApproved",
+        decisionEnumId: decision === "approve" ? "PadApproved" : "PadRefused",
         decisionDate: ec.user.nowTimestamp,
         decidedByUserId: ec.user.userId,
         decidedByPartyId: partyId,
-        reason: text(p.reason),
+        reason,
         policyFromDate: policyRow ? policyRow.fromDate : null,
+        approvalPolicyId: step?.purchaseApprovalPolicyId || null,
+        stepSeqId: step ? String(step.sequenceNum) : null,
         operationKey: operation?.operationKey || null
     })
-    // approve#Order checks the approver's PURCHASE_ORDER_APPROVE and the decision itself
-    const out = ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters({orderId: po.orderId}).call() || {}
-    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
     const result = {
         orderId: po.orderId,
         orderRevision: revision,
         purchaseApprovalDecisionId: created.purchaseApprovalDecisionId,
-        statusId: one(ORDER, {orderId: po.orderId}).statusId,
-        creditHeld: !!out.creditHeld
+        creditHeld: false,
+        pendingStepText: null
     }
+    if (decision === "refuse") {
+        call("mantle.order.OrderServices.reject#Order", {orderId: po.orderId})
+        approvals().clearNotices(source)
+    } else {
+        const after = approvals().progress(source)
+        if (!after.complete) {
+            result.pendingStepText = approvals().stepText(after, after.current)
+            approvals().notify(source, after)
+        } else {
+            // the budget of the lines with no request, at the order's revision (D10): Stop refuses, Warn warns
+            approvals().reserveBudget(po, revision, p.budgetOverrideReason)
+            // approve#Order checks the approver's PURCHASE_ORDER_APPROVE and, with the gate on, the complete approval
+            const out =
+                ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters({orderId: po.orderId}).call() || {}
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            result.creditHeld = !!out.creditHeld
+            approvals().clearNotices(source)
+        }
+    }
+    result.statusId = one(ORDER, {orderId: po.orderId}).statusId
     if (operation) lib.complete(operation, DECISION, created.purchaseApprovalDecisionId, result)
     return Object.assign(result, {alreadyApplied: false})
 }
@@ -450,6 +506,8 @@ const operations = {create, update, storeItem, removeItem, place, cancel, clone,
 ;({
     isPurchasePart,
     purchaseOrder,
+    supplierOf,
+    placedBy,
     requirePermission,
     approvalWarnings,
     approveRefusal,

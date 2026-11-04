@@ -15,7 +15,8 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Purchasing's rules over purchase orders and their policies (impl-purchasing §2, §4). P2: the buying policy
     (PurchasePolicy, dated by organization) and the supplier check the order and RFQ services call (PurchasePolicy.js).
     P3: the buyer's purchase order verbs, the approval decision and the approval gate's check (PurchaseOrders.js); the
-    order's send and print are mantle.order.OrderServices'. Later phases add the approval policies here. -->
+    order's send and print are mantle.order.OrderServices'. P4: the approval policies, the preview, the supplier's onboarding,
+    the topics' approve and refuse handlers and the revision's invalidation of a decision (PurchaseApprovals.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="PurchasePolicy" allow-remote="false">
@@ -300,21 +301,31 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="decide" noun="PurchaseApproval" allow-remote="false">
-        <description>A purchase approver's decision on a placed purchase order at its revision, with design ApprovalPolicies'
-            no-policy rule: one step by a holder of PURCHASE_APPROVE; the user who entered or placed the order is refused
-            unless the buying policy allows self-approval; a supplier the policy stops is refused. The decision is kept as a
-            PurchaseApprovalDecision bound to the revision and the policy row, then approve#Order approves the order (which
-            needs PURCHASE_ORDER_APPROVE for a purchase part, and with the approval gate on finds the decision current). The
-            same operation key answers the first result. Requires PURCHASE_APPROVE (PERMISSION_DENIED); refuses an order
-            outside the user's organizations (RECORD_UNAVAILABLE), one that is not placed (ORDER_NOT_PLACED), a revision that
-            is not the current one, naming it (STALE_REVISION), self-approval (SELF_APPROVAL) and a decision other than
-            approve (DECISION_INVALID; refusal and the policies' steps are P4's).</description>
+        <description>A purchase approver's decision on the step waiting of a placed purchase order at its revision (design
+            ApprovalPolicies; impl-purchasing P3, P4). The steps are those the organization's approval policy selects for the
+            order's amount, currency, categories and facility (PurchaseApprovalPolicy), else the no-policy rule's one step by
+            any holder of PURCHASE_APPROVE. The decision is kept as a PurchaseApprovalDecision bound to the revision, the
+            buying policy row and the approval policy's step. A refusal, with its reason, rejects the order (reject#Order,
+            OrderPlaced to OrderRejected). An approval that leaves a step waiting sends it to its approvers
+            (PurchaseOrderApproval) and answers pendingStepText; one that completes the last step reserves the budget of the
+            lines with no request at the PO stage (mantle.other.BudgetServices.reserve#Commitment, keyed by the revision: a
+            Stop refuses with BUDGET_EXCEEDED unless a BUDGET_OVERRIDE holder gives budgetOverrideReason, a Warn warns), then
+            approve#Order approves the order (PURCHASE_ORDER_APPROVE for a purchase part; with the approval gate on it finds
+            the approval complete). The same operation key answers the first result. Requires PURCHASE_APPROVE
+            (PERMISSION_DENIED); refuses an order outside the user's organizations (RECORD_UNAVAILABLE), one that is not
+            placed (ORDER_NOT_PLACED), a revision that is not the current one, naming it (STALE_REVISION), an amount no policy
+            row covers where the organization has some (POLICY_MISSING), a user the step does not name (NOT_ELIGIBLE),
+            self-approval (SELF_APPROVAL), a second approval of one step (ALREADY_DECIDED), the approver of an earlier step
+            where the step separates them (SEPARATION_REQUIRED), a refusal without a reason (REASON_REQUIRED) and a decision
+            other than approve or refuse (DECISION_INVALID).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderRevision" type="Integer"><description>The revision reviewed; the current one when
                 empty</description></parameter>
-            <parameter name="decision" default-value="approve"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
             <parameter name="reason"/>
+            <parameter name="budgetOverrideReason"><description>Passes a budget Stop for a BUDGET_OVERRIDE
+                holder</description></parameter>
             <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
@@ -322,6 +333,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="orderRevision" type="Integer"/>
             <parameter name="purchaseApprovalDecisionId"/>
             <parameter name="statusId"/>
+            <parameter name="pendingStepText"><description>The step still waiting, when the approval did not complete
+                it</description></parameter>
             <parameter name="creditHeld" type="Boolean"/>
             <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
@@ -332,14 +345,15 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="orderRevision" from="decided.orderRevision"/>
             <set field="purchaseApprovalDecisionId" from="decided.purchaseApprovalDecisionId"/>
             <set field="statusId" from="decided.statusId"/>
+            <set field="pendingStepText" from="decided.pendingStepText"/>
             <set field="creditHeld" from="decided.creditHeld"/>
             <set field="alreadyApplied" from="decided.alreadyApplied"/>
         </actions>
     </service>
     <service verb="check" noun="PurchaseApprovalRequired" allow-remote="false">
         <description>The approval gate's warning (design §6, D8): for each purchase part of the order whose buying
-            organization's policy has approvalGateEnabled, PURCHASE_APPROVAL_REQUIRED unless an approval decision is recorded
-            for the order's current revision. The Purchase SECA adds it to check#OrderPreApprove's approveWarnings, so
+            organization's policy has approvalGateEnabled, PURCHASE_APPROVAL_REQUIRED unless the order's approval is complete
+            at its current revision (every step of its approval policy, or the no-policy rule's one decision; P4). The Purchase SECA adds it to check#OrderPreApprove's approveWarnings, so
             autoApprove#Order does not approve the order, and approve#Order refuses on it. With the gate off (the default)
             nothing is added. It checks no permission: it runs as any user.</description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
@@ -349,6 +363,208 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
             <set field="approveWarnings" from="ec.resource.script(module).approvalWarnings(orderId)"/>
+        </actions>
+    </service>
+
+    <!-- ===== P4: approval policies and supplier onboarding (PurchaseApprovals.js; design-purchasing ApprovalPolicies,
+        Approvals, Supplier360; impl-purchasing P4) ===== -->
+    <service verb="store" noun="PurchaseApprovalPolicy" allow-remote="false">
+        <description>An approval step of an organization's purchase orders, requests, awards or suppliers, effective-dated
+            (PurchaseApprovalPolicy): its amount band (from, included, up to thru, not included) and currency, an optional
+            product category or facility, the step's sequence in its band, its approver (a user, else a user group's members,
+            else any purchase approver of the organization, each holding PURCHASE_APPROVE), quorum, self-approval (Y, N, or
+            empty for the buying policy's), separation from an earlier step's approver and expiry days. A new row starts at
+            fromDate (now by default); given purchaseApprovalPolicyId, the next version of that row (it ends where the next
+            starts), or with endPolicy Y that row ended at thruDate (now by default). Each key field is audit-logged with the
+            reason. Requires PURCHASE_POLICY_EDIT (PERMISSION_DENIED); refuses an organization outside the user's
+            (RECORD_UNAVAILABLE), no reason (REASON_REQUIRED), an unknown or ended row (POLICY_UNAVAILABLE, POLICY_ENDED), an
+            invalid value or a start in the past (POLICY_INVALID), a band that overlaps another band of the same scope
+            without being it, or a second row for one step of a band (POLICY_AMBIGUOUS), and a step with fewer eligible
+            approvers than its quorum (NO_ELIGIBLE_APPROVER).</description>
+        <in-parameters>
+            <parameter name="purchaseApprovalPolicyId"/>
+            <parameter name="endPolicy"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="sourceTypeEnumId"/>
+            <parameter name="fromAmount"/>
+            <parameter name="thruAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="facilityId"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="approverUserId"/>
+            <parameter name="approverUserGroupId"/>
+            <parameter name="quorum"/>
+            <parameter name="selfApprovalAllowed"/>
+            <parameter name="separateApprover"/>
+            <parameter name="expiryDays"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="purchaseApprovalPolicyId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('storePolicy', context)"/>
+            <set field="purchaseApprovalPolicyId" from="stored.purchaseApprovalPolicyId"/>
+            <set field="ended" from="stored.ended"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="PurchaseApproval" allow-remote="false">
+        <description>The approval of a source explained, writing nothing (design ApprovalPreview): a purchase order (orderId),
+            a supplier of an organization (supplierPartyId), or an amount of an organization and source type (with currency,
+            facility and category). Its revision, amount, the steps the approval policy selects (or the no-policy rule's
+            one), each with its approver, quorum, who approved it at the revision, who may approve it, separation,
+            self-approval, expiry and state (Done, Waiting, Next); a missing policy (rows in effect, none covering the
+            amount); whether the user may decide the step waiting, or why not; and for a purchase order the budget's decision
+            of its lines at the PO stage (check#Budget by account: OK, WARN, STOP, NONE), withheld (WITHHELD) from a user who
+            is not a purchase approver or finance reader. Requires PURCHASE_APPROVE, PURCHASE_POLICY_EDIT or
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses an organization, order or supplier outside the user's
+            (RECORD_UNAVAILABLE, SUPPLIER_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="sourceTypeEnumId"/>
+            <parameter name="amount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productCategoryId"/>
+        </in-parameters>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="preview" from="ec.resource.script(module).execute('preview', context).preview"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="SupplierApproval" allow-remote="false">
+        <description>Submit a supplier of an organization for approval (R-PUR-15): its profile is put Pending (a profile row,
+            store#SupplierProfile) and the step waiting goes to its approvers (PurchaseSupplierApproval). A supplier with no
+            status, Pending, Rejected, or Suspended once its purchase block has ended may be submitted. Requires
+            SUPPLIER_PROFILE_EDIT (PERMISSION_DENIED); refuses an organization outside the user's (RECORD_UNAVAILABLE),
+            another organization's supplier (SUPPLIER_UNAVAILABLE), an approved one (ALREADY_APPROVED) and a suspended one
+            whose block is in effect (SUPPLIER_BLOCKED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="approvalStatusId"/>
+            <parameter name="sourceRevision" type="Integer"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="submitted" from="ec.resource.script(module).execute('submitSupplier', context)"/>
+            <set field="approvalStatusId" from="submitted.approvalStatusId"/>
+            <set field="sourceRevision" from="submitted.sourceRevision"/>
+            <set field="notifiedCount" from="submitted.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="SupplierApproval" allow-remote="false">
+        <description>A purchase approver's decision on a Pending supplier of an organization at its revision (the count of its
+            profile rows), by the steps of the organization's supplier approval policy (PasSupplier), else one step by any
+            purchase approver, checked as decide#PurchaseApproval checks an order's (approver, group, self-approval: the user
+            who submitted it, separation, quorum). The decision is kept as a PurchaseApprovalDecision; the last step's
+            approval sets the profile Approved and a refusal, with its reason, Rejected; a step left waiting goes to its
+            approvers. Requires PURCHASE_APPROVE (PERMISSION_DENIED); refuses an organization outside the user's
+            (RECORD_UNAVAILABLE), another organization's supplier (SUPPLIER_UNAVAILABLE), one that is not Pending
+            (NOT_PENDING), a revision that is not the current one, naming it (STALE_REVISION), POLICY_MISSING, NOT_ELIGIBLE,
+            SELF_APPROVAL, ALREADY_DECIDED, SEPARATION_REQUIRED, REASON_REQUIRED and DECISION_INVALID.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="sourceRevision" type="Integer"/>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="purchaseApprovalDecisionId"/>
+            <parameter name="approvalStatusId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="decided" from="ec.resource.script(module).execute('decideSupplier', context)"/>
+            <set field="purchaseApprovalDecisionId" from="decided.purchaseApprovalDecisionId"/>
+            <set field="approvalStatusId" from="decided.approvalStatusId"/>
+        </actions>
+    </service>
+    <service verb="suspend" noun="Supplier" allow-remote="false">
+        <description>Suspend a supplier of an organization: its profile Suspended with a dated purchase block (from now or
+            fromDate, through thruDate when given) and its reason, so check#SupplierUsable stops it; its approval notices are
+            read. Once the block ends it is submitted and approved again. Requires SUPPLIER_PROFILE_EDIT (PERMISSION_DENIED);
+            refuses an organization outside the user's (RECORD_UNAVAILABLE), another organization's supplier
+            (SUPPLIER_UNAVAILABLE) and no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="approvalStatusId"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="approvalStatusId" from="ec.resource.script(module).execute('suspendSupplier', context).approvalStatusId"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="PurchaseSource" allow-remote="false">
+        <description>The approve service of the PurchaseOrderApproval and PurchaseSupplierApproval topics (F23), which the
+            framework's approve#NotificationMessage calls as the user: decide#PurchaseApproval (a purchase order) or
+            decide#SupplierApproval (a supplier) at the revision in the message (sourceRevision), so a superseded revision
+            is refused naming the current one. Requires PURCHASE_APPROVE (PERMISSION_DENIED); refuses another record
+            (SOURCE_INVALID) and as the decide services do.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <script>ec.resource.script(module).execute('approveSource', context)</script>
+            <set field="decision" value="approved"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="PurchaseSource" allow-remote="false">
+        <description>The refuse service of the PurchaseOrderApproval and PurchaseSupplierApproval topics (F23), with the
+            reason: a refused purchase order is Rejected, a refused supplier Rejected (decide#PurchaseApproval,
+            decide#SupplierApproval at the message's revision). Requires PURCHASE_APPROVE; refuses as approve#PurchaseSource
+            does.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <script>ec.resource.script(module).execute('refuseSource', context)</script>
+            <set field="decision" value="refused"/>
+        </actions>
+    </service>
+    <service verb="handle" noun="PurchaseApprovalRevision" allow-remote="false">
+        <description>Internal to the Purchase SECA on increment#OrderRevision: a commercial change (not a status, file or
+            note) of a purchase order supersedes the approval decisions of earlier revisions (supersededDate), and a placed
+            order sent for approval starts again at its first step, sent to its approvers at the new revision. An order with
+            neither a decision nor an approval notice returns at once. No permission of its own: it runs as any user. A
+            failure to notify is logged and the change stays.</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="revisionKind"/>
+        </in-parameters>
+        <out-parameters><parameter name="supersededCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseApprovals.js"/>
+            <set field="supersededCount" from="ec.resource.script(module).execute('revisionChanged', context).supersededCount"/>
         </actions>
     </service>
 </services>

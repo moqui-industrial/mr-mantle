@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- The purchase approvals waiting for a decision (impl-purchasing P4, F23; design-purchasing §6 Approvals): one message
+        per approver of the step waiting (decide#PurchaseApproval and submit#SupplierApproval send them, and mark them read
+        once the step is decided). The framework's approve#NotificationMessage and refuse#NotificationMessage call
+        mantle.order.PurchaseServices approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the source at
+        the revision in the message (sourceRevision) and refuse a stale one naming the current revision; a refusal needs a
+        reason. The message holds sourceEntityName, sourceId, sourceRevision, organizationPartyId, organizationName,
+        supplierName, amountText, stepText and, for an order, orderId; for a supplier, supplierPartyId. The app that shows
+        them sets the links (IronStone Purchasing: BossSetupData.xml). P10 seeds PurchaseRequestApproval and P12
+        PurchaseAwardApproval the same way; an agreement's activation comes on PurchaseOrderApproval (P13). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseOrderApproval" inboxEnumId="NinNotifications"
+            description="Purchase order to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve purchase order ${orderId} revision ${sourceRevision} from ${supplierName}, ${amountText} (${stepText})"/>
+    <moqui.security.user.NotificationTopic topic="PurchaseSupplierApproval" inboxEnumId="NinNotifications"
+            description="Supplier to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve supplier ${supplierName} for ${organizationName} (${stepText})"/>
+</entity-facade-xml>
