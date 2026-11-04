@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Requests for quotation and supplier quotes (design-purchasing §5 QuoteRequests, QuoteRequestDetail, Quotes, QuoteDetail;
+    impl-purchasing P11, §4, F19, F35, F41, F57): no RFQ, invitation or quote entity. An RFQ is a Request of type
+    RqtPurchaseRfq, its organization the OrgInternal RequestParty, its items RequestItems; its published PDF is RequestContent
+    (RqCntRfqPublished), stamped with its time. Each invited supplier's quote is a purchase OrderHeader with one part (the
+    supplier the vendor, the buying organization the customer) in OrderRequested and then OrderProposed, its lines linked to
+    the RFQ items by RequestItemOrder; the channel a quote came by is the order's salesChannelEnumId and its evidence
+    OrderContent (OctSupplierQuote). The RFQ's material fields and the quote's validity are audit-logged on create and update
+    ("true", F57: the first value set is the change that matters), so an RFQ prints as of its send time and a quote's
+    amendments read back. A published quote price names its source order and line. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Request" package="mantle.request">
+        <!-- an RFQ's response deadline and its specification text, part of what the supplier is sent: logged on update only,
+            as every request's change shows in its timeline and a request's first value is no change there (F-P11-11); an RFQ is
+            created with its response date, so each later change of it is logged -->
+        <field name="responseRequiredDate" type="date-time" enable-audit-log="update"/>
+        <field name="description" type="text-long" enable-audit-log="update"/>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="RqtPurchaseRfq" description="Purchase RFQ" enumTypeId="RequestType"/>
+            <!-- the RFQ as published to its suppliers (send#QuoteRequest), stored once per print -->
+            <moqui.basic.Enumeration enumId="RqCntRfqPublished" description="Published RFQ" enumTypeId="RequestContentType"/>
+        </seed-data>
+    </extend-entity>
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <!-- a line with no product is described: its text is part of the RFQ sent -->
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+    </extend-entity>
+    <extend-entity entity-name="OrderPart" package="mantle.order">
+        <!-- a supplier quote's validity: expired once past its thru date (an expired quote shows but cannot be placed) -->
+        <field name="validFromDate" type="date-time" enable-audit-log="true"/>
+        <field name="validThruDate" type="date-time" enable-audit-log="true"/>
+        <seed-data>
+            <!-- a supplier quote's evidence: the supplier's file, or how it came (a call, an email) -->
+            <moqui.basic.Enumeration enumId="OctSupplierQuote" description="Supplier quote" enumTypeId="OrderContentType"/>
+        </seed-data>
+    </extend-entity>
+    <extend-entity entity-name="ProductPrice" package="mantle.product">
+        <!-- the quote a supplier price was published from (publish#SupplierQuotePrice, R-PUR-21) -->
+        <field name="sourceOrderId" type="id" enable-audit-log="true"/>
+        <field name="sourceOrderItemSeqId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="Source" related="mantle.order.OrderHeader" short-alias="sourceOrder">
+            <key-map field-name="sourceOrderId" related="orderId"/></relationship>
+    </extend-entity>
+</entities>

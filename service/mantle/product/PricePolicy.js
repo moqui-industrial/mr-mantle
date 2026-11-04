@@ -35,7 +35,7 @@ const optional = [
     "agreementItemSeqId"
 ]
 const writeFields =
-    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason".split(
+    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason,sourceOrderId,sourceOrderItemSeqId".split(
         ","
     )
 const pick = (p, keys) =>

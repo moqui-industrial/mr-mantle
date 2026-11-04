@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- A request for quotation sent to an invited supplier (mantle.order.SourcingServices.send#QuoteRequest, impl-purchasing
+        P11): from the buying organization's order or primary address, with the published RFQ's PDF attached; the service
+        passes subject, fromAddress and fromName in bodyParameters, and the body -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RFQ_EMAIL" description="Request for Quotation"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+            subject="${subject}"/>
+</entity-facade-xml>
