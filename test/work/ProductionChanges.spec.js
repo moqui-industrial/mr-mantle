@@ -887,6 +887,83 @@ feature("a run with postings is cancelled by a reversal or closed out by its res
     }
 })
 
+feature("a run whose only facts are a split's target change or an inspection, or that has started, is reversed here", {
+    when() {
+        const preview = workEffortId => run("pch_lead", P + "preview#ProductionCancellation", {workEffortId})
+        const cancel = (workEffortId, plan) =>
+            run("pch_lead", P + "cancel#ProductionOrder", {
+                operationKey: key(),
+                workEffortId,
+                expectedRevision: revision(workEffortId),
+                previewKey: plan.previewKey,
+                reason: "Not needed"
+            })
+        // a split's source: its target change is a fact the lifecycle's cancel refuses
+        const splitId = released(5)
+        const splitPreview = run("pch_planner", P + "preview#ProductionSplit", {workEffortId: splitId, quantity: 2})
+        const splitDone = run("pch_planner", P + "split#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: splitId,
+            expectedRevision: revision(splitId),
+            quantity: 2,
+            previewKey: splitPreview.split?.previewKey,
+            reason: "Two later"
+        })
+        const splitLifecycle = act("pch_super", splitId, "cancel", {reason: "Not needed"})
+        const splitPlan = preview(splitId)
+        const splitCancelled = cancel(splitId, splitPlan)
+        // a P8 inspection of the run
+        const inspectedId = released(3)
+        call("create#mantle.product.quality.QualityInspection", {
+            organizationPartyId: org,
+            facilityId: plant,
+            statusId: "QiDraft",
+            inspectionContextEnumId: "QicProduction",
+            workEffortId: inspectedId,
+            productId: "PCH_FIN",
+            quantity: 1
+        })
+        const inspectedLifecycle = act("pch_super", inspectedId, "cancel", {reason: "Not needed"})
+        const inspectedPlan = preview(inspectedId)
+        const inspectedCancelled = cancel(inspectedId, inspectedPlan)
+        // started with no fact: the lifecycle refuses it (RUN_STARTED), the reversal cancels it
+        const startedId = released(3, {start: true})
+        const startedPlan = preview(startedId)
+        const startedCancelled = cancel(startedId, startedPlan)
+        // a released run with no fact still goes to the lifecycle
+        const plainPlan = preview(released(3))
+        return {
+            splitDone,
+            splitLifecycle,
+            splitPlan,
+            splitCancelled,
+            inspectedLifecycle,
+            inspectedPlan,
+            inspectedCancelled,
+            startedPlan,
+            startedCancelled,
+            plainPlan,
+            statuses: [splitId, inspectedId, startedId].map(workEffortId => one(WORK, {workEffortId}).statusId)
+        }
+    },
+    then(x) {
+        x.splitDone.error === ""
+        x.splitLifecycle.error.includes("RUN_HAS_FACTS")
+        x.splitPlan.allowed === true
+        x.splitPlan.mode === "reversal"
+        x.splitCancelled.error === ""
+        x.inspectedLifecycle.error.includes("RUN_HAS_FACTS")
+        x.inspectedPlan.allowed === true
+        x.inspectedPlan.facts.inspections === 1
+        x.inspectedCancelled.error === ""
+        x.startedPlan.allowed === true
+        x.startedCancelled.error === ""
+        x.statuses.every(statusId => statusId === "WeCancelled")
+        x.plainPlan.allowed === false
+        x.plainPlan.reasonCode === "NO_FACTS"
+    }
+})
+
 feature("a clone is a new draft through create#ProductionOrder with no postings", {
     when() {
         const workEffortId = state.substituteRun

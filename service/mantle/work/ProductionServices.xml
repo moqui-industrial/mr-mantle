@@ -2163,8 +2163,9 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="preview" noun="ProductionCancellation" allow-remote="false">
-        <description>The reviewed plan to cancel a released, running or held run that has postings (design-manufacturing
-            WorkOrderDetail: never a deletion): mode reversal when nothing was received, lost or timed (each issue's unreturned
+        <description>The reviewed plan to cancel a released, running or held run that has postings or has started
+            (design-manufacturing WorkOrderDetail: never a deletion; its facts are those the lifecycle's cancel refuses: issues,
+            receipts, time, P7's quantity events and losses, P8's inspections): mode reversal when nothing was received, lost or timed (each issue's unreturned
             quantity returned into its asset, then the run cancelled), else residual (the unused issues returned when
             returnUnused, what is left finished as an approved loss, the material variance accepted and the run completed for
             the cost close), with its steps, the returns and a previewKey; allowed false with NO_FACTS (cancel from the

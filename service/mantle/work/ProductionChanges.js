@@ -33,6 +33,7 @@ const WORK = "mantle.work.effort.WorkEffort",
     CHANGE = "mantle.work.production.ProductionChange",
     QEVENT = "mantle.work.production.ProductionQuantityEvent",
     LOSS = "mantle.work.production.ProductionLoss",
+    INSPECTION = "mantle.product.quality.QualityInspection",
     ISSUANCE = "mantle.product.issuance.AssetIssuance",
     RECEIPT = "mantle.product.receipt.AssetReceipt",
     TIME = "mantle.work.time.TimeEntry",
@@ -1382,8 +1383,15 @@ function cancellationPlan(run, p = {}) {
         .condition("workEffortId", "in", [run.workEffortId, ...operationIds])
         .count()
     const losses = rows(LOSS, {workEffortId: run.workEffortId})
-    const facts = issuances.length + outputReceipts.length + timeEntries + losses.length
-    if (!facts)
+    // the facts the lifecycle's cancel refuses (ProductionOrders.js factsOf): also P7's quantity events (a split's target
+    // change among them) and P8's inspections, which stay as records of the cancelled run
+    const quantityEvents = find(QEVENT, {workEffortId: run.workEffortId}).count()
+    const inspections = find(INSPECTION, {workEffortId: run.workEffortId})
+        .condition("statusId", "not-equals", "QiCancelled")
+        .count()
+    const facts = issuances.length + outputReceipts.length + timeEntries + losses.length + quantityEvents + inspections
+    // a started run with no facts is refused by the lifecycle's cancel too (RUN_STARTED), so it is reversed here
+    if (!facts && !run.actualStartDate)
         return {
             allowed: false,
             reasonCode: "NO_FACTS",
@@ -1397,6 +1405,8 @@ function cancellationPlan(run, p = {}) {
             steps.push(
                 "Returns " + row.returnable + " " + row.productName + " of issue " + row.assetIssuanceId + " into its stock"
             )
+        if (inspections)
+            steps.push("Keeps its " + inspections + (inspections === 1 ? " inspection" : " inspections") + " as records")
         steps.push("Cancels the work order and its operations; the returns leave no work in process")
     } else {
         if (yes(p.returnUnused))
@@ -1431,7 +1441,14 @@ function cancellationPlan(run, p = {}) {
                 : "Residual close: the rest written off, then completed",
         steps,
         returnRows,
-        facts: {issuances: issuances.length, receipts: outputReceipts.length, timeEntries, losses: losses.length},
+        facts: {
+            issuances: issuances.length,
+            receipts: outputReceipts.length,
+            timeEntries,
+            losses: losses.length,
+            quantityEvents,
+            inspections
+        },
         previewKey
     }
 }
