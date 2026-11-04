@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's outside processing (design-manufacturing SubcontractOperations and SubcontractDetail, crosscut
+    CX-SUBCONTRACT; impl-manufacturing P14): the agreement of an operation done by a supplier, written by
+    mantle.work.ProductionServices.request#SubcontractService and store#ProductionSubcontract. Its demand is an RqTpProduct
+    Requirement of the service product with a RequirementSupply demand link (RstOperationDemand) to the operation, which
+    SupplyPlanning's outside-processing conversion turns into a draft service purchase order line (OrderItemWorkEffort to
+    the operation); the order line is kept here once converted. The dispatch, the output receipt and the service acceptance
+    are their owners' records (Warehouse's subcontract Shipment, AssetReceipt, Purchasing's ServiceAcceptance). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- One outside-processing agreement of an operation of a released run, by the run's organization: the supplier, the
+        service product, its quantity and unit, the required date and lead time, the vendor-custody facility the components
+        go to, and the quoted price basis (a note the buyer reads; the price is the purchase line's). Components stay the
+        organization's (R-SA-08). Its key fields are audit-logged, with the revision a change must name. -->
+    <entity entity-name="ProductionSubcontract" package="mantle.work.production" cache="never">
+        <field name="productionSubcontractId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"><description>The production run</description></field>
+        <field name="operationWorkEffortId" type="id"><description>The run's operation the supplier does</description></field>
+        <field name="requirementId" type="id"><description>The RqTpProduct requirement of the service</description></field>
+        <field name="supplierPartyId" type="id" enable-audit-log="true"/>
+        <field name="productId" type="id" enable-audit-log="true"><description>The service product (PtService)</description>
+        </field>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"/>
+        <field name="requiredByDate" type="date-time" enable-audit-log="true"/>
+        <field name="leadTimeDays" type="number-decimal" enable-audit-log="true"/>
+        <field name="vendorFacilityId" type="id" enable-audit-log="true"><description>The vendor-custody facility (owned by
+            the organization, the supplier its Custodian) the components are sent to</description></field>
+        <field name="priceBasisNote" type="text-medium" enable-audit-log="true"><description>The quoted price basis (per
+            piece, per batch, a quote reference); read with the purchase price</description></field>
+        <field name="orderId" type="id" enable-audit-log="true"/>
+        <field name="orderItemSeqId" type="id" enable-audit-log="true"/>
+        <field name="statusId" type="id" enable-audit-log="true"><description>ProductionSubcontract status</description>
+        </field>
+        <field name="revision" type="number-integer"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="lastChangedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Run" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="workEffortId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.requirement.Requirement"/>
+        <relationship type="one" title="Supplier" related="mantle.party.Party">
+            <key-map field-name="supplierPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.product.Product"/>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Vendor" related="mantle.facility.Facility">
+            <key-map field-name="vendorFacilityId" related="facilityId"/></relationship>
+        <relationship type="one-nofk" related="mantle.order.OrderItem">
+            <key-map field-name="orderId"/><key-map field-name="orderItemSeqId"/></relationship>
+        <relationship type="one" title="ProductionSubcontract" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <index name="PRODSUB_OPERATION"><index-field name="operationWorkEffortId"/></index>
+        <index name="PRODSUB_RUN"><index-field name="workEffortId"/></index>
+        <index name="PRODSUB_SUPPLIER"><index-field name="supplierPartyId"/></index>
+        <index name="PRODSUB_ORDER"><index-field name="orderId"/><index-field name="orderItemSeqId"/></index>
+    </entity>
+</entities>

@@ -123,6 +123,28 @@ function isProductLine(line) {
         productTypes = new Set(rows("moqui.basic.EnumGroupMember", {enumGroupEnumId: "EngItemsProduct"}).map(row => row.enumId))
     return !!line.productId || productTypes.has(line.itemTypeEnumId)
 }
+// The service-acceptance rule of a policy (impl-manufacturing P14): a service line (a PtService product) has no receipt,
+// so on the received basis it matches what its ServiceAcceptance rows accepted (Purchasing's accept#ServiceItem, a
+// subcontract's receive#SubcontractOutput); with the rule off (N) it matches its ordered quantity.
+function isServiceItem(item) {
+    const product = item.productId ? one("mantle.product.Product", {productId: item.productId}) : null
+    return product?.productTypeEnumId === "PtService"
+}
+const acceptanceRule = policy => (policy.serviceAcceptanceRequired || "Y") !== "N"
+function serviceAcceptedOf(orderId, orderItemSeqId) {
+    return rows("mantle.order.purchase.ServiceAcceptance", {orderId, orderItemSeqId}).reduce(
+        (sum, row) => sum.add(dec(row.acceptedQuantity)),
+        zero()
+    )
+}
+// The quantity a service line may be billed against under the policy: accepted on the received basis with the rule, else
+// ordered.
+function serviceBase(item, policy) {
+    const basis = policy.billBasisEnumId || "ImbReceived"
+    return basis === "ImbReceived" && acceptanceRule(policy)
+        ? serviceAcceptedOf(item.orderId, item.orderItemSeqId)
+        : dec(item.quantity ?? 1)
+}
 // An order line of the bill's organization from its supplier, on an approved order, else a refusal.
 function orderLine(scope, orderId, orderItemSeqId) {
     const item = orderId && one("mantle.order.OrderItem", {orderId, orderItemSeqId})
@@ -200,8 +222,15 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     const thisBill = takenOf(taken, "order", orderKeyText(orderKey))
     const orderQuantity = dec(item.quantity ?? 1)
     const basis = policy.billBasisEnumId || "ImbReceived"
+    // a service line: its accepted quantity under the service-acceptance rule, else ordered (P14)
+    const service = isServiceItem(item)
+    const serviceAccepted = service ? serviceAcceptedOf(item.orderId, item.orderItemSeqId) : zero()
     // the tolerance is a share of the source's base (accepted less held, or ordered), not of what is left of it
-    const base = basis === "ImbReceived" ? accepted.subtract(held).subtract(inspectionRejected) : orderQuantity
+    const base = service
+        ? serviceBase(item, policy)
+        : basis === "ImbReceived"
+          ? accepted.subtract(held).subtract(inspectionRejected)
+          : orderQuantity
     const used = priorBilled.add(thisBill)
     const quantity = dec(allocation.quantity)
     const baseAllowance = allowance(base, policy.quantityTolerancePercent, policy.quantityToleranceQuantity)
@@ -237,6 +266,8 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
                     (thisBill.isZero() ? "" : ", " + text(thisBill) + " on this bill") +
                     ")"
             ]
+        else if (service && basis === "ImbReceived" && acceptanceRule(policy) && base.compare(0) <= 0)
+            refusal = ["MISSING_RECEIPT", "The " + where + " has no accepted service to bill"]
         else if (basis === "ImbReceived" && base.compare(0) <= 0)
             refusal = ["MISSING_RECEIPT", "The " + where + " has no accepted receipt to bill"]
         else
@@ -279,7 +310,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
                 money(policy.priceToleranceAmount, scope.currencyUomId) +
                 ")"
         })
-    if (basis === "ImbOrdered" && policy.receiptRequired === "Y" && accepted.compare(0) <= 0)
+    if (basis === "ImbOrdered" && policy.receiptRequired === "Y" && (service ? serviceAccepted : accepted).compare(0) <= 0)
         exceptions.push({
             exceptionEnumId: "MeMissingReceipt",
             holds: holds(policy),
@@ -315,7 +346,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
         invoiceUnitAmount: invoiceUnit,
         orderQuantity,
         orderUnitAmount: orderUnit,
-        acceptedQuantity: receipt ? receipt.accepted : accepted,
+        acceptedQuantity: receipt ? receipt.accepted : service ? serviceAccepted : accepted,
         heldQuantity: receipt ? receipt.held : held,
         priorBilledQuantity: priorBilled,
         remainingQuantity: remaining,
@@ -424,7 +455,8 @@ function propose(scope, line, policy, orderId, taken = newTaken()) {
         if (remaining.compare(0) <= 0) break
         const orderKey = {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}
         const used = billedByOthers(scope.invoiceId, orderKey).add(takenOf(taken, "order", orderKeyText(orderKey)))
-        if ((policy.billBasisEnumId || "ImbReceived") === "ImbReceived") {
+        if (isServiceItem(item)) add(serviceBase(item, policy).subtract(used), Object.assign({assetReceiptId: null}, orderKey))
+        else if ((policy.billBasisEnumId || "ImbReceived") === "ImbReceived") {
             const receipts = receiptsOf(item.orderId, item.orderItemSeqId).sort(
                 (a, b) => Number(a.receivedDate || 0) - Number(b.receivedDate || 0)
             )
@@ -883,6 +915,17 @@ function apply(p) {
             exceptionCodes: exception.exceptionEnumId,
             exceptionText: exception.text
         })
+    // a subcontract's service line billed at another price than ordered: the price variance is a cost event of its run
+    // (impl-manufacturing P14), written in this transaction
+    const outsideVaried = evaluated.sources.some(
+        source =>
+            !dec(source.priceVariance).isZero() &&
+            rows("mantle.order.OrderItemWorkEffort", {orderId: source.orderId, orderItemSeqId: source.orderItemSeqId}).length
+    )
+    if (outsideVaried)
+        ec.resource
+            .script("component://mr-mantle/service/mantle/work/ProductionSubcontracts.js")
+            .recordBillVariances(invoiceMatchId)
     let invoiceHoldId = null
     const holding = evaluated.exceptions.filter(row => row.holds)
     if (holding.length) invoiceHoldId = placeMatchHold(scope, holding.map(row => row.text).join("; ")).invoiceHoldId
@@ -1124,7 +1167,7 @@ function legacyBills(organizationPartyId, p) {
     const wanted = Math.max(1, Math.min(200, Number(p.limit) || 100))
     const out = []
     let after = p.afterInvoiceId || null
-    for (let read = 0; out.length < wanted && read < 5000;) {
+    for (let read = 0; out.length < wanted && read < 5000; ) {
         let query = find(I, {toPartyId: organizationPartyId})
             .condition("fromPartyId", "not-equals", organizationPartyId)
             .condition("statusId", "not-equals", "InvoiceCancelled")

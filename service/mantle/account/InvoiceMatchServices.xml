@@ -321,7 +321,8 @@ along with this software (see the LICENSE.md file). If not, see
             and the others carried over (defaults: received basis, receipt required, no tolerance, hold); nothing changes
             when nothing differs. A bill line already matched keeps the row it applied. Which row applies to a bill line:
             the product's row, else the row of a category the product is in (of several, the one that started last), else
-            the organization's row, else the defaults. selfBillingDefault is read only from the organization's row: a
+            the organization's row, else the defaults. serviceAcceptanceRequired is the service-acceptance rule (Y, the
+            default: a service line matches its accepted quantity on the received basis). selfBillingDefault is read only from the organization's row: a
             supplier's SupplierProfile change takes it when no profile row of the supplier is in effect at the change's
             date (store#SupplierProfile). Refuses both a product and a
             category, an unknown product, category, basis or action, a negative tolerance, a start before the row in
@@ -338,6 +339,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="priceToleranceAmount" type="BigDecimal"/>
             <parameter name="varianceActionEnumId"/>
             <parameter name="selfBillingDefault"/>
+            <parameter name="serviceAcceptanceRequired"><description>The service-acceptance rule: Y (the default) matches a
+                service line against its accepted quantity on the received basis, N against its ordered
+                quantity.</description></parameter>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="changeReason"/>
         </in-parameters>
@@ -379,7 +383,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="defaults" from="{billBasisEnumId:'ImbReceived', receiptRequired:'Y', quantityTolerancePercent:null,
                 quantityToleranceQuantity:null, priceTolerancePercent:null, priceToleranceAmount:null,
-                varianceActionEnumId:'ImaHold', selfBillingDefault:'N'}"/>
+                varianceActionEnumId:'ImaHold', selfBillingDefault:'N', serviceAcceptanceRequired:'Y'}"/>
             <set field="values" from="{}"/>
             <script>for (const field of Object.keys(defaults)) {
                 const given = context[field]
@@ -389,8 +393,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <return error="true" message="BASIS_INVALID: Choose the received or the ordered basis"/></if>
             <if condition="!['ImaHold', 'ImaWarn'].includes(values.varianceActionEnumId)">
                 <return error="true" message="ACTION_INVALID: Choose to hold the bill or to warn"/></if>
-            <if condition="!['Y', 'N'].includes(values.receiptRequired) || !['Y', 'N'].includes(values.selfBillingDefault)">
-                <return error="true" message="INDICATOR_INVALID: Receipt required and self-billing default are Y or N"/></if>
+            <if condition="!['Y', 'N'].includes(values.receiptRequired) || !['Y', 'N'].includes(values.selfBillingDefault)
+                    || !['Y', 'N'].includes(values.serviceAcceptanceRequired || 'Y')">
+                <return error="true"
+                        message="INDICATOR_INVALID: Receipt required, self-billing default and service acceptance are Y or N"/></if>
             <if condition="['quantityTolerancePercent', 'quantityToleranceQuantity', 'priceTolerancePercent',
                     'priceToleranceAmount'].some((field) =&gt; values[field] != null
                         &amp;&amp; toDecimal(values[field]).compare(0) &lt; 0)">

@@ -28,7 +28,10 @@
 // as of the plan date (or the date given), then RequirementSupply and WorkRequirementFulfillment WrfDelivers. A second
 // conversion of a covered requirement answers its existing run. A stale run (superseded, or older than the policy's
 // freshness limit) is refused. Buy and transfer suggestions are shown with their supplier or source; their conversions are
-// Purchasing's and Warehouse's (impl-manufacturing §7), and the outside-processing buy is P14's.
+// Purchasing's and Warehouse's (impl-manufacturing §7). An outside-processing requirement (request#SubcontractService's
+// RqTpProduct requirement of a service, with its RstOperationDemand link to the operation; impl-manufacturing P14) is a
+// PsmOutside suggestion of every run of a set that covers its facility, never netted; a buyer converts it into a line of a
+// draft purchase order of its supplier, with OrderItemWorkEffort to the operation (convertOutside).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, rows, ms, denied, call, probe, dateText, access} = lib
@@ -53,10 +56,13 @@ const firmOrderStatuses = ["OrderPlaced", "OrderHold", "OrderProcessing", "Order
 const closedRunStatuses = ["WeComplete", "WeClosed", "WeCancelled"]
 const openSuggestionStates = ["PssProposed", "PssPartial", "PssException"]
 // who reads a plan (any planner mount: the production reader, a planner; Purchasing and Warehouse add their view
-// permissions when they mount it) and who converts each method (Purchasing adds buy, Warehouse transfer; P14 the
-// outside-processing buy)
-const readPermissions = ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW"]
-const convertPermissions = {PsmMake: "PRODUCTION_PLAN"}
+// permissions when they mount it; the buyer of outside processing reads the plan to convert) and who converts each method
+// (Purchasing adds buy, Warehouse transfer; P14 the outside-processing buy)
+const readPermissions = ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "PURCHASE_ORDER_EDIT"]
+const convertPermissions = {PsmMake: "PRODUCTION_PLAN", PsmOutside: "PURCHASE_ORDER_EDIT"}
+// the requirement statuses an outside-processing suggestion is planned from, and its demand link (which covers nothing)
+const outsideStatuses = ["RqmtStProposed", "RqmtStApproved"]
+const demandSupplyType = "RstOperationDemand"
 const productLimit = 500
 const facilityDepth = 4
 
@@ -618,6 +624,8 @@ function runPlan(p) {
         )) {
             call("update#" + SUGGESTION, {planningSuggestionId: suggestion.planningSuggestionId, stateEnumId: "PssSuperseded"})
             const requirement = suggestion.requirementId ? one(REQUIREMENT, {requirementId: suggestion.requirementId}) : null
+            // an outside-processing requirement is the planner's request, not the plan's: planned again below, never rejected
+            if (suggestion.methodEnumId === "PsmOutside") continue
             if (requirement?.statusId === "RqmtStProposed" && coveredOf(requirement.requirementId).compare(0) === 0)
                 reusable.set(suggestion.facilityId + "|" + suggestion.productId, requirement)
         }
@@ -638,6 +646,22 @@ function runPlan(p) {
             })
         }
     }
+    // the open outside-processing requests under the set, each its own suggestion (P14)
+    let outsideCount = 0
+    for (const node of nodes)
+        for (const requirement of outsideRequirements(organizationPartyId, node.facilityIds))
+            try {
+                if (writeOutsideSuggestion(planningRunId, requirement, node.facilityId)) outsideCount++
+            } catch (error) {
+                ec.logger.error(
+                    "Supply plan " + planningRunId + ": outside processing " + requirement.requirementId + ": " + error
+                )
+                ctx.findings.push({
+                    code: "SUGGESTION_FAILED",
+                    productId: requirement.productId,
+                    message: String(error.message || error)
+                })
+            }
     // requirements of the last run no new suggestion took: no longer required
     for (const requirement of reusable.values())
         call("update#" + REQUIREMENT, {
@@ -648,7 +672,7 @@ function runPlan(p) {
     call("update#" + RUN, {
         planningRunId,
         completedDate: ec.user.nowTimestamp,
-        suggestionCount: suggestions.length,
+        suggestionCount: suggestions.length + outsideCount,
         exceptionCount,
         findingsJson: ctx.findings.length ? JSON.stringify(ctx.findings) : null
     })
@@ -659,7 +683,7 @@ function runPlan(p) {
             lastPlanningRunId: planningRunId,
             lastRunMessage: null
         })
-    return {planningRunId, suggestionCount: suggestions.length, exceptionCount, findings: ctx.findings}
+    return {planningRunId, suggestionCount: suggestions.length + outsideCount, exceptionCount, findings: ctx.findings}
 }
 // The netting, level by level: for each product and facility its demand over the horizon (sales, a run's material, the
 // minimum stock, and the planned makes of its parents) less its stock and open supply; a shortage is first met by a
@@ -919,6 +943,7 @@ function writeSuggestion(ctx, planningRunId, suggestion, reusable) {
 // The quantity of a requirement its active supply links cover.
 function coveredOf(requirementId) {
     return rows(SUPPLY, {requirementId})
+        .filter(row => row.supplyTypeEnumId !== demandSupplyType)
         .filter(row => !row.thruDate || ms(row.thruDate) > ms(ec.user.nowTimestamp))
         .reduce((total, row) => total.add(dec(row.quantity)), zero())
 }
@@ -949,7 +974,8 @@ const kindLabels = {
     kitOutput: "Kit assembly output",
     transfer: "Transfer in transit",
     minimum: "Minimum stock",
-    planned: "Planned make"
+    planned: "Planned make",
+    operation: "Outside operation"
 }
 const warningLabels = {LATE_RELEASE: "Release date has passed", INSIDE_TIME_FENCE: "Inside the time fence"}
 // A suggestion for a screen: names, texts, its covered quantity and links, and whether the user may convert it now.
@@ -958,15 +984,20 @@ function suggestionRow(row, run, stale, names) {
     const remaining = dec(row.quantity).subtract(covered)
     const product = names.product(row.productId)
     const permission = convertPermissions[row.methodEnumId]
+    const links = row.requirementId ? rows(SUPPLY, {requirementId: row.requirementId}) : []
+    const demand = links.find(supply => supply.supplyTypeEnumId === demandSupplyType) || null
     const supplies = row.requirementId
-        ? rows(SUPPLY, {requirementId: row.requirementId}).map(supply => ({
-              requirementSupplyId: supply.requirementSupplyId,
-              supplyTypeText: enumText(supply.supplyTypeEnumId),
-              workEffortId: supply.workEffortId || null,
-              orderId: supply.orderId || null,
-              quantity: text(supply.quantity),
-              ended: !!supply.thruDate
-          }))
+        ? links
+              .filter(supply => supply.supplyTypeEnumId !== demandSupplyType)
+              .map(supply => ({
+                  requirementSupplyId: supply.requirementSupplyId,
+                  supplyTypeText: enumText(supply.supplyTypeEnumId),
+                  workEffortId: supply.workEffortId || null,
+                  orderId: supply.orderId || null,
+                  orderItemSeqId: supply.orderItemSeqId || null,
+                  quantity: text(supply.quantity),
+                  ended: !!supply.thruDate
+              }))
         : []
     const warnings = listOf(row.warningCodes)
     return {
@@ -1003,6 +1034,7 @@ function suggestionRow(row, run, stale, names) {
         supplierName: row.supplierPartyId ? names.party(row.supplierPartyId) : null,
         sourceFacilityId: row.sourceFacilityId || null,
         sourceFacilityName: row.sourceFacilityId ? names.facility(row.sourceFacilityId) : null,
+        operationWorkEffortId: demand?.workEffortId || null,
         sourceText: row.supplierPartyId
             ? names.party(row.supplierPartyId)
             : row.sourceFacilityId
@@ -1113,7 +1145,8 @@ function getPlan(p) {
         schedule: scheduleRow(organizationPartyId),
         canRun: access.has("SUPPLY_PLAN_RUN"),
         canSchedule: access.has("SUPPLY_PLAN_RUN"),
-        canConvertMake: access.has(convertPermissions.PsmMake)
+        canConvertMake: access.has(convertPermissions.PsmMake),
+        canConvertOutside: access.has(convertPermissions.PsmOutside)
     }
     if (!run) return answer
     const stale = staleOf(run)
@@ -1277,14 +1310,20 @@ function convert(p) {
     const operationKey = str(p.operationKey)
     if (!operationKey) denied("OPERATION_KEY_REQUIRED", "An operation key is required")
     const results = []
+    // outside processing: one draft order per supplier in this call, the first line's order taken by the next (P14)
+    const supplierOrders = new Map()
     for (const planningSuggestionId of ids) {
         try {
+            const supplierPartyId = one(SUGGESTION, {planningSuggestionId})?.supplierPartyId || null
             const out = probe("mantle.product.SupplyPlanningServices.convert#PlanningSuggestion", {
                 planningSuggestionId,
                 operationKey: operationKey + "/" + planningSuggestionId,
                 methodDate: p.methodDate || null,
-                facilityId: str(p.facilityId)
+                facilityId: str(p.facilityId),
+                orderId: (supplierPartyId && supplierOrders.get(supplierPartyId)) || null
             })
+            if (out.result?.orderId && out.result.resultCode === "CREATED" && supplierPartyId)
+                supplierOrders.set(supplierPartyId, out.result.orderId)
             results.push(Object.assign({planningSuggestionId, ok: true}, out.result))
         } catch (error) {
             const message = String(error.message || error).replace(/^(Error: )+/, "")
@@ -1323,14 +1362,19 @@ function convertOne(p) {
     // a covered requirement answers its supply, whichever plan or user covered it
     const covered = coveredOf(requirement.requirementId)
     const remaining = dec(requirement.quantity).subtract(covered)
-    const links = rows(SUPPLY, {requirementId: requirement.requirementId}).filter(row => !row.thruDate)
+    const links = rows(SUPPLY, {requirementId: requirement.requirementId}).filter(
+        row => !row.thruDate && row.supplyTypeEnumId !== demandSupplyType
+    )
     if (remaining.compare(0) <= 0 && links.length)
         return {
             resultCode: "EXISTING",
             requirementId: requirement.requirementId,
             workEffortId: links[0].workEffortId || null,
-            workEffortIds: links.map(row => row.workEffortId).filter(Boolean)
+            workEffortIds: links.map(row => row.workEffortId).filter(Boolean),
+            orderId: links[0].orderId || null,
+            orderItemSeqId: links[0].orderItemSeqId || null
         }
+    if (suggestion.methodEnumId === "PsmOutside") return convertOutside(p, suggestion, run, requirement, remaining)
     const stale = staleOf(run)
     if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
     if (suggestion.exceptionCode) denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The suggestion has an exception")
@@ -1409,6 +1453,229 @@ function runFacilityOf(suggestion, run) {
     if (centers.length === 1) return centers[0]
     return suggestion.facilityId
 }
+// ===== outside processing (impl-manufacturing P14) =====
+// The open outside-processing requirements of an organization at the facilities given: RqTpProduct, proposed or approved,
+// with an operation demand link (request#SubcontractService's), at most a few hundred.
+function outsideRequirements(organizationPartyId, facilityIds) {
+    const ids = Array.from(
+        find(REQUIREMENT_PARTY, {partyId: organizationPartyId, roleTypeId: "OrgInternal"}).selectField("requirementId").list()
+    ).map(row => row.requirementId)
+    if (!ids.length || !facilityIds.length) return []
+    const requirements = Array.from(
+        find(REQUIREMENT)
+            .condition("requirementId", "in", ids)
+            .condition("requirementTypeEnumId", "RqTpProduct")
+            .condition("statusId", "in", outsideStatuses)
+            .condition("facilityId", "in", facilityIds)
+            .orderBy("requiredByDate")
+            .limit(productLimit)
+            .list()
+    )
+    return requirements.filter(row => rows(SUPPLY, {requirementId: row.requirementId, supplyTypeEnumId: demandSupplyType}).length)
+}
+// The supplier a requirement names (its RequirementParty in the Supplier role), else null.
+function requirementSupplierOf(requirementId) {
+    return rows(REQUIREMENT_PARTY, {requirementId, roleTypeId: "Supplier"}).find(row => lib.active(row))?.partyId || null
+}
+// An outside-processing requirement as a suggestion of a run: its remaining quantity and unit, its dates, its supplier and
+// its operation as the provenance; no supplier is an exception the planner resolves on the subcontract. Once per run: an
+// open suggestion of it there is brought up to date, none is written when it was converted or nothing is left to cover.
+function writeOutsideSuggestion(planningRunId, requirement, facilityId) {
+    const kept = rows(SUGGESTION, {planningRunId, requirementId: requirement.requirementId})
+    if (kept.some(row => row.stateEnumId === "PssConverted")) return false
+    const open = kept.find(row => openSuggestionStates.includes(row.stateEnumId)) || null
+    const remaining = dec(requirement.quantity).subtract(coveredOf(requirement.requirementId))
+    if (remaining.compare(0) <= 0) {
+        if (open) call("update#" + SUGGESTION, {planningSuggestionId: open.planningSuggestionId, stateEnumId: "PssSuperseded"})
+        return false
+    }
+    const demand = rows(SUPPLY, {requirementId: requirement.requirementId, supplyTypeEnumId: demandSupplyType})[0]
+    const operation = demand?.workEffortId ? one(WORK, {workEffortId: demand.workEffortId}) : null
+    const supplierPartyId = requirementSupplierOf(requirement.requirementId)
+    const requiredBy = requirement.requiredByDate || ec.user.nowTimestamp
+    const provenance = [
+        {
+            kind: "operation",
+            label:
+                "Operation " +
+                (operation?.workEffortName || demand?.workEffortId || "") +
+                (operation?.parentWorkEffortId ? " of work order " + operation.parentWorkEffortId : ""),
+            supply: false,
+            netted: false,
+            date: ms(requiredBy),
+            quantity: text(remaining),
+            workEffortId: demand?.workEffortId || null
+        }
+    ]
+    const fields = {
+        planningRunId,
+        requirementId: requirement.requirementId,
+        productId: requirement.productId,
+        facilityId: requirement.facilityId || facilityId,
+        methodEnumId: "PsmOutside",
+        stateEnumId: supplierPartyId ? "PssProposed" : "PssException",
+        quantity: remaining,
+        quantityUomId: requirement.quantityUomId || null,
+        grossQuantity: remaining,
+        availableQuantity: zero(),
+        requiredByDate: requiredBy,
+        releaseDate: requirement.requirementStartDate || requiredBy,
+        planningLevel: 0,
+        supplierPartyId,
+        exceptionCode: supplierPartyId ? null : "NO_SOURCE",
+        exceptionMessage: supplierPartyId ? null : "Choose the supplier of the outside processing",
+        provenanceJson: JSON.stringify(provenance)
+    }
+    if (open) call("update#" + SUGGESTION, Object.assign({planningSuggestionId: open.planningSuggestionId}, fields))
+    else call("create#" + SUGGESTION, fields)
+    return true
+}
+// A new or changed outside-processing request in the current runs of its organization whose facility set covers its
+// facility, so a buyer can convert it before the next calculation (request#SubcontractService, store#ProductionSubcontract).
+// The runs it is in now.
+function planOutside(requirementId) {
+    const requirement = one(REQUIREMENT, {requirementId})
+    const organizationPartyId = rows(REQUIREMENT_PARTY, {requirementId, roleTypeId: "OrgInternal"})[0]?.partyId
+    if (!requirement || !organizationPartyId) return []
+    const planned = []
+    for (const run of Array.from(find(RUN, {organizationPartyId, isCurrent: "Y"}).list())) {
+        const setIds = rows(RUN_FACILITY, {planningRunId: run.planningRunId}).map(row => row.facilityId)
+        const facilityIds = setIds.flatMap(facilityId => {
+            const facility = one(FACILITY, {facilityId})
+            return facility ? facilityTree(facility) : []
+        })
+        if (!facilityIds.includes(requirement.facilityId)) continue
+        if (writeOutsideSuggestion(run.planningRunId, requirement, setIds[0])) planned.push(run.planningRunId)
+    }
+    return planned
+}
+
+// One outside-processing suggestion converted: a line of a draft purchase order of its supplier (the order an earlier group
+// of the call made, else a new one) for the requirement's remaining quantity and unit, at the supplier's price from the
+// shared resolver with the organization as buyer; its OrderItemWorkEffort to the operation (requiredWork Y), the
+// RequirementSupply of the line, the requirement Ordered and the subcontract given the line. The order is never placed or
+// approved: that is Purchasing's.
+function convertOutside(p, suggestion, run, requirement, remaining) {
+    if (suggestion.exceptionCode || !suggestion.supplierPartyId)
+        denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "Choose the supplier of the outside processing")
+    if (!["PssProposed", "PssPartial"].includes(suggestion.stateEnumId))
+        denied("SUGGESTION_CLOSED", "The suggestion is " + enumText(suggestion.stateEnumId))
+    const demand = rows(SUPPLY, {requirementId: requirement.requirementId, supplyTypeEnumId: demandSupplyType})[0]
+    const operation = demand?.workEffortId ? one(WORK, {workEffortId: demand.workEffortId}) : null
+    if (!operation)
+        denied("RECORD_UNAVAILABLE", "The operation of requirement " + requirement.requirementId + " is not available")
+    const organizationPartyId = run.organizationPartyId
+    const supplierPartyId = suggestion.supplierPartyId
+    const productId = requirement.productId
+    const reason = usable(productId, "Purchase", remaining, suggestion.facilityId)
+    if (reason) denied("PRODUCT_NOT_USABLE", productId + " cannot be bought: " + reason)
+    // the organization's accounting currency (its own preference, else an ancestor organization's)
+    const currencyUomId =
+        call("mantle.ledger.LedgerServices.find#PartyAcctgPreference", {organizationPartyId}).partyAcctgPreference
+            ?.baseCurrencyUomId || null
+    if (!currencyUomId) denied("CURRENCY_REQUIRED", "Organization " + organizationPartyId + " has no accounting currency")
+    const quantityUomId = requirement.quantityUomId || one(PRODUCT, {productId})?.amountUomId || null
+    const price = call("mantle.product.PriceServices.get#ProductPrice", {
+        productId,
+        quantity: remaining,
+        quantityUomId,
+        vendorPartyId: supplierPartyId,
+        customerPartyId: organizationPartyId,
+        organizationPartyId,
+        pricePurposeEnumId: "PppPurchase",
+        priceUomId: currencyUomId,
+        direction: "purchase",
+        validDate: ec.user.nowTimestamp
+    })
+    // the resolver reads a supplier's price only for a supplier-price reader (Products' borrowed group of a buyer)
+    if (!price.priceAvailable && !["SUPPLIER_PRICE_VIEW", "SUPPLIER_PRICE_EDIT"].some(access.has))
+        denied("PERMISSION_DENIED", "SUPPLIER_PRICE_VIEW is required to price the line of " + productId)
+    if (!price.priceAvailable)
+        denied(
+            "PRICE_UNAVAILABLE",
+            productId + " has no purchase price from " + lib.partyNames([supplierPartyId])[supplierPartyId]
+        )
+    // the call's draft order of this supplier, while it is still a draft of the same parties and currency
+    let orderId = null,
+        orderPartSeqId = null
+    if (!blank(p.orderId)) {
+        const header = one("mantle.order.OrderHeader", {orderId: p.orderId})
+        const part = rows("mantle.order.OrderPart", {orderId: p.orderId}).find(
+            row => row.vendorPartyId === supplierPartyId && row.customerPartyId === organizationPartyId
+        )
+        if (header?.statusId === "OrderOpen" && header.currencyUomId === currencyUomId && part) {
+            orderId = header.orderId
+            orderPartSeqId = part.orderPartSeqId
+        }
+    }
+    if (!orderId) {
+        const created = call("mantle.order.OrderServices.create#Order", {
+            customerPartyId: organizationPartyId,
+            vendorPartyId: supplierPartyId,
+            currencyUomId,
+            statusId: "OrderOpen",
+            orderName: "Outside processing from supply plan " + run.planningRunId
+        })
+        orderId = created.orderId
+        orderPartSeqId = created.orderPartSeqId
+    }
+    const item = call("mantle.order.OrderServices.create#OrderItem", {
+        orderId,
+        orderPartSeqId,
+        productId,
+        quantity: remaining,
+        quantityUomId,
+        unitAmount: price.price,
+        productPriceId: price.productPriceId || null,
+        itemDescription:
+            (one(PRODUCT, {productId})?.productName || productId) +
+            " for " +
+            (operation.workEffortName || operation.workEffortId),
+        requiredByDate: requirement.requiredByDate || null
+    })
+    const orderItemSeqId = item.orderItemSeqId
+    call("create#mantle.order.OrderItemWorkEffort", {
+        orderId,
+        orderItemSeqId,
+        workEffortId: operation.workEffortId,
+        requiredWork: "Y"
+    })
+    call("create#" + SUPPLY, {
+        requirementId: requirement.requirementId,
+        supplyTypeEnumId: "RstPurchaseOrder",
+        orderId,
+        orderItemSeqId,
+        quantity: remaining,
+        quantityUomId,
+        planningSuggestionId: suggestion.planningSuggestionId,
+        operationKey: p.operationKey,
+        fromDate: ec.user.nowTimestamp,
+        createdByUserId: ec.user.userId
+    })
+    if (["RqmtStProposed", "RqmtStCreated"].includes(requirement.statusId))
+        call("update#" + REQUIREMENT, {requirementId: requirement.requirementId, statusId: "RqmtStApproved"})
+    call("update#" + REQUIREMENT, {requirementId: requirement.requirementId, statusId: "RqmtStOrdered"})
+    call("update#" + SUGGESTION, {planningSuggestionId: suggestion.planningSuggestionId, stateEnumId: "PssConverted"})
+    for (const subcontract of rows("mantle.work.production.ProductionSubcontract", {requirementId: requirement.requirementId}))
+        call("update#mantle.work.production.ProductionSubcontract", {
+            productionSubcontractId: subcontract.productionSubcontractId,
+            orderId,
+            orderItemSeqId,
+            statusId: "PscOrdered",
+            revision: Number(subcontract.revision || 0) + 1,
+            lastChangedByUserId: ec.user.userId
+        })
+    return {
+        resultCode: "CREATED",
+        requirementId: requirement.requirementId,
+        orderId,
+        orderItemSeqId,
+        supplierPartyId,
+        operationWorkEffortId: operation.workEffortId,
+        quantity: text(remaining)
+    }
+}
+
 // The sales order line a requirement covers, when it covers just one (the run's demand link).
 function singleOrderOf(requirementId) {
     const items = rows("mantle.request.requirement.RequirementOrderItem", {requirementId})
@@ -1420,6 +1687,7 @@ const operations = {runPlan, getPlan, storeSchedule, runScheduled, convert, conv
     readPermissions,
     convertPermissions,
     coveredOf,
+    planOutside,
     staleOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown supply planning operation " + op)
