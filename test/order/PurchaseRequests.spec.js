@@ -307,18 +307,25 @@ feature(
     }
 )
 
-feature("a refusal leaves the request submitted with the refused decision, and needs a purchase approver", {
+feature("a refusal leaves the request submitted with the refused decision; its approvers are told the line with no amount", {
     when() {
         const requestId = submittedRequest("Refused supplies", [[supplierA, 2, null]])
+        const unpriced = run(state.approver, R + "get#PurchaseRequestProgress", {requestId}).progress?.approval?.unpricedText
+        const message =
+            rows("moqui.security.user.NotificationMessage", {topic: "PurchaseRequestApproval", recordId: requestId}).map(row =>
+                JSON.parse(row.messageJson || "{}")
+            )[0] || {}
         const refused = run(state.approver, R + "decide#PurchaseRequestApproval", {
             requestId,
             decision: "refuse",
             reason: "Use stock"
         })
         const decision = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: requestId})[0] || {}
-        return {refused, decision, status: statusOf(requestId)}
+        return {refused, decision, unpriced, message, status: statusOf(requestId)}
     },
     then(r) {
+        r.unpriced == "Line 01 with no amount"
+        String(r.message.amountText).includes("line 01 with no amount")
         r.refused.error == ""
         r.decision.decisionEnumId == "PadRefused"
         r.status == "ReqSubmitted"

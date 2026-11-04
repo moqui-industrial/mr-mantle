@@ -308,6 +308,8 @@ function submittedBy(pr, userId, partyId) {
 function requestSource(pr) {
     const items = itemsOf(pr.requestId)
     const amount = items.reduce((total, item) => total.add(dec(item.maximumAmount)), zero())
+    // a line with no maximum counts nothing toward the approval bands (F-P10-2): its approvers are told which lines
+    const unpricedIds = items.filter(item => item.maximumAmount == null).map(item => item.requestItemSeqId)
     const productIds = [...new Set(items.map(item => item.productId).filter(Boolean))]
     const categoryIds = productIds.length
         ? [
@@ -334,14 +336,21 @@ function requestSource(pr) {
         revision,
         statusId: pr.request.statusId,
         label: "purchase request " + pr.requestId,
+        unpricedIds,
         message: {
             requestId: pr.requestId,
             requestName: pr.request.requestName || pr.requestId,
-            revisionText: revisionText(revision)
+            revisionText: revisionText(revision),
+            amountText:
+                money(amount, pr.request.currencyUomId) +
+                (unpricedIds.length ? " + " + unpricedText(unpricedIds).toLowerCase() : "")
         },
         submittedBy: (userId, partyId) => submittedBy(pr, userId, partyId)
     }
 }
+
+// The lines of a request with no maximum amount, named for its approvers (F-P10-2).
+const unpricedText = ids => (ids.length ? (ids.length === 1 ? "Line " : "Lines ") + ids.join(", ") + " with no amount" : "")
 
 // submit#PurchaseRequest: a draft with lines, each with a product or a description and a quantity, submitted and sent to the
 // approvers of its first step.
@@ -695,6 +704,8 @@ function approvalOf(pr, source) {
         refused: state.refused,
         missing: state.missing,
         currentStepText: state.current ? approvals().stepText(state, state.current) : "",
+        // F-P10-2: the lines whose amount the approval bands could not count
+        unpricedText: unpricedText(source.unpricedIds || []),
         canDecide: submitted && !!state.current && !state.refused && access.has("PURCHASE_APPROVE") && !refusal,
         refusalText: refusal ? refusal[1] : "",
         decisionRows: decisions
