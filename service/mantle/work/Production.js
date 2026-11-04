@@ -437,9 +437,12 @@ function release(userScope, run, p) {
             run.productBomId,
             run.productionRoutingId
         )
-        for (const line of lines) call("delete#" + LINE, {productionRunLineId: line.productionRunLineId})
+        // a planner's manual material lines are kept (impl-manufacturing P5b, store#ProductionMaterial)
+        const manual = lines.filter(line => line.manualLine === "Y")
+        for (const line of lines)
+            if (line.manualLine !== "Y") call("delete#" + LINE, {productionRunLineId: line.productionRunLineId})
         writeLines(run.workEffortId, plan.lines)
-        writeProducts(run.workEffortId, plan.lines)
+        writeProducts(run.workEffortId, plan.lines.concat(manual))
         // the rewritten draft goes back for review: it stays WeInPlanning at the next revision, and a release follows with
         // that revision (P16 review B7; design WorkOrderDetail "returns a finding and offers a re-explosion")
         call("update#" + WORK, {
@@ -1134,6 +1137,8 @@ function subcontractPlan(userScope, p) {
     // impl-manufacturing P5a's release gate and operations (ProductionOrders.js)
     laterReleases,
     routingsOf: routingsOfRun,
-    // impl-manufacturing P7's target change and draft outputs (ProductionQuantities.js)
-    writeProducts
+    // impl-manufacturing P5b's manual material lines (ProductionMaterials.js) and P7's target change and draft outputs
+    // (ProductionQuantities.js)
+    writeProducts,
+    lineAnswer
 })

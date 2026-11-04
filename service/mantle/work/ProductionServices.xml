@@ -1354,8 +1354,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Change the target of a released, running or held run's output line (design-manufacturing Quantities
             ChangeQuantity, R-SA-05): a target change event with the delta and the targets before and after, never below what
             the line accounts for (good, held, loss and losses waiting: TARGET_BELOW_FACTS); the material and by-product lines
-            scaled with it, never below what each has issued or received; the WeptConsume and WeptProduce rows rewritten from
-            the lines; the revision counted up. History is never rewritten and set#ProducedProductQuantity is never called
+            scaled with it, never below what each has issued or received (a manual material line keeps its quantity unless
+            scaleManual); the WeptConsume and WeptProduce rows rewritten from the lines; the revision counted up. History is never rewritten and set#ProducedProductQuantity is never called
             (F8). A retry with the same operation key answers the first. Requires PRODUCTION_PLAN; refuses a run outside the
             user's organizations (RECORD_UNAVAILABLE), a changed revision (REVISION_REQUIRED, REVISION_CHANGED), a draft or a
             done run (RUN_NOT_RELEASED), no reason (REASON_REQUIRED) or an inactive reason code (REASON_INVALID), a line that is
@@ -1369,6 +1369,8 @@ along with this software (see the LICENSE.md file). If not, see
                 unit</description></parameter>
             <parameter name="reason"/>
             <parameter name="reasonCode"/>
+            <parameter name="scaleManual" type="Boolean" default="false"><description>Scale the manual material lines
+                (store#ProductionMaterial) too; they keep their quantity otherwise</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode CHANGED, workEffortId, productionRunLineId,
@@ -1512,6 +1514,154 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuantities.js')
                     .execute('labels', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+
+    <!-- ===== a run's materials, backflush and shortages (impl-manufacturing P5b; ProductionMaterials.js) ===== -->
+    <service verb="get" noun="ProductionMaterials" allow-remote="false">
+        <description>A run's material lines as Components and MaterialIssueReceipt show them (design-manufacturing Components):
+            each line's operation, product, required quantity in the stock unit with the scrap allowance of the run's policy,
+            issued, returned and remaining, the stock free for it at the facilities the run nets against (its facility and,
+            for a line, the plant above it), shared in line order, what is short, the owner's stock held there by status
+            apart (quarantine, on hold, defective; never from available to promise, R-MFG-24), a staged release's short
+            quantity, and whether a planner added it by hand; with withStock, the available stock each line may be issued
+            from, oldest lot expiry first. Also the run's consumption policy (manual or backflush, the issue point), a draft's
+            routing operations, and whether the user may add lines (PRODUCTION_PLAN, a draft) or issue (STOCK_ISSUE, a
+            released run). Requires PRODUCTION_VIEW or STOCK_ISSUE; refuses a run outside the user's organizations
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="withStock" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="materialRows" type="List"/>
+            <parameter name="shortCount" type="Integer"/>
+            <parameter name="heldCount" type="Integer"/>
+            <parameter name="routingOperations" type="List"/>
+            <parameter name="canAdd" type="Boolean"/>
+            <parameter name="canIssue" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('materials', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionMaterial" allow-remote="false">
+        <description>Add, change or remove a manual material line of a draft run (design-manufacturing Components
+            AddMaterial): the component (a stocked product of the organization's, not what the run makes), its quantity in the
+            product's stock unit, the routing operation that consumes it, the facility its stock is staged from (the run
+            owner's) and an instruction. The line is marked manual, so a re-explosion of the method keeps it; the planning
+            rows (WeptConsume) are rewritten and the revision counts up, so a staged approval is asked again. A line from the
+            method is changed only through the method. A retry with the same operation key answers the first. Requires
+            PRODUCTION_PLAN; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not a draft
+            (RUN_NOT_DRAFT), a changed revision (REVISION_CHANGED, REVISION_REQUIRED), a line of another run or role
+            (LINE_INVALID), a method line (LINE_NOT_MANUAL), no product (PRODUCT_REQUIRED), another organization's product
+            (RECORD_UNAVAILABLE), one that is not stocked (NOT_STOCK) or the run's own output (PRODUCT_INVALID), no quantity
+            (QUANTITY_INVALID), another unit (UNIT_CONVERSION), an operation not of the routing (OPERATION_INVALID) and a
+            facility of another owner (FACILITY_OWNER).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="productionRunLineId"><description>The manual line to change or remove; empty adds one</description>
+            </parameter>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"><description>The product's stock unit when empty</description></parameter>
+            <parameter name="routingOperationWorkEffortId"/>
+            <parameter name="sourceFacilityId"/>
+            <parameter name="instructionText"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="clearEmpty" type="Boolean" default="false"><description>On a change, an empty routing
+                operation, source facility or instruction clears it; otherwise an empty field keeps the line's value (an edit
+                form posting every field passes true)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ADDED, UPDATED or REMOVED, workEffortId,
+                productionRunLineId, revision and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('store', context)"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="ProductionBackflush" allow-remote="false">
+        <description>What a backflush of a released run would issue (design-manufacturing MaterialIssueReceipt Preview
+            backflush): each material line's exact remaining quantity, of one operation's lines or all, with the lots it
+            would issue from (the run owner's available stock at the run's facilities, oldest lot expiry first, then the
+            oldest receipt; expired stock left out), and the findings that leave nothing to confirm: a policy that issues by
+            hand (BACKFLUSH_NOT_POLICY), a line the available stock does not cover (SHORTFALL: held stock is never issued,
+            also at a facility that allows issue beyond quantity on hand, F12), a staged short line still short
+            (LINE_STAGED_SHORT) and nothing left (NOTHING_TO_ISSUE). The previewKey names the run's revision and every pick
+            for backflush#ProductionMaterials. Reads only. Requires STOCK_ISSUE; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE), one not released (RUN_NOT_RELEASED) and an operation of another run
+            (OPERATION_INVALID).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="operationWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="canConfirm" type="Boolean"/>
+            <parameter name="previewKey"/>
+            <parameter name="consumptionText"/>
+            <parameter name="issuePointText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('previewBackflush', context)"/>
+            <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+    <service verb="backflush" noun="ProductionMaterials" allow-remote="false">
+        <description>Confirm a backflush preview (design-manufacturing MaterialIssueReceipt): the preview is made again and
+            must match the previewKey given (PREVIEW_CHANGED when the stock or the run changed), then each pick is issued
+            through issue#ProductionMaterial, a new issuance per line and lot with its cost event, all in this transaction, so
+            a refusal of any (a held asset, a shortfall, a staged short line, a closed period) issues none. A retry with the
+            same operation key answers the first and issues nothing more. Requires STOCK_ISSUE; refuses what
+            preview#ProductionBackflush finds (BACKFLUSH_NOT_POLICY, SHORTFALL, LINE_STAGED_SHORT, NOTHING_TO_ISSUE) and what
+            the issue guard refuses.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="previewKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode BACKFLUSHED, workEffortId, operationWorkEffortId,
+                issued (each line, asset, lot, quantity and issuance), issuedCount and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('backflush', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionShortages" allow-remote="false">
+        <description>The open runs (drafts, released, running and held) of the user's organizations at a facility (a plant
+            takes the lines under it) whose material lines the free stock does not cover, earliest due first, the first 100
+            runs checked (truncated beyond): each run with its short lines, as Home's shortage queue shows them. Requires
+            PRODUCTION_VIEW (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shortRows" type="List"/>
+            <parameter name="shortRunCount" type="Integer"/>
+            <parameter name="checkedRunCount" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
+                    .execute('shortages', context)"/>
             <script>ec.context.putAll(found)</script>
         </actions>
     </service>

@@ -959,7 +959,9 @@ function approveException(p) {
 // ===== change#ProductionQuantity =====
 // A new target for an output line of a released run as a delta (design ChangeQuantity, R-SA-05): never below what the line
 // already accounts for (good, held, loss and losses waiting); the material and by-product lines scale with it, never below
-// what each has already issued or received; the WeptConsume/WeptProduce rows are rewritten from the lines.
+// what each has already issued or received, but a planner's manual material line (P5b, store#ProductionMaterial: a quantity
+// entered for the run, not per unit made) keeps its quantity unless scaleManual; the WeptConsume/WeptProduce rows are
+// rewritten from the lines (F-P7-10).
 function changeQuantity(p) {
     const begun = posting.begin(p, "ProductionQuantityChange", "PRODUCTION_PLAN", [
         "workEffortId",
@@ -967,7 +969,8 @@ function changeQuantity(p) {
         "targetQuantity",
         "expectedRevision",
         "reason",
-        "reasonCode"
+        "reasonCode",
+        "scaleManual"
     ])
     if (begun.previous) return begun.previous
     const userScope = posting.scope()
@@ -1026,6 +1029,7 @@ function changeQuantity(p) {
                 quantity: factor.isZero() ? target : target.divide(factor, 6, "HALF_UP")
             })
         } else if (row.lineRoleEnumId === "PrlrMaterial") {
+            if (row.manualLine === "Y" && !yes(p.scaleManual)) continue
             const figures = materialFigures(row, losses)
             call("update#" + LINE, Object.assign({productionRunLineId: row.productionRunLineId}, scaled(row, figures.net)))
         } else if (row.lineRoleEnumId === "PrlrByproduct") {
