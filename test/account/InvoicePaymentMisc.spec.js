@@ -124,7 +124,9 @@ feature("record a payment, auto apply it, and read payment info", {
 
 feature("set the payment date, refund it, and set the refund link", {
     when() {
-        call("mantle.account.PaymentServices.set#PaymentDate", { paymentId, effectiveDate: effectiveTime - 900000, overrideCurrent: true })
+        // earlier than the application's date (the payment's first date): a later one can fall on the next day near
+        // midnight, and the repost below would then post the payment after the day of its application
+        call("mantle.account.PaymentServices.set#PaymentDate", { paymentId, effectiveDate: effectiveTime - 2400000, overrideCurrent: true })
         const dated = payment(paymentId)
         const refund = call("mantle.account.PaymentServices.create#RefundPayment", { paymentId, amount: 20, effectiveDate: effectiveTime })
         const refundPayment = payment(refund.paymentId)
@@ -134,7 +136,7 @@ feature("set the payment date, refund it, and set the refund link", {
         return { dated, refund, refundPayment, linked: payment(other) }
     },
     then({ dated, refund, refundPayment, linked }) {
-        String(dated.effectiveDate) == String(effectiveTime - 900000)
+        String(dated.effectiveDate) == String(effectiveTime - 2400000)
         n(refund.amount) == 20
         refundPayment.paymentTypeEnumId == "PtRefund"
         linked.refundForPaymentId == paymentId
