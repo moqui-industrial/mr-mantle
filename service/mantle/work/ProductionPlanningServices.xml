@@ -12,24 +12,33 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Manufacturing's planning reads (design-manufacturing §7 and §12 M5, M10), over ProductionPlanning.js. P3 builds the first
-    version of get#WorkCenterLoad, from capacity and released operations only; P12 adds the calendar, downtime and the
-    schedule. -->
+<!-- Manufacturing's planning and scheduling (design-manufacturing §7 ProductionSchedule and Capacity, §3 Operations' Reschedule,
+    §6 FacilityDetail, §12 M5, M10): get#WorkCenterLoad over ProductionPlanning.js (P3, completed by P12 with the calendar,
+    downtime and outages and the bookings), and P12's get#ProductionSchedule, schedule#ProductionOperation and
+    store#WorkCenterOffline over ProductionSchedule.js; both read a center's time through ProductionCalendar.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="WorkCenterLoad" allow-remote="false">
-        <description>The work centers of the user's organizations (facilityId, the centers of plantFacilityId, or those whose
-            id or name has text, ignoring case), a page at a time, each with its parallel slots and rate capacities in effect
-            at the start of the range, its efficiency, its nominal hours (slots over the whole range at its efficiency, before
-            work hours, holidays and downtime), the hours of its released operations that overlap the range (machine time
-            where the routing operation has it, else labor, for the run's output quantity), their count and the utilization,
-            with a finding for each operation whose hours do not read. The range is fromDate (now) through thruDate (two
-            weeks on), at most a year. Needs PRODUCTION_VIEW (PERMISSION_DENIED); a facilityId of another organization or
-            that is not a work center is refused like a missing one (RECORD_UNAVAILABLE).</description>
+        <description>The work centers of the user's organizations (facilityId, facilityIds, the centers of plantFacilityId, or
+            those whose id or name has text, ignoring case), a page at a time, each with its parallel slots and rate capacities,
+            its efficiency and, over the range and in each period of it (bucket day or week; the whole range by default):
+            nominal hours (the slots over the whole period at its efficiency), calendar-adjusted hours (over its work hours less
+            the holidays of its calendar and organization), downtime hours (the work hours it is offline: production stops and
+            the outages of the center or its equipment), available hours (calendar-adjusted less downtime), booked hours (each
+            released operation's standard hours, machine time where it has it, else labor, for the run's output quantity,
+            prorated over the work hours of its dates in the period; one without dates counts whole in the first period),
+            overload and utilization (booked over available, not OEE). Each center names its missing data (no calendar, no
+            slots, operations without hours or dates, stops awaiting approval counted as downtime, an open stop or outage),
+            its next available time (within 60 days) and its offline reason now or next. loadHours is the booked hours. The
+            range is fromDate (now) through thruDate (two weeks on), at most a year, and at most 62 periods. Needs
+            PRODUCTION_VIEW (PERMISSION_DENIED); a facilityId of another organization or that is not a work center is refused
+            like a missing one (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="facilityId"/>
+            <parameter name="facilityIds"><description>Work centers, a list or ids separated by commas</description></parameter>
             <parameter name="plantFacilityId"/>
             <parameter name="text"/>
+            <parameter name="bucket"><description>day, week, or empty for the whole range</description></parameter>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="pageIndex" type="Integer"/>
@@ -47,6 +56,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="rangeText"/>
             <parameter name="rangeHours"/>
+            <parameter name="bucket"/>
+            <parameter name="utilizationFormula"/>
+            <parameter name="timeZone"/>
         </out-parameters>
         <actions>
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionPlanning.js').execute('load', context)"/>
@@ -61,6 +73,138 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="thruDate" from="result.thruDate"/>
             <set field="rangeText" from="result.rangeText"/>
             <set field="rangeHours" from="result.rangeHours"/>
+            <set field="bucket" from="result.bucket"/>
+            <set field="utilizationFormula" from="result.utilizationFormula"/>
+            <set field="timeZone" from="result.timeZone"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ProductionSchedule" allow-remote="false">
+        <description>The schedule of the user's work centers (the centers of plantFacilityId, or facilityIds; at most 30) from
+            fromDate (the start of today) through thruDate (two weeks on; at most three months): each lane (center) with its
+            slots, whether it has a calendar, the times it does not work (closedList), its holidays and its offline intervals
+            (stops and outages, with their reasons); the released operations at the centers (at most 300) with their run,
+            product, hours, dates, status, whether actual work locks them, their predecessors, their revisions, whether the
+            user may move them and the conflicts of where they are now; the operations at the centers with no dates
+            (unscheduledList); the conflicts listed; the override requests waiting at the centers (and scheduleChangeId's); and
+            whether the user may schedule (PRODUCTION_SCHEDULE) and override (PRODUCTION_SUPERVISE). Dates are text in the
+            user's zone (yyyy-MM-dd HH:mm). Needs PRODUCTION_VIEW, PRODUCTION_SCHEDULE or PRODUCTION_SUPERVISE
+            (PERMISSION_DENIED); RANGE_INVALID.</description>
+        <in-parameters>
+            <parameter name="plantFacilityId"/>
+            <parameter name="facilityIds"><description>Work centers, a list or ids separated by commas</description></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="scheduleChangeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="nowText"/>
+            <parameter name="todayText"/>
+            <parameter name="laneList" type="List"/>
+            <parameter name="operationList" type="List"/>
+            <parameter name="unscheduledList" type="List"/>
+            <parameter name="conflictList" type="List"/>
+            <parameter name="requestList" type="List"/>
+            <parameter name="canSchedule" type="Boolean"/>
+            <parameter name="canOverride" type="Boolean"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSchedule.js').execute('read', context)"/>
+            <set field="fromDate" from="result.fromDate"/>
+            <set field="thruDate" from="result.thruDate"/>
+            <set field="fromText" from="result.fromText"/>
+            <set field="thruText" from="result.thruText"/>
+            <set field="nowText" from="result.nowText"/>
+            <set field="todayText" from="result.todayText"/>
+            <set field="laneList" from="result.laneList"/>
+            <set field="operationList" from="result.operationList"/>
+            <set field="unscheduledList" from="result.unscheduledList"/>
+            <set field="conflictList" from="result.conflictList"/>
+            <set field="requestList" from="result.requestList"/>
+            <set field="canSchedule" from="result.canSchedule"/>
+            <set field="canOverride" from="result.canOverride"/>
+            <set field="truncated" from="result.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="schedule" noun="ProductionOperation" allow-remote="false">
+        <description>Move one released operation to a work center and dates, or unschedule it (design-manufacturing
+            ProductionSchedule Move, Operations' Reschedule). action:
+            - preview (default; PRODUCTION_SCHEDULE or PRODUCTION_SUPERVISE): writes nothing; answers where it is and where it
+              would go (facilityId, the operation's by default; startDate, its own by default; endDate, else its standard hours
+              over the center's work hours from the start), its hours, the refusals and conflicts, its revisions and whether
+              the user may apply it, must override or may ask for an override;
+            - apply (PRODUCTION_SCHEDULE): with the operation and its run locked, rechecks it all and writes the operation's
+              center and dates, a ProductionScheduleChange and the run's people's notice. Refused, never overridden: the
+              operation or center not available (RECORD_UNAVAILABLE, CENTER_UNAVAILABLE), a center that is not its routing's
+              or an alternate of it (CENTER_NOT_QUALIFIED), started or done work or a run not open (OPERATION_LOCKED), dates out
+              of order (DATES_INVALID), revisions not given or changed (REVISION_REQUIRED, REVISION_CHANGED: expectedRevision is
+              the operation's schedule revision, expectedRunRevision the run's, which a quantity or method change moves).
+              Conflicts (calendar, offline, capacity, predecessor, successor, equipment, skills) refuse it (SCHEDULE_CONFLICT)
+              unless override is true, which needs PRODUCTION_SUPERVISE (OVERRIDE_NOT_PERMITTED) and a reason
+              (REASON_REQUIRED); an override changes no capacity and is kept on the change (overrideApplied);
+            - unschedule (PRODUCTION_SCHEDULE): clears its dates (NOT_SCHEDULED, OPERATION_LOCKED, the revisions);
+            - request (PRODUCTION_SCHEDULE): a move with conflicts, with a reason, waits for a supervisor (SchRequested) and
+              notifies the organization's PRODUCTION_SUPERVISE holders (ProductionScheduleOverride; NO_CONFLICT);
+            - approve and refuse (PRODUCTION_SUPERVISE) a request by scheduleChangeId: approve applies it with the override
+              after the same rechecks at the revisions it was asked at (REVISION_CHANGED, CHANGE_DECIDED); refuse needs a
+              reason. Both mark the requests read.
+            Writes take an operationKey, and a retry answers the first result.</description>
+        <in-parameters>
+            <parameter name="workEffortId"><description>The operation</description></parameter>
+            <parameter name="action" default-value="preview"/>
+            <parameter name="facilityId"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="endDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="override" type="Boolean"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="expectedRunRevision" type="Integer"/>
+            <parameter name="scheduleChangeId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSchedule.js').execute('schedule', context)"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="WorkCenterOffline" allow-remote="false">
+        <description>A planned offline time of a work center (design-manufacturing FacilityDetail "Offline changes warn or
+            reschedule affected operations with an explicit preview"): a ResourceUnavailability RukPlanned of the facility,
+            the minimal record Maintenance MT-07 extends. action:
+            - preview (PRODUCTION_SCHEDULE or METHOD_RESOURCES): the open operations at the center that fromDate to thruDate
+              overlaps, each with where it would move (forward to the center's first free time after the block and after its
+              moved predecessors, within its slots), or why it stays (started work is never moved);
+            - apply: records the block with its reason (REASON_REQUIRED) and, with moveOperations (PRODUCTION_SCHEDULE),
+              applies each move through schedule#ProductionOperation in its own transaction, one that fails named with its
+              reason and the others going on (moveResults);
+            - withdraw a planned block of the center by resourceUnavailabilityId: one not started ends at its start, one
+              started ends now (OFFLINE_ENDED).
+            Posted labor and machine facts are never changed. DATES_REQUIRED, DATES_INVALID, RECORD_UNAVAILABLE. Writes take an
+            operationKey, and a retry answers the first result.</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="action" default-value="preview"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="moveOperations" type="Boolean"/>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSchedule.js').execute('offline', context)"/>
         </actions>
     </service>
 </services>
