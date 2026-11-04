@@ -629,3 +629,55 @@ feature("a shortfall with held stock issues nothing, even where issue beyond on 
         r.noView.error.includes("PERMISSION_DENIED")
     }
 })
+
+feature("a target change scales the method's material lines and keeps a manual line unless asked (F-P7-10)", {
+    when() {
+        const workEffortId = draft(1, "PM5_FIN")
+        run("pm5_planner", P + "store#ProductionMaterial", {
+            operationKey: key(),
+            workEffortId,
+            expectedRevision: revisionOf(workEffortId),
+            productId: "PM5_EXTRA",
+            quantity: 2
+        })
+        const releasedNow = act("pm5_planner", workEffortId, "release")
+        const before = n(lineOf(workEffortId, "PM5_RM").stockQuantity)
+        const output = linesOf(workEffortId).find(row => row.lineRoleEnumId === "PrlrOutput")
+        const change = (targetQuantity, extra = {}) =>
+            run(
+                "pm5_planner",
+                P + "change#ProductionQuantity",
+                Object.assign(
+                    {
+                        operationKey: key(),
+                        workEffortId,
+                        expectedRevision: revisionOf(workEffortId),
+                        productionRunLineId: output.productionRunLineId,
+                        targetQuantity,
+                        reason: "Spec target change"
+                    },
+                    extra
+                )
+            )
+        const doubled = change(2)
+        const afterDouble = {
+            rm: n(lineOf(workEffortId, "PM5_RM").stockQuantity),
+            extra: n(lineOf(workEffortId, "PM5_EXTRA").stockQuantity)
+        }
+        const scaled = change(3, {scaleManual: true})
+        const afterScale = {
+            rm: n(lineOf(workEffortId, "PM5_RM").stockQuantity),
+            extra: n(lineOf(workEffortId, "PM5_EXTRA").stockQuantity)
+        }
+        return {releasedNow, before, doubled, afterDouble, scaled, afterScale}
+    },
+    then(r) {
+        r.releasedNow.error == ""
+        r.doubled.error == ""
+        r.afterDouble.rm == r.before * 2
+        r.afterDouble.extra == 2
+        r.scaled.error == ""
+        r.afterScale.rm == r.before * 3
+        r.afterScale.extra == 3
+    }
+})

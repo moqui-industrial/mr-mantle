@@ -1354,8 +1354,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Change the target of a released, running or held run's output line (design-manufacturing Quantities
             ChangeQuantity, R-SA-05): a target change event with the delta and the targets before and after, never below what
             the line accounts for (good, held, loss and losses waiting: TARGET_BELOW_FACTS); the material and by-product lines
-            scaled with it, never below what each has issued or received; the WeptConsume and WeptProduce rows rewritten from
-            the lines; the revision counted up. History is never rewritten and set#ProducedProductQuantity is never called
+            scaled with it, never below what each has issued or received (a manual material line keeps its quantity unless
+            scaleManual); the WeptConsume and WeptProduce rows rewritten from the lines; the revision counted up. History is never rewritten and set#ProducedProductQuantity is never called
             (F8). A retry with the same operation key answers the first. Requires PRODUCTION_PLAN; refuses a run outside the
             user's organizations (RECORD_UNAVAILABLE), a changed revision (REVISION_REQUIRED, REVISION_CHANGED), a draft or a
             done run (RUN_NOT_RELEASED), no reason (REASON_REQUIRED) or an inactive reason code (REASON_INVALID), a line that is
@@ -1369,6 +1369,8 @@ along with this software (see the LICENSE.md file). If not, see
                 unit</description></parameter>
             <parameter name="reason"/>
             <parameter name="reasonCode"/>
+            <parameter name="scaleManual" type="Boolean" default="false"><description>Scale the manual material lines
+                (store#ProductionMaterial) too; they keep their quantity otherwise</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode CHANGED, workEffortId, productionRunLineId,
