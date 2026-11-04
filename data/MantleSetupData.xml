@@ -83,6 +83,23 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_VIEW" fromDate="0"/>
     <userPermissions userPermissionId="PRODUCTION_PLAN" description="Production Plan"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_PLAN" fromDate="0"/>
+    <!-- the rest of Manufacturing's production permissions (impl-manufacturing P1; design-manufacturing §1.1):
+        PRODUCTION_SCHEDULE moves operations and commits a schedule, PRODUCTION_OPERATE records an operation's work,
+        PRODUCTION_SUPERVISE starts, holds, completes and cancels a run and approves its exceptions, PRODUCTION_COST_REVIEW
+        reads cost evidence and asks for its review, PRODUCTION_POLICY_EDIT keeps the production policy, reason codes and
+        work centers; SUPPLY_PLAN_RUN starts a planning run and converts its suggestions (crosscut CX-PLANNING) -->
+    <userPermissions userPermissionId="PRODUCTION_SCHEDULE" description="Production Schedule"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_SCHEDULE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_OPERATE" description="Production Operate"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_OPERATE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_SUPERVISE" description="Production Supervise"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_SUPERVISE" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_COST_REVIEW" description="Production Cost Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_COST_REVIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PRODUCTION_POLICY_EDIT" description="Production Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPLY_PLAN_RUN" description="Supply Plan Run"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLY_PLAN_RUN" fromDate="0"/>
     <!-- A return's authorization, Customer Service's right (crosscut §3.18 Authorize; no Warehouse group holds it):
         WarehouseTaskServices.request#ReturnLabel admits it beside SHIPMENT_SHIP -->
     <userPermissions userPermissionId="RETURN_AUTHORIZE" description="Return Authorize"/>
