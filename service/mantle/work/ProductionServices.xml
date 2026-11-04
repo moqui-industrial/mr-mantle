@@ -96,7 +96,10 @@ along with this software (see the LICENSE.md file). If not, see
             owner, each with its routing operation, sequence and work center, audit-logged) from the routings as of the method
             date, the lines frozen (frozenDate) on their operations, the WorkEffortProduct rows rewritten from the lines, the
             frozen standard (the approved ProductStandardCost in effect now for the organization and facility, Products P9)
-            and the release time stamped, the revision counted up, and the run WeApproved. A retry with the same operation key
+            and the release time stamped, the revision counted up, and the run WeApproved. The quality gates are kept with
+            their templates as of the release (impl-manufacturing P8, ProductionQualityGate): an operation's in-process gate,
+            an output line's final gate; an operation naming a template that is not published refuses the release
+            (TEMPLATE_UNAVAILABLE). A retry with the same operation key
             answers the first. Requires PRODUCTION_PLAN; refuses a run outside the user's organizations (RECORD_UNAVAILABLE),
             one not a draft (RUN_NOT_DRAFT), a changed revision (REVISION_CHANGED), a run with no lines (LINES_REQUIRED) and a
             product that cannot be produced (PRODUCT_NOT_USABLE).</description>
@@ -326,8 +329,9 @@ along with this software (see the LICENSE.md file). If not, see
             cost (its productStandardCostId, R-PRD-29); with no approved standard at the run's net WIP times the quantity over
             what is left to receive (the last receipt takes the rest), costProvisional; never without a cost (D12, R-SA-01,
             COST_UNAVAILABLE). The unit cost is kept at four decimals rounded down and the last unit received apart at the
-            remainder's cost, so the receipts carry the value exactly (P6, F166). Output that needs inspection (the tracking
-            policy's inspectionRequired or a published production template, P8) is received AstQuarantine into quarantine with an
+            remainder's cost, so the receipts carry the value exactly (P6, F166). Output that needs inspection (the line's final quality gate,
+            its template as of the release, impl-manufacturing P8; the tracking policy's inspectionRequired; for a run released
+            before its gates were kept, a published production template) is received AstQuarantine into quarantine with an
             inspection of each receipt (QisWorkEffort); otherwise to the location given or the putaway resolver's. Serials one per
             unit (given, or generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each
             receipt carries the output line, the operation and the quantity as entered, and has its cost event, which
@@ -756,7 +760,11 @@ along with this software (see the LICENSE.md file). If not, see
             an approved loss with the reason) and nothing held awaiting disposition (OUTPUT_HELD), no loss waiting for
             approval (LOSS_PENDING), no operation running or held (OPERATION_OPEN; those not reported complete with it) and
             each material line issued (MATERIAL_UNISSUED, unless acceptMaterialVariance); close is the cost close's
-            (CLOSE_BY_COST_CLOSE). requestStaged (PRODUCTION_PLAN) asks the supervisors to approve a staged release
+            (CLOSE_BY_COST_CLOSE). The quality gates (impl-manufacturing P8): start and resume refuse a run with a
+            failed gate (QUALITY_BLOCKED, naming the inspection); complete refuses a final inspection pending or failed
+            (INSPECTION_PENDING, INSPECTION_FAILED) and an in-process gate not passed (QUALITY_GATE_OPEN), before the
+            quantities; a release refuses an operation template that is not published (TEMPLATE_UNAVAILABLE); unrelease and
+            cancel count the run's inspections as facts. requestStaged (PRODUCTION_PLAN) asks the supervisors to approve a staged release
             of a short draft (ProductionStagedRelease); approveStaged (PRODUCTION_SUPERVISE) approves it at the next revision.
             Refuses a run outside the user's organizations (RECORD_UNAVAILABLE), no revision (REVISION_REQUIRED) or a changed
             one (REVISION_CHANGED), an action from another status (STATUS_INVALID, RUN_NOT_DRAFT), a generic transition such as
@@ -1669,6 +1677,37 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionMaterials.js')
                     .execute('shortages', context)"/>
             <script>ec.context.putAll(found)</script>
+        </actions>
+    </service>
+
+    <!-- ===== quality gates (impl-manufacturing P8; ProductionQuality.js) ===== -->
+    <service verb="create" noun="ProductionInspection" allow-remote="false">
+        <description>An inspection of an in-process quality gate of an open run (released, running or held): the run's
+            output product at its facility, the quantity inspected (the output line's target by default), the gate's
+            template as of the run's release with its sample plan (the sample given instead), the inspector and due date;
+            the same QualityInspection Warehouse's receipts make, then recorded, submitted, verified and disposed through
+            mantle.product.QualityServices. Requires QUALITY_INSPECT (PERMISSION_DENIED); refuses a run outside the user's
+            organizations or a gate of another run (RECORD_UNAVAILABLE), a run not open (RUN_NOT_OPEN), a final gate, whose
+            inspections the output receipt creates (GATE_FINAL), a gate with an open or verified inspection
+            (INSPECTION_EXISTS) and one passed (GATE_PASSED); and what create#Inspection refuses.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="productionQualityGateId" required="true"/>
+            <parameter name="quantity"/>
+            <parameter name="sampleSize"/>
+            <parameter name="inspectorPartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="qualityInspectionId"/>
+            <parameter name="productionQualityGateId"/>
+            <parameter name="inspectionTemplateId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionQuality.js')
+                    .execute('createInspection', context)"/>
+            <script>ec.context.putAll(answer)</script>
         </actions>
     </service>
 

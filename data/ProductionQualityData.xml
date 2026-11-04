@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Production quality gates (design-manufacturing QualityGates and InspectionTemplates; impl-manufacturing P8): a production
+    template's stage and sampling basis, where a gate's template came from, and the quality-block notice sent to the run
+    organization's PRODUCTION_SUPERVISE holders when a production inspection is verified with a rejection. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="ProductionInspectionStage" description="Production inspection stage"/>
+    <moqui.basic.Enumeration enumId="QpsInProcess" enumTypeId="ProductionInspectionStage" description="In-process"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QpsFinal" enumTypeId="ProductionInspectionStage" description="Final" sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType enumTypeId="InspectionSampleBasis" description="Inspection sample basis"/>
+    <moqui.basic.Enumeration enumId="QsbReceipt" enumTypeId="InspectionSampleBasis" description="Each receipt"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="QsbRun" enumTypeId="InspectionSampleBasis" description="The run's quantity"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ProductionGateSource" description="Production gate source"/>
+    <moqui.basic.Enumeration enumId="PgsOperation" enumTypeId="ProductionGateSource" description="Operation"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="PgsMethod" enumTypeId="ProductionGateSource" description="Method" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="PgsApplicability" enumTypeId="ProductionGateSource" description="Applicability"
+            sequenceNum="3"/>
+
+    <!-- Notification: a production inspection verified with a rejection blocks its gate (the operations after an in-process
+        gate, the run's completion for a final one). To the run organization's supervisors; no link template here: the work
+        order's screen belongs to the app. -->
+    <moqui.security.user.NotificationTopic topic="ProductionQualityBlock" description="Production quality block"
+            typeString="warning" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Work order ${workEffortId}: inspection ${qualityInspectionId} ${decision}"/>
+</entity-facade-xml>

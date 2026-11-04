@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's quality gates (design-manufacturing QualityGates, Inspections, QualityInspection and InspectionTemplates;
+    §12 M6's inspection part over CX-QUALITY; impl-manufacturing P8; ProductionQuality.js): a production template's stage
+    (in-process or final), sampling basis and the method or operation it attaches to; a released run's gates, each the
+    template as of the release with its sample plan, so a template change never changes an existing gate; and the
+    production links of an inspection and of its scrap disposition. A file of its own so it merges apart from the quality
+    and the other production entities. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- a production template (inspectionContextEnumId QicProduction): in-process (an operation's gate, blocking the
+        operations after it) or final (the output, received held); its sample counted on each receipt or on the run's
+        quantity; attached to a method (a BOM: the final check of what it makes) or an operation (an operation template or a
+        routing operation: its in-process check), else applying by product, category and facility as any template -->
+    <extend-entity entity-name="InspectionTemplate" package="mantle.product.quality">
+        <field name="productionStageEnumId" type="id" enable-audit-log="true"/>
+        <field name="sampleBasisEnumId" type="id" enable-audit-log="true"/>
+        <field name="productBomId" type="id" enable-audit-log="true"/>
+        <field name="operationWorkEffortId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="ProductionStage" related="moqui.basic.Enumeration">
+            <key-map field-name="productionStageEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SampleBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="sampleBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.bom.ProductBom"/>
+        <relationship type="one-nofk" title="Operation" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+    <!-- an inspection of a run's gate: the operation (in-process) or output line (final) and the gate it answers -->
+    <extend-entity entity-name="QualityInspection" package="mantle.product.quality">
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="productionQualityGateId" type="id"/>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionQualityGate"/>
+        <index name="QUAL_INSP_WORK"><index-field name="workEffortId"/></index>
+        <index name="QUAL_INSP_GATE"><index-field name="productionQualityGateId"/></index>
+    </extend-entity>
+    <!-- a scrap disposition of an open run's output takes P7's loss path: the loss it wrote -->
+    <extend-entity entity-name="QualityInspectionDisposition" package="mantle.product.quality">
+        <field name="productionLossId" type="id"/>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionLoss"/>
+    </extend-entity>
+    <!-- when a run's gates were written (its release under P8): a run with this date reads its gates only, so a template
+        published after the release adds no gate to it -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionGatesDate" type="date-time"/>
+    </extend-entity>
+
+    <!-- One quality gate of a released run (design QualityGates): an operation's in-process gate, or an output line's
+        final gate (at the operation that yields it, when the template is attached there), with the template it reads as
+        of the release (templateAsOfDate) and its sample plan as of then. Written by release#ProductionOrder, ended by an
+        unrelease; never changed otherwise. Its state (required, pending, passed, failed) is read from its inspections
+        (mantle.product.QualityServices.get#SourceInspectionStatus). -->
+    <entity entity-name="ProductionQualityGate" package="mantle.work.production" cache="never">
+        <field name="productionQualityGateId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="productionStageEnumId" type="id"/>
+        <field name="inspectionTemplateId" type="id"/>
+        <field name="templateName" type="text-medium"/>
+        <field name="templateAsOfDate" type="date-time"/>
+        <field name="samplePolicyEnumId" type="id"/>
+        <field name="sampleSize" type="number-decimal"/>
+        <field name="samplePercent" type="number-decimal"/>
+        <field name="sampleBasisEnumId" type="id"/>
+        <field name="attachedEnumId" type="id"><description>Where the template came from: the operation, the method
+            (BOM), or applicability (product, category, facility)</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="thruDate" type="date-time"><description>Set when the run is unreleased</description></field>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one-nofk" title="Operation" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionRunLine"/>
+        <relationship type="one-nofk" related="mantle.product.quality.InspectionTemplate"/>
+        <relationship type="one-nofk" title="ProductionStage" related="moqui.basic.Enumeration">
+            <key-map field-name="productionStageEnumId" related="enumId"/></relationship>
+        <index name="PROD_QGATE_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+</entities>

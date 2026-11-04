@@ -44,6 +44,16 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="samplePolicyEnumId"/>
             <parameter name="sampleSize"/>
             <parameter name="samplePercent"/>
+            <parameter name="productionApplicability"><description>Y: the production fields below are given (a production
+                template's form); otherwise they keep their values (impl-manufacturing P8)</description></parameter>
+            <parameter name="productionStageEnumId"><description>A production template: QpsInProcess (an operation's
+                gate) or QpsFinal (the output, received held)</description></parameter>
+            <parameter name="sampleBasisEnumId"><description>A production template: the sample counted on each receipt
+                (QsbReceipt) or on the run's quantity (QsbRun)</description></parameter>
+            <parameter name="productBomId"><description>A production template attached to a method (its final check); it
+                then applies through the method only</description></parameter>
+            <parameter name="operationWorkEffortId"><description>A production template attached to an operation template or
+                a routing operation (its in-process check); it then applies through the operation only</description></parameter>
             <parameter name="itemList" type="List"><description>Maps: inspectionTemplateItemId (empty adds one),
                 characteristicName, readingTypeEnumId, uomId, lowerLimit, upperLimit, targetValue, mandatory, sequenceNum,
                 description, remove.</description></parameter>
@@ -308,7 +318,11 @@ along with this software (see the LICENSE.md file). If not, see
             through update#Asset, the only path out of quarantine (its AssetStatusAvailableReservations SECA gives the rest to
             waiting reservations), then move it to toLocationSeqId when given; Scrap sets AstMorgue (moving it to a morgue
             location when given) and calls WarehouseTaskServices.scrap#Asset with this disposition, in the one transaction;
-            the others keep it quarantined, moved within quarantine when given. Each disposition is a record, queues the
+            the others keep it quarantined, moved within quarantine when given. Scrap of a production
+            run's output while the run is open takes the run's loss path instead (impl-manufacturing P8, R-MFG-20): an
+            approved PltOutputScrap ProductionLoss (productionLossId) that issues the held stock back to the run, not to
+            shrinkage. A rejected production inspection's verification notifies the run's supervisors
+            (ProductionQualityBlock). Each disposition is a record, queues the
             bill matches of the inspection's receipt (InvoiceMatchServices.queue#MatchReevaluation) and notifies the
             inspector; the inspection is Disposed once nothing is left. A retry with the same operation key answers the
             first disposition. Lock order: the inspection, its asset, the location. Refuses without QUALITY_DISPOSE
@@ -408,6 +422,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sourceTypeEnumId"/>
             <parameter name="shipmentId"/>
             <parameter name="assetReceiptId"/>
+            <parameter name="workEffortId"><description>A production run's inspections (impl-manufacturing P8)</description></parameter>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="productionQualityGateId"/>
+            <parameter name="inspectionContextEnumId"/>
             <parameter name="dueBefore" type="Timestamp"/>
             <parameter name="pageIndex"/>
             <parameter name="pageSize"/>
@@ -442,12 +460,22 @@ along with this software (see the LICENSE.md file). If not, see
             (inspectionRemovedQuantity: the scrapped quantity and what Return to supplier dispositions sent back; the rest
             is still held), match-eligible (accepted less held and less inspection-removed, P14 review B1), and the
             totals. An internal read: the caller checks
-            its own permission (as InvoiceMatch.js does). Refuses no source (SOURCE_REQUIRED).</description>
+            its own permission (as InvoiceMatch.js does). Refuses no source (SOURCE_REQUIRED).
+            A production source (impl-manufacturing P8, ProductionQuality.js), a run (workEffortId), one of its operations or
+            output lines: each quality gate it keeps (in-process or final, its template as of the release and sample) with
+            its state (required, pending, passed or failed) and the inspection that decides it, the worst state
+            (gateStatus: none without gates), the inspection that blocks and its words, the held quantity, and for an
+            operation whether a gate before it holds its start (startAllowed). The start and complete guards and the
+            operations' readiness read the same. Needs PRODUCTION_VIEW, _OPERATE or _SUPERVISE or a QUALITY_ permission
+            (PERMISSION_DENIED) and the run in the user's organizations (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="assetReceiptId"/>
             <parameter name="orderId"/>
             <parameter name="orderItemSeqId"/>
             <parameter name="shipmentId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="productionRunLineId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="receiptRows" type="List"/>
@@ -457,10 +485,32 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="matchEligibleQuantity" type="BigDecimal"/>
             <parameter name="inspectionRejectedQuantity" type="BigDecimal"/>
             <parameter name="inspectionRemovedQuantity" type="BigDecimal"/>
+            <parameter name="gateRows" type="List"/>
+            <parameter name="gateStatus"/>
+            <parameter name="gateStatusText"/>
+            <parameter name="blockingInspectionId"/>
+            <parameter name="blockingText"/>
+            <parameter name="startAllowed" type="Boolean"/>
+            <parameter name="startBlockText"/>
+            <parameter name="startBlockInspectionId"/>
+            <parameter name="gated" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="quality" from="ec.resource.script('component://mr-mantle/service/mantle/product/Quality.js')"/>
             <set field="answer" from="quality.execute('sourceStatus', context)"/>
+            <if condition="answer.gateRows != null">
+                <set field="gateRows" from="answer.gateRows"/>
+                <set field="gateStatus" from="answer.gateStatus"/>
+                <set field="gateStatusText" from="answer.gateStatusText"/>
+                <set field="blockingInspectionId" from="answer.blockingInspectionId"/>
+                <set field="blockingText" from="answer.blockingText"/>
+                <set field="startAllowed" from="answer.startAllowed"/>
+                <set field="startBlockText" from="answer.startBlockText"/>
+                <set field="startBlockInspectionId" from="answer.startBlockInspectionId"/>
+                <set field="gated" from="answer.gated"/>
+                <set field="heldQuantity" from="answer.heldQuantity"/>
+                <return/>
+            </if>
             <set field="receiptRows" from="answer.receiptRows"/>
             <set field="acceptedQuantity" from="answer.acceptedQuantity"/>
             <set field="rejectedQuantity" from="answer.rejectedQuantity"/>
