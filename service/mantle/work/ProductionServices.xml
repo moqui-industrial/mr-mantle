@@ -166,9 +166,10 @@ along with this software (see the LICENSE.md file). If not, see
             mantle.product.AssetServices.issue#AssetToWorkEffort with the run's workEffortId (AssetIssuanceGlPost moves the
             cost to WIP, the run owning it), the line and operation and the quantity as entered on the issuance; the expiry
             gate (WarehousePolicy.expiryBlock) refuses an expired asset inside the issue (ASSET_EXPIRED). The quantity is in
-            the stock unit, or in the line's unit through its exact conversion. A retry with the same operation key answers
-            the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
-            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID), an operation of another run
+            the stock unit, or in the line's unit through its exact conversion. Its cost event (record#ProductionCostEvent)
+            references the hook's transaction (impl-manufacturing P6). A retry with the same operation key answers the first
+            and writes no event. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE),
+            one not released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID), an operation of another run
             (OPERATION_INVALID), another unit (UNIT_CONVERSION), stock outside the user's facilities, not stock, or short
             (posting.stock's refusals), another product (PRODUCT_MISMATCH), stock that is not available, a quarantined one
             among them (HELD_STOCK), another owner's (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), more
@@ -187,7 +188,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode ISSUED, workEffortId, productionRunLineId,
                 operationWorkEffortId, assetId, productId, lotId, quantity, assetIssuanceId, remaining (the line's, after),
-                warnings, and the operation fields.</description></parameter>
+                warnings, productionCostEventId, and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -212,13 +213,17 @@ along with this software (see the LICENSE.md file). If not, see
                         issuanceFields:{productionMaterialLineId:plan.line.productionRunLineId,
                             operationWorkEffortId:plan.operationWorkEffortId, enteredQuantity:plan.unit.enteredQuantity,
                             enteredQuantityUomId:plan.unit.enteredUomId, appliedConversionFactor:plan.unit.factor}}"/>
+            <!-- 6. its cost event, referencing the hook's transaction (impl-manufacturing P6) -->
+            <set field="costEventIds" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .recordAll('mantle.product.issuance.AssetIssuance', [issued.assetIssuanceId])"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId,
                     'mantle.product.issuance.AssetIssuance', issued.assetIssuanceId, {resultCode: 'ISSUED',
                         workEffortId: plan.run.workEffortId, productionRunLineId: plan.line.productionRunLineId,
                         operationWorkEffortId: plan.operationWorkEffortId, assetId: plan.asset.assetId,
                         productId: plan.asset.productId, lotId: plan.asset.lotId || null,
                         quantity: production.text(plan.unit.stockQuantity), assetIssuanceId: issued.assetIssuanceId,
-                        remaining: production.text(production.materialTotals(plan.line).remaining), warnings: warnings})"/>
+                        remaining: production.text(production.materialTotals(plan.line).remaining), warnings: warnings,
+                        productionCostEventId: costEventIds[0]})"/>
         </actions>
     </service>
     <service verb="return" noun="UnusedMaterial" allow-remote="false">
@@ -229,7 +234,8 @@ along with this software (see the LICENSE.md file). If not, see
             at the original cost in the open period (D13, R-SA-02). Never cancel#AssetIssuance or an update of the issuance.
             After a provisional output receipt the return lowers the WIP the rest of the output takes (warning
             PROVISIONAL_TRUE_UP naming the receipts the cost close trues up); once all the output was received at a
-            provisional cost it is refused (PROVISIONAL_CLOSED).
+            provisional cost it is refused (PROVISIONAL_CLOSED). Its cost event references the hook's transaction, and
+            material with no cost, which would post nothing (F13), is refused (COST_UNAVAILABLE; impl-manufacturing P6).
             A retry with the same operation key answers the first. Requires STOCK_ISSUE; refuses an issuance that is not a
             work effort's or a run outside the user's organizations (RECORD_UNAVAILABLE), a closed or cancelled run
             (RUN_CLOSED), no quantity (QUANTITY_INVALID), more than is left of the issuance (QUANTITY_EXCEEDS_ISSUED), a
@@ -246,8 +252,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RETURNED, workEffortId, assetIssuanceId, assetId
-                (the stock returned to), intoOriginal, productId, quantity, facilityId, locationSeqId, assetReceiptId, and
-                the operation fields.</description></parameter>
+                (the stock returned to), intoOriginal, productId, quantity, facilityId, locationSeqId, assetReceiptId,
+                productionCostEventId, and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -264,6 +270,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
             <script>posting.period([plan.run.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
+            <!-- a return without a cost would post nothing (F13): refused (impl-manufacturing P6) -->
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                .requireCost(plan.source, 'Returned material')</script>
             <!-- 5. the new receipt fact at the original cost -->
             <if condition="plan.intoOriginal">
                 <service-call name="mantle.product.AssetServices.receive#Asset" disable-authz="true" out-map="received"
@@ -299,13 +308,15 @@ along with this software (see the LICENSE.md file). If not, see
                         operationWorkEffortId:plan.issuance.operationWorkEffortId, enteredQuantity:plan.quantity,
                         enteredQuantityUomId:plan.issuance.enteredQuantityUomId, appliedConversionFactor:1,
                         itemDescription:reason || null}"/>
+            <set field="costEventIds" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .recordAll('mantle.product.receipt.AssetReceipt', [received.assetReceiptId])"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
                     received.assetReceiptId, {resultCode: 'RETURNED', workEffortId: plan.run.workEffortId,
                         assetIssuanceId: plan.issuance.assetIssuanceId, assetId: received.assetId || plan.source.assetId,
                         intoOriginal: plan.intoOriginal, productId: plan.source.productId,
                         quantity: production.text(plan.quantity), facilityId: plan.target.facilityId,
                         locationSeqId: plan.target.locationSeqId || null, assetReceiptId: received.assetReceiptId,
-                        warnings: plan.warnings})"/>
+                        warnings: plan.warnings, productionCostEventId: costEventIds[0]})"/>
         </actions>
     </service>
     <service verb="receive" noun="ProductionOutput" allow-remote="false">
@@ -318,9 +329,11 @@ along with this software (see the LICENSE.md file). If not, see
             policy's inspectionRequired or a published production template, P8) is received AstQuarantine into quarantine with an
             inspection of each receipt (QisWorkEffort); otherwise to the location given or the putaway resolver's. Serials one per
             unit (given, or generated from firstSerialNumber by P7's generate#TrackingIdentities rules), a lot by number. Each
-            receipt carries the output line, the operation and the quantity as entered. A retry with the same operation key
-            answers the first. Requires STOCK_ISSUE; refuses a run outside the user's organizations (RECORD_UNAVAILABLE), one not
-            released (RUN_NOT_RELEASED), a line of another run or role (LINE_INVALID, LINE_REQUIRED), a by-product, whose cost
+            receipt carries the output line, the operation and the quantity as entered, and has its cost event, which
+            references the hook's transaction and refuses a receipt without a cost (COST_UNAVAILABLE; impl-manufacturing P6). A
+            retry with the same operation key answers the first. Requires STOCK_ISSUE; refuses a run outside the user's
+            organizations (RECORD_UNAVAILABLE), one not released (RUN_NOT_RELEASED), a line of another run or role
+            (LINE_INVALID, LINE_REQUIRED), a by-product, whose cost
             allocation is not built (BYPRODUCT_NOT_COSTED), more than the line has left (OVER_RECEIPT), a facility of another
             owner (OWNER_MISMATCH), the tracking checks (SERIAL_COUNT_MISMATCH, SERIAL_DUPLICATE, LOT_REQUIRED), the destination's
             refusals and a closed fiscal period today (PERIOD_CLOSED, read without locking).</description>
@@ -342,8 +355,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode RECEIVED, workEffortId, productionRunLineId,
                 operationWorkEffortId, productId, quantity, facilityId, locationSeqId, statusId, inspected, serialNumbers,
-                costSource (standard or issued), costProvisional, assetIds, assetReceiptIds, qualityInspectionIds, and the
-                operation fields; unitCost only with ACCOUNTING_VIEW.</description></parameter>
+                costSource (standard or issued), costProvisional, assetIds, assetReceiptIds, qualityInspectionIds,
+                productionCostEventIds, and the operation fields; unitCost only with ACCOUNTING_VIEW.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -363,6 +376,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <script>posting.period([plan.run.ownerPartyId], ec.user.nowTimestamp, {lock: false})</script>
             <set field="posted" from="production.postOutput(userScope, plan, context)"/>
+            <set field="costEventIds" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .recordAll('mantle.product.receipt.AssetReceipt', posted.assetReceiptIds)"/>
             <set field="financialRead" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js')
                     .has('ACCOUNTING_VIEW')"/>
             <set field="result" from="posting.complete(begun.op, plan.run.ownerPartyId, 'mantle.product.receipt.AssetReceipt',
@@ -374,7 +389,8 @@ along with this software (see the LICENSE.md file). If not, see
                         serialNumbers: plan.lines.map(line =&gt; line.serialNumber).filter(Boolean),
                         costSource: plan.cost.costSource, costProvisional: plan.cost.provisional,
                         unitCost: financialRead ? production.text(plan.lines[0].cost) : null, assetIds: posted.assetIds,
-                        assetReceiptIds: posted.assetReceiptIds, qualityInspectionIds: posted.qualityInspectionIds})"/>
+                        assetReceiptIds: posted.assetReceiptIds, qualityInspectionIds: posted.qualityInspectionIds,
+                        productionCostEventIds: costEventIds})"/>
         </actions>
     </service>
     <service verb="receive" noun="SubcontractOutput" allow-remote="false">
@@ -910,6 +926,116 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="pickRows" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionOrders.js')
                     .execute('pickList', context).pickRows"/>
+        </actions>
+    </service>
+
+    <!-- ===== cost evidence (impl-manufacturing P6; ProductionCosts.js) ===== -->
+    <service verb="record" noun="ProductionCostEvent" allow-remote="false">
+        <description>Write the cost event of a source record of a production run (design-manufacturing ProductionCosts, §12
+            M8; crosscut CX-COST), inside the transaction of the fact that causes it: the production guards call it for each
+            issuance (issue#ProductionMaterial, and receive#SubcontractOutput's material through it), return
+            (return#UnusedMaterial) and output receipt (receive#ProductionOutput). The event is derived from the source alone:
+            the run, line, operation, product, quantity, the asset's cost as its rate (an output's rate row the run's frozen
+            standard), the amount signed for the run's WIP and the AcctgTrans the movement's hook posted (posting nothing
+            again; PclNotPosted when the hook posted nothing, and unvalued without a cost). One event per source, component and
+            revision: a second call answers the first (existing true). Internal: it checks no permission, the caller's guard
+            did. Refuses a source that is not a production run's movement (SOURCE_INVALID) and a receipt without a cost, which
+            would post nothing (COST_UNAVAILABLE, F13); an unknown source entity is an error.</description>
+        <in-parameters>
+            <parameter name="sourceEntityName" required="true"><description>mantle.product.issuance.AssetIssuance or
+                mantle.product.receipt.AssetReceipt; later phases add theirs</description></parameter>
+            <parameter name="sourceId" required="true"/>
+            <parameter name="sourceRevision" type="Integer"><description>1 when empty; a correction of the source (a
+                timesheet reopened, a rate changed) is its next revision</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionCostEventId"/>
+            <parameter name="existing" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="recorded" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .execute('record', context)"/>
+            <set field="productionCostEventId" from="recorded.productionCostEventId"/>
+            <set field="existing" from="recorded.existing"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionCosts" allow-remote="false">
+        <description>A production run's cost evidence (design-manufacturing ProductionCosts Costs and CloseReview): the run,
+            its cost events (type, component, product, quantity, source, valuation and ledger state; each amount, rate and
+            ledger link only with ACCOUNTING_VIEW), the frozen estimate it was released with for its output quantity (with
+            Products' cost read: PRODUCT_COST_VIEW, _ESTIMATE or _APPROVE, ACCOUNTING_VIEW or ACCOUNTING_GL_POST), the actual cost by component with the material issued and returned, the
+            output's relief and the WIP balance (with ACCOUNTING_VIEW), the estimate against the actual (with both), the
+            exceptions that stand in the way of the cost close (unvalued, not posted and awaiting-close events) and the cost
+            review (its status, whether the user may request it now and why not, a closed-period warning). A value the user
+            may not read is left out, never zero. Requires PRODUCTION_VIEW, PRODUCTION_COST_REVIEW or ACCOUNTING_VIEW
+            (PERMISSION_DENIED); refuses a run outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="events" type="List"/>
+            <parameter name="estimate" type="Map"><description>Only with Products' cost read</description>
+            </parameter>
+            <parameter name="actuals" type="Map"><description>Only with ACCOUNTING_VIEW</description></parameter>
+            <parameter name="comparison" type="List"><description>Only with both</description></parameter>
+            <parameter name="exceptions" type="Map"/>
+            <parameter name="review" type="Map"/>
+            <parameter name="estimateRead" type="Boolean"/>
+            <parameter name="financialRead" type="Boolean"/>
+            <parameter name="canReview" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="costs" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .execute('get', context)"/>
+            <set field="run" from="costs.run"/>
+            <set field="events" from="costs.events"/>
+            <set field="estimate" from="costs.estimate"/>
+            <set field="actuals" from="costs.actuals"/>
+            <set field="comparison" from="costs.comparison"/>
+            <set field="exceptions" from="costs.exceptions"/>
+            <set field="review" from="costs.review"/>
+            <set field="estimateRead" from="costs.estimateRead"/>
+            <set field="financialRead" from="costs.financialRead"/>
+            <set field="canReview" from="costs.canReview"/>
+        </actions>
+    </service>
+    <service verb="review" noun="ProductionCosts" allow-remote="false">
+        <description>Put a production run's costs up for Accounting's cost close (design-manufacturing ProductionCosts
+            CloseReview; Accounting's ProductionCostClose posts it, P15): the run's cost-review status PcrRequested with the
+            date, the user, the revision, the proposed accounting date (today when empty) and a note, audit-logged run
+            fields, and the ProductionCostReview notice with the run and its revision to the organization's users holding
+            PRODUCTION_COST_POST. A closed fiscal period of the accounting date is a warning (PERIOD_CLOSED). A retry with the
+            same operation key answers the first. Requires PRODUCTION_COST_REVIEW (PERMISSION_DENIED); refuses a run outside
+            the user's organizations (RECORD_UNAVAILABLE), a changed revision (REVISION_CHANGED), a draft (RUN_NOT_RELEASED),
+            a closed or cancelled run (RUN_CLOSED), a run with no cost events (NO_COST_EVENTS) and one whose review was
+            already requested at this revision (REVIEW_REQUESTED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="accountingDate" type="Date"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode REVIEW_REQUESTED, workEffortId, reviewStatusId,
+                revision, accountingDate, notificationMessageId, exceptions, warnings, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionCostReview', 'PRODUCTION_COST_REVIEW', ['workEffortId',
+                    'expectedRevision', 'accountingDate', 'note'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="run" from="ec.resource.script('component://mr-mantle/service/mantle/work/Production.js')
+                    .runOf(posting.scope(), workEffortId, true)"/>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
+            <set field="reviewed" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionCosts.js')
+                    .review(run, context)"/>
+            <set field="result" from="posting.complete(begun.op, run.ownerPartyId, 'mantle.work.effort.WorkEffort',
+                    workEffortId, reviewed)"/>
         </actions>
     </service>
 </services>

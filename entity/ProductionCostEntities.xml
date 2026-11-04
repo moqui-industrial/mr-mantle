@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's cost evidence (design-manufacturing §12 M8 and ProductionCosts, crosscut CX-COST; impl-manufacturing P6):
+    the cost events of a production run, written only by mantle.work.ProductionServices.record#ProductionCostEvent inside the
+    transaction of the fact that causes each, the allocations Accounting's cost close makes of them (P15), and the run's
+    cost-review status. Evidence, not a second ledger: a material event references the AcctgTrans its stock movement's hook
+    posted, and posts nothing itself. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- The run's cost review (review#ProductionCosts): its status (ProductionCostReview, empty until requested), when and by
+        whom it was requested, at which revision of the run, the proposed accounting date and the note, audit-logged. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionCostReviewStatusId" type="id" enable-audit-log="true"/>
+        <field name="productionCostReviewDate" type="date-time" enable-audit-log="true"/>
+        <field name="productionCostReviewByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionCostReviewRevision" type="number-integer" enable-audit-log="true"/>
+        <field name="productionCostAccountingDate" type="date" enable-audit-log="true"/>
+        <field name="productionCostReviewNote" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" title="ProductionCostReview" related="moqui.basic.StatusItem"
+                short-alias="productionCostReviewStatus">
+            <key-map field-name="productionCostReviewStatusId" related="statusId"/></relationship>
+    </extend-entity>
+
+    <!-- A cost fact of a production run (crosscut CX-COST): one per source record, cost component and source revision
+        (PRODCOSTEVT_SOURCE), so a retried or repeated hook never counts a cost twice. The source is the record that caused
+        it: an AssetIssuance (a material issue), an AssetReceipt (a return of unused material, an output receipt); later
+        phases add a scrap of issued material (P7), an approved TimeEntry and a machine runtime interval (P10, a revision per
+        correction, its delta or reversal linked by originalCostEventId), and a service acceptance or bill match (P14).
+        amount is signed for the run's WIP: what adds to it is positive, what relieves it negative, in amountUomId, at
+        rateAmount from its rate row (rateEntityName, rateId: the asset's acquire cost, the frozen standard, a
+        WorkCenterRate or RateAmount). An event with no value (no cost on the asset, no rate in effect) is PcvUnvalued.
+        ledgerStatusEnumId says where it is in the GL: posted by its stock movement's hook (acctgTransId), not posted by it,
+        awaiting the cost close, or posted at the close (closeAcctgTransId); the events not yet in the GL are those awaiting
+        the close. afterClose marks an event recorded once the run was closed (an adjustment). -->
+    <entity entity-name="ProductionCostEvent" package="mantle.work.production" cache="never">
+        <field name="productionCostEventId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="costEventTypeEnumId" type="id"/>
+        <field name="costComponentEnumId" type="id"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="text-medium"/>
+        <field name="sourceRevision" type="number-integer"/>
+        <field name="productId" type="id"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="rateAmount" type="currency-precise"/>
+        <field name="rateEntityName" type="text-medium"/>
+        <field name="rateId" type="id"/>
+        <field name="amount" type="currency-precise"/>
+        <field name="amountUomId" type="id"/>
+        <field name="valuationStatusEnumId" type="id" enable-audit-log="true"/>
+        <field name="ledgerStatusEnumId" type="id" enable-audit-log="true"/>
+        <field name="acctgTransId" type="id"/>
+        <field name="closeAcctgTransId" type="id" enable-audit-log="true"/>
+        <field name="assetId" type="id"/>
+        <field name="assetIssuanceId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="timeEntryId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="invoiceItemSeqId" type="id"/>
+        <field name="originalCostEventId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="accountingDate" type="date"/>
+        <field name="afterClose" type="text-indicator"/>
+        <field name="comments" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" related="mantle.work.production.ProductionRunLine" short-alias="productionRunLine"/>
+        <relationship type="one" title="ProductionCostEventType" related="moqui.basic.Enumeration" short-alias="eventType">
+            <key-map field-name="costEventTypeEnumId"/></relationship>
+        <relationship type="one" title="ProductionCostComponent" related="moqui.basic.Enumeration" short-alias="component">
+            <key-map field-name="costComponentEnumId"/></relationship>
+        <relationship type="one" title="ProductionCostValuation" related="moqui.basic.Enumeration" short-alias="valuation">
+            <key-map field-name="valuationStatusEnumId"/></relationship>
+        <relationship type="one" title="ProductionCostLedger" related="moqui.basic.Enumeration" short-alias="ledgerStatus">
+            <key-map field-name="ledgerStatusEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId"/></relationship>
+        <relationship type="one" title="Amount" related="moqui.basic.Uom" short-alias="amountUom">
+            <key-map field-name="amountUomId"/></relationship>
+        <relationship type="one" related="mantle.ledger.transaction.AcctgTrans" short-alias="acctgTrans"/>
+        <relationship type="one" title="Close" related="mantle.ledger.transaction.AcctgTrans" short-alias="closeAcctgTrans">
+            <key-map field-name="closeAcctgTransId" related="acctgTransId"/></relationship>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.issuance.AssetIssuance" short-alias="assetIssuance"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" related="mantle.work.time.TimeEntry" short-alias="timeEntry"/>
+        <relationship type="one" title="Original" related="mantle.work.production.ProductionCostEvent"
+                short-alias="originalCostEvent">
+            <key-map field-name="originalCostEventId" related="productionCostEventId"/></relationship>
+        <relationship type="one" title="CreatedBy" related="moqui.security.UserAccount" short-alias="createdByUser">
+            <key-map field-name="createdByUserId" related="userId"/></relationship>
+        <index name="PRODCOSTEVT_SOURCE" unique="true">
+            <index-field name="sourceEntityName"/>
+            <index-field name="sourceId"/>
+            <index-field name="costComponentEnumId"/>
+            <index-field name="sourceRevision"/>
+        </index>
+        <index name="PRODCOSTEVT_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+
+    <!-- What Accounting's cost close (mantle.ledger.ProductionCostServices.post#CostClose, P15) allocates of a cost event: to
+        an output line and its receipt, to WIP or to production variance (ProductionCostDestination), under the
+        effective-dated ProductionAllocationPolicy row it applied, with the posting's operation key, its ledger link and the
+        allocation it reverses. What is allocated of an event never exceeds its amount; P6 seeds the record only. -->
+    <entity entity-name="ProductionCostAllocation" package="mantle.work.production" cache="never">
+        <field name="productionCostAllocationId" type="id" is-pk="true"/>
+        <field name="productionCostEventId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="productionRunLineId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="productionAllocationPolicyId" type="id"/>
+        <field name="destinationEnumId" type="id"/>
+        <field name="allocatedAmount" type="currency-precise"/>
+        <field name="amountUomId" type="id"/>
+        <field name="allocatedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="acctgTransId" type="id"/>
+        <field name="reversalOfAllocationId" type="id"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.production.ProductionCostEvent" short-alias="costEvent"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.work.production.ProductionRunLine" short-alias="productionRunLine"/>
+        <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
+        <relationship type="one" title="ProductionCostDestination" related="moqui.basic.Enumeration" short-alias="destination">
+            <key-map field-name="destinationEnumId"/></relationship>
+        <relationship type="one" title="Amount" related="moqui.basic.Uom" short-alias="amountUom">
+            <key-map field-name="amountUomId"/></relationship>
+        <relationship type="one" related="mantle.ledger.transaction.AcctgTrans" short-alias="acctgTrans"/>
+        <relationship type="one" title="Reversal" related="mantle.work.production.ProductionCostAllocation"
+                short-alias="reversalOfAllocation">
+            <key-map field-name="reversalOfAllocationId" related="productionCostAllocationId"/></relationship>
+        <index name="PRODCOSTALLOC_EVENT"><index-field name="productionCostEventId"/></index>
+        <index name="PRODCOSTALLOC_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+</entities>
