@@ -383,11 +383,11 @@ self-contained Mantle specs. Cover successful business effects, refusal, pending
 requests, timeout after remote success, retries after restart, wrong-account input and failed callback authentication.
 Use the framework's test seams; production services must not load specs or contain special test branches.
 
-Run relevant fast specs with `./moq test mr-mantle --spec <spec-name>` and targeted framework tests when framework code
-changes. JavaScript specs run in Moqui, not Node. Keep individual cases well under 15 seconds. Slow tests require
-explicit user permission under repository rules; mark cases over 30 seconds as slow and never run `--slow` implicitly.
-Provider sandbox/certification and live financial or shipping calls are explicit deployment exercises, not ordinary
-regression tests. This document revision itself requires no build or application test run.
+Run relevant regression specs with `./moq test mr-mantle --spec <spec-name>` and targeted framework tests when framework
+code changes. JavaScript specs run in Moqui, not Node. Keep individual cases well under a second; a regression spec over
+15 seconds fails the run. Provider sandbox/certification and live financial or shipping calls are acceptance tests, in
+`acceptance/`, run only when the user asks or when one is added or changed. This document revision itself requires no
+build or application test run.
 
 Create separate plans only when scheduling these larger efforts:
 

@@ -24,9 +24,13 @@ in `service/mantle/edi/`.
 
 ```sh
 ./moq component-get mr-mantle
-./moq test mr-mantle
+./moq test mr-mantle                              # the regression suite (test/), while working
 ./moq test mr-mantle --spec OrderToCashBasicFlow
+./moq test-apps                                   # every app component's regression suite, before a commit
+./moq accept mr-mantle                            # the acceptance suite (acceptance/), when asked
 ```
+
+The two suites are described in `docs/Build-Test.md` (The two suites) in the mr-moqui repository.
 
 For details about Mantle see its page on moqui.org:
 

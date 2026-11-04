@@ -1,6 +1,6 @@
 # mr-mantle tests
 
-JavaScript spec files that `moqui test` runs, ported from Mantle's Spock specs, plus specs without a Groovy original
+The regression suite: JavaScript spec files that `moqui test` runs, ported from Mantle's Spock specs, plus specs without a Groovy original
 that run the services the flows never reach. They run in the same script engine as the services, on a database loaded
 with every data type. Each `*.spec.js` file is one specification; `suite.js` gives the order. The specs are grouped
 in subdirectories named for the `service/mantle` directory whose services they mostly call (`account`, `ledger`,
@@ -15,6 +15,10 @@ moqui test mr-mantle --junit build/test-results       # JUnit XML for CI
 moqui test mr-mantle --coverage                       # list the services no spec called, per service file
 moqui test mr-mantle --keep --log-level info          # keep the scratch runtime, more on the console
 ```
+
+They run while working (the specs of what changed) and in `./moq test-apps` before a commit. Acceptance specs (a
+scenario, a provider sandbox call) go in `../acceptance/` and run with `./moq accept mr-mantle`: on a schedule, before
+a release, when asked, or after adding or changing one.
 
 The spec format, conditions, helpers, pitfalls and a Spock-to-spec table are in `docs/Build-Test.md` in the mr-moqui
 repository. Notes for this suite:
