@@ -113,13 +113,13 @@ function changeHold(orderId) {
             .sort((a, b) => ms(b.placedDate) - ms(a.placedDate))[0] || null
     )
 }
-const startedAt = hold => Number(hold?.sourceId || 0)
-// The order's revision state: none, started (the hold, nothing applied yet) or applied (a new revision under the hold,
-// waiting for its approval).
+// The order's revision state: none, started (the hold, nothing applied yet) or applied (a new revision written under the hold
+// by apply, its appliedRevision, waiting for its approval). The order's own count is not the marker: by default a note or a
+// receipt's status change moves it while a change is only started. A Change hold with no source is not a revision's.
 function revisionState(order) {
     const hold = changeHold(order.orderId)
-    if (!hold) return {state: "none", hold: null}
-    return {state: revisionOf(order) > startedAt(hold) ? "applied" : "started", hold}
+    if (!hold || blank(hold.sourceId)) return {state: "none", hold: null}
+    return {state: blank(hold.appliedRevision) ? "started" : "applied", hold}
 }
 // The Change hold of a held order whose new revision waits for its approval (decide#PurchaseApproval), else null.
 function awaitingApproval(po) {
@@ -149,6 +149,14 @@ function releaseRevisionHold(hold, comment) {
         }
         return {statusId: one(ORDER, {orderId: hold.orderId}).statusId, stillHeld}
     })
+}
+// release#OrderHold of a revision's Change hold by an ORDER_APPROVE holder (F-P9-2): with the approval gate on, an applied
+// revision not approved at its revision returns to Placed for its approval, not to Approved or Sent past the gate. Answers the
+// status to return to.
+function releaseReturn(hold, returnTo) {
+    if (hold?.holdTypeEnumId !== "OhtChange" || blank(hold.sourceId) || blank(hold.appliedRevision)) return returnTo
+    if (!["OrderApproved", "OrderSent"].includes(returnTo)) return returnTo
+    return orders.approvalWarnings(hold.orderId).length ? "OrderPlaced" : returnTo
 }
 
 // ===== what each line has behind it =====
@@ -591,11 +599,14 @@ function apply(p) {
     })
     call("mantle.order.OrderServices.increment#OrderRevision", {orderId: po.orderId, revisionKind: "commercial"})
     const revision = revisionOf(one(ORDER, {orderId: po.orderId}))
+    // the hold now waits for the approval of this revision (revisionState)
+    call("update#" + HOLD, {orderHoldReasonId: reviewed.current.hold.orderHoldReasonId, appliedRevision: revision})
     const quantityChanged = changeRows.some(row => row.entity === ITEM && row.field === "quantity")
 
     // the open receipts to the new remainders (Warehouse's contract, in this transaction)
     let adjustedSources = []
-    if (quantityChanged && receiptIds.length) {
+    // a receipt opened since the receipts were locked is on a line's facts too (read under the order's lock)
+    if (quantityChanged && (receiptIds.length || Object.values(reviewed.facts).some(fact => fact.onReceipt))) {
         const adjusted = call("mantle.shipment.WarehouseTaskServices.adjust#ExpectedReceipt", {
             operationKey: "rev-" + po.orderId + "-" + revision,
             orderId: po.orderId,
@@ -1014,6 +1025,7 @@ const operations = {start, cancel, preview, apply, acknowledge, remind: p => (p.
     revisionState,
     awaitingApproval,
     releaseRevisionHold,
+    releaseReturn,
     revisionList,
     revisionChanges,
     uncounted,

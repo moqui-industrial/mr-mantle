@@ -226,7 +226,7 @@ spec({
 })
 
 feature(
-    "a buyer starts a change of the sent order, which holds it with a Change reason; one without PURCHASE_ORDER_EDIT is refused, and a change nothing was applied under is let go",
+    "a buyer starts a change of the sent order, which holds it with a Change reason; one without PURCHASE_ORDER_EDIT is refused, and a change nothing was applied under is let go, even when the order's count moved",
     {
         when() {
             const other = sentOrder(supplier, 2)
@@ -240,6 +240,9 @@ feature(
             const hold = one("mantle.order.OrderHoldReason", {orderHoldReasonId: started.orderHoldReasonId})
             const otherStarted = run(state.buyer, O + "start#PurchaseRevision", {orderId: other, reason: "Maybe"})
             const otherHeld = statusOf(other)
+            // the order's count moving while the change is only started (by default a note or a receipt's status does) is
+            // not an applied change: it is still let go
+            call(O + "increment#OrderRevision", {orderId: other, revisionKind: "commercial"})
             const cancelled = run(state.buyer, O + "cancel#PurchaseRevision", {orderId: other})
             return {noPermission, noReason, started, hold, otherStarted, otherHeld, cancelled, other}
         },
@@ -403,6 +406,7 @@ feature(
             decided.error == ""
             approved == "OrderApproved"
             hold.releasedDate != null
+            hold.appliedRevision == state.r2
             sent.error == ""
             sent.orderRevision == state.r2
             mailed == 1
@@ -535,6 +539,44 @@ feature(
             part.estimatedDeliveryDate != null
             logged.length == 1
             unknown.error.includes("TERM_INVALID")
+        }
+    }
+)
+
+feature(
+    "with the approval gate on, an ORDER_APPROVE holder's release#OrderHold of an applied revision's Change hold returns the order to Placed for its approval, not to Approved",
+    {
+        when() {
+            const orderId = sentOrder(supplier, 2)
+            run(state.buyer, O + "start#PurchaseRevision", {orderId, reason: "More"})
+            call("create#mantle.order.purchase.PurchasePolicy", {
+                organizationPartyId: org,
+                fromDate: Number(ec.user.nowTimestamp),
+                commercialRevisionOnly: "Y",
+                approvalGateEnabled: "Y",
+                changeReason: "Spec gate"
+            })
+            const applied = run(state.buyer, O + "apply#PurchaseRevision", {
+                orderId,
+                itemChanges: [{orderItemSeqId: "01", quantity: 3}],
+                reason: "More"
+            })
+            call("create#moqui.security.UserGroupPermission", {
+                userGroupId: state.approver,
+                userPermissionId: "ORDER_APPROVE",
+                fromDate: since
+            })
+            const hold = rows("mantle.order.OrderHoldReason", {orderId}).find(row => !row.releasedDate)
+            const released = run(state.approver, O + "release#OrderHold", {
+                orderHoldReasonId: hold.orderHoldReasonId,
+                releaseComment: "Let it through"
+            })
+            return {orderId, applied, released}
+        },
+        then({orderId, applied, released}) {
+            applied.error == ""
+            released.error == ""
+            statusOf(orderId) == "OrderPlaced"
         }
     }
 )

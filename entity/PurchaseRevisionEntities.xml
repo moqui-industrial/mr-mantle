@@ -52,6 +52,12 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- a currency change on a part nothing was received or billed on (apply#PurchaseRevision), read back as of a time -->
         <field name="currencyUomId" type="id" enable-audit-log="update"/>
     </extend-entity>
+    <extend-entity entity-name="OrderHoldReason" package="mantle.order">
+        <field name="appliedRevision" type="number-integer">
+            <description>On a purchase revision's Change hold (sourceId the revision it started from): the revision
+                apply#PurchaseRevision wrote under it, waiting for its approval. Empty while the change is only started, so
+                a revision moved by something else (a note, a receipt's status) does not read as an applied change.</description></field>
+    </extend-entity>
     <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
         <field name="reminderOccurrence" type="text-short">
             <description>A reminder's occurrence (send#PurchaseReminder, by default its day): a recipient gets one reminder
