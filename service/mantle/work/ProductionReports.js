@@ -4,7 +4,7 @@
 // Every report checks PRODUCTION_VIEW and reads only the user's organizations and their facilities (FacilityScope.js; a run
 // by its owner and facility, as find#ProductionOrders does, F3). It answers its scope (organizations, facility, period), its
 // as-of time, the units of its quantities and the currencies of its amounts, and the partitions it could not read: each
-// independent source or record (a work order, a work center, the cost events, a source not in this build) is read on its own,
+// independent source or record (a work order, a work center, the cost events, the machine runtime) is read on its own,
 // and one that fails is named with its error and leaves the report incomplete (complete false), its figures out of the totals
 // rather than counted as zero. Money columns (amounts, rates, values) need ACCOUNTING_VIEW: without it they are left out of
 // the rows and totals, never zero, and withheldText says so. Totals are per unit and per currency, never adding unlike units.
@@ -80,9 +80,8 @@ const WORK = "mantle.work.effort.WorkEffort",
     STATUS = "moqui.basic.StatusItem",
     ENUM = "moqui.basic.Enumeration",
     UOM = "moqui.basic.Uom"
-// the sources planned in other phases, read only when this build has them (a missing one is a partition not read)
+// the shop floor's machine runtime (P10's record#MachineRuntime), apart from a person's time
 const RUNTIME = "mantle.work.production.MachineRuntimeEvent"
-const runtimeSource = "Machine runtime (shop floor)"
 
 const openStatuses = ["WeInPlanning", "WeApproved", "WeInProgress", "WeOnHold"]
 const doneStatuses = ["WeComplete", "WeClosed"]
@@ -190,14 +189,6 @@ function partition(report, name, read) {
         report.partitions.push({name, message})
         return null
     }
-}
-// A source planned in another phase: read when this build has its entity, else named as a partition not read.
-function plannedSource(report, entityName, name, read) {
-    if (!ec.entity.isEntityDefined(entityName)) {
-        report.partitions.push({name, message: "Not available in this build (" + entityName.split(".").pop() + ")"})
-        return null
-    }
-    return partition(report, name, read)
 }
 function unitText(uomId) {
     if (!uomId) return ""
@@ -555,7 +546,7 @@ function centersOf(report) {
         .sort((a, b) => String(a.facilityName || a.facilityId).localeCompare(String(b.facilityName || b.facilityId)))
 }
 // The units counted at each center: {centerId: [{operation, run, good, total, uomId}]}, from the operations' completions
-// (P10's fields, when this build has them) or else their runs' quantity events in the period (P7); rework runs left out.
+// (P10's complete#ProductionOperation: good with the held, and the losses) or else their runs' quantity events in the period (P7); rework runs left out.
 function creditsOf(report, ctx, centerIds) {
     const {fromDate, thruDate} = report.period
     const credits = new Map(centerIds.map(id => [id, []]))
@@ -599,15 +590,8 @@ function creditsOf(report, ctx, centerIds) {
     )
     const outputs = outputsOf(Array.from(runs.keys()))
     const operations = rowsIn(WORK, "parentWorkEffortId", Array.from(runs.keys()))
-    const completionCounts = ec.entity.isEntityDefined(RUNTIME)
-    const hasCounts = operation => {
-        if (!completionCounts) return false
-        try {
-            return operation.productionGoodQuantity != null
-        } catch (_) {
-            return false
-        }
-    }
+    // an operation completed on the shop floor (complete#ProductionOperation) carries its own good and lost quantity
+    const hasCounts = operation => operation.productionGoodQuantity != null
     const idealOf = (operation, run) => {
         const output = outputs.get(run.workEffortId)
         if (!output || dec(output.stockQuantity).compare(0) <= 0) throw new Error("its work order has no output quantity")
@@ -652,25 +636,24 @@ function creditsOf(report, ctx, centerIds) {
         }
     }
     // the operations completed in the period with their own counts (P10)
-    if (completionCounts)
-        for (const operation of rowsIn(WORK, "workCenterFacilityId", centerIds)
-            .filter(
-                row =>
-                    row.actualCompletionDate &&
-                    ms(row.actualCompletionDate) >= ms(fromDate) &&
-                    ms(row.actualCompletionDate) < ms(thruDate)
-            )
-            .filter(hasCounts)) {
-            const run = one(WORK, {workEffortId: operation.parentWorkEffortId})
-            if (!run || run.purposeEnumId !== "WepProductionRun") continue
-            if (report.organizationPartyIds && !report.organizationPartyIds.includes(run.ownerPartyId)) continue
-            if (!blank(report.p.productId) && !runIdsOfProduct(report.p.productId).includes(run.workEffortId)) continue
-            if (reworkRunIds.has(run.workEffortId)) continue
-            if (!outputs.has(run.workEffortId))
-                outputs.set(run.workEffortId, rows(LINE, {workEffortId: run.workEffortId, lineRoleEnumId: "PrlrOutput"})[0])
-            const good = num(operation.productionGoodQuantity) || 0
-            add(operation.workCenterFacilityId, operation, run, good, good + (num(operation.productionLossQuantity) || 0))
-        }
+    for (const operation of rowsIn(WORK, "workCenterFacilityId", centerIds)
+        .filter(
+            row =>
+                row.actualCompletionDate &&
+                ms(row.actualCompletionDate) >= ms(fromDate) &&
+                ms(row.actualCompletionDate) < ms(thruDate)
+        )
+        .filter(hasCounts)) {
+        const run = one(WORK, {workEffortId: operation.parentWorkEffortId})
+        if (!run || run.purposeEnumId !== "WepProductionRun") continue
+        if (report.organizationPartyIds && !report.organizationPartyIds.includes(run.ownerPartyId)) continue
+        if (!blank(report.p.productId) && !runIdsOfProduct(report.p.productId).includes(run.workEffortId)) continue
+        if (reworkRunIds.has(run.workEffortId)) continue
+        if (!outputs.has(run.workEffortId))
+            outputs.set(run.workEffortId, rows(LINE, {workEffortId: run.workEffortId, lineRoleEnumId: "PrlrOutput"})[0])
+        const good = num(operation.productionGoodQuantity) || 0
+        add(operation.workCenterFacilityId, operation, run, good, good + (num(operation.productionLossQuantity) || 0))
+    }
     return {credits, notes}
 }
 // Each machine's runtime at the centers in the period (P10), as {centerId: [[from, thru]] per machine}.
@@ -839,7 +822,7 @@ function oeeReport(p) {
     const centers = centersOf(report)
     const centerIds = centers.map(facility => facility.facilityId)
     const counted = partition(report, "Quantities", () => creditsOf(report, ctx, centerIds))
-    const runtime = plannedSource(report, RUNTIME, runtimeSource, () => runtimeOf(report, centerIds))
+    const runtime = partition(report, "Machine runtime", () => runtimeOf(report, centerIds))
     const labor = partition(report, "Labor time", () => laborOf(report, centerIds))
     const centerRows = []
     const downtimeRows = []

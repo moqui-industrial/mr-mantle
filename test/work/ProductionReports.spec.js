@@ -4,12 +4,11 @@
 // reader the costs; a work center whose calendar cannot be read is a named partition and the report is incomplete, its
 // figures left out of the totals rather than zero; each report answers its scope, as-of time and units; and a user without
 // PRODUCTION_VIEW, another organization's reader and a facility outside the scope are refused. The users are in spec-local
-// groups. Machine runtime (P10's MachineRuntimeEvent) is read when this build has it, else named as a partition not read.
+// groups. The run time is the machine's runtime recorded on the shop floor (P10's record#MachineRuntime).
 const P = "mantle.work.ProductionServices.",
     B = "mantle.product.BomServices.",
     R = "mantle.work.RoutingServices.",
     REPORT = "mantle.work.ProductionReportServices."
-const RUNTIME = "mantle.work.production.MachineRuntimeEvent"
 const org = "PRR_ORG",
     other = "PRR_OTHER",
     second = "PRR_SECOND",
@@ -155,6 +154,8 @@ spec({
         user("PRR_READER", ["PRODUCTION_VIEW"])
         user("PRR_FINANCE", ["PRODUCTION_VIEW", "ACCOUNTING_VIEW"])
         user("PRR_NOBODY", ["METHOD_VIEW"])
+        user("PRR_ADMIN", ["PRODUCTION_POLICY_EDIT", "PRODUCTION_VIEW"])
+        user("PRR_SUPER", ["PRODUCTION_SUPERVISE", "PRODUCTION_VIEW"])
         user("PRR_OUTSIDER", ["PRODUCTION_VIEW", "ACCOUNTING_VIEW"], [other])
         user("PRR_TWO", ["PRODUCTION_VIEW"], [org, second])
         call("create#mantle.facility.Facility", {
@@ -235,7 +236,7 @@ spec({
             allDayStart: ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd")
         })
         ec.artifactExecution.enableAuthz()
-        // the method: one operation of half an hour of machine time a unit at the plant, consuming one PRR_RM a unit
+        // the method: one operation of a quarter hour of machine time a unit at the plant, consuming one PRR_RM a unit
         as("prr_method", () => {
             call(R + "store#WorkCenter", {organizationPartyId: org, facilityId: plant, changeReason: "Spec work center"})
             const routeId = call(R + "store#Routing", {
@@ -248,7 +249,7 @@ spec({
                 workEffortName: "Assemble",
                 sequenceNum: 10,
                 estimatedWorkTime: 6,
-                methodMachineRunTime: 30,
+                methodMachineRunTime: 15,
                 timeUomId: "TF_min",
                 methodBatchQuantity: 1,
                 methodQuantityUomId: "OTH_ea",
@@ -281,6 +282,15 @@ spec({
         ec.artifactExecution.disableAuthz()
         state.rm = stock("PRR_RM", 100, 2)
         ec.artifactExecution.enableAuthz()
+        // the organization's policy records machine runtime (P10), in effect before the runs are released
+        const policy = run("prr_admin", P + "store#ProductionPolicy", {
+            organizationPartyId: org,
+            machineRuntimeEnumId: "PmrOptional",
+            changeReason: "Spec machine runtime"
+        })
+        if (policy.error) throw new Error("Policy failed: " + policy.error)
+        const until = Date.now() + 25
+        while (Date.now() < until) {}
         state.t0 = Date.now()
         // run A: 10 made, 8 good, 1 scrapped and 1 sent to rework in run B, which makes it good again
         const a = releasedRun(10)
@@ -314,20 +324,24 @@ spec({
         downtime("PRR_JAM", -3, -2)
         downtime("PRR_FAULT", -2.5, -1.5)
         downtime("PRR_CHANGE", -5, -4)
-        // with the shop floor in this build, the plant's machine ran the whole period
-        state.runtimeDefined = ec.entity.isEntityDefined(RUNTIME)
-        if (state.runtimeDefined) {
-            ec.artifactExecution.disableAuthz()
-            call("create#" + RUNTIME, {
-                organizationPartyId: org,
-                workEffortId: a.workEffortId,
-                facilityId: plant,
-                runtimeModeEnumId: "MrmRun",
-                fromDate: new Date(state.t0 - 6 * hourMs),
-                thruDate: new Date(state.t0 + 2 * hourMs)
-            })
-            ec.artifactExecution.enableAuthz()
-        }
+        // the plant's machine ran on run A's operation from the period's start until the setup, recorded on the shop floor
+        const started = run("prr_super", P + "transition#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: a.workEffortId,
+            action: "start",
+            expectedRevision: revision(a.workEffortId)
+        })
+        if (started.error) throw new Error("Start failed: " + started.error)
+        const operation = rows("mantle.work.effort.WorkEffort", {parentWorkEffortId: a.workEffortId})[0]
+        const runtime = run("prr_operator", P + "record#MachineRuntime", {
+            operationKey: key(),
+            operationWorkEffortId: operation.workEffortId,
+            action: "record",
+            runtimeModeEnumId: "MrmRun",
+            fromDate: new Date(state.t0 - 6 * hourMs),
+            thruDate: new Date(state.t0)
+        })
+        if (runtime.error) throw new Error("Runtime failed: " + runtime.error)
         state.a = a
         state.b = b
     },
@@ -345,31 +359,29 @@ feature("OEE for a work center shows its three factors from its downtime and cou
     when() {
         const out = report("prr_reader", "OperationPerformanceReport", Object.assign({facilityId: plant}, period()))
         const center = (out.centerRows || []).find(row => row.facilityId === plant) || {}
-        const runtimePartition = (out.partitions || []).some(row => row.name === "Machine runtime (shop floor)")
-        return {out, center, runtimePartition}
+        return {out, center}
     },
-    then({out, center, runtimePartition}) {
+    then({out, center}) {
         out.error == ""
         // planned: 8 hours less the planned changeover; downtime: the two stops unioned (1.5 hours, not 2)
         close(center.plannedHours, 7)
         close(center.plannedStopHours, 1)
         close(center.downtimeHours, 1.5)
-        close(center.runHours, 5.5)
-        // 10 units counted (8 good, 1 scrap, 1 rework; run B's redone unit is not counted again), half an hour each
+        // run: the machine's 6 hours less the planned changeover and the downtime within them
+        close(center.runHours, 3.5)
+        close(center.machineHours, 3.5)
+        // 10 units counted (8 good, 1 scrap, 1 rework; run B's redone unit is not counted again), a quarter hour each
         center.totalQuantity == 10
         center.goodQuantity == 8
-        close(center.standardHours, 5)
-        close(center.availability, 5.5 / 7)
-        close(center.performance, 5 / 5.5)
+        close(center.standardHours, 2.5)
+        close(center.availability, 0.5)
+        close(center.performance, 2.5 / 3.5)
         close(center.quality, 0.8)
-        close(center.oee, 4 / 7)
-        center.oeeText == "57.1%"
-        close(out.totals.oee, 4 / 7)
+        close(center.oee, 2 / 7)
+        center.oeeText == "28.6%"
+        close(out.totals.oee, 2 / 7)
         out.downtimeRows.some(row => row.reasonText == "Planned changeover" && row.kindText == "Planned (excluded)")
-        // machine runtime: read when this build has it, else named and the report incomplete
-        runtimePartition == !state.runtimeDefined
-        out.complete == state.runtimeDefined
-        state.runtimeDefined ? close(center.machineHours, 5.5) : center.machineHours == null
+        out.complete == true
         out.asOf != null
         out.scope.facilityText == "Report plant"
         out.unitsText != ""
@@ -475,7 +487,7 @@ feature("each report answers its scope, as-of time and units with the run's figu
         planning.suggestionRows == []
         dashboard.error == ""
         dashboard.kpis.map(row => row.kpiId) == ["completed", "onTime", "oee", "utilization", "scrapRate"]
-        dashboard.kpis.find(row => row.kpiId == "oee").valueText == "57.1%"
+        dashboard.kpis.find(row => row.kpiId == "oee").valueText == "28.6%"
         dashboard.kpis.find(row => row.kpiId == "oee").reportName == "OperationPerformanceReport"
         dashboard.kpis.find(row => row.kpiId == "oee").parameters.facilityId == plant
         dashboard.withheldText.includes("WIP value")
