@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's production downtime (design-manufacturing Downtime, §12 M6, D24, review Y3; impl-manufacturing P11): a
+    reason-coded stop of a work center, with its optional equipment, run and operation, and its correction chain. Written
+    only by mantle.work.ProductionServices.store#ProductionDowntime and request#ProductionMaintenance
+    (ProductionDowntime.js). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ProductionDowntime" package="mantle.work.production" cache="never">
+        <description>A stop of a work center (facilityId) of an organization, from fromDate to thruDate (open while empty):
+            no material, no operator, waiting for quality, a changeover or an equipment fault are reasons on the same interval
+            model. The reason is an organization's ProductionReason code, and the stop keeps the classification of the row in
+            effect at its start (category, equipment fault, planned stop). An equipment fault with an asset records or links
+            the asset's one open outage (resourceUnavailabilityId, review Y3). The maintenance it asked for is an
+            AssetMaintenance with an optional intake Request (D24). A correction never changes a row: it makes a new row
+            (correctionOfDowntimeId, the first of the chain originalDowntimeId) that keeps the reporter and report date,
+            and marks the row it corrects PdtCorrected with supersededByDowntimeId, so the original interval and actor stay
+            readable. A stop longer than its reason's approval threshold (minutes, kept from the reason row at its start)
+            needs a supervisor's approval once it has ended (approvalRequired; approvedByUserId and approvedDate when given).
+            revision counts the changes of a row (close, approval, correction) for expectedRevision.</description>
+        <field name="productionDowntimeId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="assetId" type="id" enable-audit-log="true"/>
+        <field name="workEffortId" type="id"><description>The production run stopped, when there is one</description></field>
+        <field name="operationWorkEffortId" type="id"><description>The run's operation stopped, when there is one</description>
+        </field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="reasonCode" type="id" enable-audit-log="true"/>
+        <field name="reasonCategoryEnumId" type="id"/>
+        <field name="equipmentFault" type="text-indicator"/>
+        <field name="plannedStop" type="text-indicator"/>
+        <field name="approvalThreshold" type="number-decimal"><description>The reason's approval threshold in minutes at the
+            stop's start; empty never</description></field>
+        <field name="approvalRequired" type="text-indicator"><description>Y: the ended stop is longer than its approval
+            threshold</description></field>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-long"/>
+        <field name="revision" type="number-integer"/>
+        <field name="reportedByUserId" type="id"/>
+        <field name="reportedDate" type="date-time"/>
+        <field name="closedByUserId" type="id"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="originalDowntimeId" type="id"/>
+        <field name="correctionOfDowntimeId" type="id"/>
+        <field name="supersededByDowntimeId" type="id" enable-audit-log="true"/>
+        <field name="correctedByUserId" type="id"/>
+        <field name="correctedDate" type="date-time"/>
+        <field name="changeReason" type="text-long"/>
+        <field name="resourceUnavailabilityId" type="id" enable-audit-log="true"/>
+        <field name="assetMaintenanceId" type="id" enable-audit-log="true"/>
+        <field name="requestId" type="id" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" title="Run" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="workEffortId"/></relationship>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="ProductionDowntime" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="ProductionReasonCategory" related="moqui.basic.Enumeration"
+                short-alias="reasonCategoryEnum"><key-map field-name="reasonCategoryEnumId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.ResourceUnavailability"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
+        <relationship type="one" related="mantle.request.Request"/>
+        <index name="PRODDOWNTIME_FACILITY"><index-field name="facilityId"/><index-field name="fromDate"/></index>
+        <index name="PRODDOWNTIME_ASSET"><index-field name="assetId"/></index>
+    </entity>
+</entities>

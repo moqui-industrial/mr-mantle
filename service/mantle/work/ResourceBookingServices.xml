@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Resource booking and availability (design-maintenance §12 MT-07 and §13 ResourceBookingServices). Manufacturing P11 builds
+    the outage fact of review Y3, record#ResourceUnavailability for an asset's actual outage, which its equipment-fault
+    downtime calls in its own transaction. Maintenance MT-07 adds find#, correct# and end#ResourceUnavailability, planned
+    blocks, facility resources and the booking policy services. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="record" noun="ResourceUnavailability" allow-remote="false">
+        <description>Record an actual outage of an asset (design-maintenance Downtime RecordDowntime, review Y3), or link the
+            one that is open: with the asset locked, an open actual ResourceUnavailability of the asset (no thruDate) is
+            answered (linked true) and nothing is written, so two faults of one asset are one outage; else a new one of
+            kind RukActual from fromDate (now when empty), open, with the organization of the asset's facility, the
+            description and the source production downtime. Nothing here ends an outage: Maintenance's
+            end#ResourceUnavailability restores the asset (MT-07). Internal: it checks no permission, its caller did
+            (store#ProductionDowntime checks PRODUCTION_OPERATE and the asset's facility); MT-07's Record outage adds its
+            own entry point. Refuses an asset that does not exist or is stock (ASSET_INVALID) and a kind other than
+            RukActual, until MT-07 builds planned blocks (KIND_INVALID).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="unavailabilityKindEnumId" default-value="RukActual"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="sourceProductionDowntimeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="linked" type="Boolean"><description>True when an open outage of the asset was
+                answered</description></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="unavailabilityKindEnumId != 'RukActual'">
+                <return error="true" message="KIND_INVALID: Only an actual outage is recorded here"/>
+            </if>
+            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
+            <if condition="!asset || !asset.assetTypeEnumId || ['AstTpInventory', 'AstTpSupplies'].includes(asset.assetTypeEnumId)">
+                <return error="true" message="ASSET_INVALID: Equipment ${assetId} is not available"/>
+            </if>
+            <entity-find entity-name="mantle.work.effort.ResourceUnavailability" list="openList" limit="1">
+                <econdition field-name="assetId"/>
+                <econdition field-name="unavailabilityKindEnumId" value="RukActual"/>
+                <econdition field-name="thruDate" operator="is-null"/>
+                <order-by field-name="fromDate"/>
+            </entity-find>
+            <set field="openOutage" from="Array.from(openList)[0] || null"/>
+            <if condition="openOutage">
+                <set field="resourceUnavailabilityId" from="openOutage.resourceUnavailabilityId"/>
+                <set field="linked" from="true"/>
+                <return/>
+            </if>
+            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility">
+                <field-map field-name="facilityId" from="asset.facilityId"/></entity-find-one>
+            <service-call name="create#mantle.work.effort.ResourceUnavailability" out-map="created"
+                    in-map="{unavailabilityKindEnumId:'RukActual', assetId:assetId,
+                        organizationPartyId:facility?.ownerPartyId || asset.ownerPartyId || null,
+                        fromDate:fromDate || ec.user.nowTimestamp, description:description || null,
+                        sourceProductionDowntimeId:sourceProductionDowntimeId || null, createdByUserId:ec.user.userId || null,
+                        createdDate:ec.user.nowTimestamp}"/>
+            <set field="resourceUnavailabilityId" from="created.resourceUnavailabilityId"/>
+            <set field="linked" from="false"/>
+        </actions>
+    </service>
+</services>
