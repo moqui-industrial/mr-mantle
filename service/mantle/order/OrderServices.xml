@@ -1410,6 +1410,11 @@ General Order Placement and eCommerce Usage
             <set field="heldNow" from="(orderPart ?? orderHeader).statusId == 'OrderHold'"/>
             <if condition="!stillHeld &amp;&amp; heldNow">
                 <set field="returnTo" from="reason.returnStatusId || 'OrderPlaced'"/>
+                <!-- a purchase revision's applied change under the approval gate returns to Placed for its approval
+                    (impl-purchasing P9 review; nothing changes with the gate off, Mantle's default) -->
+                <if condition="reason.holdTypeEnumId == 'OhtChange' &amp;&amp; reason.appliedRevision != null">
+                    <set field="returnTo" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                        .releaseReturn(reason, returnTo)"/></if>
                 <service-call name="mantle.order.OrderServices.update#OrderStatus" disable-authz="true"
                         in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId,  statusId:returnTo,
                             approvedDate:(returnTo == 'OrderApproved' ? ec.user.nowTimestamp : null)}"/>
