@@ -2,7 +2,8 @@
 // reports an equipment fault on a line with a maintenance request, which makes a corrective AssetMaintenance and a linked
 // maintenance Request; the fault records one outage of the robot, and a second fault on it links the same outage; closing
 // the stop leaves the request, the maintenance and the outage open and starts no timer; a no-material stop records no outage
-// and suggests no maintenance; a supervisor's correction keeps the original interval and reporter. Each refusal is checked
+// and suggests no maintenance; a supervisor's correction keeps the original interval and reporter; a stop longer than its
+// reason's approval threshold waits for a supervisor's approval. Each refusal is checked
 // on parameters that pass for a user who may. The users are in spec-local groups.
 const P = "mantle.work.ProductionServices."
 const DOWNTIME = "mantle.work.production.ProductionDowntime",
@@ -125,9 +126,10 @@ spec({
         const reasons = [
             ["PDT_FAULT", "Robot fault", "PrcDowntime", "Y"],
             ["PDT_NOMAT", "No material", "PrcHold", "N"],
-            ["PDT_SCRAP", "Damaged", "PrcScrap", "N"]
+            ["PDT_SCRAP", "Damaged", "PrcScrap", "N"],
+            ["PDT_JAM", "Jam", "PrcDowntime", "N", 30]
         ]
-        for (const [reasonCode, reasonName, reasonCategoryEnumId, equipmentFault] of reasons)
+        for (const [reasonCode, reasonName, reasonCategoryEnumId, equipmentFault, approvalThreshold] of reasons)
             call("create#mantle.work.production.ProductionReason", {
                 organizationPartyId: org,
                 reasonCode,
@@ -135,7 +137,8 @@ spec({
                 reasonName,
                 reasonCategoryEnumId,
                 equipmentFault,
-                plannedStop: "N"
+                plannedStop: "N",
+                approvalThreshold: approvalThreshold ?? null
             })
         // a run in progress on the line, with its operation (as release makes them)
         call("create#mantle.work.effort.WorkEffort", {
@@ -357,6 +360,58 @@ feature("a supervisor's correction keeps the original interval and reporter; the
         listed.history[1].correctedByName == "PDT_SUPERVISOR"
         !current.downtimeList.some(row => row.productionDowntimeId == stop.productionDowntimeId)
         current.downtimeList.some(row => row.productionDowntimeId == corrected.productionDowntimeId)
+    }
+})
+
+feature("a stop longer than its reason's approval threshold waits for a supervisor's approval once it has ended", {
+    when() {
+        const long = answer(open("pdt_operator", {reasonCode: "PDT_JAM", fromDate: minutesAgo(50)}))
+        const openList = run("pdt_supervisor", P + "find#ProductionDowntime", {productionDowntimeId: long.productionDowntimeId})
+        const closed = answer(
+            store("pdt_operator", {action: "close", productionDowntimeId: long.productionDowntimeId, expectedRevision: 1})
+        )
+        const short = answer(open("pdt_operator", {reasonCode: "PDT_JAM", fromDate: minutesAgo(20), thruDate: minutesAgo(5)}))
+        const approval = {action: "approve", productionDowntimeId: long.productionDowntimeId, expectedRevision: 2}
+        const waiting = run("pdt_supervisor", P + "find#ProductionDowntime", {facilityId: line, needsApproval: true})
+        const operator = store("pdt_operator", approval)
+        const approved = answer(store("pdt_supervisor", approval))
+        const twice = store("pdt_supervisor", Object.assign({}, approval, {expectedRevision: 3}))
+        const none = store("pdt_supervisor", {
+            action: "approve",
+            productionDowntimeId: short.productionDowntimeId,
+            expectedRevision: 1
+        })
+        const listed = run("pdt_reader", P + "find#ProductionDowntime", {productionDowntimeId: long.productionDowntimeId})
+        return {
+            long,
+            opened: openList.downtimeList[0],
+            closed,
+            short,
+            waiting: waiting.downtimeList.map(row => row.productionDowntimeId),
+            operator: operator.error,
+            approved,
+            twice: twice.error,
+            none: none.error,
+            listed: listed.downtimeList[0],
+            row: downtime(long.productionDowntimeId)
+        }
+    },
+    then({long, opened, closed, short, waiting, operator, approved, twice, none, listed, row}) {
+        long.approvalRequired == false
+        opened.canApprove == false
+        closed.approvalRequired == true
+        short.approvalRequired == false
+        waiting.includes(long.productionDowntimeId)
+        !waiting.includes(short.productionDowntimeId)
+        operator.includes("PERMISSION_DENIED")
+        approved.resultCode == "APPROVED"
+        approved.approvalRequired == false
+        twice.includes("DOWNTIME_APPROVED")
+        none.includes("APPROVAL_NOT_REQUIRED")
+        row.approvedByUserId == "PDT_SUPERVISOR"
+        row.reportedByUserId == "PDT_OPERATOR"
+        listed.approvalText == "Approved by PDT_SUPERVISOR"
+        listed.canApprove == false
     }
 })
 

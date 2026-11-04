@@ -764,27 +764,30 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ===== downtime and maintenance (impl-manufacturing P11; ProductionDowntime.js) ===== -->
     <service verb="store" noun="ProductionDowntime" allow-remote="false">
-        <description>Open, close or correct a production stop (design-manufacturing Downtime ReportStop, §12 M6; review Y3).
+        <description>Open, close, approve or correct a production stop (design-manufacturing Downtime ReportStop, §12 M6; review Y3).
             open: a stop of a work center of the user's organizations from fromDate (now when empty), with its optional
             equipment (an asset that is not stock, of the center's organization), run and operation (an operation of that
             run, a production run of the organization) and the organization's active downtime or hold reason as of its start,
             whose category, equipment fault and planned stop it keeps; with thruDate it is recorded closed. An equipment-fault
             reason with an asset records the asset's one open outage, or links it, in the same transaction
             (ResourceBookingServices.record#ResourceUnavailability). close: the end of an open stop (now when empty); its
-            request, maintenance and outage stay open and no timer starts. correct: a new row with the corrected interval,
+            request, maintenance and outage stay open and no timer starts; an ended stop longer than its reason's approval
+            threshold (minutes, of the reason row at its start) needs approval (approvalRequired). approve: a supervisor's
+            approval of such a stop. correct: a new row with the corrected interval,
             reason, equipment and note, keeping the reporter and report date, and the corrected row kept with its values,
             marked PdtCorrected and superseded by the new one. A retry with the same operation key answers the first.
-            Requires PRODUCTION_OPERATE or PRODUCTION_SUPERVISE to open and close, PRODUCTION_SUPERVISE to correct
-            (PERMISSION_DENIED); refuses an unknown action (ACTION_INVALID), a center, equipment, run or stop outside the
+            Requires PRODUCTION_OPERATE or PRODUCTION_SUPERVISE to open and close, PRODUCTION_SUPERVISE to approve and
+            correct (PERMISSION_DENIED); refuses an unknown action (ACTION_INVALID), a center, equipment, run or stop outside the
             user's organizations (RECORD_UNAVAILABLE), a facility that is not a work center (CENTER_INVALID), stock or another
             organization's equipment (ASSET_INVALID), an operation of another run (OPERATION_INVALID), a run of another
             organization (RUN_INVALID), a reason that is not an active downtime or hold reason (REASON_INVALID), a start or
             end in the future or an end before the start (INTERVAL_INVALID), a changed revision (REVISION_CHANGED), a stop
-            already ended (DOWNTIME_CLOSED), one already corrected (DOWNTIME_CORRECTED) and a correction without its reason
-            (REASON_REQUIRED).</description>
+            already ended (DOWNTIME_CLOSED), one already corrected (DOWNTIME_CORRECTED), a correction without its reason
+            (REASON_REQUIRED), and an approval of a stop not ended (DOWNTIME_OPEN), one that needs none
+            (APPROVAL_NOT_REQUIRED) or one already approved (DOWNTIME_APPROVED).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
-            <parameter name="action" required="true"><description>open, close or correct</description></parameter>
+            <parameter name="action" required="true"><description>open, close, approve or correct</description></parameter>
             <parameter name="productionDowntimeId"><description>The stop to close or correct</description></parameter>
             <parameter name="expectedRevision" type="Integer"><description>The stop's revision, to close or correct
                 it</description></parameter>
@@ -800,21 +803,31 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="changeReason"><description>Why a correction is made</description></parameter>
         </in-parameters>
         <out-parameters>
-            <parameter name="result" type="Map"><description>resultCode OPENED, RECORDED (opened with its end), CLOSED or
-                CORRECTED, productionDowntimeId (the new row of a correction, correctedDowntimeId the one it corrects),
-                statusId, revision, facilityId, assetId, workEffortId, operationWorkEffortId, reasonCode, equipmentFault,
+            <parameter name="result" type="Map"><description>resultCode OPENED, RECORDED (opened with its end), CLOSED,
+                APPROVED or CORRECTED, productionDowntimeId (the new row of a correction, correctedDowntimeId the one it
+                corrects), statusId, revision, facilityId, assetId, workEffortId, operationWorkEffortId, reasonCode,
+                equipmentFault, approvalRequired (ended, longer than its threshold and not approved),
                 resourceUnavailabilityId, outageLinked (an open outage of the asset was linked), suggestMaintenance (an
                 equipment fault of a machine with no maintenance yet), and the operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
             <set field="begun" from="posting.begin(context, 'ProductionDowntime' + (action || ''),
-                    action == 'correct' ? 'PRODUCTION_SUPERVISE' : ['PRODUCTION_OPERATE', 'PRODUCTION_SUPERVISE'],
+                    ['correct', 'approve'].includes(action) ? 'PRODUCTION_SUPERVISE'
+                        : ['PRODUCTION_OPERATE', 'PRODUCTION_SUPERVISE'],
                     ['action', 'productionDowntimeId', 'expectedRevision', 'facilityId', 'assetId', 'workEffortId',
                         'operationWorkEffortId', 'reasonCode', 'fromDate', 'thruDate', 'description', 'changeReason'])"/>
             <if condition="begun.previous">
                 <set field="result" from="begun.previous"/>
                 <return/>
+            </if>
+            <!-- a change of a stop locks it, then a concurrent submit of the same operation that waited on the lock answers
+                the first one's result -->
+            <if condition="action != 'open' &amp;&amp; productionDowntimeId">
+                <entity-find-one entity-name="mantle.work.production.ProductionDowntime" value-field="lockedDowntime"
+                        for-update="true"/>
+                <set field="result" from="posting.settled(begun.op)"/>
+                <if condition="result"><return/></if>
             </if>
             <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
                     .store(posting.scope(), context)"/>
@@ -827,11 +840,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="ProductionDowntime" allow-remote="false">
         <description>The production stops of the user's organizations (design-manufacturing Downtime list), newest first, a
             page at a time: by work center (with the facilities under it), equipment, run, operation, reason, request,
-            maintenance, open only, and those overlapping fromDate to thruDate; corrected rows only with includeCorrected.
-            Each row has its display text (center, equipment, work, reason name and category, from, through, duration, state
-            and color, reporter, correction, outage, maintenance and request) and what the user may do with it (canClose,
-            canCorrect, canRequestMaintenance, and suggestMaintenance for an equipment fault of a machine). With
-            productionDowntimeId, that stop (a corrected one too) and its correction chain in history, from the first report
+            maintenance, open only, waiting for approval (needsApproval), and those overlapping fromDate to thruDate;
+            corrected rows only with includeCorrected. Each row has its display text (center, equipment, work, reason name
+            and category, from, through, duration, state and color, reporter, approval, correction, outage, maintenance and
+            request) and what the user may do with it (canClose, canApprove, canCorrect, canRequestMaintenance, and
+            suggestMaintenance for an equipment fault of a machine). With productionDowntimeId, that stop (a corrected one too) and its correction chain in history, from the first report
             to the row in force. Requires PRODUCTION_VIEW, PRODUCTION_OPERATE or PRODUCTION_SUPERVISE (PERMISSION_DENIED);
             refuses a stop outside the user's organizations (RECORD_UNAVAILABLE).</description>
         <in-parameters>
@@ -844,6 +857,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId"/>
             <parameter name="assetMaintenanceId"/>
             <parameter name="open" type="Boolean"/>
+            <parameter name="needsApproval" type="Boolean"><description>Only the ended stops waiting for
+                approval</description></parameter>
             <parameter name="includeCorrected" type="Boolean"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
@@ -912,6 +927,15 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="result" from="begun.previous"/>
                 <return/>
             </if>
+            <!-- the stop (else the equipment) locked, then a concurrent submit of the same operation answers the first -->
+            <if condition="productionDowntimeId"><then>
+                <entity-find-one entity-name="mantle.work.production.ProductionDowntime" value-field="lockedDowntime"
+                        for-update="true"/>
+            </then><else-if condition="assetId">
+                <entity-find-one entity-name="mantle.product.asset.Asset" value-field="lockedAsset" for-update="true"/>
+            </else-if></if>
+            <set field="result" from="posting.settled(begun.op)"/>
+            <if condition="result"><return/></if>
             <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
                     .requestMaintenance(posting.scope(), context)"/>
             <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,

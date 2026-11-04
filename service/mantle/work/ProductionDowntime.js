@@ -1,7 +1,7 @@
 // Manufacturing's production downtime and its maintenance (design-manufacturing Downtime, EquipmentDetail, §12 M6, D24,
-// review Y3; impl-manufacturing P11): store#ProductionDowntime opens, closes and corrects a reason-coded stop of a work
-// center, with its optional equipment, run and operation; an equipment fault with an asset records or links the asset's one
-// open outage (mantle.work.ResourceBookingServices.record#ResourceUnavailability) in the same transaction.
+// review Y3; impl-manufacturing P11): store#ProductionDowntime opens, closes, approves and corrects a reason-coded stop
+// of a work center, with its optional equipment, run and operation; an equipment fault with an asset records or links the
+// asset's one open outage (mantle.work.ResourceBookingServices.record#ResourceUnavailability) in the same transaction.
 // find#ProductionDowntime reads the stops of the user's organizations with their display text, and a stop's correction
 // chain. request#ProductionMaintenance asks for corrective maintenance of the equipment: an AssetMaintenance (AsMntCreated,
 // MntTpCorrective) and, when wanted, an intake Request (RqtMaintenance) linked to the stop, the equipment, the maintenance
@@ -128,6 +128,14 @@ function outageOf(row) {
     })
     return {resourceUnavailabilityId: out.resourceUnavailabilityId, linked: !!out.linked}
 }
+// The approval a stop needs (design Downtime "supervisors may correct and approve"; ReasonCodes' approval threshold): an
+// ended stop longer than the threshold, in minutes, of the reason row in effect at its start; an open one waits for its end.
+const thresholdOf = reason =>
+    reason.approvalThreshold == null || String(reason.approvalThreshold) === "" ? null : Number(String(reason.approvalThreshold))
+function approvalOf(threshold, fromDate, thruDate) {
+    if (threshold == null || thruDate == null) return "N"
+    return (ms(thruDate) - ms(fromDate)) / 60000 > Number(String(threshold)) ? "Y" : "N"
+}
 // What a change answers: the stop's id, state and revision, its outage and whether maintenance is suggested.
 function answerOf(productionDowntimeId, resultCode, outage, extra = {}) {
     const row = one(DOWNTIME, {productionDowntimeId})
@@ -143,6 +151,7 @@ function answerOf(productionDowntimeId, resultCode, outage, extra = {}) {
             operationWorkEffortId: row.operationWorkEffortId || null,
             reasonCode: row.reasonCode,
             equipmentFault: row.equipmentFault === "Y",
+            approvalRequired: row.approvalRequired === "Y" && !row.approvedByUserId,
             resourceUnavailabilityId: row.resourceUnavailabilityId || null,
             outageLinked: !!outage?.linked,
             // only an equipment fault of a machine suggests maintenance (design Downtime Actions)
@@ -173,6 +182,8 @@ function open(userScope, p) {
         reasonCategoryEnumId: reason.reasonCategoryEnumId,
         equipmentFault: reason.equipmentFault === "Y" ? "Y" : "N",
         plannedStop: reason.plannedStop === "Y" ? "Y" : "N",
+        approvalThreshold: thresholdOf(reason),
+        approvalRequired: approvalOf(thresholdOf(reason), fromDate, thruDate),
         fromDate,
         thruDate,
         description: text(p.description),
@@ -197,6 +208,7 @@ function close(userScope, p) {
         productionDowntimeId: row.productionDowntimeId,
         statusId: "PdtClosed",
         thruDate,
+        approvalRequired: approvalOf(row.approvalThreshold, row.fromDate, thruDate),
         closedByUserId: ec.user.userId,
         closedDate: ec.user.nowTimestamp,
         revision: Number(row.revision || 0) + 1
@@ -229,6 +241,8 @@ function correct(userScope, p) {
         reasonCategoryEnumId: reason.reasonCategoryEnumId,
         equipmentFault: reason.equipmentFault === "Y" ? "Y" : "N",
         plannedStop: reason.plannedStop === "Y" ? "Y" : "N",
+        approvalThreshold: thresholdOf(reason),
+        approvalRequired: approvalOf(thresholdOf(reason), fromDate, thruDate),
         fromDate,
         thruDate,
         description: p.description == null ? row.description || null : text(p.description),
@@ -255,7 +269,24 @@ function correct(userScope, p) {
     const outage = outageOf(one(DOWNTIME, {productionDowntimeId: created.productionDowntimeId}))
     return answerOf(created.productionDowntimeId, "CORRECTED", outage, {correctedDowntimeId: row.productionDowntimeId})
 }
-const storeActions = {open, close, correct}
+// A supervisor's approval of an ended stop longer than its reason's threshold; nothing else changes.
+function approve(userScope, p) {
+    const row = downtimeOf(userScope, p.productionDowntimeId, true)
+    requireNotCorrected(row)
+    requireRevision(row, p.expectedRevision)
+    if (row.statusId !== "PdtClosed") denied("DOWNTIME_OPEN", "Downtime " + row.productionDowntimeId + " has not ended")
+    if (row.approvalRequired !== "Y")
+        denied("APPROVAL_NOT_REQUIRED", "Downtime " + row.productionDowntimeId + " needs no approval")
+    if (row.approvedByUserId) denied("DOWNTIME_APPROVED", "Downtime " + row.productionDowntimeId + " is already approved")
+    call("update#" + DOWNTIME, {
+        productionDowntimeId: row.productionDowntimeId,
+        approvedByUserId: ec.user.userId,
+        approvedDate: ec.user.nowTimestamp,
+        revision: Number(row.revision || 0) + 1
+    })
+    return answerOf(row.productionDowntimeId, "APPROVED", null)
+}
+const storeActions = {open, close, correct, approve}
 function store(userScope, p) {
     if (!Object.hasOwn(storeActions, p.action)) denied("ACTION_INVALID", "Unknown downtime action " + (p.action || ""))
     return storeActions[p.action](userScope, p)
@@ -359,6 +390,15 @@ function displayRows(list, at) {
             requestId: row.requestId || null,
             requestText: request ? (request.requestName || request.requestId) + " · " + statusText(request.statusId) : "",
             canClose: report && row.statusId === "PdtOpen",
+            approvalRequired: row.approvalRequired === "Y",
+            approvedByName: userName(row.approvedByUserId),
+            approvalText:
+                row.approvalRequired !== "Y"
+                    ? ""
+                    : row.approvedByUserId
+                      ? "Approved by " + userName(row.approvedByUserId)
+                      : "Needs approval",
+            canApprove: supervise && row.statusId === "PdtClosed" && row.approvalRequired === "Y" && !row.approvedByUserId,
             canCorrect: supervise && current,
             canRequestMaintenance: report && current && !!row.assetId && !row.assetMaintenanceId,
             suggestMaintenance: report && current && row.equipmentFault === "Y" && !!row.assetId && !row.assetMaintenanceId
@@ -396,6 +436,11 @@ function findDowntime(p) {
         for (const field of ["assetId", "workEffortId", "operationWorkEffortId", "reasonCode", "requestId", "assetMaintenanceId"])
             if (!blank(p[field])) query = query.condition(field, p[field])
         if (p.open === true || p.open === "true") query = query.condition("statusId", "PdtOpen")
+        if (p.needsApproval === true || p.needsApproval === "true")
+            query = query
+                .condition("statusId", "PdtClosed")
+                .condition("approvalRequired", "Y")
+                .condition("approvedByUserId", "is-null", null)
         if (!(p.includeCorrected === true || p.includeCorrected === "true") && blank(p.productionDowntimeId))
             query = query.condition("statusId", "not-equals", "PdtCorrected")
         if (p.thruDate) query = query.condition("fromDate", "less", p.thruDate)

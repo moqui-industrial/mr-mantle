@@ -27,7 +27,9 @@ along with this software (see the LICENSE.md file). If not, see
             AssetMaintenance with an optional intake Request (D24). A correction never changes a row: it makes a new row
             (correctionOfDowntimeId, the first of the chain originalDowntimeId) that keeps the reporter and report date,
             and marks the row it corrects PdtCorrected with supersededByDowntimeId, so the original interval and actor stay
-            readable. revision counts the changes of a row (close, correction) for expectedRevision.</description>
+            readable. A stop longer than its reason's approval threshold (minutes, kept from the reason row at its start)
+            needs a supervisor's approval once it has ended (approvalRequired; approvedByUserId and approvedDate when given).
+            revision counts the changes of a row (close, approval, correction) for expectedRevision.</description>
         <field name="productionDowntimeId" type="id" is-pk="true"/>
         <field name="organizationPartyId" type="id"/>
         <field name="facilityId" type="id"/>
@@ -40,6 +42,12 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="reasonCategoryEnumId" type="id"/>
         <field name="equipmentFault" type="text-indicator"/>
         <field name="plannedStop" type="text-indicator"/>
+        <field name="approvalThreshold" type="number-decimal"><description>The reason's approval threshold in minutes at the
+            stop's start; empty never</description></field>
+        <field name="approvalRequired" type="text-indicator"><description>Y: the ended stop is longer than its approval
+            threshold</description></field>
+        <field name="approvedByUserId" type="id" enable-audit-log="true"/>
+        <field name="approvedDate" type="date-time"/>
         <field name="fromDate" type="date-time" enable-audit-log="true"/>
         <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="description" type="text-long"/>
