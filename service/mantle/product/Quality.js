@@ -14,6 +14,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const posting = ec.resource.script("component://mr-mantle/service/mantle/shipment/StockPosting.js")
+// a production run's quality gates (impl-manufacturing P8): its inspections, scrap disposition and quality-block notice
+const productionQuality = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuality.js")
 const {find, one, rows, denied, call, access, ms, dateText} = lib
 
 const TEMPLATE = "mantle.product.quality.InspectionTemplate",
@@ -63,6 +65,9 @@ const headerFields = [
     "sampleSize",
     "samplePercent"
 ]
+// a production template's stage, sample basis and the method or operation it attaches to (impl-manufacturing P8): taken only
+// with productionApplicability, so a form that does not show them never clears them; empty outside the production context
+const productionFields = ["productionStageEnumId", "sampleBasisEnumId", "productBomId", "operationWorkEffortId"]
 
 const blank = value => value == null || String(value).trim() === ""
 const text = value => (blank(value) ? null : String(value).trim())
@@ -165,7 +170,12 @@ function applicableTemplate(organizationPartyId, productId, facilityId, contextE
             (!row.publishedDate || ms(row.publishedDate) <= ms(asOf)) &&
             (!row.inspectionContextEnumId || row.inspectionContextEnumId === contextEnumId) &&
             (!row.facilityId || row.facilityId === facilityId) &&
-            (row.productId ? row.productId === productId : !row.productCategoryId || categories.has(row.productCategoryId))
+            (row.productId ? row.productId === productId : !row.productCategoryId || categories.has(row.productCategoryId)) &&
+            // an in-process production template, and one attached to a method or operation, applies only through its
+            // gate (impl-manufacturing P8, ProductionQuality.js)
+            row.productionStageEnumId !== "QpsInProcess" &&
+            !row.productBomId &&
+            !row.operationWorkEffortId
     )
     const rank = row => (row.productId ? 4 : row.productCategoryId ? 2 : 0) + (row.facilityId ? 1 : 0)
     candidates.sort((a, b) => rank(b) - rank(a) || String(a.inspectionTemplateId).localeCompare(b.inspectionTemplateId))
@@ -209,6 +219,18 @@ function checkHeader(userScope, organizationPartyId, header) {
         if (!facility || facility.ownerPartyId !== organizationPartyId)
             denied("VALUE_INVALID", "Facility " + header.facilityId + " is not one of the template's organization")
     }
+    checkEnum(header.productionStageEnumId, "ProductionInspectionStage", "production stage")
+    checkEnum(header.sampleBasisEnumId, "InspectionSampleBasis", "sample basis")
+    if (header.productBomId) {
+        const bom = one("mantle.product.bom.ProductBom", {productBomId: header.productBomId})
+        if (!bom || bom.organizationPartyId !== organizationPartyId)
+            denied("VALUE_INVALID", "Method " + header.productBomId + " is not one of the template's organization")
+    }
+    if (header.operationWorkEffortId) {
+        const op = one("mantle.work.effort.WorkEffort", {workEffortId: header.operationWorkEffortId})
+        if (!op || op.purposeEnumId !== "WepRoutingTask" || op.ownerPartyId !== organizationPartyId)
+            denied("VALUE_INVALID", "Operation " + header.operationWorkEffortId + " is not one of the template's organization")
+    }
     if (header.samplePolicyEnumId === "QspFixed" && !(dec(header.sampleSize).compare(0) > 0))
         denied("SAMPLE_INVALID", "Give the number of units to sample")
     if (header.samplePolicyEnumId === "QspPercent") {
@@ -231,6 +253,11 @@ function storeTemplate(p) {
     const header = {}
     if (!template || !blank(p.templateName)) for (const field of headerFields) header[field] = blank(p[field]) ? null : p[field]
     for (const field of ["sampleSize", "samplePercent"]) if (Object.hasOwn(header, field)) header[field] = decimal(header[field])
+    if (Object.hasOwn(header, "templateName")) {
+        if (truthy(p.productionApplicability) && header.inspectionContextEnumId === "QicProduction")
+            for (const field of productionFields) header[field] = blank(p[field]) ? null : p[field]
+        else if (header.inspectionContextEnumId !== "QicProduction") for (const field of productionFields) header[field] = null
+    }
     const organizationPartyId = template ? template.organizationPartyId : organizationOf(userScope, p.organizationPartyId)
     if (!template && blank(header.templateName)) denied("NAME_REQUIRED", "Name the template")
     checkHeader(userScope, organizationPartyId, header)
@@ -586,7 +613,7 @@ const inspectionFields = [
     "comments",
     "reinspectQualityInspectionId"
 ]
-function createInspection(userScope, given) {
+function createInspection(userScope, given, gate = null) {
     // a plain copy of the fields read here (the caller may pass the service context)
     let p = Object.fromEntries(inspectionFields.map(field => [field, given[field] ?? null]))
     let asset = null,
@@ -607,6 +634,14 @@ function createInspection(userScope, given) {
             returnId: earlier.inspection.returnId,
             returnItemSeqId: earlier.inspection.returnItemSeqId,
             workEffortId: earlier.inspection.workEffortId,
+            // a production gate's re-inspection answers the same gate (impl-manufacturing P8)
+            gateFields: earlier.inspection.productionQualityGateId
+                ? {
+                      operationWorkEffortId: earlier.inspection.operationWorkEffortId,
+                      productionRunLineId: earlier.inspection.productionRunLineId,
+                      productionQualityGateId: earlier.inspection.productionQualityGateId
+                  }
+                : null,
             demandOrderId: p.demandOrderId || earlier.inspection.demandOrderId,
             demandOrderItemSeqId: p.demandOrderItemSeqId || earlier.inspection.demandOrderItemSeqId
         })
@@ -661,9 +696,11 @@ function createInspection(userScope, given) {
                 ? "QicProduction"
                 : "QicReceipt")
     const organizationPartyId = facility.ownerPartyId
-    const asOf = now()
+    // a production gate's inspection reads the gate's template as of the run's release (impl-manufacturing P8)
+    const asOf = gate?.templateAsOfDate || now()
     let template = null
-    if (!blank(p.inspectionTemplateId)) {
+    if (gate) template = gate.inspectionTemplateId ? one(TEMPLATE, {inspectionTemplateId: gate.inspectionTemplateId}) : null
+    else if (!blank(p.inspectionTemplateId)) {
         template = templateOf(userScope, p.inspectionTemplateId)
         if (template.statusId !== "QtPublished" || template.organizationPartyId !== organizationPartyId)
             denied("TEMPLATE_UNAVAILABLE", "Template " + p.inspectionTemplateId + " is not published for " + organizationPartyId)
@@ -673,9 +710,14 @@ function createInspection(userScope, given) {
         demandOrderItemSeqId = text(p.demandOrderItemSeqId)
     if (!demandOrderId && !blank(p.workEffortId)) {
         const pegged = rows("mantle.order.OrderItemWorkEffort", {workEffortId: p.workEffortId})[0]
+        // or the run's own demand provenance (create#ProductionOrder's sourceOrderId, impl-manufacturing P8, R-SA-10)
+        const run = pegged ? null : one("mantle.work.effort.WorkEffort", {workEffortId: p.workEffortId})
         if (pegged) {
             demandOrderId = pegged.orderId
             demandOrderItemSeqId = pegged.orderItemSeqId
+        } else if (run?.purposeEnumId === "WepProductionRun" && run.demandOrderId && run.demandOrderItemSeqId) {
+            demandOrderId = run.demandOrderId
+            demandOrderItemSeqId = run.demandOrderItemSeqId
         }
     }
     if (demandOrderId) checkDemand(userScope, demandOrderId, demandOrderItemSeqId, productId, organizationPartyId)
@@ -712,7 +754,7 @@ function createInspection(userScope, given) {
         quantity,
         heldQuantity: held,
         disposedQuantity: toDecimal(0),
-        sampleSize: sampleOf(template, quantity, p.sampleSize),
+        sampleSize: gate && blank(p.sampleSize) && gate.sampleSize ? gate.sampleSize : sampleOf(template, quantity, p.sampleSize),
         inspectionTemplateId: template?.inspectionTemplateId || null,
         templateAsOfDate: asOf,
         inspectorPartyId: text(p.inspectorPartyId),
@@ -723,6 +765,14 @@ function createInspection(userScope, given) {
         createdByUserId: ec.user.userId,
         comments: text(p.comments)
     })
+    const gateFields = gate
+        ? {
+              operationWorkEffortId: gate.operationWorkEffortId || null,
+              productionRunLineId: gate.productionRunLineId || null,
+              productionQualityGateId: gate.productionQualityGateId
+          }
+        : p.gateFields
+    if (gateFields) call("update#" + INSPECTION, Object.assign({qualityInspectionId: created.qualityInspectionId}, gateFields))
     if (earlier) {
         // the held quantity moves to the re-inspection, so the source's held quantity counts it once
         const left = dec(earlier.inspection.heldQuantity).subtract(quantity)
@@ -770,17 +820,26 @@ function outputNeedsInspection(facility, productId, policy) {
 }
 // The inspections of a run's output just received into quarantine: one per receipt with accepted stock, of the run
 // (QisWorkEffort, QicProduction), in the output guard's own operation (its STOCK_ISSUE check). Answers their ids.
-function outputInspections(userScope, assetReceiptIds, workEffortId) {
+function outputInspections(userScope, assetReceiptIds, workEffortId, gate = null) {
     const ids = []
     for (const assetReceiptId of Array.from(assetReceiptIds || [])) {
         const receipt = one(RECEIPT, {assetReceiptId})
         if (!receipt?.assetId || dec(receipt.quantityAccepted).compare(0) <= 0) continue
-        const created = createInspection(userScope, {
-            assetReceiptId,
-            workEffortId,
-            sourceTypeEnumId: "QisWorkEffort",
-            inspectionContextEnumId: "QicProduction"
-        })
+        const created = createInspection(
+            userScope,
+            {
+                assetReceiptId,
+                workEffortId,
+                sourceTypeEnumId: "QisWorkEffort",
+                inspectionContextEnumId: "QicProduction"
+            },
+            // a run's final gate: its template as of the release and its sample plan (impl-manufacturing P8)
+            gate
+                ? Object.assign(productionQuality().inspectionPlan(gate, dec(receipt.quantityAccepted)), {
+                      operationWorkEffortId: gate.operationWorkEffortId || receipt.operationWorkEffortId || null
+                  })
+                : null
+        )
         ids.push(created.qualityInspectionId)
     }
     return ids
@@ -990,6 +1049,8 @@ function verifyInspection(p) {
         verificationComments: text(p.verificationComments)
     })
     notifyDecision(inspection, approve ? "verified" : "returned to the inspector", null)
+    // a production inspection verified with a rejection: the quality-block notice (impl-manufacturing P8)
+    if (approve && inspection.workEffortId) productionQuality().afterVerify(inspection)
     return {qualityInspectionId: inspection.qualityInspectionId, statusId}
 }
 
@@ -1129,7 +1190,8 @@ function disposeStock(inspection, asset, plan, p) {
     let resultAssetId = asset?.assetId || null
     let statusAfter = asset?.statusId || null
     let reserved = null,
-        physicalInventoryId = null
+        physicalInventoryId = null,
+        toRun = null
     const dispositionSeqId = String(rows(DISPOSITION, {qualityInspectionId: inspection.qualityInspectionId}).length + 1).padStart(
         2,
         "0"
@@ -1148,6 +1210,14 @@ function disposeStock(inspection, asset, plan, p) {
                 facilityId: asset.facilityId,
                 locationSeqId: target.locationSeqId
             })
+    } else if (
+        held &&
+        dispositionEnumId === "QdScrap" &&
+        (toRun = productionQuality().scrapToRun(posting.scope(), inspection, asset, quantity, p))
+    ) {
+        // output of an open run: P7's loss path issued it back to the run (impl-manufacturing P8); it stays where it was
+        resultAssetId = asset.assetId
+        statusAfter = one(ASSET, {assetId: asset.assetId})?.statusId || asset.statusId
     } else if (held && dispositionEnumId === "QdScrap") {
         if (target && target.locationSeqId !== asset.locationSeqId) {
             // the morgue location gives AstMorgue by its type, through the flow from AstQuarantine
@@ -1188,10 +1258,11 @@ function disposeStock(inspection, asset, plan, p) {
         reservedOrderItemSeqId: reserved?.orderItemSeqId || null,
         varianceReasonEnumId: dispositionEnumId === "QdScrap" ? text(p.varianceReasonEnumId) || "InVrScrap" : null,
         reason: text(p.reason),
+        productionLossId: toRun?.productionLossId || null,
         disposedDate: now(),
         disposedByUserId: ec.user.userId
     })
-    if (held && dispositionEnumId === "QdScrap") {
+    if (held && dispositionEnumId === "QdScrap" && !toRun) {
         // the scrap itself: P6's guarded scrap#Asset, which admits QUALITY_DISPOSE for the result asset of this disposition
         const scrapped = call("mantle.shipment.WarehouseTaskServices.scrap#Asset", {
             operationKey: nestedKey(p.operationKey, "scrap"),
@@ -1240,6 +1311,7 @@ function disposeStock(inspection, asset, plan, p) {
         reservedOrderId: reserved?.orderId || null,
         reservedOrderItemSeqId: reserved?.orderItemSeqId || null,
         physicalInventoryId,
+        productionLossId: toRun?.productionLossId || null,
         heldQuantity: textOf(heldAfter.compare(0) > 0 ? heldAfter : 0),
         inspectionStatusId: complete ? "QiDisposed" : inspection.statusId
     }
@@ -1474,7 +1546,12 @@ function findInspections(p) {
             "sourceTypeEnumId",
             "shipmentId",
             "qualityInspectionId",
-            "assetReceiptId"
+            "assetReceiptId",
+            // a production run's, operation's or gate's inspections, by context (impl-manufacturing P8)
+            "workEffortId",
+            "operationWorkEffortId",
+            "productionQualityGateId",
+            "inspectionContextEnumId"
         ])
             if (!blank(p[field])) query = query.condition(field, p[field])
         if (p.dueBefore) query = query.condition("dueDate", "less", p.dueBefore)
@@ -1527,6 +1604,9 @@ function findInspections(p) {
 // held whole, as before CX-QUALITY), match-eligible (accepted less held) and what its inspections rejected (scrapped or
 // returned to the supplier), and the totals. Bill matching leaves held quantity out; planning shows it pending release.
 function sourceStatus(p) {
+    // a production run, operation or output line: its quality gates (impl-manufacturing P8, ProductionQuality.js)
+    if (!blank(p.workEffortId) || !blank(p.operationWorkEffortId) || !blank(p.productionRunLineId))
+        return productionQuality().execute("sourceStatus", p)
     const conditions = !blank(p.assetReceiptId)
         ? {assetReceiptId: p.assetReceiptId}
         : !blank(p.orderId)
@@ -1642,6 +1722,8 @@ const operations = {
     outputInspections,
     applicableTemplate,
     itemsAsOf,
+    // for a production gate's inspection (ProductionQuality.js)
+    createInspection,
     lockInspection,
     dispositionPlan,
     disposeStock,

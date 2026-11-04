@@ -497,6 +497,10 @@ function release(userScope, run, p) {
         })
     lines = linesOf(run.workEffortId)
     writeProducts(run.workEffortId, lines)
+    // the quality gates, each with its template as of now (impl-manufacturing P8, ProductionQuality.js)
+    ec.resource
+        .script("component://mr-mantle/service/mantle/work/ProductionQuality.js")
+        .writeGates(run, lines, operations, children, now)
     // the frozen standard: the approved estimate in effect now for the organization and facility (Products P9)
     const costs = ec.resource.script("component://mr-mantle/service/mantle/product/Costs.js")
     const standard = costs.effective(output.productId, run.ownerPartyId, now, run.facilityId)
@@ -905,8 +909,12 @@ function outputPlan(userScope, p) {
         expirationDate: p.expirationDate,
         mfgPartyId: run.ownerPartyId
     })
-    // held when the caller reports it produced-held (record#ProductionQuantity's pending, impl-manufacturing P7)
-    const inspect = p.hold === true || p.hold === "true" || quality.outputNeedsInspection(facility, product.productId, policy)
+    // held when the caller reports it produced-held (record#ProductionQuantity's pending, impl-manufacturing P7), when the
+    // line has a final quality gate (its template as of the release, impl-manufacturing P8), or by the tracking policy
+    const gated = ec.resource
+        .script("component://mr-mantle/service/mantle/work/ProductionQuality.js")
+        .outputInspection(run, line, facility, product.productId, policy)
+    const inspect = p.hold === true || p.hold === "true" || gated.inspect
     const operation = inspect
         ? Object.assign({}, policy.operation, {receiptSteps: 3})
         : Object.assign({}, policy.operation, {receiptSteps: 1})
@@ -931,6 +939,7 @@ function outputPlan(userScope, p) {
         product,
         track,
         inspect,
+        gate: gated.gate,
         target,
         cost,
         lines: costLines(cost.total, unit.stockQuantity, track.serialized ? track.serials : [])
@@ -978,7 +987,9 @@ function postOutput(userScope, plan, p) {
         })
         assetReceiptIds.push(out.assetReceiptId)
     }
-    const qualityInspectionIds = plan.inspect ? quality.outputInspections(userScope, assetReceiptIds, plan.run.workEffortId) : []
+    const qualityInspectionIds = plan.inspect
+        ? quality.outputInspections(userScope, assetReceiptIds, plan.run.workEffortId, plan.gate || null)
+        : []
     return {assetIds, assetReceiptIds, qualityInspectionIds}
 }
 
@@ -1137,6 +1148,8 @@ function subcontractPlan(userScope, p) {
     // impl-manufacturing P5a's release gate and operations (ProductionOrders.js)
     laterReleases,
     routingsOf: routingsOfRun,
+    // impl-manufacturing P8's quality gates (ProductionQuality.js)
+    operationsOf,
     // impl-manufacturing P5b's manual material lines (ProductionMaterials.js) and P7's target change and draft outputs
     // (ProductionQuantities.js)
     writeProducts,
