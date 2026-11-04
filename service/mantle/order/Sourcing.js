@@ -20,6 +20,8 @@ const policyModule = ec.resource.script("component://mr-mantle/service/mantle/or
 const orders = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseOrders.js")
 const documents = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseOrderDocuments.js")
 const planning = () => ec.resource.script("component://mr-mantle/service/mantle/product/SupplyPlanning.js")
+// P16: each invited supplier's link to its quote's QuoteResponse page (SupplierPortal.js)
+const portal = () => ec.resource.script("component://mr-mantle/service/mantle/order/SupplierPortal.js")
 const {find, one, rows, call, denied, access, ms, dateText} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -53,6 +55,8 @@ const reasonsOf = (values, reason) =>
     reason ? Object.fromEntries(Object.keys(values).map(field => [field + "_changeReason", String(reason)])) : {}
 
 function requirePermission(...permissions) {
+    // P16: a supplier's response from its PASS page answers its own quote (PurchaseOrders.js asSupplier)
+    if (orders().claimed(permissions)) return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
@@ -653,10 +657,13 @@ function send(p) {
 
     const fromName = partyName(rfq.organizationPartyId)
     const fromAddress = documents().recipientsOf(rfq.organizationPartyId)[0] || null
-    const body = ec.resource.template("component://mr-mantle/template/order/QuoteRequestEmail.html.fancy", {
-        note: p.note || null,
-        printHtml: printed.printHtml
-    })
+    // P16: each supplier's copy carries its own quote's link (QuoteResponse), when the organization has a Supplier site
+    const bodyFor = linkUrl =>
+        ec.resource.template("component://mr-mantle/template/order/QuoteRequestEmail.html.fancy", {
+            note: p.note || null,
+            printHtml: printed.printHtml,
+            linkUrl: linkUrl || null
+        })
     const supplierResults = []
     for (const invitation of targets) {
         const result = {
@@ -671,6 +678,7 @@ function send(p) {
         try {
             const recipients = documents().recipientsOf(invitation.supplierPartyId)
             if (!recipients.length) denied("RECIPIENT_REQUIRED", result.supplierName + " has no order or primary email address")
+            const body = bodyFor(portal().quoteLink(invitation.orderId))
             let sentCount = 0
             const failures = []
             for (const recipient of recipients) {
@@ -781,6 +789,8 @@ const expired = part => !!part.validThruDate && ms(part.validThruDate) <= Number
 // new quote is entered straight in OrderProposed, for an RFQ's items when the RFQ is given (an unsolicited quote otherwise).
 function storeQuote(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim answers its one quote, never a new one
+    if (orders().portalClaim() && blank(p.orderId)) denied("RECORD_UNAVAILABLE", "This quote is not available")
     let po
     let created = false
     if (blank(p.orderId)) {
@@ -869,6 +879,12 @@ function storeQuote(p) {
 // (each change in the line's history), or a new line on a proposed quote with no RFQ item.
 function storeQuoteItem(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim prices, dates and codes the quote's own lines; it adds no line and changes no quantity, unit or text
+    if (
+        orders().portalClaim() &&
+        (blank(p.orderItemSeqId) || ["quantity", "quantityUomId", "itemDescription"].some(field => !blank(p[field])))
+    )
+        denied("RECORD_UNAVAILABLE", "This quote line is not available")
     const po = quoteOf(p.orderId, true)
     const values = {}
     if (given(p, "unitAmount") && !blank(p.unitAmount)) values.unitAmount = decimal(p.unitAmount, "price", true)

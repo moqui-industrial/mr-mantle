@@ -11,8 +11,11 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <#-- The body of a request for quotation email (mantle.order.SourcingServices.send#QuoteRequest): the buyer's note, then the
-     RFQ as printed by get#QuoteRequestPrint, whose PDF is attached. -->
+     RFQ as printed by get#QuoteRequestPrint, whose PDF is attached; with
+     linkUrl, the supplier's own link to the Supplier app (impl-purchasing P16). -->
 <#if note><div style="font:11pt Helvetica,Arial,sans-serif;margin-bottom:16px">
 <#list String(note).split('\n') as noteLine>${noteLine}<br></#list>
 </div></#if>
+<#if linkUrl><p style="font:11pt Helvetica,Arial,sans-serif;margin-bottom:16px"><a href="${linkUrl}">Open this link</a> to answer this request with your quote.
+The link is yours alone; do not forward it.</p></#if>
 ${raw(printHtml)}

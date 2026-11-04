@@ -960,4 +960,78 @@
             'operationId',
         ],
     },
+    // Purchasing P16: the Supplier app's home, QuoteResponse and OrderAcknowledgement (mantle.order.SupplierPortalServices)
+    getSupplierHome: {
+        service: 'mantle.order.SupplierPortalServices.get#SupplierHome',
+        fields: ['siteId', 'token'],
+    },
+    getQuoteInvitation: {
+        service: 'mantle.order.SupplierPortalServices.get#QuoteInvitation',
+        fields: ['siteId', 'orderId', 'token'],
+    },
+    saveQuoteResponse: {
+        service: 'mantle.order.SupplierPortalServices.save#QuoteResponse',
+        fields: [
+            'siteId',
+            'orderId',
+            'token',
+            'rfqRevision',
+            'otherPartyOrderId',
+            'validThruDate',
+            'estimatedDeliveryDate',
+            'note',
+            'lines',
+        ],
+    },
+    submitQuoteResponse: {
+        service: 'mantle.order.SupplierPortalServices.submit#QuoteResponse',
+        fields: [
+            'siteId',
+            'orderId',
+            'token',
+            'rfqRevision',
+            'otherPartyOrderId',
+            'validThruDate',
+            'estimatedDeliveryDate',
+            'note',
+            'lines',
+            'confirm',
+            'file',
+            'operationId',
+        ],
+    },
+    getPublishedPurchaseOrder: {
+        service:
+            'mantle.order.SupplierPortalServices.get#PublishedPurchaseOrder',
+        fields: ['siteId', 'orderId', 'token'],
+    },
+    acknowledgePurchaseOrder: {
+        service:
+            'mantle.order.SupplierPortalServices.acknowledge#PurchaseOrder',
+        fields: [
+            'siteId',
+            'orderId',
+            'token',
+            'orderRevision',
+            'outcome',
+            'otherPartyOrderId',
+            'note',
+            'lines',
+            'file',
+            'operationId',
+        ],
+    },
+    reportDropShipDelivery: {
+        service: 'mantle.order.SupplierPortalServices.report#DropShipDelivery',
+        fields: [
+            'siteId',
+            'orderId',
+            'token',
+            'trackingCode',
+            'shippedDate',
+            'note',
+            'lines',
+            'operationId',
+        ],
+    },
 })

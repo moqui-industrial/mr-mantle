@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchasing's supplier pages (design-purchasing §13; impl-purchasing P16): the PASS Supplier app's QuoteResponse and
+    OrderAcknowledgement over mantle.order.SupplierPortalServices (SupplierPortal.js). A capability names the revision of the
+    record it was issued for, so a purchase order's link of an earlier revision answers SupersededRevision. A supplier's
+    response from those pages is a claim for internal review: its draft and its receipt are SupplierPortalResponse rows,
+    and what it claims is written to the order through Mantle's own services (store#SupplierQuote and
+    store#SupplierQuoteItem, record#Acknowledgement), or kept as the order's content (a drop-ship delivery report). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="ExternalAccessCapability" package="mantle.party">
+        <!-- the record's revision the capability was issued for: a purchase order's orderRevision (send#PurchaseOrder); empty
+            for a link of no revision -->
+        <field name="recordRevision" type="number-integer"/>
+    </extend-entity>
+    <entity entity-name="SupplierPortalResponse" package="mantle.order" cache="never">
+        <description>A supplier's response from the PASS Supplier app to one revision of a quote order or purchase order: a
+            quote response's private draft (state draft) and the receipt of what was submitted (state submitted), an
+            acknowledgement's or a drop-ship delivery report's receipt. A repeat of the operation, or a second submission
+            of the same revision, answers its receipt.</description>
+        <field name="responseId" type="id" is-pk="true"/>
+        <field name="orderId" type="id"/>
+        <field name="responseKind" type="id"><description>QuoteResponse, OrderAcknowledgement or DeliveryReport</description></field>
+        <field name="recordRevision" type="number-integer"><description>The quote's RFQ revision (its time in
+            milliseconds), or the purchase order's orderRevision, the response answers</description></field>
+        <field name="state" type="id"><description>draft or submitted</description></field>
+        <field name="operationId" type="id"/>
+        <field name="capabilityId" type="id"/>
+        <field name="contactPartyId" type="id"><description>The signed-in contact's party, for a response with no
+            token</description></field>
+        <field name="supplierPartyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="late" type="text-indicator"/>
+        <field name="dataJson" type="text-very-long"><description>What the supplier entered (a draft, or what was
+            submitted)</description></field>
+        <field name="resultJson" type="text-very-long"><description>The receipt the page shows</description></field>
+        <field name="savedDate" type="date-time"/>
+        <field name="submittedDate" type="date-time"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.party.ExternalAccessCapability"/>
+        <index name="SUP_PORTAL_RESP_ORDER"><index-field name="orderId"/><index-field name="responseKind"/></index>
+        <index name="SUP_PORTAL_RESP_OPERATION"><index-field name="operationId"/></index>
+        <seed-data>
+            <!-- a drop-ship supplier's delivery report from the Supplier app, for the buyer to confirm (P7's finalize) -->
+            <moqui.basic.Enumeration enumId="OctSupplierDeliveryReport" description="Supplier delivery report"
+                    enumTypeId="OrderContentType"/>
+        </seed-data>
+    </entity>
+</entities>

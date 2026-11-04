@@ -475,16 +475,16 @@ function sniff(location) {
 }
 // Stage the file under PASS's media root and scan it, as Forum stages an attachment. Its leading bytes must be the type
 // it says it is, and it is kept under a name whose extension is that type's; anything else, or a file that is not
-// clean, is refused.
-function stage(file) {
+// clean, is refused. noun names the file in the refusals (Purchasing's quote and acknowledgement files use it too, P16).
+function stage(file, noun = "bill") {
     const maxBytes = 10485760
-    if (!file || Number(file.size) < 1 || Number(file.size) > maxBytes) fail("Unprocessable", "Attach the bill, at most 10 MB")
+    if (!file || Number(file.size) < 1 || Number(file.size) > maxBytes) fail("Unprocessable", "Attach the " + noun + ", at most 10 MB")
     const type = String(file.contentType || "")
-    if (!billTypes.includes(type)) fail("Unprocessable", "Attach the bill as a PDF, PNG or JPEG file")
+    if (!billTypes.includes(type)) fail("Unprocessable", "Attach the " + noun + " as a PDF, PNG or JPEG file")
     const scanner = System.getProperty("pass_scanner_service"),
         root = System.getProperty("pass_media_root")
-    if (!scanner || !root) fail("Unavailable", "Bill files cannot be received now")
-    const location = String(root).replace(/\/$/, "") + "/bills/" + ec.user.randomString(32)
+    if (!scanner || !root) fail("Unavailable", "Files cannot be received now")
+    const location = String(root).replace(/\/$/, "") + (noun === "bill" ? "/bills/" : "/supplier/") + ec.user.randomString(32)
     file.write(location)
     const refuse = (message, why) => {
         ec.resource.getLocationReference(location).delete()
@@ -501,10 +501,10 @@ function stage(file) {
         ec.logger.error("Supplier bill file at " + location + " could not be scanned; refused")
     }
     if (!clean) refuse("The file could not be accepted; send another copy")
-    const base = String(file.name || "bill")
+    const base = String(file.name || noun)
         .replace(/\.[^.]*$/, "")
         .replace(/[^a-zA-Z0-9_ -]/g, "_")
-        .slice(0, 90) || "bill"
+        .slice(0, 90) || noun
     return {location, filename: base + "." + kind.extension, byteSize: Number(file.size)}
 }
 function submitSupplierBill(p) {
@@ -616,5 +616,7 @@ const operations = {
         } finally {
             if (!was) ec.artifactExecution.enableAuthz()
         }
-    }
+    },
+    // P16: Purchasing's supplier pages stage their files the same way (SupplierPortal.js)
+    stage
 })

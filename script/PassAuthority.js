@@ -6,7 +6,15 @@ const schema = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumSchema.js',
 )
 /* Operations a bearer link's token authorizes without a signed-in session; their services check the token. */
-const TOKEN_WRITES = ['startInvoicePayment', 'submitSupplierBill']
+const TOKEN_WRITES = [
+    'startInvoicePayment',
+    'submitSupplierBill',
+    // Purchasing P16: a quote's and a purchase order's link
+    'saveQuoteResponse',
+    'submitQuoteResponse',
+    'acknowledgePurchaseOrder',
+    'reportDropShipDelivery',
+]
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {
     session: 'start',
