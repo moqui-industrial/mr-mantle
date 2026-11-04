@@ -51,8 +51,21 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="handle" noun="OrderApprovedDropShip" allow-remote="false">
+        <description>An order's approval once it commits (DropShip.secas.xml OrderApprovedDropShip, tx-commit): a drop-ship
+            purchase order is sent (send#DropShipPurchaseOrder); an approved sales order's lines reserved at a drop-ship
+            facility get their purchase orders (create#DropShipPurchaseOrder, in a transaction of its own). A failure is logged
+            naming the order and its lines, and the approval stands. Any other order returns after one count of the drop-ship
+            facilities. No permission check: the approval's commit runs it.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="handled" type="Map"/></out-parameters>
+        <actions>
+            <set field="handled" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('approved', context)"/>
+        </actions>
+    </service>
+
     <service verb="send" noun="DropShipPurchaseOrder" allow-remote="false">
-        <description>An approved drop-ship purchase order sent to its supplier once the approval commits (DropShip.secas.xml):
+        <description>An approved drop-ship purchase order sent to its supplier once the approval commits (handle#OrderApprovedDropShip):
             through the drop-ship facility's remote (its send#DropShipPurchaseOrderPart implementation), then Sent, else by
             email on send#PurchaseOrder's path. Any other order returns at once; a failed send is logged and the order stays
             approved for the buyer to send. No permission check: it runs as the approver.</description>

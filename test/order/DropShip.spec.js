@@ -1,11 +1,13 @@
 // Drop-ship (impl-purchasing P7; DropShip.js, F38–F40): a customer line reserved at a supplier's drop-ship facility makes a
 // purchase order to the supplier when the sales order is approved, its parent the sales order, shipping to the customer and
 // linked line by line, while a line reserved in the warehouse stays; with the approval gate off it is approved and emailed
-// at once, with the gate on it waits at Placed for the approvers and goes out once approved; the supplier's confirmation
+// once the approval commits, with the gate on it waits at Placed for the approvers and goes out once approved; a line with no
+// supplier price leaves its order Open and a supplier the buying policy blocks is passed over, the sales order approved
+// either way; the supplier's confirmation
 // (finalize#DropShipPurchaseOrder, PURCHASE_ORDER_EDIT in the buying organization) ships the order's own delivery and the
 // sales shipment with the tracking code, invoices the customer once, moves the cost from Unreceived Inventory to the cost
 // of goods sold, and a retry changes nothing; the supplier's bill matches against the delivery; "Drop-ship from supplier"
-// moves a warehouse line to the supplier and buys it. ORG_ZIZI_RETAIL (its ledger and ZIRET_WH) with a supplier, drop-ship
+// moves a warehouse line to the supplier with its share of the order's promised payment and buys it. ORG_ZIZI_RETAIL (its ledger and ZIRET_WH) with a supplier, drop-ship
 // facility, customer and products of the spec's own; a spec organization with the gate on. Run:
 // ./moq test mr-mantle --spec DropShip
 const prefix = "DROPSHIP_SPEC"
@@ -13,11 +15,14 @@ const org = "ORG_ZIZI_RETAIL",
     gateOrg = prefix + "_GATE_ORG",
     supplier = prefix + "_SUPPLIER",
     facility = prefix + "_FAC",
+    blockedSupplier = prefix + "_BLOCKED",
+    blockedFacility = prefix + "_BLOCKED_FAC",
     customer = prefix + "_CUSTOMER",
     address = prefix + "_ADDR",
     dropProduct = prefix + "_DROP",
     stockProduct = prefix + "_STOCK",
     plainProduct = prefix + "_PLAIN",
+    unpricedProduct = prefix + "_UNPRICED",
     since = "2000-01-01T00:00:00Z"
 const D = "mantle.order.DropShipServices.",
     O = "mantle.order.OrderServices."
@@ -79,6 +84,7 @@ function product(productId, price, canDropShip) {
         amountUomId: "OTH_ea",
         ownerPartyId: org
     })
+    if (price == null) return
     call("create#mantle.product.ProductPrice", {
         productId,
         vendorPartyId: supplier,
@@ -129,6 +135,13 @@ function salesOrder(organizationPartyId, lines, approve = true) {
     return {orderId, parts, error: placed.error + approved.error}
 }
 const purchaseOrdersOf = salesOrderId => rows("mantle.order.OrderHeader", {parentOrderId: salesOrderId})
+// the drop-ship orders are made once the sales approval commits, on a worker: wait for them
+function purchaseOrdersAfter(salesOrderId, count = 1) {
+    const deadline = Date.now() + 5000
+    while (Date.now() < deadline && purchaseOrdersOf(salesOrderId).length < count) ec.factory.waitWorkerPoolEmpty(50)
+    ec.factory.waitWorkerPoolEmpty(50)
+    return purchaseOrdersOf(salesOrderId)
+}
 const lineOf = (salesOrderId, orderItemSeqId) =>
     rows("mantle.order.OrderItem", {salesOrderId, salesOrderItemSeqId: orderItemSeqId})[0]
 const itemSeq = (orderId, productId) => rows("mantle.order.OrderItem", {orderId, productId})[0]?.orderItemSeqId
@@ -147,12 +160,18 @@ spec({
         for (const [partyId, name, roleTypeId] of [
             [gateOrg, "Drop-ship Gate Org", "OrgInternal"],
             [supplier, "Drop-ship Supplier", "Supplier"],
+            [blockedSupplier, "Drop-ship Blocked Supplier", "Supplier"],
+            [prefix + "_GATE_SUPPLIER", "Drop-ship Gate Org's Supplier", "Supplier"],
             [customer, "Drop-ship Customer", "Customer"]
         ]) {
             call("create#mantle.party.Party", {
                 partyId,
                 partyTypeEnumId: "PtyOrganization",
-                ownerPartyId: partyId === supplier ? "_NA_" : null
+                ownerPartyId: [supplier, blockedSupplier].includes(partyId)
+                    ? "_NA_"
+                    : partyId === prefix + "_GATE_SUPPLIER"
+                      ? gateOrg
+                      : null
             })
             call("create#mantle.party.Organization", {partyId, organizationName: name})
             call("create#mantle.party.PartyRole", {partyId, roleTypeId})
@@ -191,7 +210,45 @@ spec({
             assetAllowOtherOwner: "Y",
             assetAllowIssueOverQoh: "Y"
         })
+        call("create#mantle.facility.Facility", {
+            facilityId: blockedFacility,
+            facilityTypeEnumId: "FcTpDropShip",
+            ownerPartyId: blockedSupplier,
+            facilityName: "Drop-ship Blocked Supplier direct",
+            assetAllowOtherOwner: "Y",
+            assetAllowIssueOverQoh: "Y"
+        })
+        call("create#mantle.party.supplier.SupplierProfile", {
+            organizationPartyId: org,
+            supplierPartyId: blockedSupplier,
+            fromDate: since,
+            purchaseBlockFromDate: since,
+            purchaseBlockReason: "Quality hold"
+        })
         product(dropProduct, 6, true)
+        // rows the order's price rule passes over: another currency and a store's price
+        for (const [price, fields] of [
+            [1, {priceUomId: "EUR"}],
+            [2, {productStoreId: "POPC_DEFAULT"}]
+        ])
+            call(
+                "create#mantle.product.ProductPrice",
+                Object.assign(
+                    {
+                        productId: dropProduct,
+                        vendorPartyId: supplier,
+                        pricePurposeEnumId: "PppPurchase",
+                        priceTypeEnumId: "PptCurrent",
+                        fromDate: since,
+                        minQuantity: 1,
+                        price,
+                        priceUomId: "USD",
+                        canDropShip: "Y"
+                    },
+                    fields
+                )
+            )
+        product(unpricedProduct, null)
         product(stockProduct, 5, true)
         product(plainProduct, 4, false)
         call("create#mantle.order.purchase.PurchasePolicy", {
@@ -244,7 +301,7 @@ feature(
                 [stockProduct, 3, "ZIRET_WH"]
             ])
             state.sales = sales
-            const purchaseOrders = purchaseOrdersOf(sales.orderId)
+            const purchaseOrders = purchaseOrdersAfter(sales.orderId)
             const po = purchaseOrders[0]
             state.poId = po?.orderId
             const part = po ? one("mantle.order.OrderPart", {orderId: po.orderId, orderPartSeqId: "01"}) : null
@@ -409,7 +466,7 @@ feature(
         when() {
             capture.clear()
             const sales = salesOrder(gateOrg, [[dropProduct, 1, facility]])
-            const po = purchaseOrdersOf(sales.orderId)[0]
+            const po = purchaseOrdersAfter(sales.orderId)[0]
             ec.factory.waitWorkerPoolEmpty(50)
             const placed = po ? statusOf(po.orderId) : null
             const notices = po
@@ -436,7 +493,37 @@ feature(
 )
 
 feature(
-    "Drop-ship from supplier moves a warehouse line of an approved order to the supplier and buys it; a product without a drop-ship price, a line already dropped and a user without PURCHASE_ORDER_EDIT are refused",
+    "the sales order approves while its drop-ship lines wait: a line with no supplier price leaves its order Open, unsent, and a line at a supplier the buying policy blocks is passed over and named",
+    {
+        when() {
+            capture.clear()
+            const sales = salesOrder(org, [
+                [unpricedProduct, 1, facility],
+                [dropProduct, 1, blockedFacility]
+            ])
+            const purchaseOrders = purchaseOrdersAfter(sales.orderId)
+            const po = purchaseOrders[0]
+            const line = po ? lineOf(sales.orderId, itemSeq(sales.orderId, unpricedProduct)) : null
+            const retry = run("john.doe", O + "create#DropShipPurchaseOrder", {salesOrderId: sales.orderId})
+            return {sales, purchaseOrders, po, line, retry, status: statusOf(sales.orderId), mails: capture.count()}
+        },
+        then({sales, purchaseOrders, po, line, retry, status, mails}) {
+            sales.error == ""
+            status == "OrderApproved"
+            purchaseOrders.length == 1
+            statusOf(po.orderId) == "OrderOpen"
+            n(line.unitAmount) == 0
+            mails == 0
+            retry.createdOrderIds.length == 0
+            retry.skippedItems.length == 1
+            retry.skippedItems[0].reasonCode == "SUPPLIER_BLOCKED"
+            retry.skippedItems[0].productId == dropProduct
+        }
+    }
+)
+
+feature(
+    "Drop-ship from supplier moves a warehouse line of an approved order to the supplier with its share of the promised payment and buys it; a product without a drop-ship price, a line already dropped and a user without PURCHASE_ORDER_EDIT are refused; the setup of another organization's supplier is refused",
     {
         when() {
             const sales = salesOrder(org, [
@@ -445,6 +532,14 @@ feature(
             ])
             const stockSeq = itemSeq(sales.orderId, stockProduct)
             const plainSeq = itemSeq(sales.orderId, plainProduct)
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            call(O + "add#OrderPartPayment", {
+                orderId: sales.orderId,
+                orderPartSeqId: "01",
+                paymentInstrumentEnumId: "PiCompanyCheck",
+                statusId: "PmntPromised"
+            })
             const route = {orderId: sales.orderId, orderItemSeqId: stockSeq, supplierPartyId: supplier}
             const noPermission = run(state.none, D + "route#OrderItemToDropShip", route)
             const routed = run(state.buyer, D + "route#OrderItemToDropShip", route)
@@ -459,7 +554,14 @@ feature(
             const reservedAt = reservations.map(row => one("mantle.product.asset.Asset", {assetId: row.assetId}).facilityId)
             const line = lineOf(sales.orderId, stockSeq)
             const view = run(state.buyer, D + "get#OrderDropShip", {orderId: sales.orderId})
+            const payments = rows("mantle.account.payment.Payment", {orderId: sales.orderId})
+            const setup = run(state.buyer, D + "get#DropShipSetup", {supplierPartyId: supplier})
+            const otherSetup = run(state.buyer, D + "get#DropShipSetup", {supplierPartyId: prefix + "_GATE_SUPPLIER"})
             return {
+                setup,
+                otherSetup,
+                payments,
+                grandTotal: n(one("mantle.order.OrderHeader", {orderId: sales.orderId}).grandTotal),
                 sales,
                 noPermission,
                 routed,
@@ -472,7 +574,22 @@ feature(
                 plainPart: one("mantle.order.OrderItem", {orderId: sales.orderId, orderItemSeqId: plainSeq}).orderPartSeqId
             }
         },
-        then({sales, noPermission, routed, again, plain, part, reservedAt, line, view, plainPart}) {
+        then({
+            sales,
+            noPermission,
+            routed,
+            again,
+            plain,
+            part,
+            reservedAt,
+            line,
+            view,
+            plainPart,
+            payments,
+            grandTotal,
+            setup,
+            otherSetup
+        }) {
             sales.error == ""
             noPermission.error.includes("PERMISSION_DENIED")
             routed.error == ""
@@ -486,6 +603,11 @@ feature(
             plain.error.includes("NOT_DROP_SHIPPABLE")
             view.dropShip.kind == "sales"
             view.dropShip.lines.some(row => row.purchaseOrderId == line.orderId && row.state == "ordered")
+            payments.length == 2
+            payments.some(row => row.orderPartSeqId == part.orderPartSeqId && n(row.amount) == n(part.partTotal))
+            payments.reduce((sum, row) => sum + n(row.amount), 0) == grandTotal
+            setup.facilities.some(row => row.facilityId == facility)
+            otherSetup.error.includes("SUPPLIER_UNAVAILABLE")
         }
     }
 )

@@ -3317,14 +3317,16 @@ General Order Placement and eCommerce Usage
     </service>
     <service verb="create" noun="DropShipPurchaseOrder" allow-remote="false">
         <description>The purchase orders of a sales order's lines reserved at a supplier's drop-ship facility (FcTpDropShip):
-            run after reserve#AssetsForOrder when a sales order is approved (OrderApprovedReserveAssets), and by
-            route#OrderItemToDropShip. One order per sales part and facility, its parentOrderId the sales order, its part from
+            run once a sales order's approval commits (DropShipServices.handle#OrderApprovedDropShip, in a transaction of its
+            own, so a failure never undoes the approval), and by route#OrderItemToDropShip. One order per sales part and facility, its parentOrderId the sales order, its part from
             the facility's owner to the selling organization with the end customer as CustomerShipTo and the sales part's
             ship-to, each line at the supplier's current price and linked to its sales line (OrderItem.salesOrderId,
             salesOrderItemSeqId). Placed, then approved at once, or with the buying organization's approval gate on
             (PurchasePolicy.approvalGateEnabled) left at Placed for its approvers. A line already on a live drop-ship order
             answers that order; a line meant to drop that cannot is named in skippedItems. An order with no drop-ship
-            reservation returns at once. No permission check: it runs as the sales order's approver.</description>
+            reservation returns at once. A supplier the buying policy stops is named in skippedItems; an order with a line
+            the supplier has no current price for stays Open for the buyer to price and place (unpricedItems). No permission check: it runs
+            after the approval or in route#OrderItemToDropShip.</description>
         <in-parameters>
             <parameter name="salesOrderId" required="true"/>
         </in-parameters>

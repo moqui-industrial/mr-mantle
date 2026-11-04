@@ -1,8 +1,8 @@
 // Drop-ship (impl-purchasing P7, design-purchasing §18; F14, F21, F37–F40), Moqui Java's dropship-moqui branch ported and
 // finished. A customer order line drops to a supplier by its reservation: reserved at a supplier's drop-ship facility
 // (FcTpDropShip, owned by the supplier), against its stock or Mantle's shell asset, it is bought from that supplier on a
-// purchase order the sales order's approval makes (create#DropShipPurchaseOrder, after reserve#AssetsForOrder in
-// OrderApprovedReserveAssets): one order per sales part and drop-ship facility, its parentOrderId the sales order, its part
+// purchase order made once the sales order's approval commits (create#DropShipPurchaseOrder, from DropShip.secas.xml after
+// reserve#AssetsForOrder reserved there in the approval): one order per sales part and drop-ship facility, its parentOrderId the sales order, its part
 // from the facility's owner to the selling organization with the end customer as the CustomerShipTo party and the sales
 // part's ship-to, each line at the supplier's price and linked to its sales line (OrderItem.salesOrderId and
 // salesOrderItemSeqId, F38). With the buying organization's approval gate on (PurchasePolicy.approvalGateEnabled) the order
@@ -79,23 +79,34 @@ function linkedLines(salesOrderId) {
             linked.set(line.salesOrderItemSeqId, Object.assign({statusId: statuses[line.orderId].statusId}, lib.map(line)))
     return linked
 }
-// A supplier's current purchase price for the organization, read as the order's own rule (no user's price permission): the
-// row for the organization before the supplier's general one, the highest minimum quantity the quantity reaches. Drop-ship
-// only takes a row the supplier marked canDropShip when asked.
-function supplierPrice(supplierPartyId, organizationPartyId, productId, quantity, currencyUomId, dropShipOnly = false) {
+// A supplier's current purchase price for the organization, read as the order's own rule (no user's price permission), with
+// the eligibility of get#ProductPrice's resolver (PriceResolver.js typed) for a purchase in the order's currency: a dated
+// PptCurrent purchase row of the supplier with a price, in that currency, for the organization or for any buyer, not scoped
+// to a store, agreement or term, in the line's unit, whose minimum quantity the quantity reaches; the organization's row
+// before the general one, then the highest minimum quantity, then the latest. Drop-ship only takes a row the supplier marked
+// canDropShip when asked.
+function supplierPrice(supplierPartyId, organizationPartyId, item, currencyUomId, dropShipOnly = false) {
+    const productUnit = one("mantle.product.Product", {productId: item.productId})?.amountUomId || null
+    const lineUnit = item.quantityUomId || productUnit
     const candidates = rows("mantle.product.ProductPrice", {
-        productId,
+        productId: item.productId,
         vendorPartyId: supplierPartyId,
         pricePurposeEnumId: "PppPurchase",
         priceTypeEnumId: "PptCurrent"
     })
-        .filter(row => lib.active(row))
-        .filter(row => !currencyUomId || !row.priceUomId || row.priceUomId === currencyUomId)
+        .filter(row => lib.active(row) && row.price != null)
+        .filter(row => !currencyUomId || row.priceUomId === currencyUomId)
         .filter(row => !row.customerPartyId || row.customerPartyId === organizationPartyId)
-        .filter(row => dec(row.minQuantity).compare(dec(quantity)) <= 0)
+        .filter(row => !row.productStoreId && !row.agreementId && !row.agreementItemSeqId && !row.termUomId)
+        .filter(row => !lineUnit || (row.quantityUomId || productUnit) === lineUnit)
+        .filter(row => dec(row.minQuantity).compare(openQuantity(item)) <= 0)
         .filter(row => !dropShipOnly || row.canDropShip === "Y")
         .sort(
-            (a, b) => (b.customerPartyId ? 1 : 0) - (a.customerPartyId ? 1 : 0) || dec(b.minQuantity).compare(dec(a.minQuantity))
+            (a, b) =>
+                (b.customerPartyId ? 1 : 0) - (a.customerPartyId ? 1 : 0) ||
+                dec(b.minQuantity).compare(dec(a.minQuantity)) ||
+                (lib.ms(b.fromDate) || 0) - (lib.ms(a.fromDate) || 0) ||
+                String(a.productPriceId).localeCompare(String(b.productPriceId))
         )
     return candidates[0] || null
 }
@@ -105,15 +116,32 @@ function supplierPrice(supplierPartyId, organizationPartyId, productId, quantity
 // facility. A line already on a live drop-ship purchase order is answered with that order (a retry). A line that is meant
 // to drop (its part's facility, or its reservation, is a drop-ship facility) but cannot is named in skippedItems: no
 // reservation (NO_RESERVATION), reserved apart from it (RESERVATION_SPLIT), a facility with no owner (NO_SUPPLIER) or an
-// internal owner (INTERNAL_OWNER); a line with no current price from the supplier is bought at zero and named in
-// unpricedItems. No permission check: it runs as the user who approved the sales order.
+// internal owner (INTERNAL_OWNER), a supplier the buying policy stops (its reason code, as SUPPLIER_BLOCKED); a line with
+// no current price from the supplier is named in unpricedItems and its order stays Open for the buyer to price and place. No
+// permission check: it runs after the sales order's approval commits (DropShip.secas.xml) or in route#OrderItemToDropShip.
 function create(p) {
     const salesOrderId = text(p.salesOrderId)
     const result = {purchaseOrderIds: [], createdOrderIds: [], skippedItems: [], unpricedItems: []}
-    const header = salesOrderId ? one(ORDER, {orderId: salesOrderId}) : null
+    // the sales order locked, so two runs (the approval's and a route's) make one order per line
+    const header = salesOrderId ? find(ORDER, {orderId: salesOrderId}).forUpdate(true).one() : null
     if (!header) return result
+    const groups = plan(header, result)
+    for (const group of groups) {
+        const made = makeOrder(header, group, result)
+        result.createdOrderIds.push(made.orderId)
+        result.purchaseOrderIds.push(made.orderId)
+    }
+    for (const skipped of result.skippedItems)
+        ec.logger.warn("Drop-ship of order " + salesOrderId + " passed over " + skipped.reasonCode + ": " + skipped.message)
+    return result
+}
+// The drop-ship purchase orders to make for a sales order (reads only): its lines reserved at a drop-ship facility and not
+// yet on a live drop-ship order, grouped by sales part and facility; the lines passed over in result.skippedItems and the
+// earlier orders in result.purchaseOrderIds.
+function plan(header, result) {
+    const salesOrderId = header.orderId
     const salesParts = rows(PART, {orderId: salesOrderId}).filter(part => isInternal(part.vendorPartyId))
-    if (!salesParts.length) return result
+    if (!salesParts.length) return []
     const reservations = rows(RESERVATION, {orderId: salesOrderId})
     const assets = byId(
         reservations.length
@@ -132,10 +160,11 @@ function create(p) {
             : [],
         "facilityId"
     )
-    if (!Object.keys(dropFacilities).length) return result
+    if (!Object.keys(dropFacilities).length) return []
     const partOf = byId(salesParts, "orderPartSeqId")
     const linked = linkedLines(salesOrderId)
     const groups = new Map()
+    const stops = {}
     const skip = (item, reasonCode, message) =>
         result.skippedItems.push({orderItemSeqId: item.orderItemSeqId, productId: item.productId, reasonCode, message})
     for (const item of rows(ITEM, {orderId: salesOrderId}).sort((a, b) => a.orderItemSeqId.localeCompare(b.orderItemSeqId))) {
@@ -167,21 +196,24 @@ function create(p) {
             skip(item, "INTERNAL_OWNER", "Drop-ship facility " + facility.facilityId + " is owned by an internal organization")
             continue
         }
+        // the buying policy's supplier check, as route#OrderItemToDropShip and the purchase order's own placing make it
+        const stopKey = part.vendorPartyId + "|" + facility.ownerPartyId
+        if (!(stopKey in stops)) {
+            const checked = policy.supplierUsable(part.vendorPartyId, facility.ownerPartyId)
+            stops[stopKey] = checked.result === "STOP" ? checked : null
+        }
+        if (stops[stopKey]) {
+            skip(item, stops[stopKey].reasonCode, "Line " + item.orderItemSeqId + ": " + stops[stopKey].message)
+            continue
+        }
         const key = part.orderPartSeqId + "|" + facility.facilityId
         if (!groups.has(key)) groups.set(key, {part, facility, items: []})
         groups.get(key).items.push(item)
     }
-    for (const group of groups.values()) {
-        const made = makeOrder(header, group, result)
-        result.createdOrderIds.push(made.orderId)
-        result.purchaseOrderIds.push(made.orderId)
-    }
-    for (const skipped of result.skippedItems)
-        ec.logger.warn("Drop-ship of order " + salesOrderId + " passed over " + skipped.reasonCode + ": " + skipped.message)
-    return result
+    return Array.from(groups.values())
 }
 // The purchase order of one sales part's lines at one drop-ship facility, placed, then approved (gate off) or sent to its
-// approvers (gate on).
+// approvers (gate on); left Open for the buyer when a line has no supplier price.
 function makeOrder(header, group, result) {
     const {part, facility, items} = group
     const supplierPartyId = facility.ownerPartyId,
@@ -228,7 +260,7 @@ function makeOrder(header, group, result) {
         const orderItemSeqId = String(index + 1).padStart(2, "0")
         seqOf[item.orderItemSeqId] = orderItemSeqId
         const quantity = openQuantity(item)
-        const price = supplierPrice(supplierPartyId, organizationPartyId, item.productId, quantity, header.currencyUomId)
+        const price = supplierPrice(supplierPartyId, organizationPartyId, item, header.currencyUomId)
         if (!price) result.unpricedItems.push({orderItemSeqId: item.orderItemSeqId, productId: item.productId})
         call("create#" + ITEM, {
             orderId,
@@ -270,6 +302,15 @@ function makeOrder(header, group, result) {
     for (const note of rows("mantle.order.OrderNote", {orderId: header.orderId}).filter(note => note.internalNote !== "Y"))
         call("create#mantle.order.OrderNote", Object.assign(lib.map(note), {orderId}))
     call("mantle.order.OrderServices.update#OrderPartTotal", {orderId, orderPartSeqId})
+    const unpriced = result.unpricedItems.some(row => items.some(item => item.orderItemSeqId === row.orderItemSeqId))
+    if (unpriced) {
+        // never placed, approved or sent at zero (Mantle's auto-approval approves a placed order of zero total): the order
+        // stays Open for the buyer to price and place
+        ec.logger.warn(
+            "Drop-ship purchase order " + orderId + " for order " + header.orderId + " has unpriced lines; it stays Open"
+        )
+        return {orderId}
+    }
     call("mantle.order.OrderServices.place#Order", {orderId})
     const partRow = one(PART, {orderId, orderPartSeqId})
     if (policy.effective(organizationPartyId).policy.approvalGateEnabled === "Y") {
@@ -279,6 +320,55 @@ function makeOrder(header, group, result) {
         call("mantle.order.OrderServices.update#OrderStatus", {orderId, statusId: "OrderApproved", approvedDate: now()})
     }
     return {orderId}
+}
+
+// ===== handle#OrderApprovedDropShip =====
+// Every order's approval, once it commits (DropShip.secas.xml, tx-commit: on a worker, in a transaction of its own, so
+// nothing here can undo the approval): a drop-ship purchase order goes to its supplier (send); a sales order with lines
+// reserved at a drop-ship facility gets its purchase orders (create) in a transaction of their own, a failure logged with
+// the order and the lines it leaves for the buyer. An organization with no drop-ship facility costs one count of them.
+function approved(p) {
+    const orderId = text(p.orderId)
+    const order = orderId ? one(ORDER, {orderId}) : null
+    if (!order || order.statusId !== "OrderApproved") return {}
+    if (order.parentOrderId) {
+        const sent = send({orderId})
+        if (sent.channel || sent.reasonCode) return {sent}
+    }
+    if (!find(FACILITY).condition("facilityTypeEnumId", DROP_SHIP).count()) return {}
+    ec.message.pushErrors()
+    try {
+        const out =
+            ec.service
+                .sync()
+                .name("mantle.order.OrderServices.create#DropShipPurchaseOrder")
+                .parameters({salesOrderId: orderId})
+                .disableAuthz()
+                .requireNewTransaction(true)
+                .call() || {}
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        return {created: out}
+    } catch (error) {
+        const lines = []
+        try {
+            for (const group of plan(order, {purchaseOrderIds: [], skippedItems: []}))
+                for (const item of group.items) lines.push(item.orderItemSeqId + " (" + item.productId + ")")
+        } catch (_) {
+            // the lines are named when they can be read
+        }
+        ec.logger.error(
+            "Drop-ship purchase orders of order " +
+                orderId +
+                " were not made" +
+                (lines.length ? " for lines " + lines.join(", ") : "") +
+                "; the order stays approved: " +
+                (error.message || error)
+        )
+        return {failed: true, failedItems: lines}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
 }
 
 // ===== send#DropShipPurchaseOrder =====
@@ -668,7 +758,7 @@ function route(p) {
         (supplier.ownerPartyId && !["_NA_", organizationPartyId].includes(supplier.ownerPartyId))
     )
         denied("SUPPLIER_UNAVAILABLE", "Choose an available supplier")
-    if (!supplierPrice(supplierPartyId, organizationPartyId, item.productId, openQuantity(item), header.currencyUomId, true))
+    if (!supplierPrice(supplierPartyId, organizationPartyId, item, header.currencyUomId, true))
         denied("NOT_DROP_SHIPPABLE", partyName(supplierPartyId) + " has no current drop-ship price for " + item.productId)
     const facilities = dropShipFacilitiesOf(supplierPartyId)
     const facility = text(p.facilityId) ? facilities.find(row => row.facilityId === text(p.facilityId)) : facilities[0]
@@ -691,9 +781,30 @@ function route(p) {
                     row.statusId === part.statusId
             )
             targetSeqId = sibling ? sibling.orderPartSeqId : newPart(header, part, facility)
-            call("update#" + ITEM, {orderId, orderItemSeqId: item.orderItemSeqId, orderPartSeqId: targetSeqId})
+            // the part's one promised payment, which update#OrderPartTotal lowers to what stays on the part (F-P7-4)
+            const promised = partPayments(orderId, part.orderPartSeqId)
+            // the line with its child items (its discounts, tax and other adjustments), so each part totals its own lines
+            const moving = [item.orderItemSeqId]
+            for (let i = 0; i < moving.length; i++)
+                for (const child of rows(ITEM, {orderId, parentItemSeqId: moving[i]})) moving.push(child.orderItemSeqId)
+            for (const orderItemSeqId of moving) call("update#" + ITEM, {orderId, orderItemSeqId, orderPartSeqId: targetSeqId})
             call("mantle.order.OrderServices.update#OrderPartTotal", {orderId, orderPartSeqId: part.orderPartSeqId})
             call("mantle.order.OrderServices.update#OrderPartTotal", {orderId, orderPartSeqId: targetSeqId})
+            // ...so the moved line's part gets a payment of its own by the same method for its total, and the order still
+            // collects in full; an authorized payment (it cannot be split) stays on the original part for the order to settle
+            if (promised.length === 1 && !partPayments(orderId, targetSeqId).length) {
+                const from = promised[0]
+                call("mantle.order.OrderServices.add#OrderPartPayment", {
+                    orderId,
+                    orderPartSeqId: targetSeqId,
+                    paymentTypeEnumId: from.paymentTypeEnumId || "PtInvoicePayment",
+                    paymentInstrumentEnumId: from.paymentInstrumentEnumId,
+                    paymentMethodId: from.paymentMethodId,
+                    paymentGatewayConfigId: from.paymentGatewayConfigId,
+                    finAccountId: from.finAccountId,
+                    statusId: from.statusId
+                })
+            }
         }
     }
     // the reservation made again at the drop-ship facility (its stock, else Mantle's shell asset)
@@ -714,6 +825,13 @@ function route(p) {
     }
     return result
 }
+// An order part's proposed or promised payments (those update#OrderPartTotal keeps at the part's total).
+const partPayments = (orderId, orderPartSeqId) =>
+    Array.from(
+        find("mantle.account.payment.Payment", {orderId, orderPartSeqId})
+            .condition("statusId", "in", ["PmntProposed", "PmntPromised"])
+            .list()
+    )
 // A new part of the sales order at the drop-ship facility, with the part's customer, ship-to, shipping and status.
 function newPart(header, part, facility) {
     const existing = rows(PART, {orderId: header.orderId}).map(row => Number(row.orderPartSeqId) || 0)
@@ -976,7 +1094,15 @@ function setup(p) {
     if (![...readPermissions, "PURCHASE_POLICY_EDIT"].some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", "A purchasing permission is required")
     const supplierPartyId = text(p.supplierPartyId)
-    if (!supplierPartyId) denied("SUPPLIER_UNAVAILABLE", "Choose a supplier")
+    const supplier = supplierPartyId ? one("mantle.party.Party", {partyId: supplierPartyId}) : null
+    // a shared supplier, or one of an organization of the user's (another organization's supplier is refused)
+    if (
+        !supplier ||
+        (supplier.ownerPartyId &&
+            supplier.ownerPartyId !== "_NA_" &&
+            !facilityScope.owns(facilityScope.scope(), supplier.ownerPartyId))
+    )
+        denied("SUPPLIER_UNAVAILABLE", "Choose a supplier")
     const facilities = dropShipFacilitiesOf(supplierPartyId).map(row => {
         const remote = row.dropShipRemoteId
             ? one("moqui.service.message.SystemMessageRemote", {systemMessageRemoteId: row.dropShipRemoteId})
@@ -994,7 +1120,7 @@ function setup(p) {
     return {facilities, remotes, canEdit: access.has("PURCHASE_POLICY_EDIT")}
 }
 
-const operations = {create, send, finalize, route, orderView, storeFacility, setup}
+const operations = {create, approved, send, finalize, route, orderView, storeFacility, setup}
 ;({
     shipToOf,
     deliveredQuantity,

@@ -12,17 +12,17 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Drop-ship (impl-purchasing P7, F40): an approved drop-ship purchase order goes to its supplier once the approval commits,
-    whether the sales order's approval made it approved (gate off) or decide#PurchaseApproval approved it (gate on), so a
-    send that fails never undoes either approval. Every order's approval passes here; the service returns at once for an
-    order with no parent order. (Its creation is in ProductAsset.secas.xml OrderApprovedReserveAssets, after the
-    reservation.) -->
+<!-- Drop-ship (impl-purchasing P7, F40): once an order's approval commits, on a worker in a transaction of its own, so that
+    neither a supplier's integration, a mail server nor a failure to make the purchase order ever undoes the approval: an
+    approved sales order with lines reserved at a supplier's drop-ship facility gets its drop-ship purchase orders, and an
+    approved drop-ship purchase order (approved at once with the approval gate off, or by decide#PurchaseApproval) goes to
+    its supplier. An organization with no drop-ship facility costs one count of them. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
-    <seca id="OrderApprovedSendDropShip" service="update#mantle.order.OrderHeader" when="tx-commit">
+    <seca id="OrderApprovedDropShip" service="update#mantle.order.OrderHeader" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
         <actions>
-            <service-call name="mantle.order.DropShipServices.send#DropShipPurchaseOrder" in-map="{orderId:orderId}"
+            <service-call name="mantle.order.DropShipServices.handle#OrderApprovedDropShip" in-map="{orderId:orderId}"
                     disable-authz="true"/>
         </actions>
     </seca>
