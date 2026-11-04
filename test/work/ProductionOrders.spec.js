@@ -325,6 +325,7 @@ feature("a short draft waits for a supervisor's staged release, and the short li
         const approved = act("po5_super", workEffortId, "approveStaged")
         const released = act("po5_planner", workEffortId, "release")
         const shortLine = lineOf(workEffortId, "PO5_SHORT")
+        const order = run("po5_reader", P + "get#ProductionOrder", {workEffortId})
         const blockedIssue = issue(workEffortId, "PO5_SHORT", state.short, 1)
         const coveredIssue = issue(workEffortId, "PO5_RM", state.rm, 10)
         const more = stock("PO5_SHORT", 20)
@@ -340,6 +341,7 @@ feature("a short draft waits for a supervisor's staged release, and the short li
             approved,
             released,
             shortLine,
+            order,
             blockedIssue,
             coveredIssue,
             issuedAfter,
@@ -360,6 +362,7 @@ feature("a short draft waits for a supervisor's staged release, and the short li
         r.released.error == ""
         r.released.result.staged == true
         n(r.shortLine.stagedShortQuantity) == 8
+        r.order.lines.find(row => row.productId === "PO5_SHORT").stagedShort == "8"
         r.blockedIssue.error.includes("LINE_STAGED_SHORT")
         r.coveredIssue.error == ""
         r.issuedAfter.error == ""
@@ -432,6 +435,8 @@ feature("a released run held before start resumes as released; started, held and
         const started = act("po5_super", workEffortId, "start")
         const heldAgain = act("po5_super", workEffortId, "hold", {reasonCode: "NONE_SUCH"})
         const heldCoded = act("po5_super", workEffortId, "hold", {reason: "Robot fault"})
+        // a run held after its start is not cancelled, though nothing is posted
+        const startedCancel = act("po5_super", workEffortId, "cancel", {reason: "Not needed"})
         const runningAgain = act("po5_super", workEffortId, "resume")
         const runningStatus = runOf(workEffortId).statusId
         const lifecycle = run("po5_super", P + "get#ProductionLifecycle", {workEffortId})
@@ -444,6 +449,7 @@ feature("a released run held before start resumes as released; started, held and
             started,
             heldAgain,
             heldCoded,
+            startedCancel,
             runningAgain,
             runningStatus,
             lifecycle
@@ -458,6 +464,7 @@ feature("a released run held before start resumes as released; started, held and
         r.started.result.resultCode == "STARTED"
         r.heldAgain.error.includes("REASON_INVALID")
         r.heldCoded.error == ""
+        r.startedCancel.error.includes("RUN_STARTED")
         r.runningAgain.error == ""
         r.runningStatus == "WeInProgress"
         // the history names the hold's reason

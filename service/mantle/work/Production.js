@@ -557,7 +557,9 @@ function read(userScope, workEffortId) {
             Object.assign(answer, {
                 issued: text(totals.issued),
                 returned: text(totals.returned),
-                remaining: text(totals.remaining)
+                remaining: text(totals.remaining),
+                // a staged release's short line, blocked for issue until covered (impl-manufacturing P5a)
+                stagedShort: dec(line.stagedShortQuantity).compare(0) > 0 ? text(line.stagedShortQuantity) : null
             })
         } else {
             const received = receivedOf(line)

@@ -42,7 +42,7 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const blockedEquipment = ["AstDeactivated", "AstOnHold", "AstDelivered"]
 const partyRoles = {Manager: "Supervisor", Assignee: "Operator"}
 // the reasons a release or another action waits for something, not a failure (batch#ProductionAction's outcome)
-const blockedReasons = ["SHORTAGE", "METHOD_CHANGED", "RUN_HAS_FACTS", "COMPLETE_UNAVAILABLE"]
+const blockedReasons = ["SHORTAGE", "METHOD_CHANGED", "RUN_HAS_FACTS", "RUN_STARTED", "COMPLETE_UNAVAILABLE"]
 const zero = () => toDecimal(0)
 const dec = value => toDecimal(value ?? 0)
 const blank = value => value == null || String(value).trim() === ""
@@ -323,6 +323,13 @@ function check(run, action, p, lines = production().linesOf(run.workEffortId)) {
         }
     }
     if (action === "unrelease" || action === "cancel") {
+        // a run held after its start is not cancelled here: it waits for the reviewed reversal (impl-manufacturing P9)
+        if (action === "cancel" && run.actualStartDate)
+            return {
+                allowed: false,
+                reasonCode: "RUN_STARTED",
+                message: "Work order " + run.workEffortId + " has started; it is closed out by a reviewed reversal"
+            }
         const facts = factsOf(run)
         if (facts.any)
             return {
