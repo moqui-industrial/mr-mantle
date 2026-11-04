@@ -1336,9 +1336,11 @@ function costReport(p) {
                 closeText:
                     run.statusId === "WeClosed"
                         ? "Closed"
-                        : run.productionCostReviewStatusId
-                          ? statusText(run.productionCostReviewStatusId)
-                          : "Not requested",
+                        : run.productionCostClosedDate
+                          ? "Cost closed"
+                          : run.productionCostReviewStatusId
+                            ? statusText(run.productionCostReviewStatusId)
+                            : "Not requested",
                 eventCount: own ? own.length : null,
                 unvaluedCount: own ? own.filter(event => event.valuationStatusEnumId === "PcvUnvalued").length : null,
                 awaitingCloseCount: own ? own.filter(event => event.ledgerStatusEnumId === "PclAwaitingClose").length : null
@@ -1378,7 +1380,8 @@ function costReport(p) {
                             6
                         )
                     row.allocatedOutput = sumOf(["PcdOutput", "PcdByproduct"])
-                    row.varianceAmount = sumOf(["PcdVariance"])
+                    // the production variance and the scrap of issued material (P15's PcdScrap)
+                    row.varianceAmount = sumOf(["PcdVariance", "PcdScrap"])
                     row.glText = unique(
                         allocated.map(row => row.acctgTransId).concat(mine.map(event => event.closeAcctgTransId))
                     ).join(", ")
