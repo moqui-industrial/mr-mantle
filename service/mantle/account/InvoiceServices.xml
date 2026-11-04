@@ -4513,8 +4513,9 @@ along with this software (see the LICENSE.md file). If not, see
                 organizationPartyId:organizationPartyId})"/>
             <if condition="scope.receivable">
                 <return error="true" message="PAYABLE_ONLY: Only a bill's hold release is asked for"/></if>
+            <!-- the domain check (an administrator passes, a project client never does), as writeInvoice's was -->
             <if condition="!['PAYABLE_EDIT', 'INVOICE_MATCH', 'PURCHASE_ORDER_EDIT'].some(permission =&gt;
-                    ec.user.hasPermission(permission))">
+                    ec.resource.script(invoiceLib).has(permission))">
                 <return error="true" message="PERMISSION_DENIED: PAYABLE_EDIT, INVOICE_MATCH or PURCHASE_ORDER_EDIT authority is required"/></if>
             <set field="scope" from="ec.resource.script(invoiceLib).invoice({invoiceId:hold.invoiceId,
                 organizationPartyId:scope.organizationPartyId}, null, true)"/>

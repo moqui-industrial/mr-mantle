@@ -11,6 +11,7 @@ const one = (entity, key) => helper().lib.one(entity, key)
 const rows = (entity, key) => helper().lib.rows(entity, key)
 const prefix = "PUR_BILL_SPEC"
 const org = prefix + "_ORG",
+    otherOrg = prefix + "_ORG2",
     supplier = prefix + "_SUPPLIER",
     facility = prefix + "_WH",
     product = "DEMO_1_1"
@@ -23,7 +24,7 @@ function party(partyId, name, roleTypeId) {
     svc("create#mantle.party.Organization", {partyId, organizationName: name})
     svc("create#mantle.party.PartyRole", {partyId, roleTypeId})
 }
-function user(kind, permissions) {
+function user(kind, permissions, organizationPartyId = org) {
     const id = prefix + "_" + kind.toUpperCase()
     users[kind] = id
     svc("create#moqui.security.UserGroup", {userGroupId: id, description: "Purchase bills " + kind})
@@ -41,7 +42,7 @@ function user(kind, permissions) {
     svc("create#mantle.party.PartyRelationship", {
         partyRelationshipId: id,
         fromPartyId: id,
-        toPartyId: org,
+        toPartyId: organizationPartyId,
         relationshipTypeEnumId: "PrtAgent",
         fromDate: 0
     })
@@ -111,12 +112,14 @@ spec({
             filterDate: ec.user.nowTimestamp
         })
         svc("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org, receiptInvoiceSelfBilledOnly: "Y"})
+        party(otherOrg, "Purchase bills other organization", "OrgInternal")
         party(supplier, "Purchase bills supplier", "Supplier")
         svc("create#mantle.facility.Facility", {facilityId: facility, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
         user("ap", ["PAYABLE_EDIT", "PAYABLE_VIEW", "PAYABLE_IMPORT"])
         user("buyer", ["PURCHASE_ORDER_EDIT"])
         user("matcher", ["INVOICE_MATCH", "PAYABLE_VIEW"])
         user("reader", ["PAYABLE_VIEW"])
+        user("otherBuyer", ["PURCHASE_ORDER_EDIT"], otherOrg)
         ids.po = purchase()
         ids.receipt = receive(ids.po.orderId)
     },
@@ -169,58 +172,82 @@ feature("a supplier prepayment is a promised payment on the order's part, for fi
     }
 })
 
-feature("a match that holds a bill tells the organization's buyers; a buyer or matcher asks for its release, a reader may not", {
-    when() {
-        login(users.ap)
-        const invoiceId = svc("mantle.account.InvoiceServices.import#Bill", {
-            organizationPartyId: org,
-            supplierPartyId: supplier,
-            referenceNumber: prefix + "-BILL-1"
-        }).invoiceId
-        login("john.doe")
-        svc("mantle.account.InvoiceServices.create#InvoiceItem", {
-            invoiceId,
-            itemTypeEnumId: "ItemInventory",
-            productId: product,
-            quantity: 6,
-            amount: 6
-        })
-        const invoiceItemSeqId = rows("mantle.account.invoice.InvoiceItem", {invoiceId})[0].invoiceItemSeqId
-        login(users.matcher)
-        const applied = svc("mantle.account.InvoiceMatchServices.apply#InvoiceMatch", {
-            invoiceId,
-            allocationList: [
-                {
-                    invoiceItemSeqId,
-                    orderId: ids.po.orderId,
-                    orderItemSeqId: ids.po.orderItemSeqId,
-                    assetReceiptId: ids.receipt.assetReceiptId,
-                    quantity: "6"
-                }
-            ]
-        })
-        const notices = rows("moqui.security.user.NotificationMessage", {topic: "PurchaseMatchException", recordId: invoiceId})
-        const recipients = notices.flatMap(notice =>
-            rows("moqui.security.user.NotificationMessageUser", {notificationMessageId: notice.notificationMessageId}).map(
-                row => row.userId
+feature(
+    "a match that holds a bill tells the organization's buyers; a buyer or matcher asks for its release, a reader or another organization's buyer may not",
+    {
+        when() {
+            login(users.ap)
+            const invoiceId = svc("mantle.account.InvoiceServices.import#Bill", {
+                organizationPartyId: org,
+                supplierPartyId: supplier,
+                referenceNumber: prefix + "-BILL-1"
+            }).invoiceId
+            login("john.doe")
+            svc("mantle.account.InvoiceServices.create#InvoiceItem", {
+                invoiceId,
+                itemTypeEnumId: "ItemInventory",
+                productId: product,
+                quantity: 6,
+                amount: 6
+            })
+            const invoiceItemSeqId = rows("mantle.account.invoice.InvoiceItem", {invoiceId})[0].invoiceItemSeqId
+            login(users.matcher)
+            const match = {
+                invoiceId,
+                operationKey: prefix + "-MATCH-1",
+                allocationList: [
+                    {
+                        invoiceItemSeqId,
+                        orderId: ids.po.orderId,
+                        orderItemSeqId: ids.po.orderItemSeqId,
+                        assetReceiptId: ids.receipt.assetReceiptId,
+                        quantity: "6"
+                    }
+                ]
+            }
+            const applied = svc("mantle.account.InvoiceMatchServices.apply#InvoiceMatch", match)
+            // a replayed match places no hold and sends no second notice
+            const replay = svc("mantle.account.InvoiceMatchServices.apply#InvoiceMatch", match)
+            const notices = rows("moqui.security.user.NotificationMessage", {
+                topic: "PurchaseMatchException",
+                recordId: invoiceId
+            })
+            const recipients = notices.flatMap(notice =>
+                rows("moqui.security.user.NotificationMessageUser", {notificationMessageId: notice.notificationMessageId}).map(
+                    row => row.userId
+                )
             )
-        )
-        const request = {invoiceHoldId: applied.invoiceHoldId, releaseRequestNote: "The supplier credits the difference"}
-        const reader = as("reader", "mantle.account.InvoiceServices.request#HoldRelease", request)
-        const buyer = as("buyer", "mantle.account.InvoiceServices.request#HoldRelease", request)
-        const matcher = as("matcher", "mantle.account.InvoiceServices.request#HoldRelease", request)
-        return {applied, notices, recipients, reader, buyer, matcher, hold: one("mantle.account.invoice.InvoiceHold", request)}
-    },
-    then({applied, notices, recipients, reader, buyer, matcher, hold}) {
-        applied.invoiceHoldId != null
-        notices.length == 1
-        recipients.includes(users.buyer)
-        !recipients.includes(users.matcher)
-        !recipients.includes(users.reader)
-        reader.error.includes("PERMISSION_DENIED")
-        buyer.error == undefined
-        matcher.error == undefined
-        hold.releaseRequestedByUserId == users.matcher
-        hold.releasedDate == null
+            const request = {invoiceHoldId: applied.invoiceHoldId, releaseRequestNote: "The supplier credits the difference"}
+            const reader = as("reader", "mantle.account.InvoiceServices.request#HoldRelease", request)
+            const otherBuyer = as("otherBuyer", "mantle.account.InvoiceServices.request#HoldRelease", request)
+            const buyer = as("buyer", "mantle.account.InvoiceServices.request#HoldRelease", request)
+            const matcher = as("matcher", "mantle.account.InvoiceServices.request#HoldRelease", request)
+            return {
+                applied,
+                replay,
+                notices,
+                recipients,
+                reader,
+                otherBuyer,
+                buyer,
+                matcher,
+                hold: one("mantle.account.invoice.InvoiceHold", request)
+            }
+        },
+        then({applied, replay, notices, recipients, reader, otherBuyer, buyer, matcher, hold}) {
+            applied.invoiceHoldId != null
+            replay.alreadyApplied == true
+            notices.length == 1
+            recipients.includes(users.buyer)
+            !recipients.includes(users.matcher)
+            !recipients.includes(users.reader)
+            reader.error.includes("PERMISSION_DENIED")
+            otherBuyer.error.includes("ORGANIZATION_DENIED")
+            !recipients.includes(users.otherBuyer)
+            buyer.error == undefined
+            matcher.error == undefined
+            hold.releaseRequestedByUserId == users.matcher
+            hold.releasedDate == null
+        }
     }
-})
+)
