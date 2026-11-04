@@ -322,11 +322,18 @@ along with this software (see the LICENSE.md file). If not, see
             row covers where the organization has some (POLICY_MISSING), a user the step does not name (NOT_ELIGIBLE),
             self-approval (SELF_APPROVAL), a second approval of one step (ALREADY_DECIDED), the approver of an earlier step
             where the step separates them (SEPARATION_REQUIRED), a refusal without a reason (REASON_REQUIRED) and a decision
-            other than approve or refuse (DECISION_INVALID).</description>
+            other than approve or refuse (DECISION_INVALID). P13: with agreementId (and agreementRevision) in place of the
+            order, a purchase agreement's draft or changed revision is decided the same way, by the organization's purchase
+            order steps for its value (§4); the last step activates a draft, sets its approved revision and stores its PDF
+            as AgreementContent (agreementContentId); a refusal leaves it as it was. It refuses a template
+            (TEMPLATE_NO_APPROVAL) and an agreement waiting for no approval (AGREEMENT_NOT_PENDING).</description>
         <in-parameters>
-            <parameter name="orderId" required="true"/>
+            <parameter name="orderId"/>
             <parameter name="orderRevision" type="Integer"><description>The revision reviewed; the current one when
                 empty</description></parameter>
+            <!-- P13: a purchase agreement's activation or changed revision, decided the same way (PurchaseAgreements.js) -->
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
             <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
             <parameter name="reason"/>
             <parameter name="budgetOverrideReason"><description>Passes a budget Stop for a BUDGET_OVERRIDE
@@ -342,6 +349,9 @@ along with this software (see the LICENSE.md file). If not, see
                 it</description></parameter>
             <parameter name="creditHeld" type="Boolean"/>
             <parameter name="alreadyApplied" type="Boolean"/>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="agreementContentId"><description>The approved agreement's stored PDF</description></parameter>
         </out-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/order/PurchaseOrders.js"/>
@@ -353,6 +363,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="pendingStepText" from="decided.pendingStepText"/>
             <set field="creditHeld" from="decided.creditHeld"/>
             <set field="alreadyApplied" from="decided.alreadyApplied"/>
+            <set field="agreementRevision" from="decided.agreementRevision"/>
+            <set field="agreementContentId" from="decided.agreementContentId"/>
         </actions>
     </service>
     <service verb="check" noun="PurchaseApprovalRequired" allow-remote="false">
@@ -432,6 +444,8 @@ along with this software (see the LICENSE.md file). If not, see
             (RECORD_UNAVAILABLE, SUPPLIER_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="orderId"/>
+            <!-- P13: a purchase agreement's approval -->
+            <parameter name="agreementId"/>
             <parameter name="supplierPartyId"/>
             <parameter name="organizationPartyId"/>
             <parameter name="sourceTypeEnumId"/>

@@ -15,6 +15,8 @@ const policy = ec.resource.script("component://mr-mantle/service/mantle/order/Pu
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
 // P9: a revised order's approval releases the revision's Change hold (PurchaseRevisions.js)
 const revisions = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
+// P13: a purchase agreement's approval is decided here too (PurchaseAgreements.js)
+const agreements = () => ec.resource.script("component://mr-mantle/service/mantle/party/PurchaseAgreements.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -447,6 +449,7 @@ function placedBy(order, userId, partyId) {
 // revision) and approves the order through approve#Order (PURCHASE_ORDER_APPROVE for a purchase part); one that leaves a step
 // waiting sends it to its approvers. A retry with the same operation key answers the first result.
 function decide(p) {
+    if (blank(p.orderId) && !blank(p.agreementId)) return agreements().execute("decide", p)
     requirePermission("PURCHASE_APPROVE")
     const po = purchaseOrder(p.orderId, true)
     const decision = String(p.decision || "approve")

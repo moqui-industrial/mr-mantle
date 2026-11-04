@@ -1,0 +1,108 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A purchase agreement now, or as of a date and time read back from the audit log
+     (mantle.party.AgreementServices.get#PurchaseAgreementPrint): its PDF is what the approval stores as AgreementContent.
+     agreementId, description, organizationName, supplierName, statusText, revisionText, asOfText (empty for now),
+     validityText, currencyText, templateText, textData, signersText, itemRows (seq, productText, itemText, quantityText,
+     priceText, capText, toleranceText, datesText, endedText), termRows (typeText, itemText, valueText, endedText) and
+     releaseRows (seq, orderText, dateText, quantityText, amountText, revisionText). -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Purchase agreement')} ${agreementId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+h2 { font-size: 12pt; margin: 8mm 0 2mm; }
+.sub { color: #59606b; margin: 0 0 6mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 38mm; font-weight: bold; }
+.lines th { border-bottom: 1px solid #20252b; }
+.lines td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; white-space: nowrap; }
+.note { color: #59606b; font-size: 9pt; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Purchase agreement')} ${agreementId}</h1>
+<p class="sub">${revisionText}<#if asOfText> · ${ec.l10n.localize('as of')} ${asOfText}</#if><#if templateText> · ${templateText}</#if></p>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Buyer')}</th><td>${organizationName}</td></tr>
+    <tr><th>${ec.l10n.localize('Supplier')}</th><td>${supplierName}</td></tr>
+    <#if description><tr><th>${ec.l10n.localize('Description')}</th><td>${description}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr>
+    <tr><th>${ec.l10n.localize('Valid')}</th><td>${validityText}</td></tr>
+    <tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr>
+    <#if signersText><tr><th>${ec.l10n.localize('Signers')}</th><td>${signersText}</td></tr></#if>
+</tbody></table>
+<h2>${ec.l10n.localize('Items')}</h2>
+<table class="lines">
+    <thead><tr>
+        <th>#</th>
+        <th>${ec.l10n.localize('Product')}</th>
+        <th class="amount">${ec.l10n.localize('Quantity')}</th>
+        <th class="amount">${ec.l10n.localize('Price')}</th>
+        <th class="amount">${ec.l10n.localize('Value cap')}</th>
+        <th class="amount">${ec.l10n.localize('Tolerance')}</th>
+        <th>${ec.l10n.localize('Valid')}</th>
+    </tr></thead>
+    <tbody>
+    <#list itemRows as item>
+        <tr>
+            <td>${item.seq}</td>
+            <td>${item.productText}<#if item.itemText><br><span class="note">${item.itemText}</span></#if><#if item.endedText><br><span class="note">${item.endedText}</span></#if></td>
+            <td class="amount">${item.quantityText}</td>
+            <td class="amount">${item.priceText}</td>
+            <td class="amount">${item.capText}</td>
+            <td class="amount">${item.toleranceText}</td>
+            <td>${item.datesText}</td>
+        </tr>
+    </#list>
+    </tbody>
+</table>
+<#if termRows && termRows.length>
+<h2>${ec.l10n.localize('Terms')}</h2>
+<table class="lines">
+    <thead><tr>
+        <th>${ec.l10n.localize('Term')}</th>
+        <th>${ec.l10n.localize('Item')}</th>
+        <th>${ec.l10n.localize('Value')}</th>
+    </tr></thead>
+    <tbody>
+    <#list termRows as term>
+        <tr><td>${term.typeText}<#if term.endedText><br><span class="note">${term.endedText}</span></#if></td><td>${term.itemText}</td><td>${term.valueText}</td></tr>
+    </#list>
+    </tbody>
+</table>
+</#if>
+<#if textData><h2>${ec.l10n.localize('Text')}</h2><p>${textData}</p></#if>
+<#if releaseRows && releaseRows.length>
+<h2>${ec.l10n.localize('Releases')}</h2>
+<table class="lines">
+    <thead><tr>
+        <th>#</th>
+        <th>${ec.l10n.localize('Order / line')}</th>
+        <th>${ec.l10n.localize('Released')}</th>
+        <th class="amount">${ec.l10n.localize('Quantity')}</th>
+        <th class="amount">${ec.l10n.localize('Value')}</th>
+        <th>${ec.l10n.localize('Revision')}</th>
+    </tr></thead>
+    <tbody>
+    <#list releaseRows as release>
+        <tr><td>${release.seq}</td><td>${release.orderText}</td><td>${release.dateText}</td><td class="amount">${release.quantityText}</td><td class="amount">${release.amountText}</td><td>${release.revisionText}</td></tr>
+    </#list>
+    </tbody>
+</table>
+</#if>
+</body></html>
