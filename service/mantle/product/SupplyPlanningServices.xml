@@ -40,7 +40,8 @@ along with this software (see the LICENSE.md file). If not, see
             minimum stock, over the horizon. A shortage is a transfer from a facility of the set with a surplus, else a make
             suggestion with a released BOM (its components exploded through get#BomExplosion's requirements as the next
             level's demand, dated by the lead and preparation days), else a buy suggestion from a supplier price, else a
-            NO_SOURCE exception; each is checked with check#ProductUsable (PRODUCT_NOT_USABLE). A product's reorder rule at a
+            NO_SOURCE exception; each is checked with check#ProductUsable (PRODUCT_NOT_USABLE). A runner without a method
+            read (METHOD_VIEW) gets a made product's suggestion as a METHOD_INVALID exception. A product's reorder rule at a
             facility of the set (ProductFacility, R-PUR-19) orders up to its maximum stock (RdmUpToMaximum) or at least its
             reorder quantity (RdmFixedQuantity) once the projection falls below the minimum; a snoozed rule's shortage is
             still suggested, with the warning SNOOZED. The lines of a draft purchase order a conversion made are supply. Held

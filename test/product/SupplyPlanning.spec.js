@@ -147,6 +147,7 @@ spec({
         user("SPL_METHOD", ["METHOD_VIEW", "METHOD_EDIT", "METHOD_APPROVE", "METHOD_RESOURCES"])
         user("SPL_PLANNER", ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "METHOD_VIEW"])
         user("SPL_RUNNER", ["SUPPLY_PLAN_RUN", "METHOD_VIEW"])
+        user("SPL_NOMETHOD", ["SUPPLY_PLAN_RUN"])
         user("SPL_READER", ["PRODUCTION_VIEW"])
         user("SPL_NONE", ["STOCK_ISSUE"])
         user("SPL_OUTSIDER", ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "METHOD_VIEW"], other)
@@ -649,7 +650,7 @@ feature("a reservation's unavailable part and a transfer in transit are each cou
     }
 })
 
-feature("a schedule whose user can no longer sign in is named on it, and the other schedules still run", {
+feature("a schedule whose user can no longer sign in is named on it, the other schedules still run, and a runner without METHOD_VIEW gets the made product named", {
     when() {
         call("create#mantle.facility.Facility", {
             facilityId: "SPL_OTHER_WH",
@@ -678,9 +679,14 @@ feature("a schedule whose user can no longer sign in is named on it, and the oth
         const otherSchedule = one("mantle.request.requirement.PlanSchedule", {organizationPartyId: other})
         run("spl_planner", S + "store#PlanSchedule", {organizationPartyId: org, facilityIds: [warehouse], active: "N"})
         call("update#mantle.request.requirement.PlanSchedule", {organizationPartyId: other, active: "N"})
-        return {outsider, mine, ran, results, otherSchedule}
+        // the sub-assembly's BOM cannot be read without METHOD_VIEW: the run goes on, naming it (F-P14a-2)
+        const noMethod = plan("spl_nomethod", {productIds: ["SPL_SUB"]})
+        const noMethodSub = byProduct(read("spl_planner"), "SPL_SUB")
+        return {outsider, mine, ran, results, otherSchedule, noMethod, noMethodSub}
     },
-    then({outsider, mine, ran, results, otherSchedule}) {
+    then({outsider, mine, ran, results, otherSchedule, noMethod, noMethodSub}) {
+        noMethod.error == ""
+        noMethodSub.exceptionCode == "METHOD_INVALID"
         outsider.error == ""
         mine.error == ""
         ran.error == ""

@@ -490,6 +490,16 @@ function structureOf(ctx, productId) {
     }
     if (!bom) return structure
     structure.bom = bom
+    // get#BomExplosion needs a method read (METHOD_VIEW, MethodPolicy.js); a runner without it gets this product named, not
+    // a failed run: the explosion's refusal would leave its error in the run's transaction (impl-purchasing F-P14a-2)
+    if (ctx.methodRead == null) ctx.methodRead = !!methodPolicy().capabilities().read
+    if (!ctx.methodRead) {
+        structure.error = {
+            code: "METHOD_INVALID",
+            message: "Reading the BOM of " + productId + " needs method view (METHOD_VIEW)"
+        }
+        return structure
+    }
     try {
         const exploded = call("mantle.product.BomServices.get#BomExplosion", {
             productBomId: bom.productBomId,
