@@ -352,7 +352,7 @@ function completeCheck(run, p = {}, lines = production().linesOf(run.workEffortI
                 " not reported, with no time or quantity"
         )
     const byproducts = lines.filter(line => line.lineRoleEnumId === "PrlrByproduct")
-    if (byproducts.length) impact.push("By-products are received once their cost allocation exists (the cost close)")
+    if (byproducts.length) impact.push("By-products take their share of the run's cost at the cost close")
     impact.unshift("Completes the work order; Accounting's cost close closes it")
     return {allowed: true, impact}
 }
@@ -1286,17 +1286,19 @@ function eventRow(event) {
         runRevision: event.runRevision == null ? null : Number(event.runRevision)
     }
 }
-// The by-products' allocation estimate (design ByProducts AllocationReview): the frozen estimate of the output quantity shared
-// by quantity across the output and by-product lines in the primary output's unit (the default co-product rule, §4); a line in
-// another unit is not shared. Accounting's cost close makes the actual allocation (P15).
+// The by-products' allocation estimate (design ByProducts AllocationReview): the run's frozen estimate shared by quantity
+// across the output and by-product lines in the primary output's unit (the default co-product rule, §4); a line in another
+// unit is not shared. The primary's standard is already its own share (Products' rollup nets the by-products), so the whole
+// is the standard over every unit shared and a by-product unit costs what a primary unit does (P15 review). Accounting's
+// cost close makes the actual allocation (P15).
 function allocationEstimate(run, lines) {
     const primary = primaryOf(lines)
     const standard = run.productStandardCostId ? one(STANDARD, {productStandardCostId: run.productStandardCostId}) : null
     if (!primary || standard?.unitCost == null) return {available: false, rows: []}
-    const total = dec(standard.unitCost).multiply(dec(primary.stockQuantity))
     const shared = lines.filter(line => outputRoles.includes(line.lineRoleEnumId))
     const inUnit = shared.filter(line => (line.stockUomId || null) === (primary.stockUomId || null))
     const quantity = sum(inUnit, line => line.stockQuantity)
+    const total = dec(standard.unitCost).multiply(quantity)
     return {
         available: true,
         method: "By quantity",
