@@ -197,6 +197,8 @@ function lines(p) {
     )
     // a service line receives nothing (it is accepted, accept#ServiceItem)
     items = items.filter(item => products[item.productId] && products[item.productId].productTypeEnumId !== "PtService")
+    // P7: a drop-ship line is delivered to the customer by the supplier, never received (DropShip.js)
+    items = items.filter(item => !item.salesOrderId)
     const receipts = Array.from(find(RECEIPT).condition("orderId", "in", orderIds).list())
     const receiptsByLine = groupBy(receipts, row => row.orderId + ":" + row.orderItemSeqId)
     const split = inspectionSplit(receipts)

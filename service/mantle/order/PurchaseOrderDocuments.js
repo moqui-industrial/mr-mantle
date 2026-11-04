@@ -133,6 +133,8 @@ function printOf(po, at) {
         }
     })
     const facility = po.part.facilityId ? one("mantle.facility.Facility", {facilityId: po.part.facilityId}) : null
+    // P7: a drop-ship order shows the customer's ship-to in place of a receiving facility
+    const shipTo = ec.resource.script("component://mr-mantle/service/mantle/order/DropShip.js").shipToOf(po)
     const revisionText = "Revision " + state.revision + (state.revisionDate ? " of " + lib.dateText(state.revisionDate) : "")
     const printHtml = ec.resource.template("component://mr-mantle/template/order/PurchaseOrder.print.html.fancy", {
         orderId: order.orderId,
@@ -144,7 +146,8 @@ function printOf(po, at) {
         asOfText: at == null ? "" : lib.dateText(at),
         statusText: statusText(state.statusId),
         placedText: order.placedDate && (at == null || ms(order.placedDate) <= at) ? lib.dateText(order.placedDate) : "",
-        facilityName: facility ? facility.facilityName || facility.facilityId : "",
+        facilityName: facility && !shipTo ? facility.facilityName || facility.facilityId : "",
+        shipToText: shipTo ? [shipTo.shipToName, shipTo.shipToAddress].filter(Boolean).join(", ") : "",
         currencyText: currencyUomId || "",
         totalText: ec.l10n.formatCurrency(ec.l10n.roundCurrency(total, currencyUomId), currencyUomId),
         lines
@@ -212,7 +215,25 @@ function sentTo(orderId, revision) {
 // send#PurchaseOrder: an approved (or sent) order's current revision to its supplier.
 function send(p) {
     orders.requirePermission("PURCHASE_ORDER_EDIT")
-    const po = orders.purchaseOrder(p.orderId, true)
+    return sendOf(orders.purchaseOrder(p.orderId, true), p)
+}
+// P7: an approved drop-ship purchase order sent once its approval commits (DropShip.js send), as the approver or the sales
+// order's approver, neither of whom need be a buyer of the organization: the send without the user's checks.
+function issue(orderId, p) {
+    const order = find(ORDER, {orderId}).forUpdate(true).one()
+    const part = order ? rows("mantle.order.OrderPart", {orderId}).find(orders.isPurchasePart) : null
+    if (!part) denied("NOT_PURCHASE", "Order " + orderId + " is not a purchase order")
+    const po = {
+        order,
+        part,
+        orderId: String(orderId),
+        orderPartSeqId: part.orderPartSeqId,
+        organizationPartyId: part.customerPartyId,
+        supplierPartyId: part.vendorPartyId
+    }
+    return sendOf(po, p)
+}
+function sendOf(po, p) {
     const order = po.order
     const revision = Number(order.orderRevision ?? 1)
     const recipientList = blank(p.toAddresses)
@@ -363,6 +384,7 @@ function recipientsOfOrganization(organizationPartyId) {
 
 const operations = {print, send}
 ;({
+    issue,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown purchase order document operation " + op)
         return operations[op](parameters)

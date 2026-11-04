@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Drop-ship (impl-purchasing P7; DropShip.js): Mantle's additions to Moqui Java's dropship-moqui branch, whose services
+    keep their names in OrderServices.xml (send#DropShipPurchaseOrderPart, create# and finalize#DropShipPurchaseOrder). Here:
+    "Drop-ship from supplier" on a customer line, the send of an approved drop-ship purchase order after its approval
+    commits, an order's drop-ship state for the screens, and a supplier's drop-ship facility. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="route" noun="OrderItemToDropShip" allow-remote="false">
+        <description>"Drop-ship from supplier": a customer order line moved to the supplier's drop-ship facility (its part, or
+            a new part of the order at that facility with the part's customer, ship-to and shipping), reserved there, and on
+            an approved order bought at once (create#DropShipPurchaseOrder). Requires PURCHASE_ORDER_EDIT in the selling
+            organization (PERMISSION_DENIED, RECORD_UNAVAILABLE); refuses a supplier the organization may not buy from
+            (SUPPLIER_UNAVAILABLE) or the buying policy stops, one with no current canDropShip price of the product
+            (NOT_DROP_SHIPPABLE) or no drop-ship facility (NO_DROP_SHIP_FACILITY), a line already shipped (LINE_SHIPPED)
+            or on a drop-ship order (ALREADY_DROP_SHIPPED), and an order no longer open (ORDER_STATE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="facilityId"><description>The supplier's drop-ship facility; its first when empty</description>
+            </parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="facilityId"/>
+            <parameter name="purchaseOrderIds" type="List"/>
+            <parameter name="skippedItems" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="routed" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('route', context)"/>
+            <set field="orderPartSeqId" from="routed.orderPartSeqId"/>
+            <set field="facilityId" from="routed.facilityId"/>
+            <set field="purchaseOrderIds" from="routed.purchaseOrderIds"/>
+            <set field="skippedItems" from="routed.skippedItems"/>
+        </actions>
+    </service>
+
+    <service verb="handle" noun="OrderApprovedDropShip" allow-remote="false">
+        <description>An order's approval once it commits (DropShip.secas.xml OrderApprovedDropShip, tx-commit): a drop-ship
+            purchase order is sent (send#DropShipPurchaseOrder); an approved sales order's lines reserved at a drop-ship
+            facility get their purchase orders (create#DropShipPurchaseOrder, in a transaction of its own). A failure is logged
+            naming the order and its lines, and the approval stands. Any other order returns after one count of the drop-ship
+            facilities. No permission check: the approval's commit runs it.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="handled" type="Map"/></out-parameters>
+        <actions>
+            <set field="handled" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('approved', context)"/>
+        </actions>
+    </service>
+
+    <service verb="send" noun="DropShipPurchaseOrder" allow-remote="false">
+        <description>An approved drop-ship purchase order sent to its supplier once the approval commits (handle#OrderApprovedDropShip):
+            through the drop-ship facility's remote (its send#DropShipPurchaseOrderPart implementation), then Sent, else by
+            email on send#PurchaseOrder's path. Any other order returns at once; a failed send is logged and the order stays
+            approved for the buyer to send. No permission check: it runs as the approver.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Boolean"/>
+            <parameter name="channel"/>
+            <parameter name="reasonCode"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('send', context)"/>
+            <set field="sent" from="!!out.sent"/>
+            <set field="channel" from="out.channel || null"/>
+            <set field="reasonCode" from="out.reasonCode || null"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="OrderDropShip" allow-remote="false">
+        <description>An order's drop-ship state for a purchasing user (PURCHASE_ORDER_EDIT, PURCHASE_APPROVE or
+            PURCHASE_ORDER_APPROVE) of its organization. kind sales: each product line's state (ships from the warehouse,
+            drops when approved, on its drop-ship purchase order, delivered), that order, and for a buyer the suppliers it
+            may drop from. kind purchase: the customer and ship-to, the parent sales order, each line's delivered and
+            remaining quantity, and whether the supplier's confirmation is pending. kind null for any other order or
+            user.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="dropShip" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="dropShip" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('orderView', context)"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="DropShipFacility" allow-remote="false">
+        <description>A supplier's drop-ship facility, new or its name and remote changed: type FcTpDropShip, owned by the
+            supplier, assetAllowOtherOwner Y, its remote (SystemMessageRemote) the integration that receives its orders, empty
+            to email them. Requires PURCHASE_POLICY_EDIT in the organization (PERMISSION_DENIED, RECORD_UNAVAILABLE) and a
+            supplier it may buy from (SUPPLIER_UNAVAILABLE); refuses an unknown remote (REMOTE_INVALID) and another
+            facility (FACILITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="dropShipRemoteId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('storeFacility', context)"/>
+            <set field="facilityId" from="stored.facilityId"/>
+            <set field="created" from="stored.created"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="DropShipSetup" allow-remote="false">
+        <description>A supplier's drop-ship facilities with their remotes, the remotes to choose from and whether the user
+            may change them (PURCHASE_POLICY_EDIT), for a purchasing user (PERMISSION_DENIED).</description>
+        <in-parameters><parameter name="supplierPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="facilities" type="List"/>
+            <parameter name="remotes" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('setup', context)"/>
+            <set field="facilities" from="found.facilities"/>
+            <set field="remotes" from="found.remotes"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+</services>
