@@ -568,6 +568,10 @@ const days = Array.from(dayList || []).map(String)
             ec.service.sync().name('mantle.ledger.OtherAutoPostServices.post#WorkEffortCost')
                     .parameters({timesheetId: timesheetId}).disableAuthz().call()
             if (ec.message.hasError()) return
+            // production labor cost (on with the run owner's ProductionPolicy laborCostSync): the week's production time
+            ec.service.sync().name('mantle.work.ProductionServices.sync#ProductionLaborCost')
+                    .parameters({timesheetId: timesheetId}).disableAuthz().call()
+            if (ec.message.hasError()) return
             ec.service.sync().name('mantle.work.TimesheetServices.notify#Timesheet').parameters({timesheetId: timesheetId, change: 'approved'}).call()
             message = L('Week approved')
         ]]></script></actions>
@@ -625,6 +629,10 @@ const days = Array.from(dayList || []).map(String)
             if (ec.message.hasError()) return
             // the approval undone: its project cost posting is reversed by a delta dated today
             ec.service.sync().name('mantle.ledger.OtherAutoPostServices.post#WorkEffortCost')
+                    .parameters({timesheetId: timesheetId}).disableAuthz().call()
+            if (ec.message.hasError()) return
+            // and its production labor cost events reversed (laborCostSync)
+            ec.service.sync().name('mantle.work.ProductionServices.sync#ProductionLaborCost')
                     .parameters({timesheetId: timesheetId}).disableAuthz().call()
             if (ec.message.hasError()) return
             ec.service.sync().name('mantle.work.TimesheetServices.note#TimesheetDecision').parameters({timesheetId: timesheetId, subject: L('Reopened'), body: text}).call()

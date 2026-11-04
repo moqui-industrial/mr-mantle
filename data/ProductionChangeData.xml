@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Controlled changes of a production run (design-manufacturing Components Substitute, SplitWorkOrder, BillOfMaterialsCompare's
+    amendment; impl-manufacturing P9): the kinds of a change, its status flow, where a split, backorder or clone came from,
+    and the two approval notices. A substitution is sent to the run organization's PRODUCTION_SUPERVISE holders, an amendment
+    to its METHOD_APPROVE and PRODUCTION_SUPERVISE holders. Both are decided on the run (substitute#ProductionMaterial,
+    amend#ProductionOrder), since each needs its preview, never from the notification (F40), so neither has an approve
+    service; the decision marks them read. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType description="Production Change Type" enumTypeId="ProductionChangeType"/>
+    <moqui.basic.Enumeration description="Substitution" enumId="PchtSubstitution" enumTypeId="ProductionChangeType"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Amendment" enumId="PchtAmendment" enumTypeId="ProductionChangeType" sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType description="Production Source Origin" enumTypeId="ProductionSourceOrigin"/>
+    <moqui.basic.Enumeration description="Split from" enumId="PsoSplit" enumTypeId="ProductionSourceOrigin" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Backorder of" enumId="PsoBackorder" enumTypeId="ProductionSourceOrigin"
+            sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Cloned from" enumId="PsoClone" enumTypeId="ProductionSourceOrigin" sequenceNum="3"/>
+
+    <moqui.basic.StatusType statusTypeId="ProductionChange" description="Production change"/>
+    <moqui.basic.StatusItem statusId="PchRequested" statusTypeId="ProductionChange" description="Waiting for review"
+            sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PchApplied" statusTypeId="ProductionChange" description="Applied" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PchRefused" statusTypeId="ProductionChange" description="Refused" sequenceNum="3"/>
+    <moqui.basic.StatusFlow statusFlowId="ProductionChange" statusTypeId="ProductionChange"
+            description="Production change review"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionChange" statusId="PchRequested" toStatusId="PchApplied"
+            transitionName="Apply"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="ProductionChange" statusId="PchRequested" toStatusId="PchRefused"
+            transitionName="Refuse"/>
+
+    <moqui.security.user.NotificationTopic topic="ProductionSubstitution" inboxEnumId="NinNotifications"
+            description="Substitute component to approve" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y"
+            titleTemplate="Approve ${substituteName} for ${productName} on work order ${workEffortId}"/>
+    <moqui.security.user.NotificationTopic topic="ProductionAmendment" inboxEnumId="NinNotifications"
+            description="Work order amendment to review" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="Review an amendment of work order ${workEffortId}: ${workEffortName}"/>
+</entity-facade-xml>

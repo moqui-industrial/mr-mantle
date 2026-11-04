@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Controlled changes of a production run (design-manufacturing Components Substitute, SplitWorkOrder, WorkOrderDetail's
+    cancellation and clone, BillOfMaterialsCompare's amendment; §12.1 amend#ProductionOrder; impl-manufacturing P9;
+    ProductionChanges.js): a substitution or amendment request with its reviews, the line a substitute or an amendment
+    added, and the run a split, backorder or clone came from. Written only by mantle.work.ProductionServices'
+    substitute#ProductionMaterial, amend#ProductionOrder, split#ProductionOrder and clone#ProductionOrder. A file of its own
+    so it merges apart from the other production entities. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- A change requested on a run: a substitution (PchtSubstitution: of a material line's remaining quantity by an allowed
+        alternative, at a factor) or an amendment (PchtAmendment: the run's remaining lines and operations remapped to its
+        method as of methodDate). It records the run's revision and the preview it was asked at, who asked, the reviews (a
+        substitution by a supervisor; an amendment by a method approver and a supervisor) and, once applied, the revision it
+        made and the plan it applied. Its status: requested, applied or refused; a correction is a new request. -->
+    <entity entity-name="ProductionChange" package="mantle.work.production" cache="never">
+        <field name="productionChangeId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id" enable-audit-log="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="changeTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="runRevision" type="number-integer"><description>The run's revision the request was made at</description>
+        </field>
+        <field name="previewKey" type="text-medium"><description>The preview the request was made from; a decision refuses
+            a changed one</description></field>
+        <!-- a substitution -->
+        <field name="productionRunLineId" type="id" enable-audit-log="true"><description>The material line substituted
+        </description></field>
+        <field name="substituteProductId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"><description>Of the original line, in its stock
+            unit</description></field>
+        <field name="conversionFactor" type="number-decimal" enable-audit-log="true"><description>Substitute stock units per
+            original stock unit</description></field>
+        <field name="substituteQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="substituteRunLineId" type="id"><description>The line the substitution added</description></field>
+        <!-- an amendment -->
+        <field name="methodDate" type="date-time" enable-audit-log="true"><description>As of when the method is read</description>
+        </field>
+        <field name="changeNoticeId" type="id" enable-audit-log="true"><description>Products' change notice, when
+            ChangeNotices is on</description></field>
+        <field name="planJson" type="text-very-long"><description>The remap the change applies (or would): lines kept,
+            changed, added and removed, operations kept, added and cancelled</description></field>
+        <!-- the request and its reviews -->
+        <field name="reasonCode" type="id"/>
+        <field name="reason" type="text-medium" enable-audit-log="true"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="methodApprovedByUserId" type="id" enable-audit-log="true"/>
+        <field name="methodApprovedDate" type="date-time" enable-audit-log="true"/>
+        <field name="supervisorApprovedByUserId" type="id" enable-audit-log="true"/>
+        <field name="supervisorApprovedDate" type="date-time" enable-audit-log="true"/>
+        <field name="refusedByUserId" type="id" enable-audit-log="true"/>
+        <field name="refusalReason" type="text-medium" enable-audit-log="true"/>
+        <field name="appliedDate" type="date-time" enable-audit-log="true"/>
+        <field name="resultRevision" type="number-integer" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="ProductionChangeType" related="moqui.basic.Enumeration" short-alias="changeType">
+            <key-map field-name="changeTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" related="mantle.work.production.ProductionRunLine" short-alias="runLine"/>
+        <relationship type="one" title="Substitute" related="mantle.product.Product" short-alias="substituteProduct">
+            <key-map field-name="substituteProductId" related="productId"/></relationship>
+        <index name="PRODCHANGE_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+    <!-- A line a controlled change added: a substitute (substituteOfLineId, the material line it stands in for) or an
+        amendment's new line; productionChangeId names the change. -->
+    <extend-entity entity-name="ProductionRunLine" package="mantle.work.production">
+        <field name="substituteOfLineId" type="id" enable-audit-log="true"/>
+        <field name="productionChangeId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="SubstituteOf" related="mantle.work.production.ProductionRunLine"
+                short-alias="substituteOf">
+            <key-map field-name="substituteOfLineId" related="productionRunLineId"/></relationship>
+    </extend-entity>
+    <!-- The run a split, backorder or clone came from (ProductionSourceOrigin: PsoSplit, PsoBackorder, PsoClone). -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionSourceRunId" type="id" enable-audit-log="true"/>
+        <field name="productionSourceEnumId" type="id" enable-audit-log="true"/>
+        <relationship type="one-nofk" title="ProductionSource" related="mantle.work.effort.WorkEffort"
+                short-alias="productionSourceRun">
+            <key-map field-name="productionSourceRunId" related="workEffortId"/></relationship>
+    </extend-entity>
+</entities>

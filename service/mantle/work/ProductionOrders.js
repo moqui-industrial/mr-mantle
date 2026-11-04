@@ -53,7 +53,9 @@ const blockedReasons = [
     "OUTPUT_HELD",
     "LOSS_PENDING",
     "MATERIAL_UNISSUED",
-    "OPERATION_OPEN"
+    "OPERATION_OPEN",
+    // impl-manufacturing P10: operations not completed on the shop floor
+    "OPERATION_UNREPORTED"
 ]
 const zero = () => toDecimal(0)
 const dec = value => toDecimal(value ?? 0)
@@ -584,7 +586,8 @@ function transition(p) {
             "reasonCode",
             "reexplode",
             "finishRemainder",
-            "acceptMaterialVariance"
+            "acceptMaterialVariance",
+            "closeUnreportedOperations"
         ]
     )
     if (begun.previous) return begun.previous
@@ -1138,7 +1141,7 @@ function missingSkills(run, partyId) {
             ).map(row => row.skillTypeEnumId)
         )
     )
-    const held = new Set(rows("mantle.party.PartySkill", {partyId}).map(row => row.skillTypeEnumId))
+    const held = new Set(rows("mantle.humanres.ability.PartySkill", {partyId}).map(row => row.skillTypeEnumId))
     return required
         .filter(skill => !held.has(skill))
         .map(skill => one("moqui.basic.Enumeration", {enumId: skill})?.description || skill)

@@ -37,7 +37,8 @@ along with this software (see the LICENSE.md file). If not, see
         (PRODCOSTEVT_SOURCE), so a retried or repeated hook never counts a cost twice. The source is the record that caused
         it: an AssetIssuance (a material issue), an AssetReceipt (a return of unused material, an output receipt); later
         phases add a scrap of issued material (P7), an approved TimeEntry and a machine runtime interval (P10, a revision per
-        correction, its delta or reversal linked by originalCostEventId), and a service acceptance or bill match (P14).
+        correction, its delta or reversal linked by originalCostEventId; timeEntryId names the entry with no foreign key, as a
+        reopened week's entry may be deleted after its reversal), and a service acceptance or bill match (P14).
         amount is signed for the run's WIP: what adds to it is positive, what relieves it negative, in amountUomId, at
         rateAmount from its rate row (rateEntityName, rateId: the asset's acquire cost, the frozen standard, a
         WorkCenterRate or RateAmount). An event with no value (no cost on the asset, no rate in effect) is PcvUnvalued.
@@ -108,7 +109,7 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
         <relationship type="one" related="mantle.product.issuance.AssetIssuance" short-alias="assetIssuance"/>
         <relationship type="one" related="mantle.product.receipt.AssetReceipt" short-alias="assetReceipt"/>
-        <relationship type="one" related="mantle.work.time.TimeEntry" short-alias="timeEntry"/>
+        <relationship type="one-nofk" related="mantle.work.time.TimeEntry" short-alias="timeEntry"/>
         <relationship type="one" title="Original" related="mantle.work.production.ProductionCostEvent"
                 short-alias="originalCostEvent">
             <key-map field-name="originalCostEventId" related="productionCostEventId"/></relationship>

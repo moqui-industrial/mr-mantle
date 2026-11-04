@@ -327,8 +327,30 @@ function completeCheck(run, p = {}, lines = production().linesOf(run.workEffortI
         impact.push(
             "Accepts the material not issued as a variance: " + unissued.map(row => productName(row.line.productId)).join(", ")
         )
+    // an operation not completed on the shop floor (impl-manufacturing P10, F95) is closed with the run only when the
+    // supervisor accepts it, as with the material variance; it then has no time or quantity of its own
     const open = operations.filter(op => op.statusId !== "WeComplete")
-    if (open.length) impact.push("Completes the " + open.length + " operation" + (open.length === 1 ? "" : "s") + " not reported")
+    if (open.length && !yes(p.closeUnreportedOperations))
+        return {
+            allowed: false,
+            reasonCode: "OPERATION_UNREPORTED",
+            unreportedOperationsOffered: true,
+            message:
+                "Operation " +
+                open.map(op => op.workEffortName || op.workEffortId).join(", ") +
+                (open.length === 1 ? " was" : " were") +
+                " not completed on the shop floor; complete " +
+                (open.length === 1 ? "it" : "them") +
+                ", or close the unreported operations with the work order"
+        }
+    if (open.length)
+        impact.push(
+            "Closes the " +
+                open.length +
+                " operation" +
+                (open.length === 1 ? "" : "s") +
+                " not reported, with no time or quantity"
+        )
     const byproducts = lines.filter(line => line.lineRoleEnumId === "PrlrByproduct")
     if (byproducts.length) impact.push("By-products take their share of the run's cost at the cost close")
     impact.unshift("Completes the work order; Accounting's cost close closes it")
@@ -396,7 +418,8 @@ function afterReceipt(runId) {
     const run = one(WORK, {workEffortId: runId})
     if (!run || productionPolicy().runPolicy(run).completeOnFinalReceipt !== "Y") return {completed: false, blockCode: null}
     if (run.statusId !== "WeInProgress") return {completed: false, blockCode: "STATUS_INVALID"}
-    const gate = completeCheck(run, {})
+    // the opt-in flag is the acceptance of closing the operations not reported with the final receipt
+    const gate = completeCheck(run, {closeUnreportedOperations: true})
     if (!gate.allowed) return {completed: false, blockCode: gate.reasonCode}
     complete(run, {}, "Completed on its final output receipt")
     return {completed: true, blockCode: null}
