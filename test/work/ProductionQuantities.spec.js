@@ -710,7 +710,9 @@ feature("complete is refused until the quantities reconcile, then succeeds, and 
             operationKey: completeKey,
             workEffortId: r.workEffortId,
             action: "complete",
-            expectedRevision: revision(r.workEffortId)
+            expectedRevision: revision(r.workEffortId),
+            // the operations were not completed on the shop floor (impl-manufacturing P10, F95)
+            closeUnreportedOperations: true
         }
         const completed = run("ppq_super", P + "transition#ProductionOrder", parameters)
         const retried = run("ppq_super", P + "transition#ProductionOrder", parameters)
@@ -763,6 +765,7 @@ feature("Finish remainder records the rest as an approved loss; unissued materia
         const done = act("ppq_super", r.workEffortId, "complete", {
             finishRemainder: true,
             acceptMaterialVariance: true,
+            closeUnreportedOperations: true,
             reason: "Last unit failed"
         })
         return {

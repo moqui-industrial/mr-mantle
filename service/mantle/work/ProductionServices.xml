@@ -759,7 +759,9 @@ along with this software (see the LICENSE.md file). If not, see
             remaining + approved loss with nothing remaining (QUANTITIES_UNRECONCILED; finishRemainder records what is left as
             an approved loss with the reason) and nothing held awaiting disposition (OUTPUT_HELD), no loss waiting for
             approval (LOSS_PENDING), no operation running or held (OPERATION_OPEN; those not reported complete with it) and
-            each material line issued (MATERIAL_UNISSUED, unless acceptMaterialVariance); close is the cost close's
+            each material line issued (MATERIAL_UNISSUED, unless acceptMaterialVariance), then every operation completed on
+            the shop floor (OPERATION_UNREPORTED, unless closeUnreportedOperations closes them with it; impl-manufacturing
+            P10); close is the cost close's
             (CLOSE_BY_COST_CLOSE). The quality gates (impl-manufacturing P8): start and resume refuse a run with a
             failed gate (QUALITY_BLOCKED, naming the inspection); complete refuses a final inspection pending or failed
             (INSPECTION_PENDING, INSPECTION_FAILED) and an in-process gate not passed (QUALITY_GATE_OPEN), before the
@@ -785,6 +787,8 @@ along with this software (see the LICENSE.md file). If not, see
                 of each output line as an approved loss first</description></parameter>
             <parameter name="acceptMaterialVariance" type="Boolean" default-value="false"><description>complete: accept the
                 material not issued as a variance</description></parameter>
+            <parameter name="closeUnreportedOperations" type="Boolean" default-value="false"><description>complete: close the
+                operations not completed on the shop floor with the work order</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode (RELEASED, REEXPLODED, UNRELEASED, STARTED, HELD,
@@ -983,6 +987,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sourceId" required="true"/>
             <parameter name="sourceRevision" type="Integer"><description>1 when empty; a correction of the source (a
                 timesheet reopened, a rate changed) is its next revision</description></parameter>
+            <parameter name="sourceRemoved" type="Boolean"><description>The source is being deleted (a time entry's
+                deletion reverses its labor, P10); a source whose events already match records nothing
+                (productionCostEventId empty)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="productionCostEventId"/>
@@ -1946,6 +1953,307 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="subcontractShipment" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionSubcontracts.js')
                     .execute('shipment', context)"/>
+        </actions>
+    </service>
+
+    <!-- ===== the shop floor and production time (impl-manufacturing P10; ProductionShopFloor.js) ===== -->
+    <service verb="get" noun="ShopFloorQueue" allow-remote="false">
+        <description>The shop floor queue (design-manufacturing ShopFloor Station and Queue): the operations of the released,
+            running and held work orders of the user's organizations at a plant or work center (with the lines under it), or
+            of one work order, each with its run, product, work center, due date, state (running, ready, paused, blocked or
+            done) and readiness reason (a predecessor, a quality gate, a staged short line, a work order not started), and
+            whether the user's person timer is on it; mine: only work orders or operations the user is assigned to;
+            readyOnly: only ready and running ones; done ones only with includeDone. At most 100 work orders are read
+            (truncated). The groups are the board's columns; timer is the user's running timer. Requires PRODUCTION_VIEW,
+            PRODUCTION_OPERATE or PRODUCTION_SUPERVISE (PERMISSION_DENIED); refuses a facility outside the user's
+            organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId"><description>A plant or work center</description></parameter>
+            <parameter name="workCenterFacilityId"><description>Only the operations of this work center</description></parameter>
+            <parameter name="workEffortId"><description>Only this work order's operations</description></parameter>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="readyOnly" type="Boolean"/>
+            <parameter name="includeDone" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="operationRows" type="List"/>
+            <parameter name="groups" type="List"/>
+            <parameter name="timer" type="Map"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="queue" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('queue', context)"/>
+            <set field="operationRows" from="queue.operationRows"/>
+            <set field="groups" from="queue.groups"/>
+            <set field="timer" from="queue.timer"/>
+            <set field="truncated" from="queue.truncated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionOperation" allow-remote="false">
+        <description>One operation of a work order for its operator (design-manufacturing OperationExecution Work): the
+            operation (status, work center, planned and actual dates, readiness, predecessors, whether it receives the
+            output, a supervisor's start override), its run (status, revision, release time, product), the output line's
+            target, good, held, loss and remaining, its material lines, each start check (work order running, operation open,
+            predecessors started, quality gate, material, equipment, operator, skills, instructions) with the first blocking
+            one and the advisories, the user's person timer, the machine runtime intervals (their rate and amount only with
+            ACCOUNTING_VIEW), the instructions and required evidence, the policy's machine runtime, piece rate and time log,
+            and what the user may do. Requires PRODUCTION_VIEW, PRODUCTION_OPERATE or PRODUCTION_SUPERVISE
+            (PERMISSION_DENIED); refuses an operation outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionOperation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="productionOperation" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('read', context)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionInstructions" allow-remote="false">
+        <description>An operation's instructions as of its work order's release (design-manufacturing Instructions Steps): the
+            published WectInstruction WorkEffortContent rows of its routing operation and operation template in effect at the
+            release time, in order, each with its text (a Markdown or text file), file name, checksum and whether the user
+            acknowledged it; a revision warning when a newer one was published since; the evidence the operation requires
+            (its routing operation's or template's methodRequiredEvidence) and whether it is recorded; and every
+            acknowledgment and evidence row. Requires PRODUCTION_VIEW, PRODUCTION_OPERATE or PRODUCTION_SUPERVISE
+            (PERMISSION_DENIED); refuses an operation outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="operationWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionInstructions" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="productionInstructions" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('instructions', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="InstructionStep" allow-remote="false">
+        <description>Record an operator's instruction step (design-manufacturing Instructions Evidence): IstAcknowledge, the
+            user's acknowledgment of an instruction (workEffortContentId) of the operation as of its release, once per person
+            (a second answers ALREADY_ACKNOWLEDGED); IstEvidence, the evidence the operation requires as a value with its
+            unit, a file reference or a note. An InstructionAcknowledgment of its own: who, when and which instruction row. A
+            retry with the same operation key answers the first. Requires PRODUCTION_OPERATE (PERMISSION_DENIED); refuses an
+            operation outside the user's organizations (RECORD_UNAVAILABLE), a work order not released or running
+            (RUN_NOT_RELEASED), an operation complete or cancelled (OPERATION_CLOSED), a user without a person
+            (PARTY_REQUIRED), an instruction not the operation's (INSTRUCTION_INVALID), evidence without a value or file
+            (VALUE_REQUIRED) or of an operation that requires none (EVIDENCE_NOT_REQUIRED), and an unknown step
+            (STEP_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="stepTypeEnumId" default-value="IstAcknowledge"/>
+            <parameter name="workEffortContentId"/>
+            <parameter name="valueText"/>
+            <parameter name="valueUomId"/>
+            <parameter name="contentLocation"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ACKNOWLEDGED, ALREADY_ACKNOWLEDGED or EVIDENCE_RECORDED,
+                instructionAcknowledgmentId, operationWorkEffortId, workEffortContentId, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('recordStep', context)"/>
+        </actions>
+    </service>
+    <service verb="override" noun="ProductionOperationStart" allow-remote="false">
+        <description>A supervisor's override of an operation's start checks (impl-manufacturing §4, design §13): the reason,
+            recorded and audit-logged on the operation, lets it start without the required skills and, with acknowledgment,
+            without the instruction acknowledgment; every other check still holds. A retry with the same operation key answers the first. Requires
+            PRODUCTION_SUPERVISE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE), one complete or cancelled (OPERATION_CLOSED) and no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="acknowledgment" type="Boolean"><description>Also waive the instruction
+                acknowledgment</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('override', context)"/>
+        </actions>
+    </service>
+    <service verb="start" noun="ProductionOperation" allow-remote="false">
+        <description>Start (or join, or resume after a pause) an operation with the user's person timer (design-manufacturing
+            OperationExecution PersonTimer): every start check of get#ProductionOperation must pass, then
+            mantle.work.TimesheetServices.start#Timer on the operation with the work type (the policy's, else
+            WktpProductionRun); a timer of the user running on other work is stopped only with confirmSwitch (one timer per
+            person), and the operation goes In Progress. A retry with the same operation key answers the first. Requires
+            PRODUCTION_OPERATE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE), a user without a person (PARTY_REQUIRED), the first failed check: RUN_NOT_RUNNING,
+            RUN_ON_HOLD, OPERATION_CLOSED, PREDECESSOR_NOT_STARTED, QUALITY_BLOCKED, MATERIAL_SHORT, EQUIPMENT_UNAVAILABLE,
+            NOT_ASSIGNED, SKILL_MISSING or ACKNOWLEDGMENT_REQUIRED (the last two unless a supervisor overrode them), and a
+            timer running elsewhere without confirmSwitch (TIMER_SWITCH_REQUIRED, naming it).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="confirmSwitch" type="Boolean"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode STARTED, JOINED or RESUMED, operationWorkEffortId,
+                workEffortId, timeEntryId, stoppedTimeEntryIds, switched, advisories, and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('start', context)"/>
+        </actions>
+    </service>
+    <service verb="pause" noun="ProductionOperation" allow-remote="false">
+        <description>Pause a running operation (design-manufacturing OperationExecution Actions): it goes On Hold with the
+            reason (an active production reason and, or, a text), and with stopTimer the user's person timer on it stops; a
+            stop of the line is reported apart (Downtime). A retry with the same operation key answers the first. Requires
+            PRODUCTION_OPERATE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE), one not running (OPERATION_NOT_RUNNING), an inactive reason (REASON_INVALID) and no reason
+            (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="stopTimer" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('pause', context)"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="ProductionOperation" allow-remote="false">
+        <description>Complete an operation (design-manufacturing OperationExecution CompleteStep), in one transaction: its
+            quantities through record#ProductionQuantity under this operation's key, so the operation that receives the
+            output receives its good and pending output with the loss, scrap and rework coupled to it (any other operation
+            records only its loss), then the user's person timer on it stopped (unless stopTimer is false), the pieces on
+            its entry (TimeEntry.pieceCount = good) under the piece-rate policy, and the operation Complete with its good and
+            lost quantity. A failed posting leaves nothing completed. Beyond the target and tolerance only an overproduction
+            request is recorded and the operation stays open (APPROVAL_REQUESTED). A retry with the same operation key
+            answers the first. Requires PRODUCTION_OPERATE, and STOCK_ISSUE when it receives output (PERMISSION_DENIED,
+            STOCK_ISSUE_REQUIRED); refuses an operation outside the user's organizations (RECORD_UNAVAILABLE), one complete or
+            cancelled (OPERATION_CLOSED) or not started (OPERATION_NOT_STARTED), a work order not running (RUN_NOT_RUNNING),
+            a predecessor not complete (PREDECESSOR_OPEN, naming it), required evidence not recorded (EVIDENCE_REQUIRED),
+            machine runtime still running (MACHINE_RUNNING), a negative quantity (QUANTITY_INVALID), and record#ProductionQuantity's
+            refusals.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="productionRunLineId"><description>The output line, the run's primary one when empty</description>
+            </parameter>
+            <parameter name="good" type="BigDecimal"/>
+            <parameter name="pending" type="BigDecimal"/>
+            <parameter name="processLoss" type="BigDecimal"/>
+            <parameter name="scrap" type="BigDecimal"/>
+            <parameter name="rework" type="BigDecimal"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="heldLocationSeqId"/>
+            <parameter name="lotNumber"/>
+            <parameter name="stopTimer" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode COMPLETED or APPROVAL_REQUESTED, operationWorkEffortId,
+                workEffortId, outputOperation, quantity (record#ProductionQuantity's result), timeEntryId and hours of the
+                stopped timer, pieceCountEntryId and pieceCount, operationsLeft, and the operation fields.</description>
+            </parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('complete', context)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="MachineRuntime" allow-remote="false">
+        <description>Record a machine's runtime on an operation apart from a person's time (design-manufacturing
+            OperationExecution MachineRuntime, R-SA-18): start (an open interval), stop (its end, now when empty) or record (a
+            closed interval from fromDate to thruDate), on the operation's work center and, when named, its equipment. A
+            closed interval is valued at the work center's approved machine WorkCenterRate in effect at its start, and its
+            cost event (PcetMachine, awaiting the cost close) is written through record#ProductionCostEvent; with no rate in
+            effect it is recorded unvalued and listed for review (§4). A retry with the same operation key answers the
+            first. Requires PRODUCTION_OPERATE (PERMISSION_DENIED); refuses an operation outside the user's organizations
+            (RECORD_UNAVAILABLE), an unknown action (ACTION_INVALID), a policy that records no machine runtime
+            (MACHINE_RUNTIME_OFF), a work order not running or held (RUN_NOT_RUNNING), a cancelled operation or a start of a
+            complete one (OPERATION_CLOSED), equipment that is stock or another organization's (ASSET_INVALID), a second open
+            interval (RUNTIME_OPEN), a stop with none open (RUNTIME_NOT_OPEN) and an interval that ends before it starts or
+            in the future (INTERVAL_INVALID).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="operationWorkEffortId" required="true"/>
+            <parameter name="action" default-value="record"><description>start, stop or record</description></parameter>
+            <parameter name="machineRuntimeEventId"><description>The interval to stop (the open one when empty)</description>
+            </parameter>
+            <parameter name="assetId"/>
+            <parameter name="runtimeModeEnumId"><description>MrmSetup or MrmRun (the default)</description></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reasonCode"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode STARTED, STOPPED or RECORDED, machineRuntimeEventId,
+                hours, valued, productionCostEventId, and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('machineRuntime', context)"/>
+        </actions>
+    </service>
+    <service verb="sync" noun="ProductionLaborCost" allow-remote="false">
+        <description>The labor cost events of production time (design-manufacturing ProductionTime; impl-manufacturing F34,
+            F35), called by mantle.work.TimesheetServices approve# and reopen#Timesheet (timesheetId) and
+            mantle.work.TimeServices store# and delete#TimeEntry (timeEntryIdList, deleting) beside their
+            post#WorkEffortCost: for each entry on a production run (the run or one of its operations) whose owner's
+            production policy has laborCostSync, the delta between its hours while its timesheet is approved and what its
+            labor events recorded, through record#ProductionCostEvent (PcetLabor, awaiting the cost close): an approval values
+            the entry at the costing RateAmount (RaprProductionCost) by position class and work type, else unvalued; a reopen
+            or a deletion writes the reversal; an hours change of an approved entry a delta at its first rate. Other entries
+            and runs with the flag off record nothing, so Projects' behavior is unchanged; an entry that fails is logged and
+            named (failedTimeEntryIds) and the others go on. Internal: no permission of its own.</description>
+        <in-parameters>
+            <parameter name="timesheetId"/>
+            <parameter name="timeEntryIdList" type="List"/>
+            <parameter name="deleting" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionCostEventIds" type="List"/>
+            <parameter name="failedTimeEntryIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="synced" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('syncLabor', context)"/>
+            <set field="productionCostEventIds" from="synced.productionCostEventIds"/>
+            <set field="failedTimeEntryIds" from="synced.failedTimeEntryIds"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductionTime" allow-remote="false">
+        <description>A work order's person time (design-manufacturing ProductionTime): the time entries on it and its
+            operations (or one operation), newest first and at most 500, each with the person, operation, work type, from,
+            thru, hours, pieces, its timesheet's status and whether its labor cost is recorded (the amount only with
+            ACCOUNTING_VIEW); each week of that time with its status and whether the user may approve, reopen or submit it
+            (mantle.work.TimesheetServices.get#TimesheetAccess); the total hours and the user's timer. Requires
+            PRODUCTION_VIEW, PRODUCTION_OPERATE or PRODUCTION_SUPERVISE (PERMISSION_DENIED); refuses a work order or operation
+            outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productionTime" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="productionTime" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionShopFloor.js')
+                    .execute('time', context)"/>
         </actions>
     </service>
 </services>

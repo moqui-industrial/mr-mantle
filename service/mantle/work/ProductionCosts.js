@@ -178,13 +178,20 @@ const sources = {
 const subcontracts = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionSubcontracts.js")
 sources["mantle.order.purchase.ServiceAcceptance"] = id => subcontracts().acceptanceEvent(id)
 sources["mantle.account.invoice.InvoiceMatchLine"] = id => subcontracts().billVarianceEvent(id)
+// P10: an approved production time entry's labor (a delta per revision: approval, reopen, an hours change, a deletion) and a
+// closed machine runtime interval, both awaiting the cost close (ProductionShopFloor.js)
+const shopFloor = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionShopFloor.js")
+sources["mantle.work.time.TimeEntry"] = (id, removed) => shopFloor().laborEvent(id, removed)
+sources["mantle.work.production.MachineRuntimeEvent"] = id => shopFloor().machineEvent(id)
 
 // Writes the event of a source revision once, inside the caller's transaction; a second call answers the first event.
 function record(p) {
     if (!Object.hasOwn(sources, p.sourceEntityName)) throw new Error("Unknown production cost source " + p.sourceEntityName)
     const sourceId = String(p.sourceId ?? "")
     const sourceRevision = blank(p.sourceRevision) ? 1 : Number(p.sourceRevision)
-    const event = sources[p.sourceEntityName](sourceId)
+    const event = sources[p.sourceEntityName](sourceId, p.sourceRemoved === true || p.sourceRemoved === "true")
+    // a source whose events already say what it should (a labor delta of nothing) records none
+    if (!event) return {productionCostEventId: null, existing: false}
     const run = event.run
     delete event.run
     const existing = find(EVENT, {

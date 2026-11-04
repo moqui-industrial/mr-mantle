@@ -303,7 +303,9 @@ function evaluate(ctx, userScope, operation, run, target) {
     )
     if (required.length && operators.length) {
         const qualifiedOperator = operators.some(row => {
-            const held = new Set(rows("mantle.party.PartySkill", {partyId: row.partyId}).map(skill => skill.skillTypeEnumId))
+            const held = new Set(
+                rows("mantle.humanres.ability.PartySkill", {partyId: row.partyId}).map(skill => skill.skillTypeEnumId)
+            )
             return required.every(skill => held.has(skill))
         })
         if (!qualifiedOperator)

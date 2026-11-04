@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The shop floor's own records (design-manufacturing §4 OperationExecution and Instructions, §12 M7; impl-manufacturing
+    P10): a machine's runtime on an operation, recorded apart from a person's time, and an operator's acknowledgment of an
+    instruction step or the evidence recorded for one; and the supervisor's override of an operation's start checks. A
+    person's time stays the Projects TimeEntry (TimesheetServices' timers); the labor and machine cost events are
+    ProductionCostEvent rows written by record#ProductionCostEvent. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- An operation's start override (override#ProductionOperationStart, design §13's skill and acknowledgment decision):
+        a supervisor's reason that lets the operation start without the required skills or acknowledgment, audit-logged;
+        and what its completion reported (complete#ProductionOperation): the good and the lost quantity of the operation,
+        whether or not it is the one that receives the output. -->
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort">
+        <field name="productionGoodQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="productionLossQuantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="productionStartOverride" type="text-medium" enable-audit-log="true"/>
+        <field name="productionStartOverrideChecks" type="text-short" enable-audit-log="true"><description>The checks the
+            override lets pass: SKILL_MISSING, and ACKNOWLEDGMENT_REQUIRED when the supervisor also waived the
+            acknowledgment</description></field>
+        <field name="productionStartOverrideByUserId" type="id" enable-audit-log="true"/>
+        <field name="productionStartOverrideDate" type="date-time" enable-audit-log="true"/>
+    </extend-entity>
+
+    <!-- A machine's runtime on a run's operation (record#MachineRuntime): its work center and, when named, its equipment,
+        from and thru (open while thru is empty), its hours and mode (setup or run). A closed interval is valued at the work
+        center's machine WorkCenterRate in effect at its start (workCenterRateId, rateAmount, amount in amountUomId) and its
+        cost event written (productionCostEventId); with no rate in effect it is PcvUnvalued and listed for review, and the
+        cost close refuses the run until it is valued. Never a person's time. -->
+    <entity entity-name="MachineRuntimeEvent" package="mantle.work.production" cache="never">
+        <field name="machineRuntimeEventId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="runtimeModeEnumId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="hours" type="number-decimal" enable-audit-log="true"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="comments" type="text-medium"/>
+        <field name="workCenterRateId" type="id"/>
+        <field name="rateAmount" type="currency-precise"/>
+        <field name="amount" type="currency-precise"/>
+        <field name="amountUomId" type="id"/>
+        <field name="valuationStatusEnumId" type="id" enable-audit-log="true"/>
+        <field name="productionCostEventId" type="id"/>
+        <field name="startedByUserId" type="id"/>
+        <field name="stoppedByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" title="MachineRuntimeMode" related="moqui.basic.Enumeration" short-alias="mode">
+            <key-map field-name="runtimeModeEnumId"/></relationship>
+        <relationship type="one" related="mantle.work.production.WorkCenterRate" short-alias="workCenterRate"/>
+        <relationship type="one" title="Amount" related="moqui.basic.Uom" short-alias="amountUom">
+            <key-map field-name="amountUomId" related="uomId"/></relationship>
+        <relationship type="one" title="ProductionCostValuation" related="moqui.basic.Enumeration" short-alias="valuation">
+            <key-map field-name="valuationStatusEnumId"/></relationship>
+        <index name="MACHRUNEVT_OPERATION"><index-field name="operationWorkEffortId"/></index>
+        <index name="MACHRUNEVT_RUN"><index-field name="workEffortId"/></index>
+    </entity>
+
+    <!-- An operator's record of an instruction step (record#InstructionStep; design Instructions Evidence): who, when and
+        which instruction (the WorkEffortContent row in effect at the run's release) was acknowledged, or the evidence the
+        operation requires (its routing operation's methodRequiredEvidence) as a value with its unit, a file reference or a
+        note. A record of its own; the instruction row is never changed. -->
+    <entity entity-name="InstructionAcknowledgment" package="mantle.work.production" cache="never">
+        <field name="instructionAcknowledgmentId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="operationWorkEffortId" type="id"/>
+        <field name="workEffortContentId" type="id"/>
+        <field name="stepTypeEnumId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="acknowledgedDate" type="date-time"/>
+        <field name="valueText" type="text-medium"/>
+        <field name="valueUomId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
+            <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffortContent" short-alias="workEffortContent"/>
+        <relationship type="one" title="InstructionStepType" related="moqui.basic.Enumeration" short-alias="stepType">
+            <key-map field-name="stepTypeEnumId"/></relationship>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
+        <relationship type="one" title="Value" related="moqui.basic.Uom" short-alias="valueUom">
+            <key-map field-name="valueUomId" related="uomId"/></relationship>
+        <index name="INSTRACK_OPERATION"><index-field name="operationWorkEffortId"/></index>
+    </entity>
+</entities>
