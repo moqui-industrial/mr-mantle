@@ -308,7 +308,10 @@ function substitute(p) {
         if (pendingOf(run, "PchtSubstitution").some(row => row.productionRunLineId === line.productionRunLineId))
             denied("CHANGE_PENDING", "A substitute of " + productName(line.productId) + " waits for a supervisor already")
         const supervisor = access.has("PRODUCTION_SUPERVISE")
-        const needsApproval = productionPolicy().runPolicy(run).substituteApproval !== "N"
+        // after release a substitute is an amendment of the run's lines (§4: no change after release but a reviewed one), so
+        // it always waits for a supervisor; the policy's substituteApproval N lets a draft's apply at once
+        const needsApproval =
+            releasedStatuses.includes(run.statusId) || productionPolicy().runPolicy(run).substituteApproval !== "N"
         const change = call("create#" + CHANGE, {
             workEffortId: run.workEffortId,
             organizationPartyId: run.ownerPartyId,
@@ -617,7 +620,8 @@ function amendmentPlan(run, methodDate) {
         })
     }
     for (const line of methodLines.filter(row => !matched.has(row.productionRunLineId))) {
-        const keep = lineExecuted(line)
+        // a line a substitute stands in for stays with it, so the substitute keeps its original
+        const keep = lineExecuted(line) || substitutedOf(run, line).compare(0) > 0
         lineRows.push({
             change: keep ? "kept" : "removed",
             productionRunLineId: line.productionRunLineId,
@@ -631,7 +635,10 @@ function amendmentPlan(run, methodDate) {
         if (keep)
             findings.push({
                 code: "LINE_EXECUTED_KEPT",
-                message: productName(line.productId) + " has been issued; it stays though the method no longer has it"
+                message:
+                    productName(line.productId) +
+                    (lineExecuted(line) ? " has been issued" : " has a substitute") +
+                    "; it stays though the method no longer has it"
             })
     }
     const changes =

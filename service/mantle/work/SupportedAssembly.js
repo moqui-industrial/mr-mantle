@@ -114,7 +114,9 @@ function plan(userScope, p, lock = false) {
         ).filter(row => dec(row.quantity).compare(0) > 0)
         const issued = sum(issuances, row => row.quantity)
         const used = kits.multiply(per)
-        if (issued.compare(used) < 0)
+        // any difference, more or less: the slices would not be the ones KitCost valued (with no kit cost no value check
+        // would catch it)
+        if (issued.compare(used) !== 0)
             denied(
                 "BOM_CHANGED",
                 productName(component.toProductId) +
@@ -231,6 +233,12 @@ function reverse(p) {
         unissueAssemblyComponents: false,
         breakDownDate: started
     })
+    // the slices are for the whole quantity: a breakdown that lowered less would leave work in process
+    if (broken.quantityBrokenDown != null && dec(broken.quantityBrokenDown).compare(found.quantity) !== 0)
+        denied(
+            "BREAKDOWN_SHORT",
+            "Only " + text(broken.quantityBrokenDown) + " of the " + text(found.quantity) + " kits could be broken down"
+        )
     for (const row of found.sliceRows)
         call("mantle.product.AssetServices.cancel#AssetIssuance", {
             assetIssuanceId: row.assetIssuanceId,

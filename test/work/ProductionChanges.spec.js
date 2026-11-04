@@ -17,7 +17,8 @@ const LINE = "mantle.work.production.ProductionRunLine",
 const org = "PCH_ORG",
     other = "PCH_OTHER",
     plant = "PCH_PLANT",
-    strictPlant = "PCH_STRICT"
+    strictPlant = "PCH_STRICT",
+    freePlant = "PCH_FREE"
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
 const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
@@ -175,6 +176,7 @@ spec({
         user("PCH_OUTSIDER", ["PRODUCTION_VIEW", "PRODUCTION_PLAN", "PRODUCTION_SUPERVISE", "METHOD_APPROVE"], other)
         facility(plant)
         facility(strictPlant)
+        facility(freePlant)
         for (const productId of ["PCH_FIN", "PCH_RM1", "PCH_RM2", "PCH_ALT", "PCH_ODD"])
             call("create#mantle.product.Product", {
                 productId,
@@ -255,6 +257,13 @@ spec({
             changeReason: "Spec strict release"
         })
         if (policy.error) throw new Error("Policy failed: " + policy.error)
+        const free = run("pch_admin", P + "store#ProductionPolicy", {
+            organizationPartyId: org,
+            facilityId: freePlant,
+            substituteApproval: "N",
+            changeReason: "Spec substitutes without approval"
+        })
+        if (free.error) throw new Error("Policy failed: " + free.error)
         tick()
         login("john.doe")
         ec.artifactExecution.disableAuthz()
@@ -265,6 +274,8 @@ spec({
         }
         stock("PCH_RM1", 50, 2, strictPlant)
         stock("PCH_RM2", 50, 1, strictPlant)
+        stock("PCH_RM1", 50, 2, freePlant)
+        stock("PCH_RM2", 50, 1, freePlant)
         ec.artifactExecution.enableAuthz()
     },
     setup() {
@@ -450,6 +461,35 @@ feature("a supervisor's own substitute applies at once, and a refused one leaves
         n(x.original.stockQuantity) === 3
         x.change.statusId === "PchRefused"
         x.change.refusalReason === "Keep the rest on RM2"
+    }
+})
+
+feature("with substituteApproval N a draft's substitute applies at once, while a released run's waits for a supervisor", {
+    when() {
+        const ask = workEffortId =>
+            run("pch_planner", P + "substitute#ProductionMaterial", {
+                operationKey: key(),
+                workEffortId,
+                expectedRevision: revision(workEffortId),
+                productionRunLineId: lineOf(workEffortId, "PCH_RM2").productionRunLineId,
+                substituteProductId: "PCH_ALT",
+                quantity: 1,
+                reason: "Use the equivalent"
+            })
+        const draft = run("pch_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "PCH_FIN",
+            quantity: 3,
+            facilityId: freePlant
+        })
+        return {draft: ask(draft.workEffortId), releasedRun: ask(released(3, {facilityId: freePlant}))}
+    },
+    then(x) {
+        x.draft.error === ""
+        x.draft.result.resultCode === "APPLIED"
+        x.releasedRun.error === ""
+        x.releasedRun.result.resultCode === "REQUESTED"
     }
 })
 

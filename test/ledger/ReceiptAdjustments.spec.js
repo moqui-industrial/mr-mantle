@@ -1,8 +1,8 @@
 // The forward receipt repost (impl-manufacturing P9, F31, F32; ReceiptAdjustments.js): with the owner's
 // PartyAcctgPreference.forwardReceiptRepostEnabled off a changed receipt reposts as before (its transaction unposted, deleted and
-// posted again at the received date, and refused under a hard lock); with it on the posted history stays and one transaction
-// dated now carries the difference, once, in an open period and with the receipt's day under a hard lock. The organization is
-// the spec's own.
+// posted again at the received date; under a hard lock its new posting is refused, so the posted history is lost, F-P9-2,
+// Accounting's); with it on the posted history stays and one transaction dated now carries the difference, once, in an open
+// period and with the receipt's day under a hard lock. The organization is the spec's own.
 const org = "RAJ_ORG",
     facility = "RAJ_FAC"
 const TRANS = "mantle.ledger.transaction.AcctgTrans",
@@ -150,7 +150,7 @@ feature("with the flag on the posted history stays and one transaction dated now
     }
 })
 
-feature("under a hard lock of the receipt's day the delta posts today, and with the flag off the change is refused", {
+feature("under a hard lock of the receipt's day the delta posts today, and with the flag off the posting is lost (F-P9-2)", {
     when() {
         preference({postingGuardEnabled: "Y"})
         const lock = invoke("mantle.ledger.CloseServices.store#Lock", {
