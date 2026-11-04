@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Production downtime and its maintenance (design-manufacturing Downtime, §12 M6, D24; impl-manufacturing P11, F18): the
+    states of a ProductionDowntime, the kinds of a ResourceUnavailability (MT-07 uses the planned kind), the maintenance
+    request type and the corrective maintenance type that request#ProductionMaintenance writes. -->
+<entity-facade-xml type="seed">
+    <!-- a stop is open until its end is recorded; a correction marks the row it replaces Corrected (the new row is open or
+        closed by its own end) -->
+    <moqui.basic.StatusType statusTypeId="ProductionDowntime" description="Production downtime"/>
+    <moqui.basic.StatusItem statusId="PdtOpen" statusTypeId="ProductionDowntime" description="Open" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="PdtClosed" statusTypeId="ProductionDowntime" description="Closed" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="PdtCorrected" statusTypeId="ProductionDowntime" description="Corrected"
+            sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtOpen" toStatusId="PdtClosed"
+            transitionName="Close"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtOpen" toStatusId="PdtCorrected"
+            transitionName="Correct"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PdtClosed" toStatusId="PdtCorrected"
+            transitionName="Correct"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ResourceUnavailabilityKind" description="Resource Unavailability Kind"/>
+    <moqui.basic.Enumeration enumId="RukActual" enumTypeId="ResourceUnavailabilityKind" description="Actual outage"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="RukPlanned" enumTypeId="ResourceUnavailabilityKind" description="Planned block"
+            sequenceNum="2"/>
+
+    <!-- the intake trail of a maintenance request (a Request the plant triages) and the corrective work it asks for (the
+        AssetMaintenance the later Maintenance app adopts) -->
+    <moqui.basic.Enumeration enumId="RqtMaintenance" description="Maintenance" enumTypeId="RequestType"/>
+    <moqui.basic.Enumeration enumId="MntTpCorrective" description="Corrective Maintenance" enumTypeId="MaintenanceType"/>
+</entity-facade-xml>

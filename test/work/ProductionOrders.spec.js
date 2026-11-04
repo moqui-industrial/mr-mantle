@@ -503,7 +503,8 @@ feature("a released run held before start resumes as released; started, held and
         r.runningStatus == "WeInProgress"
         // the history names the hold's reason
         r.lifecycle.history.some(row => row.toStatusText === "On Hold" && row.changeReason === "Fixture repair")
-        r.lifecycle.actions.find(row => row.action === "complete").reasonCode == "COMPLETE_UNAVAILABLE"
+        // nothing is received yet: complete waits for the quantity reconciliation (impl-manufacturing P7)
+        r.lifecycle.actions.find(row => row.action === "complete").reasonCode == "QUANTITIES_UNRECONCILED"
     }
 })
 
