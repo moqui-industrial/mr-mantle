@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- A purchase request waiting for a decision (impl-purchasing P10; design-purchasing §4 RequestDetail, crosscut §3.11
+        PurchaseRequestApproval), seeded as P4's topics are (PurchaseApprovalSetupData.xml): one message per approver of the
+        step waiting (submit#PurchaseRequest and decide#PurchaseRequestApproval send them, and mark them read once the step is
+        decided); approve#NotificationMessage and refuse#NotificationMessage call mantle.order.PurchaseServices
+        approve#PurchaseSource and refuse#PurchaseSource as the user, which decide the request at the revision in the message
+        (sourceRevision, the time of its last line change) and refuse a changed one; a refusal needs a reason. The message
+        holds requestId, requestName, revisionText, organizationPartyId, organizationName, amountText (the lines' maximum
+        amounts) and stepText. The app that shows them sets the link (IronStone Purchasing: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PurchaseRequestApproval" inboxEnumId="NinNotifications"
+            description="Purchase request to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.PurchaseServices.approve#PurchaseSource"
+            refuseServiceName="mantle.order.PurchaseServices.refuse#PurchaseSource" refuseReasonRequired="Y"
+            titleTemplate="Approve purchase request ${requestId} ${requestName} of ${organizationName}, ${amountText} (${stepText})"/>
+</entity-facade-xml>

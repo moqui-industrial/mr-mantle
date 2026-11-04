@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase requests and their sourcing (design-purchasing §4 Requests, RequestDetail, RequestSourcing; crosscut §3.11;
+    impl-purchasing P10, R-PUR-01, R-PUR-06, F3, F4): included in mantle.request.RequestServices by name (service-include),
+    over PurchaseRequests.js. A purchase request is a Request of type RqtPurchase whose organization is its OrgInternal
+    RequestParty, one of the user's organizations (RECORD_UNAVAILABLE outside them); a requester works on their own request
+    (the filer, or one of its people), a buyer (PURCHASE_ORDER_EDIT) on any of the organization's. Its revision is the time of
+    the last change to a line's audit-logged product, quantity, unit, required date, supplier or cost centre.
+    mantle.order.OrderServices.create#PurchaseRequestOrder stays as it is for its Mantle callers (F4). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="create" noun="PurchaseRequest" allow-remote="false">
+        <description>A draft purchase request (RqtPurchase) of one of the user's organizations, filed by the user: the
+            organization as its OrgInternal RequestParty, the purpose (requestCategoryId), project (rootWorkEffortId),
+            facility, currency (the buying policy's, else the organization's accounting currency) and response date; its
+            lines are added with store#PurchaseRequestItem. Refuses an organization outside the user's (RECORD_UNAVAILABLE),
+            no name (NAME_REQUIRED), another organization's facility (FACILITY_INVALID) and an unknown currency, project or
+            purpose (CURRENCY_INVALID, PROJECT_INVALID, CATEGORY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="facilityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="assignToPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="requestId"/></out-parameters>
+        <actions>
+            <set field="requestId" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('create', context).requestId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PurchaseRequestItem" allow-remote="false">
+        <description>A line of a draft or submitted purchase request, new or changed: a product usable for buying
+            (check#ProductUsable, usage Purchase; PRODUCT_NOT_USABLE) or a description, the quantity and its unit (the
+            product's by default), the required date (the request's response date by default), a supplier the organization
+            may buy from (SUPPLIER_UNAVAILABLE), the cost centre (the organization or one rolling up to it,
+            COST_CENTER_INVALID), carried to the purchase order line, and the most to pay for the line (maximumAmount). A
+            change to a submitted request is a new revision, sent to its approvers again. On an approved request (In Progress)
+            a buyer chooses only a line's supplier and cost centre (REQUEST_APPROVED for another field). The request's
+            requester or PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses a closed request (REQUEST_CLOSED), a line not on it
+            (ITEM_UNAVAILABLE), a line with neither product nor description (ITEM_INVALID), an unknown unit (UOM_INVALID) and
+            a quantity that is not above zero (QUANTITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="description"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="costCenterId"/>
+            <parameter name="maximumAmount" type="BigDecimal"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="sourceRevision" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('storeItem', context)"/>
+            <set field="requestItemSeqId" from="stored.requestItemSeqId"/>
+            <set field="sourceRevision" from="stored.sourceRevision"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="PurchaseRequestItem" allow-remote="false">
+        <description>A draft purchase request's line removed. The request's requester or PURCHASE_ORDER_EDIT; refuses a
+            submitted request (REQUEST_NOT_DRAFT: change the line instead) and a line not on it (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestItemSeqId" required="true"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('removeItem', context)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="PurchaseRequest" allow-remote="false">
+        <description>Submit a draft purchase request for approval: Submitted, and the step waiting sent to its approvers on
+            the PurchaseRequestApproval topic (the organization's PasRequest approval policy rows for the lines' maximum
+            amounts, else one step by any purchase approver). The request's requester or PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses a request that is not a draft (NOT_DRAFT), one with no lines (NO_ITEMS) and a line
+            with no quantity or with neither product nor description (ITEM_INVALID).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="submitted" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('submit', context)"/>
+            <set field="statusId" from="submitted.statusId"/>
+            <set field="sourceRevision" from="submitted.sourceRevision"/>
+            <set field="notifiedCount" from="submitted.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="PurchaseRequestApproval" allow-remote="false">
+        <description>A purchase approver's decision on the step waiting of a submitted purchase request at its revision
+            (the PurchaseRequestApproval topic's approve#PurchaseSource and refuse#PurchaseSource call it). The decision is
+            kept as a PurchaseApprovalDecision bound to the revision. A refusal, with its reason, leaves the request
+            Submitted (Request has no Rejected status); an approval that leaves a step waiting sends it to its approvers. The
+            last step's approval makes each line one approved Requirement (RqTpProduct for a product line, else RqTpInternal;
+            RqmtStApproved) linked through RequirementRequestItem, with the organization as its OrgInternal RequirementParty,
+            reserves each line's maximum amount at the request stage where its account is under an approved budget
+            (mantle.other.BudgetServices.reserve#Commitment, keyed by the revision: a Stop refuses with BUDGET_EXCEEDED unless
+            a BUDGET_OVERRIDE holder gives budgetOverrideReason), and puts the request In Progress, ready to source. The same
+            operation key answers the first result. Requires PURCHASE_APPROVE (PERMISSION_DENIED); refuses a request outside
+            the user's organizations (RECORD_UNAVAILABLE), one not submitted (NOT_SUBMITTED), a revision that is not the
+            current one (STALE_REVISION), POLICY_MISSING, NOT_ELIGIBLE, SELF_APPROVAL (its filer or submitter),
+            ALREADY_DECIDED, SEPARATION_REQUIRED, REASON_REQUIRED and DECISION_INVALID.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="sourceRevision" type="Long"><description>The revision reviewed; the current one when
+                empty</description></parameter>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="budgetOverrideReason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="purchaseApprovalDecisionId"/>
+            <parameter name="statusId"/>
+            <parameter name="pendingStepText"/>
+            <parameter name="requirementIds" type="List"/>
+            <parameter name="reservedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('decide', context)"/>
+            <set field="sourceRevision" from="decided.sourceRevision"/>
+            <set field="purchaseApprovalDecisionId" from="decided.purchaseApprovalDecisionId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="pendingStepText" from="decided.pendingStepText"/>
+            <set field="requirementIds" from="decided.requirementIds"/>
+            <set field="reservedCount" from="decided.reservedCount"/>
+            <set field="alreadyApplied" from="decided.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="PurchaseRequest" allow-remote="false">
+        <description>Cancel an open purchase request with its reason (kept on the status change's audit row): its demand
+            not yet sourced is released (a requirement with nothing covered Rejected, one partly covered cut to what is
+            covered) with what is left of its budget commitments (release#ClosedSourceCommitments); the live purchase orders
+            made from it are named (orderIds) for the buyer to decide on, and stay. The request's requester or
+            PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses no reason (REASON_REQUIRED) and a completed or cancelled request
+            (REQUEST_CLOSED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="releasedCount" type="Integer"/>
+            <parameter name="orderIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="cancelled" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('cancel', context)"/>
+            <set field="statusId" from="cancelled.statusId"/>
+            <set field="releasedCount" from="cancelled.releasedCount"/>
+            <set field="orderIds" from="cancelled.orderIds"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PurchaseRequestProgress" allow-remote="false">
+        <description>A purchase request's progress (crosscut §3.11 PurchaseSourcingProgress; CX-REQUEST: a purchase request
+            follows its sourcing, never its linked work): each line's requested quantity and unit, supplier, cost centre and
+            maximum, the approved quantity of its requirement, what is sourced (RequirementSupply), ordered and received on its
+            purchase order lines (RequestItemOrder) and what remains to source; the request's revision, its approval (state,
+            step waiting, decisions, whether the user may decide) and the actions the user may take. Supplier prices are not
+            in it. The request's people, or PURCHASE_ORDER_EDIT, PURCHASE_APPROVE, SUPPLY_PLAN_VIEW or SUPPLY_PLAN_RUN
+            (PERMISSION_DENIED); refuses a request outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="progress" type="Map"/></out-parameters>
+        <actions>
+            <set field="progress" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('progress', context)"/>
+        </actions>
+    </service>
+    <service verb="define" noun="PurchaseSourcingDemand" type="interface">
+        <description>The approved request lines a sourcing takes: by key, by line with its supplier, quantity and route, or
+            every line of the requests.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="requestIds" type="List"/>
+            <parameter name="requestItemKeys"><description>requestId:requestItemSeqId, a list or comma separated</description>
+            </parameter>
+            <parameter name="lines" type="List"><description>Maps of requestId, requestItemSeqId and optionally
+                supplierPartyId, quantity (at most what remains; what remains by default) and route (po, or dropship for a
+                line for a customer order line)</description></parameter>
+            <parameter name="operationKey"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="PurchaseSourcing" allow-remote="false">
+        <description>The sourcing of approved request lines explained, writing nothing (design RequestSourcing SourceDemand
+            and SourceGroups): each line's required, sourced and remaining quantity, supplier and route, ready or why not
+            (NOT_APPROVED, ALREADY_SOURCED, MISSING_SUPPLIER, PRODUCT_REQUIRED, NO_CUSTOMER_LINE; EXISTING once this operation
+            sourced it), and the supplier groups a conversion makes on the result envelope, each with the buying policy's
+            supplier check (a Stop fails it, a Warn is its message) and, for a supplier-price reader, its lines' prices and
+            amount. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED); refuses no line (DEMAND_REQUIRED).</description>
+        <implements service="mantle.request.RequestServices.define#PurchaseSourcingDemand"/>
+        <out-parameters>
+            <parameter name="demandRows" type="List"/>
+            <parameter name="groupRows" type="List"><description>The result envelope of each group: operationId,
+                supplierGroupId, supplierPartyId, sourceRevision, requestItemKeys, requirementIds, requestedQuantity,
+                allocatedQuantity, quantityUomId, resultStatus (READY, EXISTING, FAILED), orderId, orderPartSeqId,
+                rfqRequestId, errorCode, errorMessage, retryable; a ready group's supplierResult, supplierMessage, lineRows,
+                amountText and dueText.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="previewed" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('preview', context)"/>
+            <set field="demandRows" from="previewed.demandRows"/>
+            <set field="groupRows" from="previewed.groupRows"/>
+        </actions>
+    </service>
+    <service verb="convert" noun="PurchaseSourcing" allow-remote="false">
+        <description>Source approved request lines to draft purchase orders (design RequestSourcing ConvertDemand; R-PUR-01,
+            R-PUR-06), in place of create#PurchaseRequestOrder for BOSS (F4): one draft purchase order (OrderOpen) per
+            organization, supplier, receiving facility and route, each group in its own transaction
+            (convert#PurchaseSourcingGroup) under the lock of its requirements' remaining quantity, made through
+            create#PurchaseOrder and store#PurchaseOrderItem (the supplier check, product usability, the supplier's price and
+            the line's cost centre and unit), with a RequestItemOrder and a RequirementSupply for each line; a line for a
+            customer order line may take the drop-ship route (route#OrderItemToDropShip). A group fails by name with its
+            reason (MISSING_SUPPLIER for lines with no supplier, ALREADY_SOURCED, a supplier Stop, PRICE_UNAVAILABLE...) and
+            the others go on; a retry with the same operation key repeats only the failures, the earlier successes answering
+            their orders (EXISTING); another operation is refused the quantity already sourced (ALREADY_SOURCED). Nothing is
+            placed or approved (PLACE_NOT_ALLOWED for placeAndApproveOrders). Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED);
+            refuses no operation key (OPERATION_KEY_REQUIRED) and no line (DEMAND_REQUIRED).</description>
+        <implements service="mantle.request.RequestServices.define#PurchaseSourcingDemand"/>
+        <in-parameters>
+            <parameter name="placeAndApproveOrders"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>Each group's result envelope (resultStatus CREATED, EXISTING
+                or FAILED), as preview#PurchaseSourcing's groupRows.</description></parameter>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="converted" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('convert', context)"/>
+            <set field="results" from="converted.results"/>
+            <set field="createdCount" from="converted.createdCount"/>
+            <set field="existingCount" from="converted.existingCount"/>
+            <set field="failedCount" from="converted.failedCount"/>
+        </actions>
+    </service>
+    <service verb="convert" noun="PurchaseSourcingGroup" allow-remote="false">
+        <description>Internal to convert#PurchaseSourcing, which runs it in a transaction of its own per supplier group: the
+            group's requirements locked in id order, each line read again (its refusal by name), the draft purchase order and
+            its lines (or the drop-ship route) and the lineage. Requires PURCHASE_ORDER_EDIT.</description>
+        <in-parameters>
+            <parameter name="lines" type="List" required="true"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="allocatedQuantity"/>
+        </out-parameters>
+        <actions>
+            <set field="group" from="ec.resource.script('component://mr-mantle/service/mantle/request/PurchaseRequests.js')
+                    .execute('convertGroup', context)"/>
+            <set field="orderId" from="group.orderId"/>
+            <set field="orderPartSeqId" from="group.orderPartSeqId"/>
+            <set field="allocatedQuantity" from="group.allocatedQuantity"/>
+        </actions>
+    </service>
+</services>
