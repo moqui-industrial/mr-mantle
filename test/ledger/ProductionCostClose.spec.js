@@ -254,6 +254,8 @@ spec({
         user("PCC_ESTIMATOR", ["PRODUCTION_VIEW", "PRODUCT_COST_VIEW", "PRODUCTION_COST_REVIEW"])
         user("PCC_GL", ["ACCOUNTING_VIEW", "ACCOUNTING_GL_POST"])
         user("PCC_POSTER", ["ACCOUNTING_VIEW", "PRODUCTION_COST_POST"])
+        // a production and financial reader of the cost report (impl-manufacturing P16's re-verify after P15)
+        user("PCC_REPORT", ["PRODUCTION_VIEW", "ACCOUNTING_VIEW"])
         user("PCC_ADMIN", ["ACCOUNTING_ADMIN", "ACCOUNTING_VIEW"])
         user("PCC_OTHER_POSTER", ["ACCOUNTING_VIEW", "PRODUCTION_COST_POST", "ACCOUNTING_GL_POST"], other)
         call("create#mantle.facility.Facility", {
@@ -593,6 +595,33 @@ feature("the close posts once, closing the run in the same transaction, and a re
                 row => row.viewedDate != null
             )
         )
+    }
+})
+
+// P16's cost report reads the posted close (impl-manufacturing P16 review): the run closed, its output and by-product
+// allocation, its variance (production and scrap) and the close's transaction
+feature("the cost report reads a posted close: closed, the output allocation, the variance and its transaction", {
+    when() {
+        const r = state.byRun
+        const out = run("pcc_report", "mantle.work.ProductionReportServices.get#ProductionCostReport", {
+            workEffortId: r.workEffortId
+        })
+        const allocations = rows(ALLOCATION, {workEffortId: r.workEffortId})
+        const sumOf = destinations =>
+            allocations
+                .filter(row => destinations.includes(row.destinationEnumId))
+                .reduce((sum, row) => sum + Number(row.allocatedAmount.toNumber()), 0)
+        const after = one(WORK, {workEffortId: r.workEffortId})
+        return {out, row: (out.costRows || [])[0] || {}, sumOf, after}
+    },
+    then({out, row, sumOf, after}) {
+        out.error == ""
+        out.financialRead == true
+        row.closeText == "Closed"
+        row.allocatedOutput != null && sumOf(["PcdOutput", "PcdByproduct"]) != 0
+        near(row.allocatedOutput, sumOf(["PcdOutput", "PcdByproduct"]))
+        near(row.varianceAmount, sumOf(["PcdVariance", "PcdScrap"]))
+        row.glText.includes(after.productionCostCloseTransId)
     }
 })
 
