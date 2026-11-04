@@ -953,7 +953,9 @@ function suggestionRow(row, run, stale, names) {
             ? names.party(row.supplierPartyId)
             : row.sourceFacilityId
               ? "From " + names.facility(row.sourceFacilityId)
-              : row.productBomId || "",
+              : row.productBomId
+                ? "BOM " + row.productBomId
+                : "",
         exceptionCode: row.exceptionCode || null,
         exceptionMessage: row.exceptionMessage || null,
         warningText: warnings.map(code => warningLabels[code] || code).join(", "),
