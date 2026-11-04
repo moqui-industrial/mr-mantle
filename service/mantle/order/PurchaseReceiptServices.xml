@@ -22,8 +22,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The nightly late-receipt notice (ServiceJob notify_LateReceipts, topic PurchaseLateReceipt): each
             purchase order part with a stock line still to come whose due date (the line's required date, else the part's
             promised delivery, else its open receipt's expected arrival) is before today is told once per due date to its
-            buying organization's users holding PURCHASE_ORDER_EDIT, naming the late lines and what is still to come. A part
-            that fails is logged and the others go on. Optionally for one organization, and as of a time.</description>
+            buying organization's users holding PURCHASE_ORDER_EDIT, naming the late lines and what is still to come. Without
+            an organization each internal organization runs in its own transaction, and one that fails is logged while the
+            others go on; within one, a part that fails is logged and the others go on. Optionally for one organization,
+            and as of a time.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="asOf" type="Timestamp"/>

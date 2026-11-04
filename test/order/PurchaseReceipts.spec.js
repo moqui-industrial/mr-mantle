@@ -1,7 +1,7 @@
 // Purchasing's receipt progress (impl-purchasing P5; design-purchasing §9 Receipts): a purchase line's expected, received,
 // accepted, rejected and held quantities kept apart (an inspection's rejection moves units from accepted to rejected, and
-// held is the quality record's), its due date and lateness; and the late-receipt notice, sent once per order part and due
-// date to the organization's buyers, never for a line received in full or not yet due. Standalone: a spec-local
+// held is the quality record's; a re-inspection's acceptance moves units back), its due date and lateness; and the late-receipt notice, sent once per order part and due
+// date to the organization's buyers (the job runs each organization in its own transaction), never for a line received in full or not yet due. Standalone: a spec-local
 // organization, supplier, product, buyer and orders written as rows, with artifact authorization disabled.
 // Run: ./moq test mr-mantle --spec PurchaseReceipts
 const prefix = "PUR_RCPT_SPEC"
@@ -126,6 +126,42 @@ spec({
             quantityAccepted: 7,
             quantityRejected: 1
         })
+        // reworked: 6 received, the first inspection rejected 2 and kept them held for rework; the re-inspection accepted 1
+        approvedOrder(prefix + "_REWORK", 6, now + 7 * DAY)
+        received(prefix + "_REWORK", prefix + "_R3", 6)
+        const inspection = (id, fields) =>
+            call(
+                "create#mantle.product.quality.QualityInspection",
+                Object.assign(
+                    {
+                        qualityInspectionId: id,
+                        organizationPartyId: org,
+                        facilityId: facility,
+                        inspectionContextEnumId: "QicReceipt",
+                        sourceTypeEnumId: "QisReceipt",
+                        assetReceiptId: prefix + "_R3",
+                        orderId: prefix + "_REWORK",
+                        orderItemSeqId: "01",
+                        productId: product
+                    },
+                    fields
+                )
+            )
+        inspection(prefix + "_QI2", {
+            statusId: "QiDisposed",
+            quantity: 6,
+            heldQuantity: 0,
+            quantityAccepted: 4,
+            quantityRejected: 2
+        })
+        inspection(prefix + "_QI3", {
+            statusId: "QiSubmitted",
+            quantity: 2,
+            heldQuantity: 2,
+            quantityAccepted: 1,
+            quantityRejected: 1,
+            previousInspectionId: prefix + "_QI2"
+        })
         // due three days ago but received in full; and due next week
         approvedOrder(prefix + "_DONE", 4, now - 3 * DAY)
         received(prefix + "_DONE", prefix + "_R2", 4)
@@ -140,9 +176,15 @@ feature("a line keeps expected, received, accepted, rejected and held apart, and
     when() {
         const found = receipts().lines({organizationPartyIds: [org]}).lines
         const line = orderId => found.find(row => row.orderId === orderId) || {}
-        return {late: line(prefix + "_LATE"), done: line(prefix + "_DONE"), soon: line(prefix + "_SOON"), other: found.length}
+        return {
+            late: line(prefix + "_LATE"),
+            rework: line(prefix + "_REWORK"),
+            done: line(prefix + "_DONE"),
+            soon: line(prefix + "_SOON"),
+            other: found.length
+        }
     },
-    then({late, done, soon, other}) {
+    then({late, rework, done, soon, other}) {
         String(late.expectedQuantity) == "10"
         String(late.receivedQuantity) == "8"
         String(late.acceptedQuantity) == "7"
@@ -150,20 +192,21 @@ feature("a line keeps expected, received, accepted, rejected and held apart, and
         String(late.heldQuantity) == "8"
         String(late.remainingQuantity) == "2"
         late.late == true
+        String(rework.acceptedQuantity) == "5"
+        String(rework.rejectedQuantity) == "1"
+        String(rework.heldQuantity) == "2"
         String(done.remainingQuantity) == "0"
         done.late == false
         soon.late == false
-        other == 3
+        other == 4
     }
 })
 
 feature("the late-receipt notice tells the organization's buyers once per order part and due date", {
     when() {
-        const first = ec.service
-            .sync()
-            .name("mantle.order.PurchaseReceiptServices.notify#LateReceipts")
-            .parameters({organizationPartyId: org})
-            .call()
+        // the job's run (every internal organization, each in its own transaction), then the organization's own
+        ec.service.sync().name("mantle.order.PurchaseReceiptServices.notify#LateReceipts").parameters({}).call()
+        const fromJob = notices(prefix + "_LATE").length
         const second = ec.service
             .sync()
             .name("mantle.order.PurchaseReceiptServices.notify#LateReceipts")
@@ -175,11 +218,10 @@ feature("the late-receipt notice tells the organization's buyers once per order 
                   row => row.userId
               )
             : []
-        return {first, second, message, recipients, done: notices(prefix + "_DONE"), soon: notices(prefix + "_SOON")}
+        return {fromJob, second, message, recipients, done: notices(prefix + "_DONE"), soon: notices(prefix + "_SOON")}
     },
-    then({first, second, message, recipients, done, soon}) {
-        first.notifiedCount == 1
-        first.lateCount == 1
+    then({fromJob, second, message, recipients, done, soon}) {
+        fromJob == 1
         second.notifiedCount == 0
         JSON.parse(message.messageJson).lines[0].remaining == "2"
         recipients == [buyer]

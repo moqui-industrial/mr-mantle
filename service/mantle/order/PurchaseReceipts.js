@@ -25,6 +25,15 @@ const DAY = 86400000
 
 const dec = value => toDecimal(value ?? 0)
 const zero = () => toDecimal(0)
+const groupBy = (values, keyOf) => {
+    const groups = new Map()
+    for (const value of values) {
+        const key = keyOf(value)
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(value)
+    }
+    return groups
+}
 const unique = values => [...new Set(values.filter(value => value != null && value !== ""))]
 const text = value => ec.l10n.format(dec(value), "#,##0.###")
 const internalIds = () => rows("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).map(row => row.partyId)
@@ -38,12 +47,24 @@ function startOfToday(asOf) {
     return lib.ms(ec.l10n.parseTimestamp(day + " 00:00:00", "yyyy-MM-dd HH:mm:ss"))
 }
 
+// A read of another service in its own error frame: a failure throws here and leaves no error message behind, so the
+// lines after it (and the caller's later service calls) go on.
+function guarded(name, parameters) {
+    ec.message.pushErrors()
+    try {
+        return lib.call(name, parameters)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
+
 // Stock units in one unit of the line's quantity: 1 when the line has no unit or the product's own, else Mantle's factor
 // (a unit it cannot relate counts as 1, as get#OrderItemStockFactor answers).
 function factorOf(item, product) {
     if (!item.quantityUomId || !product?.amountUomId || item.quantityUomId === product.amountUomId) return toDecimal(1)
     try {
-        const unit = lib.call("mantle.order.OrderServices.get#OrderItemStockFactor", {orderItem: item})
+        const unit = guarded("mantle.order.OrderServices.get#OrderItemStockFactor", {orderItem: item})
         return dec(unit.stockFactor ?? 1)
     } catch (error) {
         ec.logger.warn("Stock factor of " + item.orderId + ":" + item.orderItemSeqId + ": " + error.message)
@@ -70,10 +91,12 @@ function openReceipts(items) {
                   .list()
           )
         : []
+    const itemByKey = new Map(items.map(item => [item.orderId + ":" + item.orderItemSeqId, item]))
+    const sourcesByShipment = groupBy(sources, row => row.shipmentId)
     const byPart = {}
     for (const shipment of open) {
-        for (const source of sources.filter(row => row.shipmentId === shipment.shipmentId)) {
-            const item = items.find(row => row.orderId === source.orderId && row.orderItemSeqId === source.orderItemSeqId)
+        for (const source of sourcesByShipment.get(shipment.shipmentId) || []) {
+            const item = itemByKey.get(source.orderId + ":" + source.orderItemSeqId)
             if (!item) continue
             const key = item.orderId + ":" + item.orderPartSeqId
             if (!byPart[key]) byPart[key] = {shipmentId: shipment.shipmentId, estimatedArrivalDate: shipment.estimatedArrivalDate}
@@ -82,27 +105,36 @@ function openReceipts(items) {
     return byPart
 }
 
-// What each line's receipts' inspections decided (the receipt's first inspection, not a re-inspection, which shows through
-// the held quantity): rejected units and units not decided yet, by "orderId:orderItemSeqId".
+// What each line's receipts' inspections decided: rejected units and units not decided yet, by "orderId:orderItemSeqId".
+// A first inspection's rejection moves units from accepted to rejected, and its units are undecided until it is
+// submitted. A re-inspection (previousInspectionId) inspects stock its earlier inspection rejected and still holds (a
+// disposition that kept it quarantined, such as rework): while it is undecided its units leave rejected for undecided,
+// and once decided what it accepts goes back to accepted (what it rejects stays rejected).
 function inspectionSplit(receipts) {
     const receiptIds = receipts.map(row => row.assetReceiptId)
     const split = {}
     if (!receiptIds.length) return split
+    const receiptById = new Map(receipts.map(row => [row.assetReceiptId, row]))
     const inspections = Array.from(
-        find(INSPECTION)
-            .condition("assetReceiptId", "in", receiptIds)
-            .condition("statusId", "not-equals", "QiCancelled")
-            .condition("previousInspectionId", "is-null", null)
-            .list()
+        find(INSPECTION).condition("assetReceiptId", "in", receiptIds).condition("statusId", "not-equals", "QiCancelled").list()
     )
     for (const inspection of inspections) {
-        const receipt = receipts.find(row => row.assetReceiptId === inspection.assetReceiptId)
+        const receipt = receiptById.get(inspection.assetReceiptId)
         const key = receipt.orderId + ":" + receipt.orderItemSeqId
         const entry = split[key] || (split[key] = {rejected: zero(), undecided: zero(), inspectionIds: []})
         entry.inspectionIds.push(inspection.qualityInspectionId)
-        if (decidedInspection.includes(inspection.statusId)) entry.rejected = entry.rejected.add(dec(inspection.quantityRejected))
-        else entry.undecided = entry.undecided.add(dec(inspection.quantity))
+        const decided = decidedInspection.includes(inspection.statusId)
+        if (!inspection.previousInspectionId) {
+            if (decided) entry.rejected = entry.rejected.add(dec(inspection.quantityRejected))
+            else entry.undecided = entry.undecided.add(dec(inspection.quantity))
+        } else if (decided) {
+            entry.rejected = entry.rejected.subtract(dec(inspection.quantityAccepted))
+        } else {
+            entry.rejected = entry.rejected.subtract(dec(inspection.quantity))
+            entry.undecided = entry.undecided.add(dec(inspection.quantity))
+        }
     }
+    for (const entry of Object.values(split)) if (entry.rejected.compare(0) < 0) entry.rejected = zero()
     return split
 }
 
@@ -110,7 +142,7 @@ function inspectionSplit(receipts) {
 // receipt with no inspection held whole).
 function heldOf(orderId, orderItemSeqId) {
     try {
-        return dec(lib.call("mantle.product.QualityServices.get#SourceInspectionStatus", {orderId, orderItemSeqId}).heldQuantity)
+        return dec(guarded("mantle.product.QualityServices.get#SourceInspectionStatus", {orderId, orderItemSeqId}).heldQuantity)
     } catch (error) {
         ec.logger.error("Held quantity of " + orderId + ":" + orderItemSeqId + ": " + error.message)
         return null
@@ -121,10 +153,12 @@ function heldOf(orderId, orderItemSeqId) {
 // statuses (the open ones by default; "closed" adds the completed), narrowed to vendorPartyId, orderId or facilityId; each
 // with its quantities in stock units, its open receipt, its due date (the line's required date, else the part's promised
 // delivery, else the open receipt's expected arrival) and whether it is late (due before today and something still to
-// come). excludedVendorIds leaves out suppliers the caller's user may not work with. At most lineCap lines (truncated).
+// come). excludedVendorIds leaves out suppliers the caller's user may not work with. withoutHeld skips the held quantity
+// (heldQuantity null), a quality read per received line, for a caller that needs only lateness (Home's count, the Late
+// views, the notice). At most lineCap lines (truncated).
 function lines(p) {
-    const organizations = p.organizationPartyIds == null ? null : Array.from(p.organizationPartyIds)
-    if (organizations && !organizations.length) return {lines: [], truncated: false}
+    const organizations = p.organizationPartyIds == null ? internalIds() : Array.from(p.organizationPartyIds)
+    if (!organizations.length) return {lines: [], truncated: false}
     const statuses = p.includeClosed ? openStatuses.concat(closedStatuses) : openStatuses
     let partQuery = find(PART_VIEW)
         .condition("partStatusId", "in", statuses)
@@ -133,15 +167,14 @@ function lines(p) {
         .selectField("entryDate,orderName")
         .orderBy("-entryDate")
         .orderBy("orderId")
-    partQuery = organizations
-        ? partQuery.condition("customerPartyId", "in", organizations)
-        : partQuery.condition("customerPartyId", "in", internalIds())
+    partQuery = partQuery.condition("customerPartyId", "in", organizations)
     if (p.orderId) partQuery = partQuery.condition("orderId", String(p.orderId))
     if (p.vendorPartyId) partQuery = partQuery.condition("vendorPartyId", String(p.vendorPartyId))
     if (p.facilityId) partQuery = partQuery.condition("facilityId", String(p.facilityId))
     const excluded = Array.from(p.excludedVendorIds || [])
     if (excluded.length) partQuery = partQuery.condition("vendorPartyId", "not-in", excluded)
     const parts = Array.from(partQuery.limit(lineCap).list())
+    const partByKey = new Map(parts.map(part => [part.orderId + ":" + part.orderPartSeqId, part]))
     const orderIds = unique(parts.map(part => part.orderId))
     if (!orderIds.length) return {lines: [], truncated: false}
     let items = Array.from(
@@ -152,7 +185,7 @@ function lines(p) {
             .orderBy("orderId")
             .orderBy("orderItemSeqId")
             .list()
-    ).filter(item => parts.some(part => part.orderId === item.orderId && part.orderPartSeqId === item.orderPartSeqId))
+    ).filter(item => partByKey.has(item.orderId + ":" + item.orderPartSeqId))
     if (p.orderItemSeqId) items = items.filter(item => item.orderItemSeqId === String(p.orderItemSeqId))
     const truncated = items.length > lineCap
     items = items.slice(0, lineCap)
@@ -165,14 +198,15 @@ function lines(p) {
     // a service line receives nothing (it is accepted, accept#ServiceItem)
     items = items.filter(item => products[item.productId] && products[item.productId].productTypeEnumId !== "PtService")
     const receipts = Array.from(find(RECEIPT).condition("orderId", "in", orderIds).list())
+    const receiptsByLine = groupBy(receipts, row => row.orderId + ":" + row.orderItemSeqId)
     const split = inspectionSplit(receipts)
     const receiptsByPart = openReceipts(items)
     const today = startOfToday(p.asOf)
     const answer = items.map(item => {
-        const part = parts.find(row => row.orderId === item.orderId && row.orderPartSeqId === item.orderPartSeqId)
+        const part = partByKey.get(item.orderId + ":" + item.orderPartSeqId)
         const product = products[item.productId]
         const factor = factorOf(item, product)
-        const own = receipts.filter(row => row.orderItemSeqId === item.orderItemSeqId && row.orderId === item.orderId)
+        const own = receiptsByLine.get(item.orderId + ":" + item.orderItemSeqId) || []
         const dockAccepted = own.reduce((sum, row) => sum.add(dec(row.quantityAccepted)), zero())
         const dockRejected = own.reduce((sum, row) => sum.add(dec(row.quantityRejected)), zero())
         const inspected = split[item.orderId + ":" + item.orderItemSeqId] || {
@@ -188,7 +222,7 @@ function lines(p) {
         if (remaining.compare(0) < 0) remaining = zero()
         let accepted = dockAccepted.subtract(inspected.rejected).subtract(inspected.undecided)
         if (accepted.compare(0) < 0) accepted = zero()
-        const held = own.length ? heldOf(item.orderId, item.orderItemSeqId) : zero()
+        const held = p.withoutHeld ? null : own.length ? heldOf(item.orderId, item.orderItemSeqId) : zero()
         const receipt = receiptsByPart[item.orderId + ":" + item.orderPartSeqId] || null
         const dueDate = item.requiredByDate || part.estimatedDeliveryDate || receipt?.estimatedArrivalDate || null
         const open = openStatuses.includes(part.partStatusId) && remaining.compare(0) > 0
@@ -228,7 +262,7 @@ function lines(p) {
 
 // The order parts with a late line, by "orderId:orderPartSeqId": the earliest due date, the late lines and their remaining.
 function lateParts(p) {
-    const found = lines(p)
+    const found = lines(Object.assign({}, p, {withoutHeld: true}))
     const parts = {}
     for (const line of found.lines.filter(row => row.late)) {
         const key = line.orderId + ":" + line.orderPartSeqId
@@ -289,9 +323,35 @@ function buyersOf(organizationPartyId) {
 }
 
 // notify#LateReceipts: once for each order part and due date, the buyers of its organization hear that it is late (the late
-// lines and what is still to come). A part that fails is logged and the others go on.
+// lines and what is still to come). Without an organization (the job) each internal organization is its own call, in its own
+// transaction: one that fails is logged and the others go on. Within one, a part that fails is logged and the others go on.
 function notifyLate(p) {
-    const found = lateParts({organizationPartyIds: p.organizationPartyId ? [p.organizationPartyId] : null, asOf: p.asOf})
+    if (!p.organizationPartyId) {
+        let notified = 0,
+            late = 0
+        for (const organizationPartyId of unique(internalIds())) {
+            try {
+                const out = lib.probe("mantle.order.PurchaseReceiptServices.notify#LateReceipts", {
+                    organizationPartyId,
+                    asOf: p.asOf || null
+                })
+                notified += Number(out.notifiedCount || 0)
+                late += Number(out.lateCount || 0)
+            } catch (error) {
+                ec.logger.error("Late receipt notices of organization " + organizationPartyId + ": " + error.message)
+            }
+        }
+        return {notifiedCount: notified, lateCount: late}
+    }
+    const found = lateParts({organizationPartyIds: [String(p.organizationPartyId)], asOf: p.asOf})
+    if (found.truncated)
+        ec.logger.warn(
+            "Late receipt notices of organization " +
+                p.organizationPartyId +
+                ": more than " +
+                lineCap +
+                " open lines, the rest wait"
+        )
     let notified = 0
     for (const part of found.parts) {
         try {
@@ -324,6 +384,7 @@ function notifyLate(p) {
                 .send()
             notified++
         } catch (error) {
+            ec.message.clearErrors()
             ec.logger.error("Late receipt notice of order " + part.orderId + ":" + part.orderPartSeqId + ": " + error.message)
         }
     }
