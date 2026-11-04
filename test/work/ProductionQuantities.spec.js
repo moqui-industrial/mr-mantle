@@ -309,12 +309,16 @@ feature(
             const issuancesBefore = rows(ISSUANCE, {workEffortId: r.workEffortId}).length
             const receiptsBefore = rows(RECEIPT, {workEffortId: r.workEffortId}).length
             const assetBefore = n(one(ASSET, {assetId: state.stock.rm1}).quantityOnHandTotal)
-            const scrapped = loss("ppq_operator", r.workEffortId, {
+            const scrapKey = key()
+            const scrapParameters = {
                 lossTypeEnumId: "PltComponentScrap",
                 productionRunLineId: r.rm1,
                 quantity: 2,
                 reasonCode: "PPQ_DROP"
-            })
+            }
+            const scrapped = loss("ppq_operator", r.workEffortId, scrapParameters, scrapKey)
+            // a retry with the same key answers the first: no second loss or cost event
+            const scrapRetry = loss("ppq_operator", r.workEffortId, scrapParameters, scrapKey)
             const tooMuch = loss("ppq_operator", r.workEffortId, {
                 lossTypeEnumId: "PltComponentScrap",
                 productionRunLineId: r.rm1,
@@ -328,6 +332,8 @@ feature(
                 reasonCode: "PPQ_SPILL"
             })
             const reader = loss("ppq_reader", r.workEffortId, {lossTypeEnumId: "PltProcessLoss", quantity: 1, reason: "x"})
+            const readerRecord = record("ppq_reader", r.workEffortId, {processLoss: 1, reason: "x"})
+            const outsiderRecord = record("ppq_outsider", r.workEffortId, {processLoss: 1, reason: "x"})
             return {
                 r,
                 recorded,
@@ -335,6 +341,13 @@ feature(
                 tooMuch,
                 wrongReason,
                 reader,
+                readerRecord,
+                outsiderRecord,
+                scrapRetry,
+                losses: rows(LOSS, {workEffortId: r.workEffortId}).length,
+                scrapEvents: rows(COST, {workEffortId: r.workEffortId}).filter(
+                    row => row.costEventTypeEnumId === "PcetMaterialScrap"
+                ).length,
                 issuancesBefore,
                 receiptsBefore,
                 issuancesAfter: rows(ISSUANCE, {workEffortId: r.workEffortId}).length,
@@ -370,6 +383,13 @@ feature(
             x.tooMuch.error.includes("QUANTITY_EXCEEDS_ISSUED")
             x.wrongReason.error.includes("REASON_INVALID")
             x.reader.error.includes("PERMISSION_DENIED")
+            x.readerRecord.error.includes("PERMISSION_DENIED")
+            x.outsiderRecord.error.includes("RECORD_UNAVAILABLE")
+            x.scrapRetry.result.alreadyApplied == true
+            x.scrapRetry.result.productionLossId == x.scrapped.result.productionLossId
+            // the process loss and the component scrap, each once
+            x.losses == 2
+            x.scrapEvents == 1
             const output = outputRow(x.read)
             output.target == "10"
             output.good == "6"
@@ -541,6 +561,17 @@ feature("output beyond the overproduction tolerance waits for a supervisor, then
         })
         const eventId = beyond.result?.productionQuantityEventId
         const notices = rows("moqui.security.user.NotificationMessage", {topic: "ProductionOverproduction", recordId: eventId})
+        const recipients = notices.length
+            ? rows("moqui.security.user.NotificationMessageUser", {
+                  notificationMessageId: notices[0].notificationMessageId
+              }).map(row => row.userId)
+            : []
+        // the decision names the work order the screen checked: a request of another one is refused
+        const otherRun = run("ppq_super", P + "approve#ProductionException", {
+            operationKey: key(),
+            workEffortId: draft(1),
+            productionQuantityEventId: eventId
+        })
         const decide = (username, decision = "approve") =>
             run(username, P + "approve#ProductionException", {operationKey: key(), productionQuantityEventId: eventId, decision})
         const operatorApproves = decide("ppq_operator")
@@ -554,6 +585,8 @@ feature("output beyond the overproduction tolerance waits for a supervisor, then
             beyond,
             direct,
             notices,
+            recipients,
+            otherRun,
             operatorApproves,
             outsider,
             approved,
@@ -571,6 +604,11 @@ feature("output beyond the overproduction tolerance waits for a supervisor, then
         x.beyond.result.excess == "2"
         x.direct.error.includes("OVER_RECEIPT")
         x.notices.length == 1
+        // to the organization's supervisors only
+        x.recipients.includes("PPQ_SUPER")
+        !x.recipients.includes("PPQ_OPERATOR")
+        !x.recipients.includes("PPQ_OUTSIDER")
+        x.otherRun.error.includes("RECORD_UNAVAILABLE")
         x.operatorApproves.error.includes("PERMISSION_DENIED")
         x.outsider.error.includes("RECORD_UNAVAILABLE")
         x.approved.error == ""

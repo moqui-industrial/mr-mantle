@@ -868,6 +868,7 @@ function recordQuantity(p) {
 // overproduction request approved (the line may take that much more) or refused. The decision marks the notices read.
 function approveException(p) {
     const begun = posting.begin(p, "ProductionException", "PRODUCTION_SUPERVISE", [
+        "workEffortId",
         "productionLossId",
         "productionQuantityEventId",
         "decision",
@@ -881,7 +882,9 @@ function approveException(p) {
     const userScope = posting.scope()
     if (!blank(p.productionLossId)) {
         const loss = find(LOSS, {productionLossId: p.productionLossId}).forUpdate(true).one()
-        if (!loss) denied("RECORD_UNAVAILABLE", "Loss " + p.productionLossId + " is not available")
+        // a loss of the work order named, when one is (the screen's record check is of that work order)
+        if (!loss || (!blank(p.workEffortId) && loss.workEffortId !== String(p.workEffortId).trim()))
+            denied("RECORD_UNAVAILABLE", "Loss " + p.productionLossId + " is not available")
         const run = production().runOf(userScope, loss.workEffortId, true)
         const settled = posting.settled(begun.op)
         if (settled) return settled
@@ -912,7 +915,11 @@ function approveException(p) {
     }
     if (blank(p.productionQuantityEventId)) denied("RECORD_REQUIRED", "Choose the loss or the overproduction request to decide")
     const event = find(QEVENT, {productionQuantityEventId: p.productionQuantityEventId}).forUpdate(true).one()
-    if (!event || event.quantityEventTypeEnumId !== "PqetOverproduction")
+    if (
+        !event ||
+        event.quantityEventTypeEnumId !== "PqetOverproduction" ||
+        (!blank(p.workEffortId) && event.workEffortId !== String(p.workEffortId).trim())
+    )
         denied("RECORD_UNAVAILABLE", "Overproduction request " + p.productionQuantityEventId + " is not available")
     const run = production().runOf(userScope, event.workEffortId, true)
     const settled = posting.settled(begun.op)

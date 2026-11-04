@@ -1252,9 +1252,11 @@ along with this software (see the LICENSE.md file). If not, see
             key answers the first. Requires PRODUCTION_SUPERVISE; refuses a record outside the user's organizations or missing
             (RECORD_UNAVAILABLE, RECORD_REQUIRED), one already decided (NOT_PENDING), another decision (DECISION_INVALID), a
             refusal without a reason (REASON_REQUIRED), a run no longer open (RUN_NOT_OPEN) and the loss's own
-            refusals.</description>
+            refusals; with workEffortId, a record of another work order (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId"><description>The work order the caller checked: the record must be
+                its</description></parameter>
             <parameter name="productionLossId"/>
             <parameter name="productionQuantityEventId"/>
             <parameter name="decision"><description>approve (default) or refuse</description></parameter>
