@@ -11,7 +11,21 @@ const orders = ec.resource.script("component://mr-mantle/service/mantle/order/Pu
 const {find, one, rows, call, denied, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
+    PART = "mantle.order.OrderPart",
     ITEM = "mantle.order.OrderItem"
+// P9: a revision's changes on its print (PurchaseRevisions.js)
+const revisions = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
+// P9: the part's fields a print reads back as of a time (the supplier, delivery, terms and the supplier's reference, F36)
+const partFields = [
+    "vendorPartyId",
+    "facilityId",
+    "postalContactMechId",
+    "otherPartyOrderId",
+    "otherPartyOrderDate",
+    "estimatedDeliveryDate",
+    "settlementTermId",
+    "tradeTermEnumId"
+]
 const readPermissions = ["PURCHASE_ORDER_EDIT", "PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"]
 const sendStatuses = ["OrderApproved", "OrderSent"]
 const blank = value => value == null || String(value).trim() === ""
@@ -55,7 +69,8 @@ function orderAt(po, at) {
                 .orderBy("changedDate")
                 .list()
         )
-    const headerLogs = now ? [] : auditFind(ORDER, ["statusId", "orderRevision"])
+    const headerLogs = now ? [] : auditFind(ORDER, ["statusId", "orderRevision", "currencyUomId"])
+    const partLogs = now ? [] : auditFind(PART, partFields)
     const itemFields = [
         "productId",
         "quantity",
@@ -99,14 +114,22 @@ function orderAt(po, at) {
     const revisionLog = auditFind(ORDER, ["orderRevision"])
         .filter(row => ms(row.changedDate) <= when && Number(row.newValueText) === revision)
         .at(-1)
-    return {statusId, revision, revisionDate: revisionLog ? revisionLog.changedDate : order.entryDate, lines}
+    // P9: the part as of the time (its key fields read back), and the order's currency
+    const part = Object.fromEntries(
+        partFields.map(field => [
+            field,
+            now ? po.part[field] : valueAt(partLogs, field, po.part.orderPartSeqId, when, po.part[field])
+        ])
+    )
+    const currencyUomId = now ? order.currencyUomId : valueAt(headerLogs, "currencyUomId", null, when, order.currencyUomId)
+    return {statusId, revision, revisionDate: revisionLog ? revisionLog.changedDate : order.entryDate, lines, part, currencyUomId}
 }
 
 // The print of a purchase order (as of a time, or now): its HTML, the revision and a hash of the print.
 function printOf(po, at) {
     const order = po.order
     const state = orderAt(po, at)
-    const currencyUomId = order.currencyUomId
+    const currencyUomId = state.currencyUomId || order.currencyUomId
     const productNames = {}
     for (const line of state.lines)
         if (line.productId && !productNames[line.productId]) {
@@ -132,14 +155,32 @@ function printOf(po, at) {
             cancelledText: line.quantityCancelled && !line.quantityCancelled.isZero() ? quantityText(line.quantityCancelled) : ""
         }
     })
-    const facility = po.part.facilityId ? one("mantle.facility.Facility", {facilityId: po.part.facilityId}) : null
+    const facility = state.part.facilityId ? one("mantle.facility.Facility", {facilityId: state.part.facilityId}) : null
+    const shipTo = state.part.postalContactMechId
+        ? one("mantle.party.contact.PostalAddress", {contactMechId: state.part.postalContactMechId})
+        : null
+    const term = state.part.settlementTermId
+        ? one("mantle.account.invoice.SettlementTerm", {settlementTermId: state.part.settlementTermId})
+        : null
+    const incoterm = state.part.tradeTermEnumId ? one("moqui.basic.Enumeration", {enumId: state.part.tradeTermEnumId}) : null
+    // P9: what this revision changed, from the audit log (none for the first)
+    const changeRows = state.revision > 1 ? revisions().revisionChanges(order.orderId, state.revision, true) : []
     const revisionText = "Revision " + state.revision + (state.revisionDate ? " of " + lib.dateText(state.revisionDate) : "")
     const printHtml = ec.resource.template("component://mr-mantle/template/order/PurchaseOrder.print.html.fancy", {
         orderId: order.orderId,
         orderName: order.orderName || "",
         organizationName: partyName(po.organizationPartyId),
-        supplierName: partyName(po.supplierPartyId),
-        supplierReference: po.part.otherPartyOrderId || "",
+        supplierName: partyName(state.part.vendorPartyId || po.supplierPartyId),
+        supplierReference: state.part.otherPartyOrderId || "",
+        deliveryText: state.part.estimatedDeliveryDate ? lib.dateText(state.part.estimatedDeliveryDate) : "",
+        shipToText: shipTo
+            ? [shipTo.toName, shipTo.address1, shipTo.address2, [shipTo.city, shipTo.postalCode].filter(Boolean).join(" ")]
+                  .filter(Boolean)
+                  .join(", ")
+            : "",
+        termText: term ? term.description || term.settlementTermId : "",
+        incotermText: incoterm ? incoterm.description || incoterm.enumId : "",
+        changeRows,
         revisionText,
         asOfText: at == null ? "" : lib.dateText(at),
         statusText: statusText(state.statusId),
@@ -363,6 +404,8 @@ function recipientsOfOrganization(organizationPartyId) {
 
 const operations = {print, send}
 ;({
+    // P9: the reminders' recipients (PurchaseRevisions.js), as the send's
+    recipientsOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown purchase order document operation " + op)
         return operations[op](parameters)

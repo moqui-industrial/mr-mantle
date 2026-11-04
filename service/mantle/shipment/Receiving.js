@@ -30,7 +30,9 @@ const text = value => (dec(value).compare(0) === 0 ? "0" : String(dec(value).toN
 
 // ===== the purchase part and its open receipt =====
 // The order part, locked: a purchase (its customer an internal organization of the user's scope), approved or sent.
-function purchasePart(userScope, orderId, orderPartSeqId) {
+// statuses: the order statuses it may be in, approved or sent; a purchase revision's adjust#ExpectedReceipt adds the hold its
+// revision placed (impl-purchasing P9).
+function purchasePart(userScope, orderId, orderPartSeqId, statuses = ["OrderApproved", "OrderSent"]) {
     const part = find("mantle.order.OrderPart", {orderId, orderPartSeqId}).forUpdate(true).one()
     if (!part) denied("RECORD_UNAVAILABLE", "Order part " + orderId + ":" + orderPartSeqId + " is not available")
     if (!one("mantle.party.PartyRole", {partyId: part.customerPartyId, roleTypeId: "OrgInternal"}))
@@ -38,7 +40,7 @@ function purchasePart(userScope, orderId, orderPartSeqId) {
     if (!facilityScope.owns(userScope, part.customerPartyId))
         denied("RECORD_UNAVAILABLE", "Order part " + orderId + ":" + orderPartSeqId + " is not available")
     const header = one("mantle.order.OrderHeader", {orderId})
-    if (!["OrderApproved", "OrderSent"].includes(part.statusId) && !["OrderApproved", "OrderSent"].includes(header?.statusId))
+    if (!statuses.includes(part.statusId) && !statuses.includes(header?.statusId))
         denied("ORDER_NOT_OPEN", "Order " + orderId + " is not approved, or is already complete")
     return part
 }

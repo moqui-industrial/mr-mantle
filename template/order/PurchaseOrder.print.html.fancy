@@ -15,7 +15,8 @@ along with this software (see the LICENSE.md file). If not, see
      orderName, organizationName, supplierName, revisionText, asOfText (empty for the current order, whose print is the
      same for a revision whatever its status), statusText (shown as of a time),
      placedText, facilityName, currencyText, supplierReference, totalText and lines (seq, productText, description,
-     quantityText, unitText, priceText, amountText, requiredText, cancelledText). -->
+     quantityText, unitText, priceText, amountText, requiredText, cancelledText); P9: shipToText, deliveryText, termText,
+     incotermText (the part as of the time) and changeRows (whatText, fromText, toText, reason: the revision's changes). -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>${ec.l10n.localize('Purchase order')} ${orderId}</title>
 <style>
@@ -45,6 +46,10 @@ tbody tr { break-inside: avoid; }
     <#if supplierReference><tr><th>${ec.l10n.localize('Supplier reference')}</th><td>${supplierReference}</td></tr></#if>
     <#if placedText><tr><th>${ec.l10n.localize('Placed')}</th><td>${placedText}</td></tr></#if>
     <#if facilityName><tr><th>${ec.l10n.localize('Deliver to')}</th><td>${facilityName}</td></tr></#if>
+    <#if shipToText><tr><th>${ec.l10n.localize('Ship to')}</th><td>${shipToText}</td></tr></#if>
+    <#if deliveryText><tr><th>${ec.l10n.localize('Delivery by')}</th><td>${deliveryText}</td></tr></#if>
+    <#if termText><tr><th>${ec.l10n.localize('Payment term')}</th><td>${termText}</td></tr></#if>
+    <#if incotermText><tr><th>${ec.l10n.localize('Incoterm')}</th><td>${incotermText}</td></tr></#if>
     <#if asOfText><tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr></#if>
     <tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr>
 </tbody></table>
@@ -76,4 +81,20 @@ tbody tr { break-inside: avoid; }
         </tr>
     </tbody>
 </table>
+<#if changeRows && changeRows.length>
+<h2 style="font-size:12pt;margin:8mm 0 2mm">${ec.l10n.localize('Changes in this revision')}</h2>
+<table class="lines">
+    <thead><tr>
+        <th>${ec.l10n.localize('Changed')}</th>
+        <th>${ec.l10n.localize('From')}</th>
+        <th>${ec.l10n.localize('To')}</th>
+        <th>${ec.l10n.localize('Reason')}</th>
+    </tr></thead>
+    <tbody>
+    <#list changeRows as change>
+        <tr><td>${change.whatText}</td><td>${change.fromText}</td><td>${change.toText}</td><td>${change.reason}</td></tr>
+    </#list>
+    </tbody>
+</table>
+</#if>
 </body></html>

@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase order revisions and acknowledgements (design-purchasing §6 OrderChanges and Acknowledgements; impl-purchasing P9,
+    §2, §4): included in mantle.order.OrderServices by name (service-include), over PurchaseRevisions.js. No revision or
+    acknowledgement record: a revision is OrderHeader.orderRevision with the audit-logged key fields, an acknowledgement the
+    part's and lines' audit-logged acknowledgement fields. Each service needs PURCHASE_ORDER_EDIT (the preview also
+    PURCHASE_APPROVE) in the order's buying organization (RECORD_UNAVAILABLE outside it), on a purchase order of one purchase
+    part (NOT_PURCHASE, PURCHASE_PARTS). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="PurchaseRevisionChange" type="interface">
+        <description>A proposed revision of a purchase order: the lines' and the part's new values.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" type="Integer"><description>The revision the change was reviewed at; the current
+                one when empty.</description></parameter>
+            <parameter name="itemChanges" type="List"><description>Each changed line: orderItemSeqId with its new quantity,
+                unitAmount, requiredByDate, itemDescription or productId (a substitute, under the buying policy's
+                substitution rule).</description></parameter>
+            <parameter name="partChanges" type="Map"><description>The part's new vendorPartyId, currencyUomId, facilityId,
+                postalContactMechId, estimatedDeliveryDate, settlementTermId or tradeTermEnumId.</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="start" noun="PurchaseRevision" allow-remote="false">
+        <description>Start changing a placed, approved or sent purchase order (design OrderChanges, D7): a Change hold
+            (hold#Order, OhtChange) with the reason, its source the revision it starts from; a sent order un-sends to
+            Approved first. Receiving goes on (a receipt posted while a change is reviewed fails its apply,
+            RECEIPT_IN_PROGRESS). An open change is answered (alreadyStarted). Refuses a draft
+            or a closed order (ORDER_NOT_REVISABLE), a revision that is not the current one (STALE_REVISION) and no reason
+            (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="orderHoldReasonId"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyStarted" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="started" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('start', context)"/>
+            <script>ec.context.putAll(started)</script>
+        </actions>
+    </service>
+    <service verb="cancel" noun="PurchaseRevision" allow-remote="false">
+        <description>Let a started change go before anything is applied: its Change hold is released and the order returns
+            to its status before. Refuses an order with no open change (REVISION_NOT_STARTED) and one whose new revision was
+            applied and waits for its approval (REVISION_APPLIED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="cancelled" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('cancel', context)"/>
+            <script>ec.context.putAll(cancelled)</script>
+        </actions>
+    </service>
+    <service verb="preview" noun="PurchaseRevision" allow-remote="false">
+        <description>The effects of a proposed revision, nothing written (design ProposedChange and RevisionEffects): the
+            change rows with old and new values and each one's refusal by name (QUANTITY_BELOW_RECEIVED, _BILLED, _RETURNED,
+            _ACCEPTED; SUPPLIER_CHANGE_PROGRESSED and CURRENCY_CHANGE_PROGRESSED on a part that was received or billed;
+            SUBSTITUTION_NOT_ALLOWED, SUBSTITUTE_PROGRESSED, PRODUCT_NOT_USABLE; FACILITY_ON_RECEIPT), each line's ordered,
+            received, billed, returned, accepted and expected quantities, the amount of each changed line before and after,
+            and the basis key apply#PurchaseRevision checks. Needs PURCHASE_ORDER_EDIT or PURCHASE_APPROVE.</description>
+        <implements service="mantle.order.PurchaseRevisionServices.define#PurchaseRevisionChange"/>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="proposedRevision" type="Integer"/>
+            <parameter name="revisionState"><description>none, started (the hold, nothing applied) or applied (waiting for
+                the approval of the new revision).</description></parameter>
+            <parameter name="statusId"/>
+            <parameter name="partValues" type="Map"><description>The part's current supplier, currency, facility, ship-to
+                address, delivery date, payment term and incoterm; partTexts the same as text.</description></parameter>
+            <parameter name="partTexts" type="Map"/>
+            <parameter name="changeRows" type="List"><description>entity, orderItemSeqId, field, whatText, oldValue,
+                newValue, fromText, toText, refusalCode, refusalText.</description></parameter>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="budgetRows" type="List"/>
+            <parameter name="amountDelta" type="BigDecimal"/>
+            <parameter name="amountDeltaText"/>
+            <parameter name="openReceipt" type="Boolean"/>
+            <parameter name="refusalCount" type="Integer"/>
+            <parameter name="canApply" type="Boolean"/>
+            <parameter name="basisKey"/>
+        </out-parameters>
+        <actions>
+            <set field="previewed" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('preview', context)"/>
+            <script>ec.context.putAll(previewed)</script>
+        </actions>
+    </service>
+    <service verb="apply" noun="PurchaseRevision" allow-remote="false">
+        <description>Apply a reviewed revision of a started change in one transaction (design ApplyRevision, Lock and
+            apply): the order's open receipts and the order locked (receipt first, as the receive guard), the changes written
+            to the audit-logged fields with the reason (and an internal note), the revision counted once
+            (increment#OrderRevision, which supersedes the earlier revision's decisions), each open receipt set to its line's
+            new remainder (mantle.shipment.WarehouseTaskServices.adjust#ExpectedReceipt), the budget a lowered line no longer
+            needs released (mantle.other.BudgetServices.lower#SourceCommitments; a raised line is reserved by the approval),
+            each changed line's matched bills queued for re-evaluation (mantle.account.InvoiceMatchServices
+            queue#MatchReevaluation), and the new revision sent to its approvers. The order stays held until the approval of
+            the new revision (decide#PurchaseApproval) releases the Change hold. A retry with the same operation key answers
+            the first. Refuses an order with no change started (REVISION_NOT_STARTED), a revision that is not the current one
+            (STALE_REVISION), a receipt or bill posted since the preview's basis (RECEIPT_IN_PROGRESS, nothing changes), a
+            refused change row (its code), no change (NO_CHANGE) and no reason (REASON_REQUIRED).</description>
+        <implements service="mantle.order.PurchaseRevisionServices.define#PurchaseRevisionChange"/>
+        <in-parameters>
+            <parameter name="basisKey"><description>The preview's basis key: a receipt or bill posted since fails the
+                apply.</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="fromRevision" type="Integer"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="changeRows" type="List"/>
+            <parameter name="adjustedSources" type="List"/>
+            <parameter name="loweredLines" type="List"/>
+            <parameter name="queuedCount" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="applied" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('apply', context)"/>
+            <script>ec.context.putAll(applied)</script>
+        </actions>
+    </service>
+    <service verb="record" noun="Acknowledgement" allow-remote="false">
+        <description>Record the supplier's acknowledgement of a purchase order's current revision on its behalf (design
+            RecordAcknowledgement): its reference and date, the outcome (accepted, accepted with changes or rejected) with
+            the supplier's note, each line's promised date and quantity, all audit-logged; the requested date and the
+            ordered quantity stay (a changed promise goes to the buyer, and a quantity changes only through a revision). The
+            evidence (a file, or how it came: a phone call, an email) is the order's content in the supplier's role. A retry
+            with the same operation key answers the first. Refuses an order not sent (ORDER_NOT_SENT), an older revision
+            (SUPERSEDED_REVISION, naming the current one), an unknown outcome (OUTCOME_INVALID), a changed or rejected one
+            without the supplier's reason (REASON_REQUIRED) and a line not on the order (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="otherPartyOrderDate" type="Timestamp"/>
+            <parameter name="acknowledgementEnumId"/>
+            <parameter name="acknowledgementNote"/>
+            <parameter name="lineAcknowledgements" type="List"><description>Each line's orderItemSeqId, promisedDate and
+                promisedQuantity.</description></parameter>
+            <parameter name="evidenceText"/>
+            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="acknowledgedRevision" type="Integer"/>
+            <parameter name="acknowledgementEnumId"/>
+            <parameter name="changedLines" type="List"/>
+            <parameter name="orderContentId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="recorded" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('acknowledge', context)"/>
+            <script>ec.context.putAll(recorded)</script>
+        </actions>
+    </service>
+    <service verb="send" noun="PurchaseReminder" allow-remote="false">
+        <description>Remind suppliers to acknowledge their purchase orders' current revisions (design SendReminder): per
+            order, in its own transaction, the supplier's order addresses (else its primary ones; toAddresses for one order)
+            each get the reminder through send#EmailTemplate (MANTLE_PURCHASE_REMINDER by default), recorded as an
+            OrderEmailMessage with the revision and occurrence; a recipient already reminded of the revision, template and
+            occurrence (by default today) is skipped. A result per order (SENT, PARTLY_SENT, SKIPPED, FAILED or the refusal:
+            ORDER_NOT_SENT, ALREADY_ACKNOWLEDGED, RECIPIENT_REQUIRED) and per recipient (sent, queued, skipped or failed with
+            RECIPIENT_INVALID or DELIVERY_FAILED); one order's failure does not stop the others.</description>
+        <in-parameters>
+            <parameter name="orderIds" type="List"/>
+            <parameter name="orderId"/>
+            <parameter name="toAddresses"/>
+            <parameter name="subject"/>
+            <parameter name="note"/>
+            <parameter name="occurrence"><description>The reminder's occurrence, by default today's date: a recipient is
+                reminded once per revision, template and occurrence.</description></parameter>
+            <parameter name="emailTemplateId"/>
+            <parameter name="single" type="Boolean"><description>Internal: one order, run per order in its own
+                transaction.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="occurrence"/>
+            <parameter name="results" type="List"><description>Each order's orderId, orderRevision, resultCode, message and
+                recipientResults (recipient, status, reasonCode, emailMessageId).</description></parameter>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="reminded" from="ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseRevisions.js')
+                .execute('remind', context)"/>
+            <script>ec.context.putAll(reminded)</script>
+        </actions>
+    </service>
+</services>

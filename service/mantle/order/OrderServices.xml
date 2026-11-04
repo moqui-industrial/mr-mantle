@@ -2895,6 +2895,9 @@ General Order Placement and eCommerce Usage
         </in-parameters>
         <actions>
             <if condition="!orderId"><return/></if>
+            <!-- a purchase revision's apply and an acknowledgement write the order's fields under one count of their own
+                (impl-purchasing P9, PurchaseRevisions.js): the writes they make in between are not counted one by one -->
+            <if condition="ec.context.sharedMap['PurchaseRevisionCount:' + orderId]"><return/></if>
             <if condition="revisionKind &amp;&amp; revisionKind != 'commercial'">
                 <set field="commercialOnly" from="false"/>
                 <set field="purchaseOrder" from="false"/>
@@ -3217,6 +3220,14 @@ General Order Placement and eCommerce Usage
                     Object.assign({resultCode: 'ACCEPTED'}, accepted))"/>
         </actions>
     </service>
+    <!-- ===== Purchasing's revisions and acknowledgements (design-purchasing §6 OrderChanges and Acknowledgements;
+        impl-purchasing P9; PurchaseRevisionServices.xml) ===== -->
+    <service-include verb="start" noun="PurchaseRevision" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
+    <service-include verb="cancel" noun="PurchaseRevision" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
+    <service-include verb="preview" noun="PurchaseRevision" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
+    <service-include verb="apply" noun="PurchaseRevision" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
+    <service-include verb="record" noun="Acknowledgement" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
+    <service-include verb="send" noun="PurchaseReminder" location="component://mr-mantle/service/mantle/order/PurchaseRevisionServices.xml"/>
     <!-- ===== Purchasing's purchase order send and print (design-purchasing §6 OrderDetail, R-PUR-02; impl-purchasing P3,
         F42; PurchaseOrderDocuments.js) ===== -->
     <service verb="send" noun="PurchaseOrder" allow-remote="false">

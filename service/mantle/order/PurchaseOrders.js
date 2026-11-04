@@ -13,6 +13,8 @@ const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/f
 const policy = ec.resource.script("component://mr-mantle/service/mantle/order/PurchasePolicy.js")
 // P4: the approval policies' steps, notices and budget (PurchaseApprovals.js)
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
+// P9: a revised order's approval releases the revision's Change hold (PurchaseRevisions.js)
+const revisions = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -162,6 +164,22 @@ function update(p) {
             denied("FACILITY_INVALID", "Choose a facility of " + partyName(po.organizationPartyId))
         call("update#" + PART, {orderId: po.orderId, orderPartSeqId: po.orderPartSeqId, facilityId: String(p.facilityId)})
     }
+    // P9: the draft's delivery date and terms (a placed order's change through a revision)
+    const terms = {}
+    if (p.estimatedDeliveryDate !== undefined)
+        terms.estimatedDeliveryDate = blank(p.estimatedDeliveryDate) ? null : p.estimatedDeliveryDate
+    if (p.settlementTermId !== undefined) {
+        if (!blank(p.settlementTermId) && !one("mantle.account.invoice.SettlementTerm", {settlementTermId: p.settlementTermId}))
+            denied("TERM_INVALID", "Choose a payment term")
+        terms.settlementTermId = text(p.settlementTermId)
+    }
+    if (p.tradeTermEnumId !== undefined) {
+        if (!blank(p.tradeTermEnumId) && one("moqui.basic.Enumeration", {enumId: p.tradeTermEnumId})?.parentEnumId !== "TtInco")
+            denied("TERM_INVALID", "Choose an incoterm")
+        terms.tradeTermEnumId = text(p.tradeTermEnumId)
+    }
+    if (Object.keys(terms).length)
+        call("update#" + PART, Object.assign({orderId: po.orderId, orderPartSeqId: po.orderPartSeqId}, terms))
     return {orderId: po.orderId}
 }
 // store#PurchaseOrderItem: a draft's line, new (a product usable for buying, at the supplier's price unless one is given) or
@@ -436,7 +454,9 @@ function decide(p) {
     const request = {orderId: po.orderId, orderRevision: p.orderRevision == null ? null : Number(p.orderRevision), decision}
     const operation = blank(p.operationKey) ? null : lib.operation(p, "PurchaseApproval", po.organizationPartyId, request)
     if (operation?.old) return lib.previous(operation)
-    if (po.order.statusId !== "OrderPlaced")
+    // P9: an order held for a change whose new revision was applied waits for the approval of that revision
+    const revisionHold = revisions().awaitingApproval(po)
+    if (po.order.statusId !== "OrderPlaced" && !revisionHold)
         denied("ORDER_NOT_PLACED", "Purchase order " + po.orderId + " is not waiting for approval")
     const revision = revisionOf(po.order)
     if (p.orderRevision != null && !blank(p.orderRevision) && Number(p.orderRevision) !== revision)
@@ -479,7 +499,8 @@ function decide(p) {
         pendingStepText: null
     }
     if (decision === "refuse") {
-        call("mantle.order.OrderServices.reject#Order", {orderId: po.orderId})
+        // a refused revision leaves the order held for the buyer to change again; a placed order is rejected
+        if (!revisionHold) call("mantle.order.OrderServices.reject#Order", {orderId: po.orderId})
         approvals().clearNotices(source)
     } else {
         const after = approvals().progress(source)
@@ -489,11 +510,18 @@ function decide(p) {
         } else {
             // the budget of the lines with no request, at the order's revision (D10): Stop refuses, Warn warns
             approvals().reserveBudget(po, revision, p.budgetOverrideReason)
+            // P9: a revised order's Change hold is released, back to Approved (or to Placed, approved below)
+            const released = revisionHold
+                ? revisions().releaseRevisionHold(revisionHold, "Revision " + revision + " approved")
+                : null
             // approve#Order checks the approver's PURCHASE_ORDER_APPROVE and, with the gate on, the complete approval
-            const out =
-                ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters({orderId: po.orderId}).call() || {}
-            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
-            result.creditHeld = !!out.creditHeld
+            if (!released || released.statusId === "OrderPlaced") {
+                const out =
+                    ec.service.sync().name("mantle.order.OrderServices.approve#Order").parameters({orderId: po.orderId}).call() ||
+                    {}
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                result.creditHeld = !!out.creditHeld
+            }
             approvals().clearNotices(source)
         }
     }

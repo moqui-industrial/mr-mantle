@@ -1253,6 +1253,91 @@ function releaseOpen(organizationPartyId, p) {
     return {releasedCount: open.length, budgetCommitmentIds: open.map(row => row.budgetCommitmentId)}
 }
 
+// lower#SourceCommitments: internal to a revision of the source in its own checked operation (Purchasing's
+// apply#PurchaseRevision, impl-purchasing P9): each source line the new revision lowers below what its earlier revisions hold
+// open gives up the difference. Its open commitments of earlier revisions are released, and what the line still needs, less
+// what they passed on to later stages, is held at the new revision on the same account and budget line, with the decision it
+// was reserved under. A line the revision raises or keeps is left alone: the approval of the new revision reserves it
+// (reserve#Commitment), where the policy's Warn or Stop applies. No permission of its own, as releaseClosed.
+function lowerSource(p) {
+    if (!p.sourceEntityName || !p.sourceId) denied("SOURCE_REQUIRED", "Name the source document")
+    if (p.sourceRevision == null || p.sourceRevision === "") denied("SOURCE_REVISION_REQUIRED", "Name the source's revision")
+    const stageEnumId = p.stageEnumId || "BcsOrder"
+    const revision = String(p.sourceRevision)
+    const loweredLines = []
+    for (const line of Array.from(p.lines || [])) {
+        const key = {
+            sourceEntityName: p.sourceEntityName,
+            sourceId: p.sourceId,
+            sourceItemId: line.sourceItemId || null,
+            sourceRevision: null,
+            stageEnumId
+        }
+        const earlier = keyed(key).filter(row => row.sourceRevision !== revision)
+        const open = earlier.filter(row => row.statusId === "BcReserved")
+        if (!open.length) continue
+        const consumed = consumedAmounts(earlier.map(row => row.budgetCommitmentId))
+        const carried = earlier.reduce((sum, row) => sum.add(consumed[row.budgetCommitmentId] || zero()), zero())
+        const held = open.reduce((sum, row) => sum.add(openAmount(row, consumed)), zero())
+        const needed = dec(line.amount).subtract(carried)
+        if (needed.compare(held) >= 0) continue
+        const newest = open.sort((a, b) => ms(b.createdDate) - ms(a.createdDate))[0]
+        // the budget is locked before any commitment row: budget, then commitment, everywhere
+        lockBudget({budgetId: newest.budgetId})
+        for (const row of open)
+            call("update#" + COMMITMENT, {
+                budgetCommitmentId: row.budgetCommitmentId,
+                statusId: "BcReleased",
+                releasedDate: ec.user.nowTimestamp
+            })
+        let budgetCommitmentId = null
+        if (needed.compare(0) > 0) {
+            const fields = Object.fromEntries(
+                [
+                    "organizationPartyId",
+                    "budgetId",
+                    "budgetItemSeqId",
+                    "glAccountId",
+                    "timePeriodId",
+                    "commitmentDate",
+                    "sourceEntityName",
+                    "sourceId",
+                    "sourceItemId",
+                    "stageEnumId",
+                    "currencyUomId",
+                    "convertedFromId",
+                    "budgetControlPolicyId",
+                    "decisionEnumId",
+                    "budgetAmount",
+                    "spentAmount",
+                    "availableAmount",
+                    "overrideReason",
+                    "overrideByUserId"
+                ].map(field => [field, newest[field] ?? null])
+            )
+            budgetCommitmentId = call(
+                "create#" + COMMITMENT,
+                Object.assign(fields, {
+                    sourceRevision: revision,
+                    amount: needed,
+                    statusId: "BcReserved",
+                    decisionMessage: ("Lowered by revision " + revision + "; " + (newest.decisionMessage || "")).slice(0, 255),
+                    createdDate: ec.user.nowTimestamp,
+                    createdByUserId: ec.user.userId
+                })
+            ).budgetCommitmentId
+        }
+        loweredLines.push({
+            sourceItemId: line.sourceItemId || null,
+            fromAmount: held,
+            amount: needed.compare(0) > 0 ? needed : zero(),
+            releasedIds: open.map(row => row.budgetCommitmentId),
+            budgetCommitmentId
+        })
+    }
+    return {loweredLines}
+}
+
 // check#Budget: the decision each line would get now, with nothing written.
 function check(p) {
     requireAny(commitPermissions.concat(readPermissions, ["BUDGET_OVERRIDE"]), "Budget")
@@ -1395,6 +1480,7 @@ const operations = {
     convert,
     release,
     releaseClosed,
+    lowerSource,
     reverseInvoice,
     editScope: p => ({organizationPartyId: editScope(p).organizationPartyId}),
     check,

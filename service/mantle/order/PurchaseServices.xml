@@ -93,6 +93,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="approvalGateEnabled"/>
             <parameter name="selfApprovalAllowed"/>
             <parameter name="commercialRevisionOnly"/>
+            <parameter name="substitutionEnumId"/>
             <parameter name="changeReason" required="true"/>
         </in-parameters>
         <out-parameters>
@@ -180,14 +181,18 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="update" noun="PurchaseOrder" allow-remote="false">
-        <description>A draft purchase order's name and receiving facility. Requires PURCHASE_ORDER_EDIT (PERMISSION_DENIED);
-            refuses an order outside the user's organizations (RECORD_UNAVAILABLE), one that is not a purchase order
-            (NOT_PURCHASE) or has several parts (PURCHASE_PARTS), one that is not a draft (ORDER_NOT_DRAFT) and another
-            organization's facility (FACILITY_INVALID).</description>
+        <description>A draft purchase order's name and receiving facility, and (P9) its delivery date, payment term and
+            incoterm; a placed order changes through a revision (apply#PurchaseRevision). Requires PURCHASE_ORDER_EDIT
+            (PERMISSION_DENIED); refuses an order outside the user's organizations (RECORD_UNAVAILABLE), one that is not a
+            purchase order (NOT_PURCHASE) or has several parts (PURCHASE_PARTS), one that is not a draft (ORDER_NOT_DRAFT),
+            another organization's facility (FACILITY_INVALID) and an unknown term (TERM_INVALID).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderName"/>
             <parameter name="facilityId"/>
+            <parameter name="estimatedDeliveryDate" type="Timestamp"/>
+            <parameter name="settlementTermId"/>
+            <parameter name="tradeTermEnumId"/>
         </in-parameters>
         <out-parameters><parameter name="orderId"/></out-parameters>
         <actions>

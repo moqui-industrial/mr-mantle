@@ -1,0 +1,21 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- The body of a reminder to acknowledge a purchase order's revision (mantle.order.OrderServices.send#PurchaseReminder):
+     orderId, orderName, revision, supplierName, organizationName, sentText (when the revision went out, if known) and the
+     buyer's note. -->
+<div style="font:11pt Helvetica,Arial,sans-serif">
+<p>${ec.l10n.localize('Dear')} ${supplierName},</p>
+<p>${ec.l10n.localize('Please confirm purchase order')} ${orderId}<#if orderName> (${orderName})</#if>, ${ec.l10n.localize('revision')} ${revision}<#if sentText>, ${ec.l10n.localize('sent on')} ${sentText}</#if>: ${ec.l10n.localize('your order reference, and the delivery date you promise for each line')}.</p>
+<#if note><p><#list String(note).split('\n') as noteLine>${noteLine}<br></#list></p></#if>
+<p>${organizationName}</p>
+</div>
