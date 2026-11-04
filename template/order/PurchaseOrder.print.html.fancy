@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
      (mantle.order.OrderServices.get#PurchaseOrderPrint): its PDF is what send#PurchaseOrder mails and stores. orderId,
      orderName, organizationName, supplierName, revisionText, asOfText (empty for the current order, whose print is the
      same for a revision whatever its status), statusText (shown as of a time),
-     placedText, facilityName, currencyText, supplierReference, totalText and lines (seq, productText, description,
+     placedText, facilityName (empty for a drop-ship order), shipToText (a drop-ship order's customer and address), currencyText, supplierReference, totalText and lines (seq, productText, description,
      quantityText, unitText, priceText, amountText, requiredText, cancelledText). -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>${ec.l10n.localize('Purchase order')} ${orderId}</title>
@@ -45,6 +45,7 @@ tbody tr { break-inside: avoid; }
     <#if supplierReference><tr><th>${ec.l10n.localize('Supplier reference')}</th><td>${supplierReference}</td></tr></#if>
     <#if placedText><tr><th>${ec.l10n.localize('Placed')}</th><td>${placedText}</td></tr></#if>
     <#if facilityName><tr><th>${ec.l10n.localize('Deliver to')}</th><td>${facilityName}</td></tr></#if>
+    <#if shipToText><tr><th>${ec.l10n.localize('Drop-ship to')}</th><td>${shipToText}</td></tr></#if>
     <#if asOfText><tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr></#if>
     <tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr>
 </tbody></table>

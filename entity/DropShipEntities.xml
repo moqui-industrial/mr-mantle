@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Drop-ship (impl-purchasing P7, F21, F37, F38), ported from Moqui Java's dropship-moqui branch of mantle-udm: a supplier's
+    drop-ship facility (facility type FcTpDropShip, owned by the supplier, assetAllowOtherOwner Y) names the
+    SystemMessageRemote of the supplier's integration in dropShipRemoteId. A drop-ship purchase order line keeps the customer
+    order line it ships (salesOrderId, salesOrderItemSeqId): the stored link the delivery, the match and the screens read,
+    in place of the branch's match by product or sequence id. The enumerations and roles are in DropShipSetupData.xml. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Facility" package="mantle.facility">
+        <field name="dropShipRemoteId" type="id"><description>For a drop-ship facility (FcTpDropShip), the
+            SystemMessageRemote of the supplier's integration: its sendServiceName implements
+            mantle.order.OrderServices.send#DropShipPurchaseOrderPart. Empty: the purchase order is emailed
+            (send#PurchaseOrder).</description></field>
+        <relationship type="one" title="DropShipSystemMessageRemote" related="moqui.service.message.SystemMessageRemote"
+                short-alias="dropShipRemote">
+            <key-map field-name="dropShipRemoteId" related="systemMessageRemoteId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="OrderItem" package="mantle.order">
+        <field name="salesOrderId" type="id"><description>On a drop-ship purchase order line, the customer order whose line
+            it ships (the order's parentOrderId).</description></field>
+        <field name="salesOrderItemSeqId" type="id"><description>On a drop-ship purchase order line, the customer order
+            line it ships.</description></field>
+        <relationship type="one-nofk" title="Sales" related="mantle.order.OrderItem" short-alias="salesItem">
+            <key-map field-name="salesOrderId" related="orderId"/>
+            <key-map field-name="salesOrderItemSeqId" related="orderItemSeqId"/></relationship>
+        <index name="ORDITM_SALES_ITEM"><index-field name="salesOrderId"/><index-field name="salesOrderItemSeqId"/></index>
+    </extend-entity>
+</entities>

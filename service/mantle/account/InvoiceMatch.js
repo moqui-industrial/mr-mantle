@@ -149,6 +149,13 @@ function serviceBase(item, policy) {
         ? serviceAcceptedOf(item.orderId, item.orderItemSeqId)
         : dec(item.quantity ?? 1)
 }
+// A drop-ship purchase order line (impl-purchasing P7) is never received: on the received basis it matches what the
+// supplier's confirmed delivery shipped to the customer (DropShip.js deliveredQuantity), as a receipt would; null for any
+// other line.
+function dropShipDelivered(item) {
+    if (!item.salesOrderId) return null
+    return ec.resource.script("component://mr-mantle/service/mantle/order/DropShip.js").deliveredQuantity(item)
+}
 // An order line of the bill's organization from its supplier, on an approved order, else a refusal.
 function orderLine(scope, orderId, orderItemSeqId) {
     const item = orderId && one("mantle.order.OrderItem", {orderId, orderItemSeqId})
@@ -229,12 +236,16 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     // a service line: its accepted quantity under the service-acceptance rule, else ordered (P14)
     const service = isServiceItem(item)
     const serviceAccepted = service ? serviceAcceptedOf(item.orderId, item.orderItemSeqId) : zero()
+    // a drop-ship line: its confirmed delivery (P7)
+    const delivered = service ? null : dropShipDelivered(item)
     // the tolerance is a share of the source's base (accepted less held, or ordered), not of what is left of it
     const base = service
         ? serviceBase(item, policy)
-        : basis === "ImbReceived"
-          ? accepted.subtract(held).subtract(inspectionRejected)
-          : orderQuantity
+        : delivered != null && basis === "ImbReceived"
+          ? delivered
+          : basis === "ImbReceived"
+            ? accepted.subtract(held).subtract(inspectionRejected)
+            : orderQuantity
     const used = priorBilled.add(thisBill)
     const quantity = dec(allocation.quantity)
     const baseAllowance = allowance(base, policy.quantityTolerancePercent, policy.quantityToleranceQuantity)
@@ -272,6 +283,8 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
             ]
         else if (service && basis === "ImbReceived" && acceptanceRule(policy) && base.compare(0) <= 0)
             refusal = ["MISSING_RECEIPT", "The " + where + " has no accepted service to bill"]
+        else if (delivered != null && basis === "ImbReceived" && base.compare(0) <= 0)
+            refusal = ["MISSING_RECEIPT", "The " + where + " has no confirmed drop-ship delivery to bill"]
         else if (basis === "ImbReceived" && base.compare(0) <= 0)
             refusal = ["MISSING_RECEIPT", "The " + where + " has no accepted receipt to bill"]
         else
@@ -314,7 +327,11 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
                 money(policy.priceToleranceAmount, scope.currencyUomId) +
                 ")"
         })
-    if (basis === "ImbOrdered" && policy.receiptRequired === "Y" && (service ? serviceAccepted : accepted).compare(0) <= 0)
+    if (
+        basis === "ImbOrdered" &&
+        policy.receiptRequired === "Y" &&
+        (service ? serviceAccepted : delivered != null ? delivered : accepted).compare(0) <= 0
+    )
         exceptions.push({
             exceptionEnumId: "MeMissingReceipt",
             holds: holds(policy),
@@ -350,7 +367,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
         invoiceUnitAmount: invoiceUnit,
         orderQuantity,
         orderUnitAmount: orderUnit,
-        acceptedQuantity: receipt ? receipt.accepted : service ? serviceAccepted : accepted,
+        acceptedQuantity: receipt ? receipt.accepted : service ? serviceAccepted : delivered != null ? delivered : accepted,
         heldQuantity: receipt ? receipt.held : held,
         priorBilledQuantity: priorBilled,
         remainingQuantity: remaining,
@@ -459,7 +476,10 @@ function propose(scope, line, policy, orderId, taken = newTaken()) {
         if (remaining.compare(0) <= 0) break
         const orderKey = {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}
         const used = billedByOthers(scope.invoiceId, orderKey).add(takenOf(taken, "order", orderKeyText(orderKey)))
+        const delivered = dropShipDelivered(item)
         if (isServiceItem(item)) add(serviceBase(item, policy).subtract(used), Object.assign({assetReceiptId: null}, orderKey))
+        else if (delivered != null && (policy.billBasisEnumId || "ImbReceived") === "ImbReceived")
+            add(delivered.subtract(used), Object.assign({assetReceiptId: null}, orderKey))
         else if ((policy.billBasisEnumId || "ImbReceived") === "ImbReceived") {
             const receipts = receiptsOf(item.orderId, item.orderItemSeqId).sort(
                 (a, b) => Number(a.receivedDate || 0) - Number(b.receivedDate || 0)
@@ -1171,7 +1191,7 @@ function legacyBills(organizationPartyId, p) {
     const wanted = Math.max(1, Math.min(200, Number(p.limit) || 100))
     const out = []
     let after = p.afterInvoiceId || null
-    for (let read = 0; out.length < wanted && read < 5000;) {
+    for (let read = 0; out.length < wanted && read < 5000; ) {
         let query = find(I, {toPartyId: organizationPartyId})
             .condition("fromPartyId", "not-equals", organizationPartyId)
             .condition("statusId", "not-equals", "InvoiceCancelled")

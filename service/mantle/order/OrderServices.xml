@@ -3302,4 +3302,92 @@ General Order Placement and eCommerce Usage
             <set field="fileName" from="printed.fileName"/>
         </actions>
     </service>
+
+    <!-- ========== Drop-ship (impl-purchasing P7): Moqui Java's dropship-moqui branch, its names kept for integrations ========== -->
+
+    <service verb="send" noun="DropShipPurchaseOrderPart" type="interface">
+        <description>The integration of a supplier's drop-ship facility: a SystemMessageRemote's sendServiceName (named by
+            Facility.dropShipRemoteId) implements it to send an approved drop-ship purchase order part to the supplier. Called
+            once the approval commits (DropShip.secas.xml); a failure is logged and the order stays approved.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+            <parameter name="facilityId" required="true"/>
+        </in-parameters>
+    </service>
+    <service verb="create" noun="DropShipPurchaseOrder" allow-remote="false">
+        <description>The purchase orders of a sales order's lines reserved at a supplier's drop-ship facility (FcTpDropShip):
+            run after reserve#AssetsForOrder when a sales order is approved (OrderApprovedReserveAssets), and by
+            route#OrderItemToDropShip. One order per sales part and facility, its parentOrderId the sales order, its part from
+            the facility's owner to the selling organization with the end customer as CustomerShipTo and the sales part's
+            ship-to, each line at the supplier's current price and linked to its sales line (OrderItem.salesOrderId,
+            salesOrderItemSeqId). Placed, then approved at once, or with the buying organization's approval gate on
+            (PurchasePolicy.approvalGateEnabled) left at Placed for its approvers. A line already on a live drop-ship order
+            answers that order; a line meant to drop that cannot is named in skippedItems. An order with no drop-ship
+            reservation returns at once. No permission check: it runs as the sales order's approver.</description>
+        <in-parameters>
+            <parameter name="salesOrderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="purchaseOrderIds" type="List"><description>The drop-ship purchase orders of the sales order's
+                lines, new and earlier</description></parameter>
+            <parameter name="createdOrderIds" type="List"/>
+            <parameter name="skippedItems" type="List"><description>Each line passed over: orderItemSeqId, productId,
+                reasonCode (NO_RESERVATION, RESERVATION_SPLIT, NO_SUPPLIER, INTERNAL_OWNER) and message</description></parameter>
+            <parameter name="unpricedItems" type="List"><description>Lines bought at zero for want of a current supplier
+                price</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="made" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('create', context)"/>
+            <set field="purchaseOrderIds" from="made.purchaseOrderIds"/>
+            <set field="createdOrderIds" from="made.createdOrderIds"/>
+            <set field="skippedItems" from="made.skippedItems"/>
+            <set field="unpricedItems" from="made.unpricedItems"/>
+        </actions>
+    </service>
+    <service verb="finalize" noun="DropShipPurchaseOrder" allow-remote="false">
+        <description>The supplier's confirmation of a drop-ship purchase order, from its integration or the buyer: the
+            purchase order's own delivery (a ShpTpPurchase shipment with the confirmed lines and tracking code) shipped and
+            never received; the linked sales lines packed on their sales shipment (an open one, else a new one) with the
+            tracking code and shipped, which invoices the customer; each delivered line's cost moved from Unreceived
+            Inventory to the cost of goods sold (AttDropShipDelivery); the order completed once delivered in full. Quantities
+            by line (itemQuantityList) or by product (productQuantityList, the branch's call), else what is left. Requires
+            PURCHASE_ORDER_EDIT in the buying organization (PERMISSION_DENIED, RECORD_UNAVAILABLE); refuses an order that is
+            not a drop-ship order (NOT_DROP_SHIP) or not approved (ORDER_NOT_APPROVED), an unknown line or product
+            (ITEM_UNAVAILABLE), a product on two lines (PRODUCT_AMBIGUOUS) and more than is left (QUANTITY_EXCESS). An
+            order delivered in full answers its delivery and changes nothing (alreadyApplied).</description>
+        <in-parameters>
+            <parameter name="purchaseOrderId" required="true"/>
+            <parameter name="orderPartSeqId"><description>Ignored: a purchase order has one part (the branch's
+                parameter)</description></parameter>
+            <parameter name="itemQuantityList" type="List">
+                <parameter name="orderItemSeqId"/><parameter name="quantity" type="BigDecimal"/></parameter>
+            <parameter name="productQuantityList" type="List">
+                <parameter name="productId"/><parameter name="quantity" type="BigDecimal"/></parameter>
+            <parameter name="trackingCode"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="purchaseOrderId"/>
+            <parameter name="salesOrderId"/>
+            <parameter name="shipmentId"><description>The purchase order's delivery shipment</description></parameter>
+            <parameter name="salesShipmentIds" type="List"/>
+            <parameter name="acctgTransId"/>
+            <parameter name="deliveredItems" type="List"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/order/DropShip.js').execute('finalize', context)"/>
+            <set field="purchaseOrderId" from="done.purchaseOrderId"/>
+            <set field="salesOrderId" from="done.salesOrderId"/>
+            <set field="shipmentId" from="done.shipmentId"/>
+            <set field="salesShipmentIds" from="done.salesShipmentIds"/>
+            <set field="acctgTransId" from="done.acctgTransId || null"/>
+            <set field="deliveredItems" from="done.deliveredItems"/>
+            <set field="statusId" from="done.statusId"/>
+            <set field="alreadyApplied" from="done.alreadyApplied"/>
+        </actions>
+    </service>
 </services>
