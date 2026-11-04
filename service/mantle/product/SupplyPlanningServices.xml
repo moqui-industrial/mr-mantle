@@ -14,7 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- The shared supply plan (design-crosscut CX-PLANNING, §3.20 and §4.2; design-manufacturing §7 SupplyPlanning;
     impl-manufacturing P13), over SupplyPlanning.js: run a plan, read it, keep the organization's one plan schedule, and
-    convert its make suggestions into draft production runs. Each checks its Moqui permission and the organization itself;
+    convert its make suggestions into draft production runs and its buy and outside-processing suggestions into lines of draft
+    purchase orders. Each checks its Moqui permission and the organization itself;
     the apps' SupplyPlanning mounts call these after their own access check. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
@@ -39,7 +40,12 @@ along with this software (see the LICENSE.md file). If not, see
             minimum stock, over the horizon. A shortage is a transfer from a facility of the set with a surplus, else a make
             suggestion with a released BOM (its components exploded through get#BomExplosion's requirements as the next
             level's demand, dated by the lead and preparation days), else a buy suggestion from a supplier price, else a
-            NO_SOURCE exception; each is checked with check#ProductUsable (PRODUCT_NOT_USABLE). Held stock is a
+            NO_SOURCE exception; each is checked with check#ProductUsable (PRODUCT_NOT_USABLE). A runner without a method
+            read (METHOD_VIEW) gets a made product's suggestion as a METHOD_INVALID exception. A product's reorder rule at a
+            facility of the set (ProductFacility, R-PUR-19) orders up to its maximum stock (RdmUpToMaximum) or at least its
+            reorder quantity (RdmFixedQuantity) once the projection falls below the minimum; a snoozed rule's shortage is
+            still suggested, with the warning SNOOZED. The lines of a draft purchase order a conversion made are supply. Held
+            stock is a
             pending-release line with its inspection's due date, netted only by the schedule's organization option for what
             is due within the lead time. Each suggestion stands on a Requirement of the organization (RequirementParty
             OrgInternal) in the stock unit. Requires SUPPLY_PLAN_RUN (PERMISSION_DENIED); refuses an organization or facility
@@ -74,7 +80,8 @@ along with this software (see the LICENSE.md file). If not, see
             freshness limit); its suggestions (filtered by method, product or exceptions) with their requirement, covered and
             remaining quantity, supply links, dates, source and exception, and whether the user may convert each; the held
             lines pending release; the selected suggestion's demand and supply as of the run; and the organization's plan
-            schedule. Requires SUPPLY_PLAN_RUN, PRODUCTION_PLAN, PRODUCTION_VIEW or PURCHASE_ORDER_EDIT (a buyer of outside processing); refuses an organization, facility or run
+            schedule. Requires SUPPLY_PLAN_RUN, SUPPLY_PLAN_VIEW, PRODUCTION_PLAN, PRODUCTION_VIEW or PURCHASE_ORDER_EDIT (a
+            buyer); refuses an organization, facility or run
             outside the user's (RECORD_UNAVAILABLE).</description>
         <implements service="mantle.product.SupplyPlanningServices.define#PlanScope"/>
         <in-parameters>
@@ -100,6 +107,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canSchedule" type="Boolean"/>
             <parameter name="canConvertMake" type="Boolean"/>
             <parameter name="canConvertOutside" type="Boolean"/>
+            <parameter name="canConvertBuy" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/SupplyPlanning.js')
@@ -118,6 +126,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canSchedule" from="out.canSchedule"/>
             <set field="canConvertMake" from="out.canConvertMake"/>
             <set field="canConvertOutside" from="out.canConvertOutside"/>
+            <set field="canConvertBuy" from="out.canConvertBuy"/>
         </actions>
     </service>
     <service verb="store" noun="PlanSchedule" allow-remote="false">
@@ -173,10 +182,17 @@ along with this software (see the LICENSE.md file). If not, see
             quantity and unit at the supplier's price (mantle.product.PriceServices.get#ProductPrice, the shared resolver,
             with the organization as buyer), its OrderItemWorkEffort to the operation (requiredWork Y), a RequirementSupply
             of the line, the requirement Ordered and the subcontract given the line; the order is never placed or approved
-            (Purchasing's). Its plan's age does not matter (the quantity is the request's, not netted). Other buy and
-            transfer suggestions are not converted here (METHOD_NOT_CONVERTED). Requires PRODUCTION_PLAN for make and
-            PURCHASE_ORDER_EDIT for outside processing (PERMISSION_DENIED); refuses an outside-processing suggestion with no
-            supplier (SUGGESTION_EXCEPTION) or no supplier price (PRICE_UNAVAILABLE), and a suggestion outside the user's
+            (Purchasing's). Its plan's age does not matter (the quantity is the request's, not netted). A buy suggestion
+            (impl-purchasing P14a) becomes a line of a draft purchase order of its supplier for its facility, one order per
+            supplier and facility in this call (one purchase part), at the requirement's remaining quantity in the stock unit
+            and the supplier's price, with a RequirementSupply of the line, the requirement Ordered; never placed or
+            approved. A buy whose requirement another conversion already covered is refused DEMAND_ALREADY_COVERED, naming
+            the supply, so no second order is made; a retry with the same operation key answers its first result (EXISTING).
+            Transfer suggestions are not converted here (METHOD_NOT_CONVERTED). An automatic conversion (automatic) leaves a
+            suggestion whose reorder rule is snoozed (SUGGESTION_SNOOZED). Requires PRODUCTION_PLAN for make and
+            PURCHASE_ORDER_EDIT for buy and outside processing (PERMISSION_DENIED); refuses a buy or outside-processing
+            suggestion with no supplier (SUGGESTION_EXCEPTION) or no supplier price (PRICE_UNAVAILABLE), a product that cannot
+            be bought (PRODUCT_NOT_USABLE), and a suggestion outside the user's
             organizations (RECORD_UNAVAILABLE), a stale plan (PLAN_STALE), an exception (SUGGESTION_EXCEPTION), a superseded or converted
             suggestion (SUGGESTION_CLOSED), a product that cannot be produced (PRODUCT_NOT_USABLE) and
             create#ProductionOrder's refusals.</description>
@@ -187,11 +203,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="methodDate" type="Timestamp"/>
             <parameter name="facilityId"><description>The facility of the runs, for every suggestion converted; each
                 suggestion's own when empty.</description></parameter>
+            <parameter name="automatic" type="Boolean" default="false"><description>A conversion no person chose (a schedule's
+                or a policy's): a suggestion whose reorder rule is snoozed is left (SUGGESTION_SNOOZED).</description>
+            </parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"><description>Per suggestion: planningSuggestionId, ok, resultCode CREATED or
-                EXISTING, requirementId, workEffortId, quantity and facilityId (make), or orderId and orderItemSeqId
-                (outside processing), or reasonCode and message.</description>
+                EXISTING, requirementId, workEffortId, quantity and facilityId (make), or orderId and orderItemSeqId (buy
+                and outside processing), or reasonCode and message.</description>
             </parameter>
             <parameter name="createdCount" type="Integer"/>
             <parameter name="existingCount" type="Integer"/>
@@ -214,8 +233,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="operationKey" required="true"/>
             <parameter name="methodDate" type="Timestamp"/>
             <parameter name="facilityId"/>
-            <parameter name="orderId"><description>Outside processing: the draft order of the same supplier an earlier
-                group of the call made, which this line joins</description></parameter>
+            <parameter name="orderId"><description>Buy and outside processing: the draft order of the same supplier (and
+                facility, for a buy) an earlier group of the call made, which this line joins</description></parameter>
+            <parameter name="automatic" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"/>

@@ -27,8 +27,14 @@
 // release), each suggestion on its own: the requirement locked, its covered quantity read, the run created with the method
 // as of the plan date (or the date given), then RequirementSupply and WorkRequirementFulfillment WrfDelivers. A second
 // conversion of a covered requirement answers its existing run. A stale run (superseded, or older than the policy's
-// freshness limit) is refused. Buy and transfer suggestions are shown with their supplier or source; their conversions are
-// Purchasing's and Warehouse's (impl-manufacturing §7). An outside-processing requirement (request#SubcontractService's
+// freshness limit) is refused. A buy suggestion (impl-purchasing P14a) is converted by a buyer into a line of a draft
+// purchase order of its supplier for its facility (convertBuy: one order per supplier and facility in the call, never placed
+// or approved); a requirement another conversion already covered is refused DEMAND_ALREADY_COVERED, naming its supply, while
+// a retry of the same operation answers it. Transfer suggestions are shown with their source; their conversion is
+// Warehouse's (impl-manufacturing §7). The reorder rule of a product at a facility of the set (ProductFacility, R-PUR-19)
+// orders up to its maximum stock (RdmUpToMaximum) or at least its reorder quantity (RdmFixedQuantity) once the projection
+// falls below the minimum; a snoozed rule still shows its shortage, and only an automatic conversion skips it
+// (SUGGESTION_SNOOZED). An outside-processing requirement (request#SubcontractService's
 // RqTpProduct requirement of a service, with its RstOperationDemand link to the operation; impl-manufacturing P14) is a
 // PsmOutside suggestion of every run of a set that covers its facility, never netted; a buyer converts it into a line of a
 // draft purchase order of its supplier, with OrderItemWorkEffort to the operation (convertOutside).
@@ -58,8 +64,9 @@ const openSuggestionStates = ["PssProposed", "PssPartial", "PssException"]
 // who reads a plan (any planner mount: the production reader, a planner; Purchasing and Warehouse add their view
 // permissions when they mount it; the buyer of outside processing reads the plan to convert) and who converts each method
 // (Purchasing adds buy, Warehouse transfer; P14 the outside-processing buy)
-const readPermissions = ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "PURCHASE_ORDER_EDIT"]
-const convertPermissions = {PsmMake: "PRODUCTION_PLAN", PsmOutside: "PURCHASE_ORDER_EDIT"}
+// (Purchasing's reader holds SUPPLY_PLAN_VIEW, impl-purchasing P14a)
+const readPermissions = ["SUPPLY_PLAN_RUN", "SUPPLY_PLAN_VIEW", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "PURCHASE_ORDER_EDIT"]
+const convertPermissions = {PsmMake: "PRODUCTION_PLAN", PsmOutside: "PURCHASE_ORDER_EDIT", PsmBuy: "PURCHASE_ORDER_EDIT"}
 // the requirement statuses an outside-processing suggestion is planned from, and its demand link (which covers nothing)
 const outsideStatuses = ["RqmtStProposed", "RqmtStApproved"]
 const demandSupplyType = "RstOperationDemand"
@@ -286,16 +293,57 @@ function runRows(ctx, node) {
     }
     return byProduct
 }
-// The minimum stock of products at the facilities of the set (ProductFacility), as demand.
+// The minimum stock of products at the facilities of the set (ProductFacility), as demand, with the reorder rule a shortage
+// reads (reorderOf, R-PUR-19): its method, maximum stock, reorder quantity and snooze. A rule ordering up to its maximum
+// counts with no minimum too (its reorder point is then zero).
 function minimumStock(ctx, node) {
     const byProduct = new Map()
-    for (const row of rows("mantle.facility.ProductFacility", {facilityId: node.facilityId}))
-        if (row.minimumStock != null && dec(row.minimumStock).compare(0) > 0)
-            byProduct.set(row.productId, [
-                {kind: "minimum", label: "Minimum stock at " + node.facilityName, date: null, quantity: dec(row.minimumStock)}
-            ])
+    for (const row of rows("mantle.facility.ProductFacility", {facilityId: node.facilityId})) {
+        const minimum = dec(row.minimumStock)
+        const upToMaximum = row.reorderMethodEnumId === "RdmUpToMaximum" && dec(row.maximumStock).compare(0) > 0
+        if (minimum.compare(0) <= 0 && !upToMaximum) continue
+        byProduct.set(row.productId, [
+            {
+                kind: "minimum",
+                label: "Minimum stock at " + node.facilityName,
+                date: null,
+                quantity: minimum.compare(0) > 0 ? minimum : zero(),
+                rule: {
+                    facilityId: node.facilityId,
+                    minimumStock: minimum,
+                    maximumStock: row.maximumStock == null ? null : dec(row.maximumStock),
+                    reorderQuantity: row.reorderQuantity == null ? null : dec(row.reorderQuantity),
+                    reorderMethodEnumId: row.reorderMethodEnumId || null,
+                    snoozeThruDate: row.snoozeThruDate || null
+                }
+            }
+        ])
+    }
     return byProduct
 }
+// What a shortage orders beyond its net quantity by the reorder rule of its facility: up to the maximum stock, or at least
+// the reorder quantity; the line that explains it, else none.
+function reorderOf(row) {
+    const rule = row.lines.find(line => line.kind === "minimum" && line.rule)?.rule
+    if (!rule) return {extra: zero(), line: null, rule: null}
+    let extra = zero(),
+        label = null
+    if (rule.reorderMethodEnumId === "RdmUpToMaximum" && rule.maximumStock && rule.maximumStock.compare(rule.minimumStock) > 0) {
+        extra = rule.maximumStock.subtract(rule.minimumStock)
+        label = "Up to the maximum stock of " + text(rule.maximumStock)
+    } else if (
+        rule.reorderMethodEnumId === "RdmFixedQuantity" &&
+        rule.reorderQuantity &&
+        rule.reorderQuantity.compare(row.net) > 0
+    ) {
+        extra = rule.reorderQuantity.subtract(row.net)
+        label = "At least the reorder quantity of " + text(rule.reorderQuantity)
+    }
+    if (extra.compare(0) <= 0) return {extra: zero(), line: null, rule}
+    return {extra, rule, line: {kind: "reorder", label, date: null, quantity: extra, netted: true}}
+}
+// Whether a reorder rule (or a product's ProductFacility row) is snoozed at a date.
+const snoozedAt = (rule, date) => !!rule?.snoozeThruDate && ms(rule.snoozeThruDate) > ms(date || ec.user.nowTimestamp)
 // The organization's transfers in transit to a node, by product: each transfer line's issuances less what its receipts
 // accepted and rejected (Transfers.js sums the two apart, F37). The origin's stock is out of its available to promise once
 // issued, so it is supply at the destination until received (get#InventoryProjectedInfo counts no transfer).
@@ -371,10 +419,12 @@ function stockLines(ctx, node, productId) {
             netted: false
         })
     }
+    // open purchase lines, and the lines of a draft order a conversion made (a RequirementSupply of the line), so a converted
+    // buy suggestion is supply to the next run (impl-purchasing P14a)
     const parts = Array.from(
         find("mantle.order.OrderPart", {customerPartyId: ctx.organizationPartyId})
             .condition("facilityId", "in", node.facilityIds)
-            .condition("statusId", "in", firmOrderStatuses)
+            .condition("statusId", "in", firmOrderStatuses.concat(["OrderOpen"]))
             .list()
     ).filter(part => part.vendorPartyId !== ctx.organizationPartyId)
     for (const part of parts)
@@ -383,6 +433,11 @@ function stockLines(ctx, node, productId) {
             orderPartSeqId: part.orderPartSeqId,
             productId
         })) {
+            if (
+                part.statusId === "OrderOpen" &&
+                !rows(SUPPLY, {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}).some(row => !row.thruDate)
+            )
+                continue
             const received = rows("mantle.product.receipt.AssetReceipt", {
                 orderId: item.orderId,
                 orderItemSeqId: item.orderItemSeqId
@@ -391,7 +446,11 @@ function stockLines(ctx, node, productId) {
             if (open.compare(0) > 0)
                 lines.push({
                     kind: "purchase",
-                    label: "Purchase order " + item.orderId + " line " + item.orderItemSeqId,
+                    label:
+                        (part.statusId === "OrderOpen" ? "Draft purchase order " : "Purchase order ") +
+                        item.orderId +
+                        " line " +
+                        item.orderItemSeqId,
                     orderId: item.orderId,
                     orderItemSeqId: item.orderItemSeqId,
                     date: item.requiredByDate || part.estimatedDeliveryDate || null,
@@ -431,6 +490,16 @@ function structureOf(ctx, productId) {
     }
     if (!bom) return structure
     structure.bom = bom
+    // get#BomExplosion needs a method read (METHOD_VIEW, MethodPolicy.js); a runner without it gets this product named, not
+    // a failed run: the explosion's refusal would leave its error in the run's transaction (impl-purchasing F-P14a-2)
+    if (ctx.methodRead == null) ctx.methodRead = !!methodPolicy().capabilities().read
+    if (!ctx.methodRead) {
+        structure.error = {
+            code: "METHOD_INVALID",
+            message: "Reading the BOM of " + productId + " needs method view (METHOD_VIEW)"
+        }
+        return structure
+    }
     try {
         const exploded = call("mantle.product.BomServices.get#BomExplosion", {
             productBomId: bom.productBomId,
@@ -777,7 +846,11 @@ function plan(ctx, nodes) {
                 }
             }
             for (const row of nets.filter(each => each.net.compare(0) > 0)) {
-                const suggestion = suggestionOf(ctx, row, productId, level, structure, {quantity: row.net})
+                const reorder = reorderOf(row)
+                if (reorder.line) row.lines.push(reorder.line)
+                const suggestion = suggestionOf(ctx, row, productId, level, structure, {quantity: row.net.add(reorder.extra)})
+                // a snoozed rule still shows its shortage; an automatic conversion leaves it (convertOne)
+                if (snoozedAt(reorder.rule, ctx.planDate) && !suggestion.exceptionCode) suggestion.warnings.push("SNOOZED")
                 out.push(suggestion)
                 // a make suggestion's components are demand of their level, due at its release
                 if (suggestion.methodEnumId === "PsmMake" && !suggestion.exceptionCode)
@@ -989,9 +1062,20 @@ const kindLabels = {
     transfer: "Transfer in transit",
     minimum: "Minimum stock",
     planned: "Planned make",
-    operation: "Outside operation"
+    operation: "Outside operation",
+    reorder: "Reorder rule"
 }
-const warningLabels = {LATE_RELEASE: "Release date has passed", INSIDE_TIME_FENCE: "Inside the time fence"}
+const warningLabels = {
+    LATE_RELEASE: "Release date has passed",
+    INSIDE_TIME_FENCE: "Inside the time fence",
+    SNOOZED: "Reorder rule snoozed"
+}
+// The snooze of a product's reorder rule at a facility now, as a suggestion shows it: until when and why, else null.
+function snoozeOf(productId, facilityId) {
+    const policy = one("mantle.facility.ProductFacility", {productId, facilityId})
+    if (!snoozedAt(policy)) return null
+    return {thruText: dateText(policy.snoozeThruDate), reason: policy.snoozeReason || ""}
+}
 // A suggestion for a screen: names, texts, its covered quantity and links, and whether the user may convert it now.
 function suggestionRow(row, run, stale, names) {
     const covered = row.requirementId ? coveredOf(row.requirementId) : zero()
@@ -1014,6 +1098,7 @@ function suggestionRow(row, run, stale, names) {
               }))
         : []
     const warnings = listOf(row.warningCodes)
+    const snooze = warnings.includes("SNOOZED") ? snoozeOf(row.productId, row.facilityId) : null
     return {
         planningSuggestionId: row.planningSuggestionId,
         planningRunId: row.planningRunId,
@@ -1058,7 +1143,15 @@ function suggestionRow(row, run, stale, names) {
                 : "",
         exceptionCode: row.exceptionCode || null,
         exceptionMessage: row.exceptionMessage || null,
-        warningText: warnings.map(code => warningLabels[code] || code).join(", "),
+        warningText: warnings
+            .filter(code => code !== "SNOOZED" || snooze)
+            .map(code =>
+                code === "SNOOZED"
+                    ? "Reorder rule snoozed until " + snooze.thruText + (snooze.reason ? ": " + snooze.reason : "")
+                    : warningLabels[code] || code
+            )
+            .join(", "),
+        snoozed: !!snooze,
         stateColor: row.exceptionCode
             ? "negative"
             : row.stateEnumId === "PssConverted"
@@ -1160,7 +1253,8 @@ function getPlan(p) {
         canRun: access.has("SUPPLY_PLAN_RUN"),
         canSchedule: access.has("SUPPLY_PLAN_RUN"),
         canConvertMake: access.has(convertPermissions.PsmMake),
-        canConvertOutside: access.has(convertPermissions.PsmOutside)
+        canConvertOutside: access.has(convertPermissions.PsmOutside),
+        canConvertBuy: access.has(convertPermissions.PsmBuy)
     }
     if (!run) return answer
     const stale = staleOf(run)
@@ -1324,20 +1418,28 @@ function convert(p) {
     const operationKey = str(p.operationKey)
     if (!operationKey) denied("OPERATION_KEY_REQUIRED", "An operation key is required")
     const results = []
-    // outside processing: one draft order per supplier in this call, the first line's order taken by the next (P14)
+    // one draft order per supplier group in this call, the first line's order taken by the next: outside processing by
+    // supplier (P14), a buy by supplier and facility (P14a)
     const supplierOrders = new Map()
+    const automatic = p.automatic === true || p.automatic === "true" || p.automatic === "Y"
     for (const planningSuggestionId of ids) {
         try {
-            const supplierPartyId = one(SUGGESTION, {planningSuggestionId})?.supplierPartyId || null
+            const suggestion = one(SUGGESTION, {planningSuggestionId})
+            const groupKey = !suggestion?.supplierPartyId
+                ? null
+                : suggestion.methodEnumId === "PsmBuy"
+                  ? "buy|" + suggestion.supplierPartyId + "|" + suggestion.facilityId
+                  : suggestion.supplierPartyId
             const out = probe("mantle.product.SupplyPlanningServices.convert#PlanningSuggestion", {
                 planningSuggestionId,
                 operationKey: operationKey + "/" + planningSuggestionId,
                 methodDate: p.methodDate || null,
                 facilityId: str(p.facilityId),
-                orderId: (supplierPartyId && supplierOrders.get(supplierPartyId)) || null
+                orderId: (groupKey && supplierOrders.get(groupKey)) || null,
+                automatic
             })
-            if (out.result?.orderId && out.result.resultCode === "CREATED" && supplierPartyId)
-                supplierOrders.set(supplierPartyId, out.result.orderId)
+            if (out.result?.orderId && out.result.resultCode === "CREATED" && groupKey)
+                supplierOrders.set(groupKey, out.result.orderId)
             results.push(Object.assign({planningSuggestionId, ok: true}, out.result))
         } catch (error) {
             const message = String(error.message || error).replace(/^(Error: )+/, "")
@@ -1379,6 +1481,23 @@ function convertOne(p) {
     const links = rows(SUPPLY, {requirementId: requirement.requirementId}).filter(
         row => !row.thruDate && row.supplyTypeEnumId !== demandSupplyType
     )
+    // a buy another conversion covered is a named failure, so a competing buyer makes no second order; a retry of this
+    // operation answers its first result (design-purchasing §8 SupplyPlanning, DemandAlreadyCovered)
+    if (
+        remaining.compare(0) <= 0 &&
+        links.length &&
+        suggestion.methodEnumId === "PsmBuy" &&
+        !links.some(row => row.operationKey === p.operationKey)
+    )
+        denied(
+            "DEMAND_ALREADY_COVERED",
+            "Requirement " +
+                requirement.requirementId +
+                " of " +
+                suggestion.productId +
+                " is already covered by " +
+                links.map(supplyText).join(", ")
+        )
     if (remaining.compare(0) <= 0 && links.length)
         return {
             resultCode: "EXISTING",
@@ -1388,7 +1507,17 @@ function convertOne(p) {
             orderId: links[0].orderId || null,
             orderItemSeqId: links[0].orderItemSeqId || null
         }
+    // an automatic conversion (a schedule's or a policy's) leaves a snoozed rule's shortage; a person may still convert it
+    if (
+        (p.automatic === true || p.automatic === "true") &&
+        snoozedAt(one("mantle.facility.ProductFacility", {productId: suggestion.productId, facilityId: suggestion.facilityId}))
+    )
+        denied(
+            "SUGGESTION_SNOOZED",
+            "The reorder rule of " + suggestion.productId + " at " + suggestion.facilityId + " is snoozed"
+        )
     if (suggestion.methodEnumId === "PsmOutside") return convertOutside(p, suggestion, run, requirement, remaining)
+    if (suggestion.methodEnumId === "PsmBuy") return convertBuy(p, suggestion, run, requirement, remaining)
     const stale = staleOf(run)
     if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
     if (suggestion.exceptionCode) denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The suggestion has an exception")
@@ -1583,71 +1712,20 @@ function convertOutside(p, suggestion, run, requirement, remaining) {
     const productId = requirement.productId
     const reason = usable(productId, "Purchase", remaining, suggestion.facilityId)
     if (reason) denied("PRODUCT_NOT_USABLE", productId + " cannot be bought: " + reason)
-    // the organization's accounting currency (its own preference, else an ancestor organization's)
-    const currencyUomId =
-        call("mantle.ledger.LedgerServices.find#PartyAcctgPreference", {organizationPartyId}).partyAcctgPreference
-            ?.baseCurrencyUomId || null
-    if (!currencyUomId) denied("CURRENCY_REQUIRED", "Organization " + organizationPartyId + " has no accounting currency")
     const quantityUomId = requirement.quantityUomId || one(PRODUCT, {productId})?.amountUomId || null
-    const price = call("mantle.product.PriceServices.get#ProductPrice", {
-        productId,
-        quantity: remaining,
-        quantityUomId,
-        vendorPartyId: supplierPartyId,
-        customerPartyId: organizationPartyId,
+    const {orderId, orderItemSeqId} = draftOrderLine(p, {
         organizationPartyId,
-        pricePurposeEnumId: "PppPurchase",
-        priceUomId: currencyUomId,
-        direction: "purchase",
-        validDate: ec.user.nowTimestamp
-    })
-    // the resolver reads a supplier's price only for a supplier-price reader (Products' borrowed group of a buyer)
-    if (!price.priceAvailable && !["SUPPLIER_PRICE_VIEW", "SUPPLIER_PRICE_EDIT"].some(access.has))
-        denied("PERMISSION_DENIED", "SUPPLIER_PRICE_VIEW is required to price the line of " + productId)
-    if (!price.priceAvailable)
-        denied(
-            "PRICE_UNAVAILABLE",
-            productId + " has no purchase price from " + lib.partyNames([supplierPartyId])[supplierPartyId]
-        )
-    // the call's draft order of this supplier, while it is still a draft of the same parties and currency
-    let orderId = null,
-        orderPartSeqId = null
-    if (!blank(p.orderId)) {
-        const header = one("mantle.order.OrderHeader", {orderId: p.orderId})
-        const part = rows("mantle.order.OrderPart", {orderId: p.orderId}).find(
-            row => row.vendorPartyId === supplierPartyId && row.customerPartyId === organizationPartyId
-        )
-        if (header?.statusId === "OrderOpen" && header.currencyUomId === currencyUomId && part) {
-            orderId = header.orderId
-            orderPartSeqId = part.orderPartSeqId
-        }
-    }
-    if (!orderId) {
-        const created = call("mantle.order.OrderServices.create#Order", {
-            customerPartyId: organizationPartyId,
-            vendorPartyId: supplierPartyId,
-            currencyUomId,
-            statusId: "OrderOpen",
-            orderName: "Outside processing from supply plan " + run.planningRunId
-        })
-        orderId = created.orderId
-        orderPartSeqId = created.orderPartSeqId
-    }
-    const item = call("mantle.order.OrderServices.create#OrderItem", {
-        orderId,
-        orderPartSeqId,
+        supplierPartyId,
         productId,
         quantity: remaining,
         quantityUomId,
-        unitAmount: price.price,
-        productPriceId: price.productPriceId || null,
+        orderName: "Outside processing from supply plan " + run.planningRunId,
         itemDescription:
             (one(PRODUCT, {productId})?.productName || productId) +
             " for " +
             (operation.workEffortName || operation.workEffortId),
         requiredByDate: requirement.requiredByDate || null
     })
-    const orderItemSeqId = item.orderItemSeqId
     call("create#mantle.order.OrderItemWorkEffort", {
         orderId,
         orderItemSeqId,
@@ -1688,6 +1766,139 @@ function convertOutside(p, suggestion, run, requirement, remaining) {
         operationWorkEffortId: operation.workEffortId,
         quantity: text(remaining)
     }
+}
+
+// A line of a draft purchase order of the supplier: the order an earlier group of the call made (p.orderId) while it is
+// still a draft of the same parties, currency and facility, else a new one with one purchase part; priced by the shared
+// resolver with the organization as buyer, in the organization's accounting currency (its own preference, else an
+// ancestor's). The order is never placed or approved (Purchasing's).
+function draftOrderLine(p, line) {
+    const {organizationPartyId, supplierPartyId, productId} = line
+    const currencyUomId =
+        call("mantle.ledger.LedgerServices.find#PartyAcctgPreference", {organizationPartyId}).partyAcctgPreference
+            ?.baseCurrencyUomId || null
+    if (!currencyUomId) denied("CURRENCY_REQUIRED", "Organization " + organizationPartyId + " has no accounting currency")
+    const price = call("mantle.product.PriceServices.get#ProductPrice", {
+        productId,
+        quantity: line.quantity,
+        quantityUomId: line.quantityUomId,
+        vendorPartyId: supplierPartyId,
+        customerPartyId: organizationPartyId,
+        organizationPartyId,
+        pricePurposeEnumId: "PppPurchase",
+        priceUomId: currencyUomId,
+        direction: "purchase",
+        validDate: ec.user.nowTimestamp
+    })
+    // the resolver reads a supplier's price only for a supplier-price reader (Products' borrowed group of a buyer)
+    if (!price.priceAvailable && !["SUPPLIER_PRICE_VIEW", "SUPPLIER_PRICE_EDIT"].some(access.has))
+        denied("PERMISSION_DENIED", "SUPPLIER_PRICE_VIEW is required to price the line of " + productId)
+    if (!price.priceAvailable)
+        denied(
+            "PRICE_UNAVAILABLE",
+            productId + " has no purchase price from " + lib.partyNames([supplierPartyId])[supplierPartyId]
+        )
+    let orderId = null,
+        orderPartSeqId = null
+    if (!blank(p.orderId)) {
+        const header = one("mantle.order.OrderHeader", {orderId: p.orderId})
+        const part = rows("mantle.order.OrderPart", {orderId: p.orderId}).find(
+            row =>
+                row.vendorPartyId === supplierPartyId &&
+                row.customerPartyId === organizationPartyId &&
+                (row.facilityId || null) === (line.facilityId || null)
+        )
+        if (header?.statusId === "OrderOpen" && header.currencyUomId === currencyUomId && part) {
+            orderId = header.orderId
+            orderPartSeqId = part.orderPartSeqId
+        }
+    }
+    if (!orderId) {
+        const created = call("mantle.order.OrderServices.create#Order", {
+            customerPartyId: organizationPartyId,
+            vendorPartyId: supplierPartyId,
+            currencyUomId,
+            statusId: "OrderOpen",
+            facilityId: line.facilityId || null,
+            orderName: line.orderName
+        })
+        orderId = created.orderId
+        orderPartSeqId = created.orderPartSeqId
+    }
+    const item = call("mantle.order.OrderServices.create#OrderItem", {
+        orderId,
+        orderPartSeqId,
+        productId,
+        quantity: line.quantity,
+        quantityUomId: line.quantityUomId,
+        unitAmount: price.price,
+        productPriceId: price.productPriceId || null,
+        itemDescription: line.itemDescription,
+        requiredByDate: line.requiredByDate
+    })
+    return {orderId, orderItemSeqId: item.orderItemSeqId}
+}
+
+// ===== buy (impl-purchasing P14a) =====
+// One buy suggestion converted: its plan current and fresh, the suggestion open with its supplier, the product usable for
+// purchase; a line of a draft purchase order of its supplier for its facility (the order an earlier group of the call made,
+// else a new one) for the requirement's remaining quantity in the stock unit, at the supplier's price; a RequirementSupply
+// of the line, the requirement Ordered and the suggestion converted. A customer order's demand keeps its sales line: the
+// requirement's RequirementOrderItem stays, and the line's provenance with it.
+function convertBuy(p, suggestion, run, requirement, remaining) {
+    const stale = staleOf(run)
+    if (stale.stale) denied("PLAN_STALE", stale.reason + "; recalculate the plan")
+    if (suggestion.exceptionCode || !suggestion.supplierPartyId)
+        denied("SUGGESTION_EXCEPTION", suggestion.exceptionMessage || "The buy suggestion has no supplier")
+    if (!["PssProposed", "PssPartial"].includes(suggestion.stateEnumId))
+        denied("SUGGESTION_CLOSED", "The suggestion is " + enumText(suggestion.stateEnumId))
+    const productId = suggestion.productId
+    const reason = usable(productId, "Purchase", remaining, suggestion.facilityId)
+    if (reason) denied("PRODUCT_NOT_USABLE", productId + " cannot be bought: " + reason)
+    const product = one(PRODUCT, {productId})
+    const quantityUomId = suggestion.quantityUomId || requirement.quantityUomId || product?.amountUomId || null
+    const {orderId, orderItemSeqId} = draftOrderLine(p, {
+        organizationPartyId: run.organizationPartyId,
+        supplierPartyId: suggestion.supplierPartyId,
+        productId,
+        quantity: remaining,
+        quantityUomId,
+        facilityId: suggestion.facilityId,
+        orderName: "Replenishment from supply plan " + run.planningRunId,
+        itemDescription: product?.productName || productId,
+        requiredByDate: suggestion.requiredByDate || requirement.requiredByDate || null
+    })
+    call("create#" + SUPPLY, {
+        requirementId: requirement.requirementId,
+        supplyTypeEnumId: "RstPurchaseOrder",
+        orderId,
+        orderItemSeqId,
+        quantity: remaining,
+        quantityUomId,
+        planningSuggestionId: suggestion.planningSuggestionId,
+        operationKey: p.operationKey,
+        fromDate: ec.user.nowTimestamp,
+        createdByUserId: ec.user.userId
+    })
+    if (["RqmtStProposed", "RqmtStCreated"].includes(requirement.statusId))
+        call("update#" + REQUIREMENT, {requirementId: requirement.requirementId, statusId: "RqmtStApproved"})
+    call("update#" + REQUIREMENT, {requirementId: requirement.requirementId, statusId: "RqmtStOrdered"})
+    call("update#" + SUGGESTION, {planningSuggestionId: suggestion.planningSuggestionId, stateEnumId: "PssConverted"})
+    return {
+        resultCode: "CREATED",
+        requirementId: requirement.requirementId,
+        orderId,
+        orderItemSeqId,
+        supplierPartyId: suggestion.supplierPartyId,
+        facilityId: suggestion.facilityId,
+        quantity: text(remaining)
+    }
+}
+// A supply link as a refusal names it: its order line, run, request or transfer.
+function supplyText(link) {
+    if (link.orderId) return "purchase order " + link.orderId + " line " + link.orderItemSeqId
+    if (link.workEffortId) return "work order " + link.workEffortId
+    return enumText(link.supplyTypeEnumId) + " " + (link.requirementSupplyId || "")
 }
 
 // The sales order line a requirement covers, when it covers just one (the run's demand link).

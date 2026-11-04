@@ -314,7 +314,11 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="ProductFacilityPolicy" allow-remote="false">
-        <description>Warehouse-owned product/facility policy; minimumStock targets the location when locationSeqId is supplied. Facility and location levels are edited separately and audit-logged.</description>
+        <description>Warehouse-owned product/facility policy; minimumStock targets the location when locationSeqId is supplied. Facility and location levels are edited separately and audit-logged.
+            The facility level is also the product's reorder rule (impl-purchasing P14a): its method (RdmFixedQuantity or
+            RdmUpToMaximum, which needs maximumStock) and its snooze, a thru date with its reason (snoozeThruDate,
+            snoozeReason), which stops automatic conversion of the rule's shortage, not the shortage. A new snooze must end
+            after now (SNOOZE_INVALID) and give its reason (SNOOZE_REASON_REQUIRED); an empty thru date ends it.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="productId" required="true"/>

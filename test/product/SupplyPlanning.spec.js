@@ -4,7 +4,7 @@
 // the components, a phantom's blown through; a kit's sales demand counts as its components' and a kit assembly run is shown
 // and not netted; held stock is a pending-release line, netted only by the schedule's option within the lead time; an
 // obsolete product and one with no source are exceptions; converting the make suggestion creates a draft run with its lines,
-// RequirementSupply and WrfDelivers, a second conversion answers that run, a buy suggestion is not converted here, and a
+// RequirementSupply and WrfDelivers, a second conversion answers that run, a buy suggestion is the buyer's (Replenishment.spec), and a
 // superseded plan is refused; a run nets the draft run on its line; a second facility's surplus is a transfer; and the
 // permissions and the organization are checked. The users are in spec-local groups.
 const S = "mantle.product.SupplyPlanningServices.",
@@ -147,6 +147,7 @@ spec({
         user("SPL_METHOD", ["METHOD_VIEW", "METHOD_EDIT", "METHOD_APPROVE", "METHOD_RESOURCES"])
         user("SPL_PLANNER", ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "METHOD_VIEW"])
         user("SPL_RUNNER", ["SUPPLY_PLAN_RUN", "METHOD_VIEW"])
+        user("SPL_NOMETHOD", ["SUPPLY_PLAN_RUN"])
         user("SPL_READER", ["PRODUCTION_VIEW"])
         user("SPL_NONE", ["STOCK_ISSUE"])
         user("SPL_OUTSIDER", ["SUPPLY_PLAN_RUN", "PRODUCTION_PLAN", "PRODUCTION_VIEW", "METHOD_VIEW"], other)
@@ -389,8 +390,9 @@ feature("converting the make suggestion creates a draft run with its supply link
         converted.createdCount == 1
         converted.failedCount == 1
         made.resultCode == "CREATED"
+        // a buy is converted by a buyer (PURCHASE_ORDER_EDIT; impl-purchasing P14a, Replenishment.spec)
         buy.ok == false
-        buy.reasonCode == "METHOD_NOT_CONVERTED"
+        buy.reasonCode == "PERMISSION_DENIED"
         runRow.purposeEnumId == "WepProductionRun"
         runRow.statusId == "WeInPlanning"
         runRow.facilityId == line
@@ -648,7 +650,7 @@ feature("a reservation's unavailable part and a transfer in transit are each cou
     }
 })
 
-feature("a schedule whose user can no longer sign in is named on it, and the other schedules still run", {
+feature("a schedule whose user can no longer sign in is named on it, the other schedules still run, and a runner without METHOD_VIEW gets the made product named", {
     when() {
         call("create#mantle.facility.Facility", {
             facilityId: "SPL_OTHER_WH",
@@ -677,9 +679,14 @@ feature("a schedule whose user can no longer sign in is named on it, and the oth
         const otherSchedule = one("mantle.request.requirement.PlanSchedule", {organizationPartyId: other})
         run("spl_planner", S + "store#PlanSchedule", {organizationPartyId: org, facilityIds: [warehouse], active: "N"})
         call("update#mantle.request.requirement.PlanSchedule", {organizationPartyId: other, active: "N"})
-        return {outsider, mine, ran, results, otherSchedule}
+        // the sub-assembly's BOM cannot be read without METHOD_VIEW: the run goes on, naming it (F-P14a-2)
+        const noMethod = plan("spl_nomethod", {productIds: ["SPL_SUB"]})
+        const noMethodSub = byProduct(read("spl_planner"), "SPL_SUB")
+        return {outsider, mine, ran, results, otherSchedule, noMethod, noMethodSub}
     },
-    then({outsider, mine, ran, results, otherSchedule}) {
+    then({outsider, mine, ran, results, otherSchedule, noMethod, noMethodSub}) {
+        noMethod.error == ""
+        noMethodSub.exceptionCode == "METHOD_INVALID"
         outsider.error == ""
         mine.error == ""
         ran.error == ""

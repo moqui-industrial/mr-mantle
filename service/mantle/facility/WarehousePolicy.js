@@ -509,13 +509,46 @@ function facilityRead(p) {
         canPlan: g.canPlan
     }
 }
+// The product facility levels a store would write, checked as facilityStore checks them, without writing: the import of
+// reorder rules (ReorderLevelServices.validate#ReorderRuleImportRow) previews a row through it.
+function facilityPreview(p) {
+    const checked = facilityValues(p, false)
+    if (checked.removing) throw new Error("A preview does not remove a location policy")
+    return {
+        organizationPartyId: checked.g.organizationPartyId,
+        productId: checked.g.productId,
+        facilityId: checked.g.facilityId,
+        locationSeqId: checked.location,
+        before: checked.old ? pick(map(checked.old), checked.fields) : null,
+        values: Object.assign({}, checked.data, {changeReason: checked.why})
+    }
+}
 function facilityStore(p) {
+    const checked = facilityValues(p, true)
+    const {g, why, location, key, entity, fields, old, data} = checked
+    // a product's location policy removed, so the location no longer names it (a location closes only when none does)
+    if (checked.removing) {
+        if (!old) throw new Error("This product has no policy at the location")
+        // the fields cleared through the audited update first, so the old values and the reason reach the audit log
+        audit([...fields, "changeReason"], why)
+        call("update#" + entity, Object.assign({}, key, Object.fromEntries(fields.map(f => [f, null])), {changeReason: why}))
+        call("delete#" + entity, key)
+        return Object.assign(facilityRead(g), {locationSeqId: location})
+    }
+    audit([...fields, "changeReason"], why)
+    call((old ? "update#" : "create#") + entity, Object.assign({}, key, data, {changeReason: why}))
+    return Object.assign(facilityRead(g), {locationSeqId: location})
+}
+// The checks of a product facility store and the values it writes. The snooze of a reorder rule (impl-purchasing P14a,
+// CX-FACILITY-POLICY) is a thru date and its reason: it stops automatic conversion of the rule's shortage, not the shortage.
+function facilityValues(p, lock) {
     const g = guard(p, true),
         why = reason(p)
     if (g.facilityId === "_NA_" || g.productId === "_NA_") throw new Error("Choose a product and facility")
-    find(E + "Facility", {facilityId: g.facilityId})
-        .forUpdate(true)
-        .one()
+    if (lock)
+        find(E + "Facility", {facilityId: g.facilityId})
+            .forUpdate(true)
+            .one()
     const location = p.locationSeqId || null,
         key = {productId: g.productId, facilityId: g.facilityId},
         entity = E + (location ? "ProductFacilityLocation" : "ProductFacility")
@@ -530,22 +563,32 @@ function facilityStore(p) {
     }
     const fields = location
             ? ["minimumStock", "moveQuantity"]
-            : ["minimumStock", "maximumStock", "reorderQuantity", "daysToShip", "reorderMethodEnumId", "abcClassEnumId"],
-        old = find(entity, key).forUpdate(true).one()
+            : [
+                  "minimumStock",
+                  "maximumStock",
+                  "reorderQuantity",
+                  "daysToShip",
+                  "reorderMethodEnumId",
+                  "abcClassEnumId",
+                  "snoozeThruDate",
+                  "snoozeReason"
+              ],
+        old = lock ? find(entity, key).forUpdate(true).one() : one(entity, key)
     if (p.expectedLastUpdatedStamp && ms(p.expectedLastUpdatedStamp) !== ms(old?.lastUpdatedStamp))
         throw new Error("Facility policy changed; reload before saving")
-    // a product's location policy removed, so the location no longer names it (a location closes only when none does)
-    if (location && (p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y")) {
-        if (!old) throw new Error("This product has no policy at the location")
-        // the fields cleared through the audited update first, so the old values and the reason reach the audit log
-        audit([...fields, "changeReason"], why)
-        call("update#" + entity, Object.assign({}, key, Object.fromEntries(fields.map(f => [f, null])), {changeReason: why}))
-        call("delete#" + entity, key)
-        return Object.assign(facilityRead(g), {locationSeqId: location})
-    }
+    const removing = !!location && (p.removeLocation === true || p.removeLocation === "true" || p.removeLocation === "Y")
+    if (removing) return {g, why, location, key, entity, fields, old, removing}
     if (
         location &&
-        ["maximumStock", "reorderQuantity", "daysToShip", "reorderMethodEnumId", "abcClassEnumId"].some(k => p[k] != null)
+        [
+            "maximumStock",
+            "reorderQuantity",
+            "daysToShip",
+            "reorderMethodEnumId",
+            "abcClassEnumId",
+            "snoozeThruDate",
+            "snoozeReason"
+        ].some(k => p[k] != null)
     )
         throw new Error("Edit facility levels separately from location levels")
     const changes = pick(p, fields)
@@ -565,9 +608,25 @@ function facilityStore(p) {
             throw new Error("Choose a valid " + field)
     if (data.reorderMethodEnumId === "RdmUpToMaximum" && data.maximumStock == null)
         throw new Error("Up-to-maximum replenishment requires maximum stock")
-    audit([...fields, "changeReason"], why)
-    call((old ? "update#" : "create#") + entity, Object.assign({}, key, data, {changeReason: why}))
-    return Object.assign(facilityRead(g), {locationSeqId: location})
+    // a new snooze ends after now and says why; ending it clears its reason; one left as it was is kept, past or not
+    if (!location) {
+        const snoozeChanged =
+            Object.keys(changes).includes("snoozeThruDate") &&
+            data.snoozeThruDate != null &&
+            ms(data.snoozeThruDate) !== ms(old?.snoozeThruDate)
+        if (data.snoozeThruDate == null || data.snoozeThruDate === "") {
+            data.snoozeThruDate = null
+            data.snoozeReason = null
+        } else if (snoozeChanged) {
+            if (!Number.isFinite(ms(data.snoozeThruDate)) || ms(data.snoozeThruDate) <= ms(ec.user.nowTimestamp))
+                denied("SNOOZE_INVALID", "A snooze ends after now")
+            if (!String(data.snoozeReason || "").trim())
+                denied("SNOOZE_REASON_REQUIRED", "Give the reason for snoozing the reorder rule")
+            data.snoozeThruDate = new Date(ms(data.snoozeThruDate))
+        } else if (!String(data.snoozeReason || "").trim())
+            denied("SNOOZE_REASON_REQUIRED", "Give the reason for snoozing the reorder rule")
+    }
+    return {g, why, location, key, entity, fields, old, data, removing: false}
 }
 function execute(op, p) {
     const operations = {
@@ -579,7 +638,8 @@ function execute(op, p) {
         storeStoreReservation,
         reservationCheck,
         facilityRead,
-        facilityStore
+        facilityStore,
+        facilityPreview
     }
     if (!operations[op]) throw new Error("Unknown warehouse policy operation " + op)
     return operations[op](p)
