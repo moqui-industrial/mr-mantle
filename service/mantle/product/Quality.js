@@ -961,7 +961,9 @@ function notifyDecision(inspection, decision, permission) {
         qualityInspectionId: inspection.qualityInspectionId,
         decision,
         facilityId: inspection.facilityId,
-        productId: inspection.productId
+        productId: inspection.productId,
+        // the context, so an app's link template opens the inspection where it belongs (impl-manufacturing P8, F-P8-2)
+        inspectionContextEnumId: inspection.inspectionContextEnumId || null
     }
     try {
         if (permission) {

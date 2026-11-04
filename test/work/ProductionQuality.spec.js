@@ -387,7 +387,9 @@ spec({
 
 feature("output of a run whose final template applies is received held, and complete is refused while it is pending", {
     when() {
-        const r = runningRun("PQG_FIN", 6)
+        // the run made for a sales order item (create#ProductionOrder's sourceOrderId): the peg its inspections carry
+        const peggedOrder = salesOrder("PQG_FIN", 5)
+        const r = runningRun("PQG_FIN", 6, {sourceOrderId: peggedOrder, orderItemSeqId: "01"})
         const cutInspection = passCut(r)
         finishOperation(r.cut)
         const received = receive(r.workEffortId, 6)
@@ -399,7 +401,7 @@ feature("output of a run whose final template applies is received held, and comp
         const runStatus = status("pqg_super", {workEffortId: r.workEffortId})
         const lineStatus = status("pqg_inspector", {productionRunLineId: r.output})
         const outsider = status("pqg_outsider", {workEffortId: r.workEffortId})
-        state.held = {r, inspection}
+        state.held = {r, inspection, peggedOrder}
         return {r, cutInspection, received, inspection, read, completed, runStatus, lineStatus, outsider}
     },
     then({r, received, inspection, read, completed, runStatus, lineStatus, outsider}) {
@@ -419,6 +421,8 @@ feature("output of a run whose final template applies is received held, and comp
         inspection.inspectionContextEnumId == "QicProduction"
         n(inspection.sampleSize) == 2
         n(inspection.heldQuantity) == 6
+        inspection.demandOrderId == state.held.peggedOrder
+        inspection.demandOrderItemSeqId == "01"
         String(inspection.templateAsOfDate) == String(r.finalGate.templateAsOfDate)
         // held quantity never counts as good
         n(primaryOutput(read).good) == 0
@@ -447,9 +451,13 @@ feature("an inspector records and submits, cannot verify, and a verifier verifie
         const notices = rows("moqui.security.user.NotificationMessage", {topic: "ProductionQualityBlock"}).filter(row =>
             String(row.messageJson || "").includes(inspection.qualityInspectionId)
         )
-        return {submitted, byInspector, read, byVerifier, after, notices}
+        // the submit's decision notice to the verifiers carries the production context, for an app's link (F-P8-2)
+        const decisions = rows("moqui.security.user.NotificationMessage", {topic: "QualityInspectionDecision"}).filter(row =>
+            String(row.messageJson || "").includes(inspection.qualityInspectionId)
+        )
+        return {submitted, byInspector, read, byVerifier, after, notices, decisions}
     },
-    then({submitted, byInspector, read, byVerifier, after, notices}) {
+    then({submitted, byInspector, read, byVerifier, after, notices, decisions}) {
         submitted.error == ""
         byInspector.error.includes("PERMISSION_DENIED")
         read.error == ""
@@ -461,21 +469,18 @@ feature("an inspector records and submits, cannot verify, and a verifier verifie
         n(after.quantityRejected) == 1
         // a rejection blocks the gate: the supervisors are told
         notices.length == 1
+        decisions.length > 0
+        decisions.every(row => String(row.messageJson).includes("QicProduction"))
+        // with BOSS's link template a production inspection opens in Manufacturing
+        decisions.every(row => !row.linkText || String(row.linkText).includes("/Manufacturing/Quality/QualityInspection"))
     }
 })
 
 feature("a disposition releases five, reserved first to the pegged order item, and scraps one through the loss path", {
     when() {
-        const {r, inspection} = state.held
+        // the peg: the run's own demand provenance, which the receipt's inspection took (the first feature)
+        const {r, inspection, peggedOrder} = state.held
         const id = inspection.qualityInspectionId
-        // the peg: the run's own demand provenance, then the inspection's (create#ProductionOrder's sourceOrderId)
-        const peggedOrder = salesOrder("PQG_FIN", 5)
-        as("john.doe", () =>
-            call("update#" + WORK, {workEffortId: r.workEffortId, demandOrderId: peggedOrder, demandOrderItemSeqId: "01"})
-        )
-        as("john.doe", () =>
-            call("update#" + INSPECTION, {qualityInspectionId: id, demandOrderId: peggedOrder, demandOrderItemSeqId: "01"})
-        )
         const beforeComplete = act("pqg_super", r.workEffortId, "complete")
         const released = run("pqg_verifier", Q + "dispose#Inspection", {
             operationKey: key(),
@@ -714,5 +719,74 @@ feature("an operation naming a template that is not published blocks the release
         released.error.includes("TEMPLATE_UNAVAILABLE")
         gates.length == 0
         one(WORK, {workEffortId: created.workEffortId}).statusId == "WeInPlanning"
+    }
+})
+
+feature("a run released before its gates were kept keeps P16's rule; a gated run reads its gates only", {
+    when() {
+        // released before P8 (no productionGatesDate): a production template that applies now holds the output
+        const legacy = runningRun("PQG_FIN", 2)
+        as("john.doe", () => call("update#" + WORK, {workEffortId: legacy.workEffortId, productionGatesDate: null}))
+        const legacyReceived = receive(legacy.workEffortId, 2)
+        // a gated run whose final gate is gone: the template that applies by product adds no gate after the release
+        const gated = runningRun("PQG_FIN", 2)
+        as("john.doe", () =>
+            call("update#" + GATE, {
+                productionQualityGateId: gated.finalGate.productionQualityGateId,
+                thruDate: ec.user.nowTimestamp
+            })
+        )
+        const gatedReceived = run("pqg_operator", P + "receive#ProductionOutput", {
+            operationKey: key(),
+            workEffortId: gated.workEffortId,
+            quantity: 2,
+            toLocationSeqId: "PICK1"
+        })
+        const legacyInspection = legacyReceived.result?.qualityInspectionIds?.[0]
+            ? one(INSPECTION, {qualityInspectionId: legacyReceived.result.qualityInspectionIds[0]})
+            : null
+        return {legacyReceived, legacyInspection, gatedReceived}
+    },
+    then({legacyReceived, legacyInspection, gatedReceived}) {
+        legacyReceived.error == ""
+        legacyReceived.result.inspected == true
+        legacyInspection.inspectionTemplateId == state.finTemplate
+        legacyInspection.productionQualityGateId == null
+        gatedReceived.error == ""
+        gatedReceived.result.inspected != true
+        gatedReceived.result.qualityInspectionIds.length == 0
+    }
+})
+
+feature("an unrelease counts the gates' inspections as facts, and ends the gates once there are none", {
+    when() {
+        const created = run("pqg_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "PQG_FIN",
+            quantity: 2,
+            facilityId: plant
+        })
+        const workEffortId = created.workEffortId
+        act("pqg_planner", workEffortId, "release")
+        const gate = rows(GATE, {workEffortId}).find(row => row.productionStageEnumId === "QpsInProcess")
+        const inspection = run("pqg_inspector", P + "create#ProductionInspection", {
+            workEffortId,
+            productionQualityGateId: gate.productionQualityGateId
+        })
+        const refused = act("pqg_planner", workEffortId, "unrelease", {reason: "Spec"})
+        run("pqg_inspector", Q + "cancel#Inspection", {qualityInspectionId: inspection.qualityInspectionId, reason: "Spec"})
+        const unreleased = act("pqg_planner", workEffortId, "unrelease", {reason: "Spec"})
+        return {workEffortId, inspection, refused, unreleased, gates: rows(GATE, {workEffortId})}
+    },
+    then({workEffortId, inspection, refused, unreleased, gates}) {
+        inspection.error == ""
+        refused.error.includes("RUN_HAS_FACTS")
+        refused.error.includes("1 inspection")
+        unreleased.error == ""
+        gates.length == 2
+        gates.every(row => row.thruDate != null)
+        one(WORK, {workEffortId}).productionGatesDate == null
+        one(WORK, {workEffortId}).statusId == "WeInPlanning"
     }
 })
