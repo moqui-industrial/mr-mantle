@@ -52,10 +52,12 @@ spec({
                 call("create#mantle.party.Organization", {partyId: id, organizationName: id})
                 call("create#mantle.party.PartyRole", {partyId: id, roleTypeId: "OrgInternal"})
             }
-            for (const [id, group] of [
+            // MTT_FAR_APPROVER approves methods of the other organization only: no notice of this one's requests
+            for (const [id, group, organizationId = ORG] of [
                 ["MTT_ENGINEER", "MTT_METHOD_EDIT"],
                 ["MTT_APPROVER", "MTT_METHOD_APPROVE"],
-                ["MTT_READER", "MTT_METHOD_VIEW"]
+                ["MTT_READER", "MTT_METHOD_VIEW"],
+                ["MTT_FAR_APPROVER", "MTT_METHOD_APPROVE", "MTT_OTHER"]
             ]) {
                 call("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
                 call("create#mantle.party.Person", {partyId: id, firstName: id})
@@ -69,7 +71,7 @@ spec({
                 call("create#moqui.security.UserGroupMember", {userId: id, userGroupId: group, fromDate: "2000-01-01T00:00:00Z"})
                 call("create#mantle.party.PartyRelationship", {
                     fromPartyId: id,
-                    toPartyId: ORG,
+                    toPartyId: organizationId,
                     relationshipTypeEnumId: "PrtAgent",
                     toRoleTypeId: "OrgInternal",
                     fromDate: "2000-01-01T00:00:00Z"
@@ -135,15 +137,29 @@ feature("an engineer keeps operation templates and publishes dated instructions;
                 fromDate: Date.now() + 60000,
                 changeReason: "Second instruction"
             })
+            // the instruction is kept on the entity: the generic file services can neither remove nor replace it
+            const C = "mantle.work.effort.WorkEffortContent"
+            const removed = invoke("delete#" + C, {workEffortContentId: first.workEffortContentId}),
+                replaced = invoke("update#" + C, {
+                    workEffortContentId: first.workEffortContentId,
+                    contentLocation: "dbresource://mantle/content/elsewhere.md"
+                }),
+                forged = invoke("create#" + C, {
+                    workEffortId: weldId,
+                    contentTypeEnumId: "WectInstruction",
+                    contentLocation: "dbresource://mantle/content/forged.md",
+                    fromDate: Date.now() + 120000
+                }),
+                kept = one(C, {workEffortContentId: first.workEffortContentId})
             const noUnit = invoke(R + "store#OperationTemplate", Object.assign(template("No unit"), {methodQuantityUomId: null}))
             const reader = as("mtt_reader", () => ({
                 found: invoke(R + "find#OperationTemplates", {organizationPartyId: ORG, text: "WELD"}),
                 store: invoke(R + "store#OperationTemplate", template("Refused"))
             }))
-            return {cut, weld, first, second, noUnit, reader}
+            return {cut, weld, first, second, removed, replaced, forged, kept, noUnit, reader}
         })
     },
-    then({cut, weld, first, second, noUnit, reader}) {
+    then({cut, weld, first, second, removed, replaced, forged, kept, noUnit, reader}) {
         cut.error == ""
         weld.error == ""
         weld.template.methodRequiredEvidence == "Photo of the joint"
@@ -154,6 +170,11 @@ feature("an engineer keeps operation templates and publishes dated instructions;
         // the first is in effect until the second starts
         second.instructionRows[1].thruDate != null
         second.template.instruction.workEffortContentId == first.workEffortContentId
+        removed.error.includes("cannot be removed")
+        replaced.error.includes("cannot be changed")
+        forged.error.includes("store#OperationInstruction")
+        kept.contentLocation == first.instructionRows[0].contentLocation
+        kept.contentChecksum == first.instructionRows[0].contentChecksum
         noUnit.error.includes("unit")
         reader.found.error == ""
         reader.found.templateRows.length == 1
@@ -219,6 +240,7 @@ feature("a routing is built from two templates; archive blocks new copies; only 
         requested.notified == true
         before.some(row => row.userId === "MTT_APPROVER" && !row.viewed)
         !before.some(row => row.userId === "MTT_ENGINEER")
+        !before.some(row => row.userId === "MTT_FAR_APPROVER")
         released.error == ""
         released.releasedOperationRows.length == 2
         after.length > 0 && after.every(Boolean)

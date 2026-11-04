@@ -351,7 +351,34 @@ function copyOperations(p) {
     })
 }
 
-const operations = {findTemplates, storeTemplate, storeInstruction, copyOperations}
+// The instruction rows' guard (Work.eecas.xml WorkEffortInstructionImmutable): the generic file screens and services write
+// WorkEffortContent too, so a published instruction is kept on the entity. It is created once with its checksum, never
+// removed, and an update may only end it (thruDate); its file, type, template and start never change.
+function guardInstruction(p) {
+    const original = p.originalValue ? map(p.originalValue) : null
+    const candidate = Object.assign({}, original || {}, map(p.entityValue || {}))
+    if (p.eecaOperation === "delete") throw new Error("A published instruction cannot be removed; publish the next one")
+    if (p.eecaOperation === "create") {
+        if (
+            !candidate.contentChecksum ||
+            !String(candidate.contentLocation || "").startsWith("dbresource://mantle/content/workEffort/") ||
+            !candidate.fromDate
+        )
+            throw new Error("An instruction is published with store#OperationInstruction")
+        return {}
+    }
+    for (const field of ["workEffortId", "contentTypeEnumId", "contentLocation", "contentChecksum", "fromDate"]) {
+        const before = original?.[field],
+            after = candidate[field]
+        if (field === "fromDate" ? ms(before) !== ms(after) : String(before ?? "") !== String(after ?? ""))
+            throw new Error("A published instruction's file and start cannot be changed; publish the next one")
+    }
+    if (original?.thruDate && ms(original.thruDate) !== ms(candidate.thruDate))
+        throw new Error("A published instruction that has ended stays ended")
+    return {}
+}
+
+const operations = {findTemplates, storeTemplate, storeInstruction, copyOperations, guardInstruction}
 ;({
     instructionAt,
     template,
