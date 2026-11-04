@@ -130,8 +130,8 @@ function runningRun() {
     const operation = rows(WORK, {parentWorkEffortId: workEffortId})[0]
     return {workEffortId, operationWorkEffortId: operation?.workEffortId || null}
 }
-// a cost event as the shop floor's labor and machine runtime (P10) and the subcontract acceptance (P14) write it: awaiting
-// the close, with its hours or quantity
+// a cost event as the labor of approved production time (P10's TimeEntry source, its sync behind laborCostSync) and the
+// subcontract acceptance (P14) write it: awaiting the close, with its hours or quantity
 let eventSeq = 0
 function costEvent(r, values) {
     return call(
@@ -159,24 +159,35 @@ const labor = (r, hours, amount, extra = {}) =>
     costEvent(
         r,
         Object.assign(
-            {costEventTypeEnumId: "PCC_LABOR", costComponentEnumId: "PrcLabor", quantity: hours, quantityUomId: "TF_hr", amount},
+            {costEventTypeEnumId: "PcetLabor", costComponentEnumId: "PrcLabor", quantity: hours, quantityUomId: "TF_hr", amount},
             extra
         )
     )
-const machine = (r, hours, amount, extra = {}) =>
-    costEvent(
-        r,
-        Object.assign(
-            {
-                costEventTypeEnumId: "PCC_MACHINE",
-                costComponentEnumId: "PrcMachine",
-                quantity: hours,
-                quantityUomId: "TF_hr",
-                amount
-            },
-            extra
-        )
-    )
+// a closed machine runtime interval as the shop floor records it (P10's MachineRuntimeEvent), unvalued without an amount,
+// and its event through record#ProductionCostEvent (P10's source)
+let runtimeSeq = 0
+function machine(r, hours, amount) {
+    const machineRuntimeEventId = "PCC_RT_" + ++runtimeSeq
+    call("create#mantle.work.production.MachineRuntimeEvent", {
+        machineRuntimeEventId,
+        organizationPartyId: org,
+        workEffortId: r.workEffortId,
+        operationWorkEffortId: r.operationWorkEffortId,
+        facilityId: plant,
+        fromDate: ec.user.nowTimestamp,
+        thruDate: ec.user.nowTimestamp,
+        hours,
+        amount,
+        rateAmount: amount == null ? null : amount / hours,
+        amountUomId: "USD",
+        valuationStatusEnumId: amount == null ? "PcvUnvalued" : "PcvValued",
+        createdDate: ec.user.nowTimestamp
+    })
+    return call(P + "record#ProductionCostEvent", {
+        sourceEntityName: "mantle.work.production.MachineRuntimeEvent",
+        sourceId: machineRuntimeEventId
+    }).productionCostEventId
+}
 const outside = (r, amount) =>
     costEvent(r, {costEventTypeEnumId: "PcetOutsideAccrual", costComponentEnumId: "PrcOutside", quantity: 10, amount})
 const preview = (username, workEffortId, extra = {}) =>
@@ -235,13 +246,6 @@ spec({
             fromDate: "2020-01-01",
             thruDate: "2020-01-31",
             isClosed: "Y"
-        })
-        // the shop floor's event types (Manufacturing P10 seeds its own)
-        call("create#moqui.basic.Enumeration", {enumId: "PCC_LABOR", enumTypeId: "ProductionCostEventType", description: "Labor"})
-        call("create#moqui.basic.Enumeration", {
-            enumId: "PCC_MACHINE",
-            enumTypeId: "ProductionCostEventType",
-            description: "Machine"
         })
         user("PCC_METHOD", ["METHOD_VIEW", "METHOD_EDIT", "METHOD_APPROVE", "METHOD_RESOURCES"])
         user("PCC_PLANNER", ["PRODUCTION_PLAN", "PRODUCTION_VIEW", "METHOD_VIEW"])
@@ -447,7 +451,7 @@ feature(
             machine(r, 2, 20)
             outside(r, 30)
             const early = preview("pcc_gl", r.workEffortId)
-            const completed = act("pcc_super", r.workEffortId, "complete")
+            const completed = act("pcc_super", r.workEffortId, "complete", {closeUnreportedOperations: true})
             const previewed = preview("pcc_gl", r.workEffortId)
             const posterPreview = preview("pcc_poster", r.workEffortId)
             state.previewed = previewed
@@ -565,7 +569,7 @@ feature("the close posts once, closing the run in the same transaction, and a re
         after.productionAllocationPolicyId == state.policyId
         after.productionCostReviewStatusId == "PcrClosed"
         events
-            .filter(event => ["PCC_LABOR", "PCC_MACHINE", "PcetOutsideAccrual"].includes(event.costEventTypeEnumId))
+            .filter(event => ["PcetLabor", "PcetMachine", "PcetOutsideAccrual"].includes(event.costEventTypeEnumId))
             .every(event => event.ledgerStatusEnumId == "PclClosePosted" && event.closeAcctgTransId == posted.result.acctgTransId)
         allocations.every(row => row.productionAllocationPolicyId == state.policyId && row.adjustment == "N")
         allocations.filter(row => row.destinationEnumId == "PcdByproduct").length == 1
@@ -615,8 +619,8 @@ feature("a labor event after the close is previewed and posted as an adjustment"
 feature("time on an unapproved timesheet and an unvalued event block the close", {
     when() {
         const r = runningRun()
-        const completed = act("pcc_super", r.workEffortId, "complete")
-        machine(r, 1, null, {valuationStatusEnumId: "PcvUnvalued"})
+        const completed = act("pcc_super", r.workEffortId, "complete", {closeUnreportedOperations: true})
+        machine(r, 1, null)
         call("create#mantle.work.time.Timesheet", {timesheetId: "PCC_SHEET", partyId: "PCC_SUPER", statusId: "TmshCompleted"})
         call("create#mantle.work.time.TimeEntry", {
             timeEntryId: "PCC_TIME",
@@ -645,7 +649,7 @@ feature("time on an unapproved timesheet and an unvalued event block the close",
 feature("the variance of a subcontract bill whose match was unapplied is reversed at the close (F115)", {
     when() {
         const r = runningRun()
-        act("pcc_super", r.workEffortId, "complete")
+        act("pcc_super", r.workEffortId, "complete", {closeUnreportedOperations: true})
         call("create#mantle.order.OrderHeader", {orderId: "PCC_PO", statusId: "OrderOpen", currencyUomId: "USD"})
         call("create#mantle.order.OrderPart", {
             orderId: "PCC_PO",
@@ -710,7 +714,7 @@ feature("the variance of a subcontract bill whose match was unapplied is reverse
 feature("the period close lists the runs awaiting their cost close and the production WIP", {
     when() {
         const r = runningRun()
-        act("pcc_super", r.workEffortId, "complete")
+        act("pcc_super", r.workEffortId, "complete", {closeUnreportedOperations: true})
         const day = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd")
         const month = rows("mantle.party.time.TimePeriod", {partyId: org, timePeriodTypeId: "FiscalMonth"}).find(
             row => ec.l10n.format(row.fromDate, "yyyy-MM-dd") <= day && ec.l10n.format(row.thruDate, "yyyy-MM-dd") >= day
