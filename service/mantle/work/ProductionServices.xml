@@ -172,8 +172,9 @@ along with this software (see the LICENSE.md file). If not, see
             (OPERATION_INVALID), another unit (UNIT_CONVERSION), stock outside the user's facilities, not stock, or short
             (posting.stock's refusals), another product (PRODUCT_MISMATCH), stock that is not available, a quarantined one
             among them (HELD_STOCK), another owner's (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), more
-            than the line has left (QUANTITY_EXCEEDS_REMAINING) and a closed fiscal period today (PERIOD_CLOSED, read
-            without locking).</description>
+            than the line has left beyond its scrap allowance (QUANTITY_EXCEEDS_REMAINING: the over-consumption tolerance of
+            the ProductionPolicy the run was released under, none without a policy; impl-manufacturing P4) and a closed
+            fiscal period today (PERIOD_CLOSED, read without locking).</description>
         <in-parameters>
             <parameter name="operationKey" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -461,6 +462,177 @@ along with this software (see the LICENSE.md file). If not, see
                         vendorFacilityId: plan.vendorFacility.facilityId, issues: issues, output: received.result,
                         serviceAcceptanceId: accepted.serviceAcceptanceId, orderId: plan.orderId,
                         orderItemSeqId: plan.orderItemSeqId, acceptedQuantity: accepted.acceptedQuantity})"/>
+        </actions>
+    </service>
+
+    <!-- ===== the production policy and reason codes (impl-manufacturing P4; ProductionPolicy.js) ===== -->
+    <service verb="get" noun="ProductionPolicy" allow-remote="false">
+        <description>The production policy in effect (design-manufacturing ProductionSettings) for an organization, at one of
+            its facilities (a plant's override) or for a run, as of a date: each value with its source (the built-in
+            default, the organization's default or a facility's override, with the row's dates and reason; traceRows has
+            the display text), the row set at the exact scope (configuredPolicy, expectedFromDate) and its history. A run is
+            read at its owner and facility as of its release time (a draft as of now), the policy it keeps; asOfDate reads
+            another time. Requires PRODUCTION_VIEW or PRODUCTION_POLICY_EDIT (PERMISSION_DENIED); refuses an organization,
+            facility or run outside the user's organizations (RECORD_UNAVAILABLE). The production guards read the policy
+            through ProductionPolicy.js's runPolicy, which checks no permission.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"><description>The facility's or run's owner, else the user's active or
+                first organization, when empty</description></parameter>
+            <parameter name="facilityId"><description>Empty for the organization's default</description></parameter>
+            <parameter name="workEffortId"><description>A production run, read as of its release time</description>
+            </parameter>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="facilityId"/>
+            <parameter name="facilityName"/>
+            <parameter name="workEffortId"/>
+            <parameter name="asOfDate"/>
+            <parameter name="policy" type="Map"><description>The value of each field in effect</description></parameter>
+            <parameter name="sources" type="Map"><description>Each field a row sets: level (organization or facility),
+                facilityId, facilityName, fromDate, thruDate, changeReason</description></parameter>
+            <parameter name="traceRows" type="List"/>
+            <parameter name="configuredPolicy" type="Map"/>
+            <parameter name="expectedFromDate"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/work/ProductionPolicy.js"/>
+            <set field="resolved" from="ec.resource.script(module).execute('resolve', context)"/>
+            <set field="organizationPartyId" from="resolved.organizationPartyId"/>
+            <set field="organizationName" from="resolved.organizationName"/>
+            <set field="facilityId" from="resolved.facilityId"/>
+            <set field="facilityName" from="resolved.facilityName"/>
+            <set field="workEffortId" from="resolved.workEffortId"/>
+            <set field="asOfDate" from="resolved.asOfDate"/>
+            <set field="policy" from="resolved.policy"/>
+            <set field="sources" from="resolved.sources"/>
+            <set field="traceRows" from="resolved.traceRows"/>
+            <set field="configuredPolicy" from="resolved.configuredPolicy"/>
+            <set field="expectedFromDate" from="resolved.expectedFromDate"/>
+            <set field="history" from="resolved.history"/>
+            <set field="canEdit" from="resolved.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionPolicy" allow-remote="false">
+        <description>A dated production policy change for an organization (no facility) or one of its facilities (a plant's
+            override): consumption (manual or backflush, the issue point, the over-consumption and overproduction
+            tolerances in percent, substitute approval, the quality defaults, and the completion-on-final-receipt and
+            strict-release flags), time and cost (time logging, machine runtime, the work type, piece rate, the labor cost
+            flag, estimate refresh and close approval) and planning (horizon, time fence, shortage release, calendar,
+            lead-time basis and freshness limit). An empty value inherits. The row in effect at the start ends there; the
+            new row holds its values with the changes, every field audit-logged with the reason. A released run keeps the
+            row of its release time. Requires PRODUCTION_POLICY_EDIT (PERMISSION_DENIED); refuses an organization or
+            facility outside the user's (RECORD_UNAVAILABLE), a stale expectedFromDate (POLICY_CHANGED), a start before now,
+            a second row at the same time and an invalid value (POLICY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"><description>Empty starts now</description></parameter>
+            <parameter name="expectedFromDate" type="Timestamp"><description>The fromDate of the row in effect at this
+                scope when the form was read, empty when none</description></parameter>
+            <parameter name="policyGroup"><description>consumption, timeAndCost or planning: only that group's fields
+                change (one ProductionSettings form); empty changes every field given</description></parameter>
+            <parameter name="consumptionMethodEnumId"/>
+            <parameter name="issuePointEnumId"/>
+            <parameter name="overConsumePercent" type="BigDecimal"/>
+            <parameter name="overProducePercent" type="BigDecimal"/>
+            <parameter name="substituteApproval"/>
+            <parameter name="outputInspection"/>
+            <parameter name="firstPieceInspection"/>
+            <parameter name="completeOnFinalReceipt"/>
+            <parameter name="strictRelease"/>
+            <parameter name="timeLogEnforcementEnumId"/>
+            <parameter name="machineRuntimeEnumId"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="pieceRate"/>
+            <parameter name="laborCostSync"/>
+            <parameter name="estimateRefresh"/>
+            <parameter name="closeApproval"/>
+            <parameter name="planningHorizonDays" type="Integer"/>
+            <parameter name="timeFenceDays" type="Integer"/>
+            <parameter name="shortageReleaseEnumId"/>
+            <parameter name="calendarId"/>
+            <parameter name="leadTimeBasisEnumId"/>
+            <parameter name="freshnessLimitHours" type="Integer"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="traceRows" type="List"/>
+            <parameter name="configuredPolicy" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/work/ProductionPolicy.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('store', context)"/>
+            <set field="organizationPartyId" from="stored.organizationPartyId"/>
+            <set field="facilityId" from="stored.facilityId"/>
+            <set field="fromDate" from="stored.asOfDate"/>
+            <set field="policy" from="stored.policy"/>
+            <set field="traceRows" from="stored.traceRows"/>
+            <set field="configuredPolicy" from="stored.configuredPolicy"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ProductionReasons" allow-remote="false">
+        <description>The production reason codes of an organization as of a date (design-manufacturing ReasonCodes): each
+            code with its row in effect and display text, by sequence and code; inactive codes (no row in effect, with
+            their latest row) only with includeInactive; with reasonCode, that code's dated rows (history). Requires
+            PRODUCTION_VIEW or PRODUCTION_POLICY_EDIT; refuses an organization outside the user's
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="reasonCategoryEnumId"/>
+            <parameter name="includeInactive" type="Boolean" default-value="false"/>
+            <parameter name="reasonCode"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="reasons" type="List"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/work/ProductionPolicy.js"/>
+            <set field="found" from="ec.resource.script(module).execute('findReasons', context)"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="reasons" from="found.reasons"/>
+            <set field="history" from="found.history"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductionReasons" allow-remote="false">
+        <description>Add, change or deactivate production reason codes of an organization, each reason on its own: a new
+            code (reasonName and reasonCategoryEnumId required), a change (a dated row from fromDate, now when empty, that
+            ends the one in effect) or, with active N, a deactivation that ends the row in effect. A reason is never
+            deleted, so the events that name it keep it; each row's fields are audit-logged with the reason. Every reason is
+            checked before any is written, and one refused is named in results (REASON_INVALID, also for a deactivation
+            before a change already scheduled, REASON_CHANGED for a stale expectedFromDate, REASON_INACTIVE) while the
+            others are stored; the save is refused when none is. Requires PRODUCTION_POLICY_EDIT (PERMISSION_DENIED);
+            refuses an organization outside the user's (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="reasons" type="List" required="true"><description>Maps of reasonCode, reasonName,
+                reasonCategoryEnumId, equipmentFault, plannedStop, approvalThreshold, sequenceNum, active (N deactivates),
+                fromDate and expectedFromDate</description></parameter>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="results" type="List"><description>Each reason: reasonCode, resultCode (STORED, CHANGED,
+                DEACTIVATED or REFUSED), errorCode and message when refused</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/work/ProductionPolicy.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('storeReasons', context)"/>
+            <set field="organizationPartyId" from="stored.organizationPartyId"/>
+            <set field="results" from="stored.results"/>
         </actions>
     </service>
 </services>

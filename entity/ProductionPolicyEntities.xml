@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Manufacturing's production policy and reason codes (design-manufacturing ProductionSettings and ReasonCodes, §12 M1,
+    M4 and M6; impl-manufacturing P4). Both follow the shared effective-date rule (impl-drawers-commons §4): a change ends
+    the row in effect and starts the next, with its fields audit-logged, so a run reads its policy as of its release time
+    and an event its reason as of its date. ProductionPolicy.js reads and writes them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ProductionPolicy" package="mantle.work.production" cache="never">
+        <description>Dated production policy of an organization (facilityId _NA_, its default) or of one of its facilities
+            (a plant's override). An empty field inherits: a facility's row from the facility above it, then the
+            organization's, then the built-in default (Mantle's behavior with no row). The flags that change an existing
+            Mantle service are off by default (impl-manufacturing §2). Written by
+            mantle.work.ProductionServices.store#ProductionPolicy, read by get#ProductionPolicy.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="facilityId" type="id" is-pk="true" default="'_NA_'"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <!-- consumption -->
+        <field name="consumptionMethodEnumId" type="id" enable-audit-log="true"><description>ProductionConsumption: manual
+            issue (default) or backflush of the run lines' exact quantities</description></field>
+        <field name="issuePointEnumId" type="id" enable-audit-log="true"><description>ProductionIssuePoint: when material is
+            issued or backflushed</description></field>
+        <field name="overConsumePercent" type="number-decimal" enable-audit-log="true"><description>The scrap allowance:
+            how far, in percent of a material line's quantity, issue#ProductionMaterial may issue beyond it (0 with no
+            row)</description></field>
+        <field name="overProducePercent" type="number-decimal" enable-audit-log="true"><description>How far, in percent of
+            an output line's quantity, output may be received beyond it without a supervisor's approval (0 with no row;
+            receive#ProductionOutput reads it from impl-manufacturing P7)</description></field>
+        <field name="substituteApproval" type="text-indicator" enable-audit-log="true"><description>Y (default): a
+            substitute component needs a supervisor's approval</description></field>
+        <field name="outputInspection" type="text-indicator" enable-audit-log="true"><description>Y: output is inspected
+            before it is available by default (N with no row)</description></field>
+        <field name="firstPieceInspection" type="text-indicator" enable-audit-log="true"><description>Y: a first-piece
+            inspection is raised at an operation's start by default (N with no row)</description></field>
+        <field name="completeOnFinalReceipt" type="text-indicator" enable-audit-log="true"><description>Y: the final
+            output receipt reconciles and completes the run in the same service (impl-manufacturing §4, P7); N with no
+            row</description></field>
+        <field name="strictRelease" type="text-indicator" enable-audit-log="true"><description>Y: a released run is never
+            amended; a method change needs a linked new run (impl-manufacturing §4, P9); N with no row</description></field>
+        <!-- time and cost -->
+        <field name="timeLogEnforcementEnumId" type="id" enable-audit-log="true"><description>ProductionTimeLog: whether an
+            operation's completion needs person time logged</description></field>
+        <field name="machineRuntimeEnumId" type="id" enable-audit-log="true"><description>ProductionMachineRuntime: whether
+            machine runtime is recorded</description></field>
+        <field name="workTypeEnumId" type="id" enable-audit-log="true"><description>The default work type (WorkType) of
+            production time</description></field>
+        <field name="pieceRate" type="text-indicator" enable-audit-log="true"><description>Y: finishing an operation
+            records the pieces on its time entry (TimeEntry.pieceCount, P10); N with no row</description></field>
+        <field name="laborCostSync" type="text-indicator" enable-audit-log="true"><description>Y: timesheet approval,
+            reopening and an approved entry's change record the production labor cost event of a run's time (F34, P10);
+            N with no row, so Projects' timesheet behavior is unchanged</description></field>
+        <field name="estimateRefresh" type="text-indicator" enable-audit-log="true"><description>Y: a method or rate change
+            proposes a new standard estimate for review, never revaluing stock or a released run; N with no
+            row</description></field>
+        <field name="closeApproval" type="text-indicator" enable-audit-log="true"><description>Y: a run's cost close needs a
+            review approval first (P15); N with no row</description></field>
+        <!-- planning -->
+        <field name="planningHorizonDays" type="number-integer" enable-audit-log="true"/>
+        <field name="timeFenceDays" type="number-integer" enable-audit-log="true"><description>Days from today inside
+            which planning changes no firm run (0 with no row)</description></field>
+        <field name="shortageReleaseEnumId" type="id" enable-audit-log="true"><description>ProductionShortageRelease: the
+            release gate for a run with a component that is not usable (P5)</description></field>
+        <field name="calendarId" type="id" enable-audit-log="true"><description>The plant's work calendar where a work
+            center has none</description></field>
+        <field name="leadTimeBasisEnumId" type="id" enable-audit-log="true"><description>ProductionLeadTimeBasis: a
+            method's lead time entered on the BOM or derived from its routing's standards</description></field>
+        <field name="freshnessLimitHours" type="number-integer" enable-audit-log="true"><description>How old a supply
+            plan may be before it is shown stale</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one" title="ProductionConsumption" related="moqui.basic.Enumeration"
+                short-alias="consumptionMethodEnum"><key-map field-name="consumptionMethodEnumId"/></relationship>
+        <relationship type="one" title="ProductionIssuePoint" related="moqui.basic.Enumeration" short-alias="issuePointEnum">
+            <key-map field-name="issuePointEnumId"/></relationship>
+        <relationship type="one" title="ProductionTimeLog" related="moqui.basic.Enumeration"
+                short-alias="timeLogEnforcementEnum"><key-map field-name="timeLogEnforcementEnumId"/></relationship>
+        <relationship type="one" title="ProductionMachineRuntime" related="moqui.basic.Enumeration"
+                short-alias="machineRuntimeEnum"><key-map field-name="machineRuntimeEnumId"/></relationship>
+        <relationship type="one" title="WorkType" related="moqui.basic.Enumeration" short-alias="workTypeEnum">
+            <key-map field-name="workTypeEnumId"/></relationship>
+        <relationship type="one" title="ProductionShortageRelease" related="moqui.basic.Enumeration"
+                short-alias="shortageReleaseEnum"><key-map field-name="shortageReleaseEnumId"/></relationship>
+        <relationship type="one" title="ProductionLeadTimeBasis" related="moqui.basic.Enumeration"
+                short-alias="leadTimeBasisEnum"><key-map field-name="leadTimeBasisEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.calendar.Calendar"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Production Consumption" enumTypeId="ProductionConsumption"/>
+            <moqui.basic.Enumeration enumId="PcmManual" description="Manual issue" sequenceNum="1"
+                    enumTypeId="ProductionConsumption"/>
+            <moqui.basic.Enumeration enumId="PcmBackflush" description="Backflush the planned quantities" sequenceNum="2"
+                    enumTypeId="ProductionConsumption"/>
+            <moqui.basic.EnumerationType description="Production Issue Point" enumTypeId="ProductionIssuePoint"/>
+            <moqui.basic.Enumeration enumId="PipRelease" description="At release" sequenceNum="1"
+                    enumTypeId="ProductionIssuePoint"/>
+            <moqui.basic.Enumeration enumId="PipOperationStart" description="When the operation starts" sequenceNum="2"
+                    enumTypeId="ProductionIssuePoint"/>
+            <moqui.basic.Enumeration enumId="PipOperationComplete" description="When the operation is completed"
+                    sequenceNum="3" enumTypeId="ProductionIssuePoint"/>
+            <moqui.basic.Enumeration enumId="PipOutputReceipt" description="When output is received" sequenceNum="4"
+                    enumTypeId="ProductionIssuePoint"/>
+            <moqui.basic.EnumerationType description="Production Time Log" enumTypeId="ProductionTimeLog"/>
+            <moqui.basic.Enumeration enumId="PtlOptional" description="Optional" sequenceNum="1" enumTypeId="ProductionTimeLog"/>
+            <moqui.basic.Enumeration enumId="PtlWarn" description="Warn when an operation is completed without time"
+                    sequenceNum="2" enumTypeId="ProductionTimeLog"/>
+            <moqui.basic.Enumeration enumId="PtlRequired" description="Required to complete an operation" sequenceNum="3"
+                    enumTypeId="ProductionTimeLog"/>
+            <moqui.basic.EnumerationType description="Production Machine Runtime" enumTypeId="ProductionMachineRuntime"/>
+            <moqui.basic.Enumeration enumId="PmrNotRecorded" description="Not recorded" sequenceNum="1"
+                    enumTypeId="ProductionMachineRuntime"/>
+            <moqui.basic.Enumeration enumId="PmrOptional" description="Recorded when entered" sequenceNum="2"
+                    enumTypeId="ProductionMachineRuntime"/>
+            <moqui.basic.Enumeration enumId="PmrRequired" description="Required for a machine operation" sequenceNum="3"
+                    enumTypeId="ProductionMachineRuntime"/>
+            <moqui.basic.EnumerationType description="Production Shortage Release" enumTypeId="ProductionShortageRelease"/>
+            <moqui.basic.Enumeration enumId="PsrAllUsable" sequenceNum="1" enumTypeId="ProductionShortageRelease"
+                    description="All components usable; a supervisor may approve a staged release"/>
+            <moqui.basic.Enumeration enumId="PsrStaged" sequenceNum="2" enumTypeId="ProductionShortageRelease"
+                    description="Staged release; short lines stay blocked until usable"/>
+            <moqui.basic.EnumerationType description="Production Lead Time Basis" enumTypeId="ProductionLeadTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PltEntered" description="Entered on the BOM" sequenceNum="1"
+                    enumTypeId="ProductionLeadTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PltRouting" description="Derived from the routing standards" sequenceNum="2"
+                    enumTypeId="ProductionLeadTimeBasis"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ProductionReason" package="mantle.work.production" cache="never">
+        <description>A production reason code of an organization (design-manufacturing ReasonCodes): loss, downtime, hold
+            and amendment reasons, each a dated row with its classification, audit-logged. A reason is active while a row
+            is in effect; deactivating ends it and never deletes it, so the events that name the code keep it, and each
+            event keeps the classification it was recorded with. Written by
+            mantle.work.ProductionServices.store#ProductionReasons.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="reasonCode" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="reasonName" type="text-medium" enable-audit-log="true"/>
+        <field name="reasonCategoryEnumId" type="id" enable-audit-log="true"/>
+        <field name="equipmentFault" type="text-indicator" enable-audit-log="true"><description>Y: suggests a maintenance
+            request (P11); the event otherwise stays an ordinary production loss</description></field>
+        <field name="plannedStop" type="text-indicator" enable-audit-log="true"><description>Y: a planned stop, apart from
+            availability loss in OEE</description></field>
+        <field name="approvalThreshold" type="number-decimal" enable-audit-log="true"><description>Above it the event needs
+            a supervisor's approval: a loss in percent of the run's quantity, a stop in minutes; empty never</description>
+        </field>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" title="ProductionReasonCategory" related="moqui.basic.Enumeration"
+                short-alias="reasonCategoryEnum"><key-map field-name="reasonCategoryEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Production Reason Category" enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcScrap" description="Scrap" sequenceNum="1"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcProcessLoss" description="Process loss" sequenceNum="2"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcRework" description="Rework" sequenceNum="3"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcDowntime" description="Downtime" sequenceNum="4"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcHold" description="Hold" sequenceNum="5"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcAmendment" description="Amendment" sequenceNum="6"
+                    enumTypeId="ProductionReasonCategory"/>
+            <moqui.basic.Enumeration enumId="PrcSubstitute" description="Substitution" sequenceNum="7"
+                    enumTypeId="ProductionReasonCategory"/>
+        </seed-data>
+    </entity>
+</entities>
