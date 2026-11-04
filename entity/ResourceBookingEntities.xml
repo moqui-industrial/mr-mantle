@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Resource availability (design-maintenance §7 and §12 MT-07): the one availability fact of a resource that planning,
+    booking and Maintenance read. Manufacturing P11 builds the minimal record of review Y3 (design-manufacturing Downtime
+    "One equipment outage fact"): an actual outage of an asset with its interval and its source production downtime, written
+    by mantle.work.ResourceBookingServices.record#ResourceUnavailability. Maintenance MT-07 extends it with planned blocks,
+    facility resources, reasons, work and step sources, bookings, end#ResourceUnavailability and corrections. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ResourceUnavailability" package="mantle.work.effort" cache="never">
+        <description>A time a resource cannot be used: an actual outage (RukActual) or a planned block (RukPlanned, MT-07).
+            The resource is exactly one of assetId and facilityId. An open outage has no thruDate; only Maintenance's
+            end#ResourceUnavailability restores the resource (MT-07), and closing the production downtime that recorded it
+            does not. One source occurrence yields one row: a later equipment-fault downtime of the asset links the open
+            one.</description>
+        <field name="resourceUnavailabilityId" type="id" is-pk="true"/>
+        <field name="unavailabilityKindEnumId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="sourceProductionDowntimeId" type="id"><description>The production downtime that recorded the outage
+            (store#ProductionDowntime with an equipment-fault reason)</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" title="ResourceUnavailabilityKind" related="moqui.basic.Enumeration"
+                short-alias="kindEnum"><key-map field-name="unavailabilityKindEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Source" related="mantle.work.production.ProductionDowntime">
+            <key-map field-name="sourceProductionDowntimeId" related="productionDowntimeId"/></relationship>
+        <index name="RESUNAVAIL_ASSET"><index-field name="assetId"/><index-field name="thruDate"/></index>
+    </entity>
+</entities>

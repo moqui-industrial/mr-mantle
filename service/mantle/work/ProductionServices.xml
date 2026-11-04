@@ -761,4 +761,161 @@ along with this software (see the LICENSE.md file). If not, see
                     workEffortId, reviewed)"/>
         </actions>
     </service>
+
+    <!-- ===== downtime and maintenance (impl-manufacturing P11; ProductionDowntime.js) ===== -->
+    <service verb="store" noun="ProductionDowntime" allow-remote="false">
+        <description>Open, close or correct a production stop (design-manufacturing Downtime ReportStop, §12 M6; review Y3).
+            open: a stop of a work center of the user's organizations from fromDate (now when empty), with its optional
+            equipment (an asset that is not stock, of the center's organization), run and operation (an operation of that
+            run, a production run of the organization) and the organization's active downtime or hold reason as of its start,
+            whose category, equipment fault and planned stop it keeps; with thruDate it is recorded closed. An equipment-fault
+            reason with an asset records the asset's one open outage, or links it, in the same transaction
+            (ResourceBookingServices.record#ResourceUnavailability). close: the end of an open stop (now when empty); its
+            request, maintenance and outage stay open and no timer starts. correct: a new row with the corrected interval,
+            reason, equipment and note, keeping the reporter and report date, and the corrected row kept with its values,
+            marked PdtCorrected and superseded by the new one. A retry with the same operation key answers the first.
+            Requires PRODUCTION_OPERATE or PRODUCTION_SUPERVISE to open and close, PRODUCTION_SUPERVISE to correct
+            (PERMISSION_DENIED); refuses an unknown action (ACTION_INVALID), a center, equipment, run or stop outside the
+            user's organizations (RECORD_UNAVAILABLE), a facility that is not a work center (CENTER_INVALID), stock or another
+            organization's equipment (ASSET_INVALID), an operation of another run (OPERATION_INVALID), a run of another
+            organization (RUN_INVALID), a reason that is not an active downtime or hold reason (REASON_INVALID), a start or
+            end in the future or an end before the start (INTERVAL_INVALID), a changed revision (REVISION_CHANGED), a stop
+            already ended (DOWNTIME_CLOSED), one already corrected (DOWNTIME_CORRECTED) and a correction without its reason
+            (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="action" required="true"><description>open, close or correct</description></parameter>
+            <parameter name="productionDowntimeId"><description>The stop to close or correct</description></parameter>
+            <parameter name="expectedRevision" type="Integer"><description>The stop's revision, to close or correct
+                it</description></parameter>
+            <parameter name="facilityId"><description>The work center, to open</description></parameter>
+            <parameter name="assetId"/>
+            <parameter name="workEffortId"><description>The run stopped (from the operation when empty)</description>
+            </parameter>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="reasonCode"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="changeReason"><description>Why a correction is made</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode OPENED, RECORDED (opened with its end), CLOSED or
+                CORRECTED, productionDowntimeId (the new row of a correction, correctedDowntimeId the one it corrects),
+                statusId, revision, facilityId, assetId, workEffortId, operationWorkEffortId, reasonCode, equipmentFault,
+                resourceUnavailabilityId, outageLinked (an open outage of the asset was linked), suggestMaintenance (an
+                equipment fault of a machine with no maintenance yet), and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionDowntime' + (action || ''),
+                    action == 'correct' ? 'PRODUCTION_SUPERVISE' : ['PRODUCTION_OPERATE', 'PRODUCTION_SUPERVISE'],
+                    ['action', 'productionDowntimeId', 'expectedRevision', 'facilityId', 'assetId', 'workEffortId',
+                        'operationWorkEffortId', 'reasonCode', 'fromDate', 'thruDate', 'description', 'changeReason'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
+                    .store(posting.scope(), context)"/>
+            <set field="downtime" from="ec.entity.find('mantle.work.production.ProductionDowntime')
+                    .condition('productionDowntimeId', stored.productionDowntimeId).disableAuthz().one()"/>
+            <set field="result" from="posting.complete(begun.op, downtime.organizationPartyId,
+                    'mantle.work.production.ProductionDowntime', stored.productionDowntimeId, stored)"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ProductionDowntime" allow-remote="false">
+        <description>The production stops of the user's organizations (design-manufacturing Downtime list), newest first, a
+            page at a time: by work center (with the facilities under it), equipment, run, operation, reason, request,
+            maintenance, open only, and those overlapping fromDate to thruDate; corrected rows only with includeCorrected.
+            Each row has its display text (center, equipment, work, reason name and category, from, through, duration, state
+            and color, reporter, correction, outage, maintenance and request) and what the user may do with it (canClose,
+            canCorrect, canRequestMaintenance, and suggestMaintenance for an equipment fault of a machine). With
+            productionDowntimeId, that stop (a corrected one too) and its correction chain in history, from the first report
+            to the row in force. Requires PRODUCTION_VIEW, PRODUCTION_OPERATE or PRODUCTION_SUPERVISE (PERMISSION_DENIED);
+            refuses a stop outside the user's organizations (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="productionDowntimeId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="operationWorkEffortId"/>
+            <parameter name="reasonCode"/>
+            <parameter name="requestId"/>
+            <parameter name="assetMaintenanceId"/>
+            <parameter name="open" type="Boolean"/>
+            <parameter name="includeCorrected" type="Boolean"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="downtimeList" type="List"/>
+            <parameter name="downtimeListCount" type="Integer"/>
+            <parameter name="downtimeListPageIndex" type="Integer"/>
+            <parameter name="downtimeListPageSize" type="Integer"/>
+            <parameter name="downtimeListPageMaxIndex" type="Integer"/>
+            <parameter name="downtimeListPageRangeLow" type="Integer"/>
+            <parameter name="downtimeListPageRangeHigh" type="Integer"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canReport" type="Boolean"/>
+            <parameter name="canCorrect" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
+                    .execute('find', context)"/>
+            <set field="downtimeList" from="found.downtimeList"/>
+            <set field="downtimeListCount" from="found.downtimeListCount"/>
+            <set field="downtimeListPageIndex" from="found.downtimeListPageIndex"/>
+            <set field="downtimeListPageSize" from="found.downtimeListPageSize"/>
+            <set field="downtimeListPageMaxIndex" from="found.downtimeListPageMaxIndex"/>
+            <set field="downtimeListPageRangeLow" from="found.downtimeListPageRangeLow"/>
+            <set field="downtimeListPageRangeHigh" from="found.downtimeListPageRangeHigh"/>
+            <set field="history" from="found.history"/>
+            <set field="canReport" from="found.canReport"/>
+            <set field="canCorrect" from="found.canCorrect"/>
+        </actions>
+    </service>
+    <service verb="request" noun="ProductionMaintenance" allow-remote="false">
+        <description>Ask for corrective maintenance of equipment (design-manufacturing Downtime Maintenance and
+            EquipmentDetail, D24), for a stop (its equipment) or for equipment alone: an AssetMaintenance of the asset with
+            status AsMntCreated and type MntTpCorrective through mantle.product.EquipmentServices.create#AssetMaintenance,
+            and with createRequest an intake Request of type RqtMaintenance, submitted, at the stop's work center (else the
+            equipment's facility), with the problem as its description, the priority, and the organization as OrgInternal,
+            linked through mantle.request.RequestServices.link#RequestRecord to the stop, the equipment, the maintenance and
+            the stop's operation or run. The stop keeps the maintenance and the request. Nothing closes the stop or starts a
+            timer. A retry with the same operation key answers the first. Requires PRODUCTION_OPERATE or
+            PRODUCTION_SUPERVISE (PERMISSION_DENIED); refuses a stop or equipment outside the user's organizations
+            (RECORD_UNAVAILABLE), a corrected stop (DOWNTIME_CORRECTED), a stop whose maintenance was already requested
+            (MAINTENANCE_REQUESTED), no equipment (ASSET_REQUIRED), stock, another organization's equipment or equipment
+            other than the stop's (ASSET_INVALID) and no problem (PROBLEM_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="productionDowntimeId"/>
+            <parameter name="assetId"><description>The equipment, when there is no stop</description></parameter>
+            <parameter name="problem" required="true"/>
+            <parameter name="priority" type="Integer"><description>The request's urgency, 1 the highest</description>
+            </parameter>
+            <parameter name="createRequest" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode MAINTENANCE_REQUESTED, productionDowntimeId,
+                assetId, organizationPartyId, assetMaintenanceId, requestId (when createRequest), and the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
+            <set field="begun" from="posting.begin(context, 'ProductionMaintenance', ['PRODUCTION_OPERATE', 'PRODUCTION_SUPERVISE'],
+                    ['productionDowntimeId', 'assetId', 'problem', 'priority', 'createRequest'])"/>
+            <if condition="begun.previous">
+                <set field="result" from="begun.previous"/>
+                <return/>
+            </if>
+            <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
+                    .requestMaintenance(posting.scope(), context)"/>
+            <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,
+                    'mantle.product.maintenance.AssetMaintenance', requested.assetMaintenanceId, requested)"/>
+        </actions>
+    </service>
 </services>
