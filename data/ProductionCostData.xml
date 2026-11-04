@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Production cost evidence (design-manufacturing §12 M8 and ProductionCosts, crosscut CX-COST; impl-manufacturing P6): the
+    kinds of a ProductionCostEvent and its cost components, valuation and ledger states, the destinations of a
+    ProductionCostAllocation, the run's cost-review status, and the ProductionCostReview notification. -->
+<entity-facade-xml type="seed">
+    <!-- the facts that write an event; P7 adds the scrap of issued material, P10 labor and machine runtime, P14 the
+        outside-processing accrual and its price variance -->
+    <moqui.basic.EnumerationType description="Production Cost Event Type" enumTypeId="ProductionCostEventType"/>
+    <moqui.basic.Enumeration description="Material issued" enumId="PcetMaterialIssue" enumTypeId="ProductionCostEventType"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Unused material returned" enumId="PcetMaterialReturn"
+            enumTypeId="ProductionCostEventType" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Output received" enumId="PcetOutputReceipt" enumTypeId="ProductionCostEventType"
+            sequenceNum="3"/>
+
+    <!-- the cost components of an event, the components of the frozen estimate (ProductStandardCost) with the output's
+        relief of WIP beside them; overhead is not an event (preview#CostClose computes it, R-SA-18) -->
+    <moqui.basic.EnumerationType description="Production Cost Component" enumTypeId="ProductionCostComponent"/>
+    <moqui.basic.Enumeration description="Material" enumId="PrcMaterial" enumTypeId="ProductionCostComponent" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Labor" enumId="PrcLabor" enumTypeId="ProductionCostComponent" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Machine" enumId="PrcMachine" enumTypeId="ProductionCostComponent" sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Outside processing" enumId="PrcOutside" enumTypeId="ProductionCostComponent"
+            sequenceNum="4"/>
+    <moqui.basic.Enumeration description="Output" enumId="PrcOutput" enumTypeId="ProductionCostComponent" sequenceNum="5"/>
+
+    <!-- an event without a value (no cost on the asset, no rate in effect on its date) waits for review, and the cost close
+        refuses a run that has one (impl-manufacturing §4) -->
+    <moqui.basic.EnumerationType description="Production Cost Valuation" enumTypeId="ProductionCostValuation"/>
+    <moqui.basic.Enumeration description="Valued" enumId="PcvValued" enumTypeId="ProductionCostValuation" sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Not valued" enumId="PcvUnvalued" enumTypeId="ProductionCostValuation"
+            sequenceNum="2"/>
+
+    <moqui.basic.EnumerationType description="Production Cost Ledger Status" enumTypeId="ProductionCostLedger"/>
+    <moqui.basic.Enumeration description="Posted with its stock movement" enumId="PclPosted" enumTypeId="ProductionCostLedger"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Not posted by its stock movement" enumId="PclNotPosted"
+            enumTypeId="ProductionCostLedger" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="Awaiting the cost close" enumId="PclAwaitingClose" enumTypeId="ProductionCostLedger"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Posted at the cost close" enumId="PclClosePosted" enumTypeId="ProductionCostLedger"
+            sequenceNum="4"/>
+
+    <moqui.basic.EnumerationType description="Production Cost Destination" enumTypeId="ProductionCostDestination"/>
+    <moqui.basic.Enumeration description="Work in process" enumId="PcdWip" enumTypeId="ProductionCostDestination"
+            sequenceNum="1"/>
+    <moqui.basic.Enumeration description="Output" enumId="PcdOutput" enumTypeId="ProductionCostDestination" sequenceNum="2"/>
+    <moqui.basic.Enumeration description="By-product" enumId="PcdByproduct" enumTypeId="ProductionCostDestination"
+            sequenceNum="3"/>
+    <moqui.basic.Enumeration description="Production variance" enumId="PcdVariance" enumTypeId="ProductionCostDestination"
+            sequenceNum="4"/>
+
+    <!-- the run's cost review: requested by Manufacturing (review#ProductionCosts); Accounting's cost close (P15) adds its
+        decisions -->
+    <moqui.basic.StatusType statusTypeId="ProductionCostReview" description="Production cost review"/>
+    <moqui.basic.StatusItem statusId="PcrRequested" statusTypeId="ProductionCostReview" description="Review requested"
+            sequenceNum="1"/>
+
+    <!-- Sent by review#ProductionCosts to the run organization's users holding PRODUCTION_COST_POST, Accounting's cost close
+        permission, with the run, its revision and the proposed accounting date; the run is its record. Decided on the
+        record (the cost close), so it has no approve service (impl-manufacturing F40). An app adds its linkTemplate. -->
+    <moqui.security.user.NotificationTopic topic="ProductionCostReview" inboxEnumId="NinNotifications"
+            description="Production cost review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" titleTemplate="Work order ${workEffortLabel} is ready for its cost close"/>
+</entity-facade-xml>

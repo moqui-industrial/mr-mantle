@@ -733,6 +733,11 @@ feature("subcontract output is received from the vendor facility: components iss
         n(acceptances[0].acceptedQuantity) == 3
         acceptances[0].assetReceiptId == output.assetReceiptIds[0]
         acceptances[0].workEffortId == opId
+        // a cost event for each material issue and output receipt, each referencing its hook's transaction (impl-manufacturing P6)
+        const costEvents = rows("mantle.work.production.ProductionCostEvent", {workEffortId: runId})
+        costEvents.filter(row => row.costEventTypeEnumId === "PcetMaterialIssue").length == 2
+        costEvents.filter(row => row.costEventTypeEnumId === "PcetOutputReceipt").length == output.assetReceiptIds.length
+        costEvents.every(row => row.acctgTransId != null && row.ledgerStatusEnumId === "PclPosted")
         retry.result.alreadyApplied == true
         more.error.includes("OVER_RECEIPT")
         extra.error.includes("QUANTITY_EXCEEDS_ORDERED")
