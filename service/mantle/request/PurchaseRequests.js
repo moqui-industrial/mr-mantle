@@ -1245,7 +1245,15 @@ function convertGroup(p) {
 // commitment is reserved as the order's other lines are (reserve#Commitment, which replaces an earlier revision's), where
 // its account is under an approved budget.
 function convertOrderCommitments(po, revision, overrideReason) {
-    const links = rows(ITEM_ORDER, {orderId: po.orderId})
+    // P12: an awarded quote's line is linked to its RFQ item and to the request line the RFQ sourced; it is held once, by the
+    // request line's link (its commitment converts), so a line's RFQ link is passed over when the line has another
+    const typeOf = requestId => one(REQUEST, {requestId})?.requestTypeEnumId || null
+    const allLinks = rows(ITEM_ORDER, {orderId: po.orderId})
+    const links = allLinks.filter(
+        link =>
+            typeOf(link.requestId) !== "RqtPurchaseRfq" ||
+            !allLinks.some(other => other.orderItemSeqId === link.orderItemSeqId && typeOf(other.requestId) !== "RqtPurchaseRfq")
+    )
     if (!links.length) return {convertedCount: 0, reservedCount: 0}
     const order = one(ORDER, {orderId: po.orderId})
     let convertedCount = 0,

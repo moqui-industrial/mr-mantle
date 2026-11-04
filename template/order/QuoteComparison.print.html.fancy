@@ -1,0 +1,77 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- The comparison of an RFQ's quotes (mantle.order.SourcingServices.compare#SupplierQuotes with output print), for the
+     buyer's file: the basis (revision, display currency and rate date), then each demand line with its offers, each with the
+     original basis (the supplier's quantity, unit, price and currency) and the normalized one (price per demand unit in the
+     display currency, committed amount, freight and estimated landed cost), lead time, validity and risk. An offer that
+     cannot be compared says why; it is never shown as zero or ranked. requestId, requestName, organizationName, revisionText,
+     basisText and demands (productText, quantityText, uomText, requiredText, remainingText, offers: rankText, supplierName,
+     statusText, originalText, basisText, normalizedText, committedText, freightText, landedText, leadText, validityText,
+     riskText, reasonText). -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Quote comparison')} ${requestId}</title>
+<style>
+@page { size: A4 landscape; margin: 14mm; }
+body { font: 9pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 16pt; margin: 0 0 2mm; }
+h2 { font-size: 11pt; margin: 6mm 0 2mm; }
+.sub { color: #59606b; margin: 0 0 4mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 3px 5px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+th { border-bottom: 1px solid #20252b; }
+td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; white-space: nowrap; }
+.note { color: #59606b; font-size: 8pt; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Quote comparison')} ${requestId}</h1>
+<p class="sub">${requestName} · ${organizationName} · ${revisionText}<br>${basisText}</p>
+<#list demands as demand>
+<h2>${demand.productText} · ${demand.quantityText} ${demand.uomText}<#if demand.requiredText> · ${ec.l10n.localize('required by')} ${demand.requiredText}</#if><#if demand.remainingText> · ${ec.l10n.localize('left to award')} ${demand.remainingText}</#if></h2>
+<table>
+    <thead><tr>
+        <th>${ec.l10n.localize('Rank')}</th>
+        <th>${ec.l10n.localize('Supplier')}</th>
+        <th>${ec.l10n.localize('As quoted')}</th>
+        <th>${ec.l10n.localize('Basis')}</th>
+        <th class="amount">${ec.l10n.localize('Unit price')}</th>
+        <th class="amount">${ec.l10n.localize('Committed')}</th>
+        <th class="amount">${ec.l10n.localize('Freight')}</th>
+        <th class="amount">${ec.l10n.localize('Est. landed')}</th>
+        <th>${ec.l10n.localize('Lead time')}</th>
+        <th>${ec.l10n.localize('Valid')}</th>
+        <th>${ec.l10n.localize('Risk')}</th>
+    </tr></thead>
+    <tbody>
+    <#list demand.offers as offer>
+        <tr>
+            <td>${offer.rankText}</td>
+            <td>${offer.supplierName}<br><span class="note">${offer.statusText}</span></td>
+            <td>${offer.originalText}</td>
+            <td>${offer.basisText}<#if offer.reasonText><br><span class="note">${offer.reasonText}</span></#if></td>
+            <td class="amount">${offer.normalizedText}</td>
+            <td class="amount">${offer.committedText}</td>
+            <td class="amount">${offer.freightText}</td>
+            <td class="amount">${offer.landedText}</td>
+            <td>${offer.leadText}</td>
+            <td>${offer.validityText}</td>
+            <td>${offer.riskText}</td>
+        </tr>
+    </#list>
+    </tbody>
+</table>
+</#list>
+<p class="note" style="margin-top:6mm">${ec.l10n.localize('The ranking compares committed unit prices; it does not choose or approve a supplier. Estimated landed cost adds the quoted freight, where given.')}</p>
+</body></html>

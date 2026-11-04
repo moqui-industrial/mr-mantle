@@ -432,6 +432,8 @@ function quoteOrder(rfqOrNull, organizationPartyId, supplierPartyId, statusId, c
         orderName: rfqOrNull ? "RFQ " + rfqOrNull.requestId + " · " + (rfqOrNull.request.requestName || "") : null,
         statusId
     })
+    // P12: marked a supplier quote, so the purchase order lists leave out the quotes never placed (F-P12-1)
+    call("update#" + ORDER, {orderId: created.orderId, supplierQuote: "Y"})
     return {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, supplierResult: checked.result}
 }
 // store#QuoteInvitation: a supplier invited to an RFQ (its quote order in OrderRequested, a line per item), or a requested
@@ -900,6 +902,8 @@ function storeQuoteItem(p) {
     const line = one(ORDER_ITEM, {orderId: po.orderId, orderItemSeqId: p.orderItemSeqId})
     if (!line) denied("ITEM_UNAVAILABLE", "Line " + p.orderItemSeqId + " is not on quote " + po.orderId)
     if (values.unitAmount != null) values.isModifiedPrice = "Y"
+    // P12: a quantity changed alone keeps the quoted price (update#OrderItem without one prices the line by the resolver)
+    else if (values.quantity != null) Object.assign(values, {unitAmount: dec(line.unitAmount), isModifiedPrice: "Y"})
     if (Object.keys(values).length)
         call(
             "mantle.order.OrderServices.update#OrderItem",
