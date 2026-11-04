@@ -55,8 +55,9 @@ function receiptOf(shipmentId) {
     return {shipment, organizationPartyId}
 }
 // The open sales lines a purchase order line was bought for: through its RequirementSupply rows, the requirement's customer
-// order lines and the request line's.
-function pegsOf(orderId, orderItemSeqId) {
+// order lines and the request line's; only the buying organization's own sales lines (review R4: its received stock is never
+// offered to another organization's order).
+function pegsOf(orderId, orderItemSeqId, organizationPartyId) {
     const seen = new Set(),
         out = []
     const add = (salesOrderId, salesOrderItemSeqId) => {
@@ -66,6 +67,7 @@ function pegsOf(orderId, orderItemSeqId) {
         const part = item ? one(PART, {orderId: item.orderId, orderPartSeqId: item.orderPartSeqId}) : null
         const header = item ? one(ORDER, {orderId: item.orderId}) : null
         if (!part || !isInternal(part.vendorPartyId) || isInternal(part.customerPartyId)) return
+        if (organizationPartyId && part.vendorPartyId !== organizationPartyId) return
         if (!openSalesStatuses.includes(header.statusId)) return
         seen.add(key)
         out.push({item, part, header})
@@ -112,7 +114,7 @@ function pegs(p) {
         row => row.orderId && row.assetId && dec(row.quantityAccepted).compare(0) > 0
     )) {
         const asset = one(ASSET, {assetId: received.assetId})
-        for (const peg of pegsOf(received.orderId, received.orderItemSeqId)) {
+        for (const peg of pegsOf(received.orderId, received.orderItemSeqId, receipt.organizationPartyId)) {
             const state = lineState(peg.item, received.assetId)
             const available = reservable.includes(asset?.statusId) && dec(asset.quantityOnHandTotal).compare(0) > 0
             pegRows.push({
@@ -155,7 +157,7 @@ function reserve(p) {
         row => row.assetId === p.assetId && row.orderId
     )
     if (!received) denied("ASSET_UNAVAILABLE", "Stock " + (p.assetId || "") + " was not received on this receipt")
-    const peg = pegsOf(received.orderId, received.orderItemSeqId).find(
+    const peg = pegsOf(received.orderId, received.orderItemSeqId, receipt.organizationPartyId).find(
         row => row.item.orderId === p.orderId && row.item.orderItemSeqId === p.orderItemSeqId
     )
     if (!peg)
