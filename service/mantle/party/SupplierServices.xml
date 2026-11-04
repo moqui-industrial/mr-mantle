@@ -12,22 +12,34 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- An organization's suppliers: the supplier profile (SupplierProfile, effective-dated) and a supplier's finance with the
-    organization. The finance fields are here; Purchasing adds the buyer fields under SUPPLIER_PROFILE_EDIT. -->
+<!-- An organization's suppliers: the supplier profile (SupplierProfile, effective-dated) with its finance fields
+    (SUPPLIER_TERMS_EDIT) and buying fields (SUPPLIER_PROFILE_EDIT), a new supplier, its buyer and category
+    (SupplierProfile.js), and a supplier's finance with the organization. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="store" noun="SupplierProfile" allow-remote="false">
         <description>Change an organization's profile of a supplier: the row in effect ends at fromDate (now by default) and
             the next starts there with the fields given and the others carried over; nothing changes when nothing differs.
             The finance fields, the default payment term of the supplier's bills (settlementTermId) and self-billing
-            (selfBillingIndicator, Y or N), need SUPPLIER_TERMS_EDIT in the organization. A supplier's first row takes
-            self-billing from the organization's match policy (selfBillingDefault) unless the change gives it. Refuses an
-            unknown term, a supplier another user keeps private and a start before the row in effect.</description>
+            (selfBillingIndicator, Y or N), need SUPPLIER_TERMS_EDIT in the organization. The buying fields (impl-purchasing
+            P2), the default currency and Incoterm, the approval status (SupplierApproval) and a dated purchase block with
+            its reason, need SUPPLIER_PROFILE_EDIT; an approval decision (Approved or Rejected) or clearing the status needs PURCHASE_APPROVE too.
+            A supplier's first row takes self-billing from the organization's match policy (selfBillingDefault) unless the
+            change gives it. Each field is audit-logged with the reason. Refuses an unknown term, currency, Incoterm or
+            status (TERM_INVALID, PROFILE_INVALID), a block without its start or reason or ending before it starts
+            (BLOCK_INVALID), a supplier another user keeps private, or with buying fields one owned by another organization
+            (SUPPLIER_UNAVAILABLE), and a start before the row in effect (DATE_INVALID). SupplierProfile.js.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="supplierPartyId" required="true"/>
             <parameter name="settlementTermId"/>
             <parameter name="selfBillingIndicator"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="incotermEnumId"/>
+            <parameter name="approvalStatusId"/>
+            <parameter name="purchaseBlockFromDate" type="Timestamp"/>
+            <parameter name="purchaseBlockThruDate" type="Timestamp"/>
+            <parameter name="purchaseBlockReason"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="changeReason"/>
         </in-parameters>
@@ -36,67 +48,84 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="changed" type="Boolean"/>
         </out-parameters>
         <actions>
-            <set field="financeFields" from="['settlementTermId', 'selfBillingIndicator'].filter((field) => field in context)"/>
-            <if condition="!financeFields.length">
-                <return error="true" message="PROFILE_EMPTY: Give a supplier profile field to change"/></if>
-            <set field="workflow" value="component://mr-mantle/service/mantle/account/InvoiceWorkflow.js"/>
-            <script>ec.resource.script(workflow).execute('organization',
-                {organizationPartyId:organizationPartyId, permission:'SUPPLIER_TERMS_EDIT', lock:true})</script>
-            <entity-find-one entity-name="mantle.party.Party" value-field="supplier" disable-authz="true">
-                <field-map field-name="partyId" from="supplierPartyId"/></entity-find-one>
-            <if condition="supplier == null || (supplier.privateOwnerUserId &amp;&amp;
-                    supplier.privateOwnerUserId != ec.user.userId)">
-                <return error="true" message="SUPPLIER_UNAVAILABLE: Choose an available supplier"/></if>
-            <if condition="settlementTermId">
-                <entity-find-one entity-name="mantle.account.invoice.SettlementTerm" value-field="settlementTerm"
-                        disable-authz="true"/>
-                <if condition="settlementTerm == null">
-                    <return error="true" message="TERM_INVALID: Choose an existing payment term"/></if>
-            </if>
-            <if condition="selfBillingIndicator &amp;&amp; !['Y', 'N'].includes(selfBillingIndicator)">
-                <return error="true" message="SELF_BILLING_INVALID: Self-billing is Y or N"/></if>
-            <set field="fromDate" from="fromDate ?? ec.user.nowTimestamp"/>
-            <entity-find entity-name="mantle.party.supplier.SupplierProfile" list="currentList" for-update="true"
-                    disable-authz="true">
-                <date-filter valid-date="fromDate"/>
-                <econdition field-name="organizationPartyId"/><econdition field-name="supplierPartyId"/>
-                <order-by field-name="-fromDate"/>
-            </entity-find>
-            <set field="current" from="currentList[0] ?? null"/>
-            <!-- a supplier's first row takes the organization's self-billing default (its match policy row) -->
-            <set field="selfBillingDefault" value="N"/>
-            <if condition="!current">
-                <entity-find entity-name="mantle.account.invoice.InvoiceMatchPolicy" list="matchPolicyList" limit="1"
-                        disable-authz="true">
-                    <date-filter valid-date="fromDate"/>
-                    <econdition field-name="organizationPartyId"/>
-                    <econdition field-name="productId" from="null"/><econdition field-name="productCategoryId" from="null"/>
-                    <order-by field-name="-fromDate"/>
-                </entity-find>
-                <set field="selfBillingDefault" from="matchPolicyList[0]?.selfBillingDefault || 'N'"/>
-            </if>
-            <set field="values" from="{settlementTermId:current?.settlementTermId ?? null,
-                selfBillingIndicator:current?.selfBillingIndicator ?? selfBillingDefault}"/>
-            <iterate list="financeFields" entry="field">
-                <script>values[field] = context[field] || null</script></iterate>
-            <set field="values.selfBillingIndicator" from="values.selfBillingIndicator || 'N'"/>
-            <if condition="current &amp;&amp; current.settlementTermId == values.settlementTermId &amp;&amp;
-                    (current.selfBillingIndicator || 'N') == values.selfBillingIndicator">
-                <set field="supplierProfileId" from="current.supplierProfileId"/>
-                <set field="changed" from="false"/>
-                <return/>
-            </if>
-            <if condition="current &amp;&amp; Number(current.fromDate) &gt;= Number(fromDate)">
-                <return error="true" message="DATE_INVALID: The change must start after the profile in effect"/></if>
-            <if condition="current">
-                <service-call name="update#mantle.party.supplier.SupplierProfile" disable-authz="true"
-                        in-map="{supplierProfileId:current.supplierProfileId, thruDate:fromDate}"/></if>
-            <service-call name="create#mantle.party.supplier.SupplierProfile" out-map="created" disable-authz="true"
-                    in-map="{organizationPartyId:organizationPartyId, supplierPartyId:supplierPartyId, fromDate:fromDate,
-                        settlementTermId:values.settlementTermId, selfBillingIndicator:values.selfBillingIndicator,
-                        changeReason:changeReason, changedByUserId:ec.user.userId}"/>
+            <set field="module" value="component://mr-mantle/service/mantle/party/SupplierProfile.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('store', context)"/>
+            <set field="supplierProfileId" from="stored.supplierProfileId"/>
+            <set field="changed" from="stored.changed"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Supplier" allow-remote="false">
+        <description>A new supplier of an organization (design-purchasing Suppliers; impl-purchasing P2): an organization
+            (organizationName) or a person (firstName and lastName) owned by the organization, in the Supplier role, with
+            its external ID, primary email and phone and a supplier category (PcltSupplierCategory). Its profile starts
+            Pending approval when the organization's PurchasePolicy requires supplier approval. A caller searches for
+            duplicates first. Requires SUPPLIER_PROFILE_EDIT in the organization (PERMISSION_DENIED,
+            ORGANIZATION_DENIED); refuses a supplier without its name (SUPPLIER_INVALID) and a classification of another
+            type (CLASSIFICATION_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="organizationName"/>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="externalId"/>
+            <parameter name="emailAddress"><text-email/></parameter>
+            <parameter name="contactNumber"/>
+            <parameter name="partyClassificationId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="supplierProfileId"/>
+            <parameter name="approvalStatusId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/party/SupplierProfile.js"/>
+            <set field="created" from="ec.resource.script(module).execute('create', context)"/>
+            <set field="partyId" from="created.partyId"/>
             <set field="supplierProfileId" from="created.supplierProfileId"/>
-            <set field="changed" from="true"/>
+            <set field="approvalStatusId" from="created.approvalStatusId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SupplierBuyer" allow-remote="false">
+        <description>The supplier's buyer for an organization from a date (now by default), as a dated PartyRelationship
+            (PrtSupplier) from the buyer in the Buyer role to the supplier in the Supplier role, not a profile field
+            (impl-drawers-commons §4): the relationships of the organization's people to the supplier in effect then end
+            there, and the buyer's starts; with no buyer they only end. Another organization's buyers of a shared supplier
+            are left alone. Requires SUPPLIER_PROFILE_EDIT in the organization; refuses a buyer who is not a person of the
+            organization (BUYER_INVALID), a party not in the Supplier role, another user's private contact or a supplier
+            owned by another organization (SUPPLIER_UNAVAILABLE) and a start before the buyer in effect (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="buyerPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/party/SupplierProfile.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('storeBuyer', context)"/>
+            <set field="partyRelationshipId" from="stored.partyRelationshipId"/>
+            <set field="changed" from="stored.changed"/>
+        </actions>
+    </service>
+    <service verb="set" noun="SupplierCategory" allow-remote="false">
+        <description>A supplier's category (a PartyClassification of PcltSupplierCategory), replacing the one in effect, or
+            with none given the category ends. Requires SUPPLIER_PROFILE_EDIT in the organization; refuses a classification
+            of another type (CLASSIFICATION_INVALID) and a party not in the Supplier role or owned by another organization
+            (SUPPLIER_UNAVAILABLE); the category already in effect is no change.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="partyClassificationId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/party/SupplierProfile.js"/>
+            <set field="changed" from="ec.resource.script(module).execute('setCategory', context).changed"/>
         </actions>
     </service>
     <service verb="get" noun="SupplierFinance" allow-remote="false">

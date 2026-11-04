@@ -20,7 +20,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>What an organization keeps about one of its suppliers, as effective-dated rows: a change ends the row in
             effect and starts the next (store#SupplierProfile). The finance fields are the default payment term of the
             supplier's bills and whether the organization bills itself for the supplier's receipts (self-billing); the
-            buying fields are Purchasing's.</description>
+            buying fields are Purchasing's: the default currency and Incoterm, the approval status and a dated purchase
+            block with its reason.</description>
         <field name="supplierProfileId" type="id" is-pk="true"/>
         <field name="organizationPartyId" type="id" enable-audit-log="true"/>
         <field name="supplierPartyId" type="id" enable-audit-log="true"/>
@@ -28,6 +29,19 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="settlementTermId" type="id" enable-audit-log="true"/>
         <field name="selfBillingIndicator" type="text-indicator" enable-audit-log="true"/>
+        <!-- the buying fields (impl-purchasing P2, under SUPPLIER_PROFILE_EDIT) -->
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>The currency the organization buys from
+            the supplier in by default</description></field>
+        <field name="incotermEnumId" type="id" enable-audit-log="true"><description>The default Incoterm (a TermType under
+            TtInco)</description></field>
+        <field name="approvalStatusId" type="id" enable-audit-log="true"><description>SupplierApproval: Pending, Approved,
+            Rejected or Suspended; empty is a supplier never put through approval. An RFQ or purchase order to a supplier
+            that is not Approved meets the organization's PurchasePolicy (check#SupplierUsable)</description></field>
+        <field name="purchaseBlockFromDate" type="date-time" enable-audit-log="true"><description>A purchase block from
+            this time (to purchaseBlockThruDate, open-ended when empty): no new RFQ or purchase order while it lasts; it
+            cancels no order</description></field>
+        <field name="purchaseBlockThruDate" type="date-time" enable-audit-log="true"/>
+        <field name="purchaseBlockReason" type="text-medium" enable-audit-log="true"/>
         <field name="changeReason" type="text-medium" enable-audit-log="true"/>
         <field name="changedByUserId" type="id"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
@@ -37,7 +51,25 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="supplierPartyId" related="partyId"/>
         </relationship>
         <relationship type="one" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Incoterm" related="moqui.basic.Enumeration" short-alias="incotermEnum">
+            <key-map field-name="incotermEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SupplierApproval" related="moqui.basic.StatusItem" short-alias="approvalStatus">
+            <key-map field-name="approvalStatusId" related="statusId"/></relationship>
         <index name="SUPPLIER_PROFILE_ORG"><index-field name="organizationPartyId"/><index-field name="supplierPartyId"/></index>
+        <seed-data>
+            <!-- a supplier's onboarding (impl-purchasing P2; deciding it is P4's decide#PurchaseApproval) -->
+            <moqui.basic.StatusType statusTypeId="SupplierApproval" description="Supplier Approval"/>
+            <moqui.basic.StatusItem statusId="SupaPending" statusTypeId="SupplierApproval" sequenceNum="1"
+                    description="Pending approval"/>
+            <moqui.basic.StatusItem statusId="SupaApproved" statusTypeId="SupplierApproval" sequenceNum="2"
+                    description="Approved"/>
+            <moqui.basic.StatusItem statusId="SupaRejected" statusTypeId="SupplierApproval" sequenceNum="3"
+                    description="Rejected"/>
+            <moqui.basic.StatusItem statusId="SupaSuspended" statusTypeId="SupplierApproval" sequenceNum="4"
+                    description="Suspended"/>
+        </seed-data>
     </entity>
     <entity entity-name="InvoiceHold" package="mantle.account.invoice" cache="never">
         <description>A hold on a bill: while it is open (no releasedDate) the bill is not approved and no payment is applied

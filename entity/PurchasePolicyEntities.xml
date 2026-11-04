@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchasing's buying policy (design-purchasing PurchasePolicy; impl-purchasing P2, F34). It follows the shared
+    effective-date rule (impl-drawers-commons §4), on ProductionPolicy's pattern: a change ends the row in effect and starts
+    the next, with its fields audit-logged, so a document reads the policy as of the time it was evaluated. PurchasePolicy.js
+    reads and writes it; the supplier category classification type is seeded here too. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PurchasePolicy" package="mantle.order.purchase" cache="never">
+        <description>Dated buying policy of an organization: the buying defaults and the controls of its purchase documents. An
+            empty field takes the built-in default, which is Mantle's behavior with no row: every flag that changes an
+            existing Mantle service is off by default (impl-purchasing §2). Written by
+            mantle.order.PurchaseServices.store#PurchasePolicy, read by get#PurchasePolicy and, with no permission check, by
+            the purchase rules through PurchasePolicy.js's effective().</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <!-- buying defaults -->
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>The currency of a new purchase order
+            when the supplier's profile sets none</description></field>
+        <field name="priceListId" type="id" enable-audit-log="true"><description>The purchase price list a new order
+            prices from first</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>The receiving facility of a new purchase
+            order</description></field>
+        <field name="buyerPartyId" type="id" enable-audit-log="true"><description>The buyer of a supplier with no buyer of
+            its own (no Buyer-to-Supplier relationship)</description></field>
+        <field name="settlementTermId" type="id" enable-audit-log="true"><description>The payment term of a supplier whose
+            profile sets none</description></field>
+        <field name="incotermEnumId" type="id" enable-audit-log="true"><description>The Incoterm (a TermType under TtInco)
+            of a supplier whose profile sets none</description></field>
+        <!-- controls -->
+        <field name="rfqResponseDays" type="number-integer" enable-audit-log="true"><description>Days a supplier has to
+            answer an RFQ (7 with no row)</description></field>
+        <field name="quoteExpiryWarnDays" type="number-integer" enable-audit-log="true"><description>Days before a quote's
+            expiry it shows as expiring (7 with no row)</description></field>
+        <field name="reminderDays" type="number-integer" enable-audit-log="true"><description>Days after a purchase order is
+            sent that an unacknowledged order is reminded (3 with no row)</description></field>
+        <field name="lockSentOrders" type="text-indicator" enable-audit-log="true"><description>Y: a sent purchase order
+            changes only through a revision (P9); N with no row</description></field>
+        <field name="supplierApprovalRequired" type="text-indicator" enable-audit-log="true"><description>Y: a new
+            supplier's profile starts Pending approval; N with no row</description></field>
+        <field name="unapprovedSupplierEnumId" type="id" enable-audit-log="true"><description>PurchaseUnapprovedSupplier:
+            what an RFQ or purchase order to a supplier that is not Approved gets, a warning (the default) or a
+            stop</description></field>
+        <field name="approvalGateEnabled" type="text-indicator" enable-audit-log="true"><description>Y: a purchase part
+            reaches Approved only through decide#PurchaseApproval, and check#PurchaseApprovalRequired warns
+            approve#Order and autoApprove#Order (impl-purchasing §2, P3, P4); N with no row, so Mantle's approval is
+            unchanged</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: under the approval
+            gate, the user who placed a purchase order may approve it; N with no row</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.ProductPriceList"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility"/>
+        <relationship type="one-nofk" title="Buyer" related="mantle.party.Party" short-alias="buyer">
+            <key-map field-name="buyerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.account.invoice.SettlementTerm"/>
+        <relationship type="one-nofk" title="Incoterm" related="moqui.basic.Enumeration" short-alias="incotermEnum">
+            <key-map field-name="incotermEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="PurchaseUnapprovedSupplier" related="moqui.basic.Enumeration"
+                short-alias="unapprovedSupplierEnum"><key-map field-name="unapprovedSupplierEnumId" related="enumId"/>
+        </relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Purchase Unapproved Supplier" enumTypeId="PurchaseUnapprovedSupplier"/>
+            <moqui.basic.Enumeration enumId="PusWarn" description="Warn" sequenceNum="1"
+                    enumTypeId="PurchaseUnapprovedSupplier"/>
+            <moqui.basic.Enumeration enumId="PusStop" description="Stop" sequenceNum="2"
+                    enumTypeId="PurchaseUnapprovedSupplier"/>
+            <!-- the supplier categories buyers assign (design-purchasing SupplierClassifications, F11): PartyClassification
+                rows of this type -->
+            <moqui.basic.Enumeration description="Supplier Category" enumId="PcltSupplierCategory"
+                    enumTypeId="PartyClassificationType"/>
+        </seed-data>
+    </entity>
+</entities>

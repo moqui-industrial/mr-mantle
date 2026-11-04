@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchasing's rules over purchase orders and their policies (impl-purchasing §2, §4). P2: the buying policy
+    (PurchasePolicy, dated by organization) and the supplier check the order and RFQ services call (PurchasePolicy.js).
+    Later phases add the approval gate (check#PurchaseApprovalRequired, decide#PurchaseApproval) and the order verbs here. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="PurchasePolicy" allow-remote="false">
+        <description>The buying policy of an organization in effect at a date (design-purchasing PurchasePolicy): each value,
+            the built-in default where the row in effect sets none (traceRows has the display text and the source), the
+            row in effect (policyFromDate, the row a document keeps; configuredPolicy and expectedFromDate for its form), the
+            organization's rows newest first (history) and whether the user may change them. The approval gate's flag
+            (approvalGateEnabled), self-approval, supplier approval, the unapproved supplier's Warn or Stop and the RFQ,
+            quote-expiry and reminder days are the controls later phases read. Requires PURCHASE_POLICY_EDIT,
+            PURCHASE_ORDER_EDIT, PURCHASE_APPROVE, PURCHASE_ORDER_APPROVE or SUPPLIER_PROFILE_EDIT (PERMISSION_DENIED);
+            refuses an organization outside the user's (RECORD_UNAVAILABLE). A rule that runs as any user (a SECA) reads
+            it through PurchasePolicy.js's effective(), which checks no permission.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"><description>The user's active or first organization when
+                empty</description></parameter>
+            <parameter name="asOfDate" type="Timestamp"><description>Now when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="asOfDate"/>
+            <parameter name="policy" type="Map"><description>The value of each field in effect</description></parameter>
+            <parameter name="policyFromDate"/>
+            <parameter name="traceRows" type="List"/>
+            <parameter name="configuredPolicy" type="Map"/>
+            <parameter name="expectedFromDate"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchasePolicy.js"/>
+            <set field="resolved" from="ec.resource.script(module).execute('resolve', context)"/>
+            <set field="organizationPartyId" from="resolved.organizationPartyId"/>
+            <set field="organizationName" from="resolved.organizationName"/>
+            <set field="asOfDate" from="resolved.asOfDate"/>
+            <set field="policy" from="resolved.policy"/>
+            <set field="policyFromDate" from="resolved.policyFromDate"/>
+            <set field="traceRows" from="resolved.traceRows"/>
+            <set field="configuredPolicy" from="resolved.configuredPolicy"/>
+            <set field="expectedFromDate" from="resolved.expectedFromDate"/>
+            <set field="history" from="resolved.history"/>
+            <set field="canEdit" from="resolved.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PurchasePolicy" allow-remote="false">
+        <description>A dated buying policy change for an organization: the buying defaults (currency, purchase price list,
+            receiving facility, default buyer, payment term, Incoterm) and the purchase controls (RFQ response days,
+            quote-expiry warning days, acknowledgement reminder days, sent orders by revision, supplier approval required,
+            the unapproved supplier's Warn or Stop, the approval gate and self-approval). An empty value takes the built-in
+            default. The row in effect at the start ends there; the new row holds its values with the changes, every field
+            audit-logged with the reason, and the earlier row stays with its history. A document keeps the row it was
+            evaluated against. Requires PURCHASE_POLICY_EDIT (PERMISSION_DENIED); refuses an organization outside the user's
+            (RECORD_UNAVAILABLE), a stale expectedFromDate (POLICY_CHANGED), a start before now, a second row at the same time
+            and an invalid value (POLICY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"><description>Empty starts now</description></parameter>
+            <parameter name="expectedFromDate" type="Timestamp"><description>The fromDate of the row in effect when the form
+                was read, empty when none</description></parameter>
+            <parameter name="policyGroup"><description>defaults or controls: only that group's fields change (one
+                PurchasePolicy form); empty changes every field given</description></parameter>
+            <parameter name="currencyUomId"/>
+            <parameter name="priceListId"/>
+            <parameter name="facilityId"/>
+            <parameter name="buyerPartyId"/>
+            <parameter name="settlementTermId"/>
+            <parameter name="incotermEnumId"/>
+            <parameter name="rfqResponseDays" type="Integer"/>
+            <parameter name="quoteExpiryWarnDays" type="Integer"/>
+            <parameter name="reminderDays" type="Integer"/>
+            <parameter name="lockSentOrders"/>
+            <parameter name="supplierApprovalRequired"/>
+            <parameter name="unapprovedSupplierEnumId"/>
+            <parameter name="approvalGateEnabled"/>
+            <parameter name="selfApprovalAllowed"/>
+            <parameter name="changeReason" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="traceRows" type="List"/>
+            <parameter name="configuredPolicy" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchasePolicy.js"/>
+            <set field="stored" from="ec.resource.script(module).execute('store', context)"/>
+            <set field="organizationPartyId" from="stored.organizationPartyId"/>
+            <set field="fromDate" from="stored.asOfDate"/>
+            <set field="policy" from="stored.policy"/>
+            <set field="traceRows" from="stored.traceRows"/>
+            <set field="configuredPolicy" from="stored.configuredPolicy"/>
+        </actions>
+    </service>
+    <service verb="check" noun="SupplierUsable" allow-remote="false">
+        <description>Whether an organization may send a supplier an RFQ or a purchase order at a date (now by default), for
+            the order and RFQ services beside check#ProductUsable: a purchase block in effect on the organization's
+            SupplierProfile (SUPPLIER_BLOCKED) or a Suspended profile (SUPPLIER_SUSPENDED) stops; a supplier that is not
+            Approved (Pending, Rejected, or with no status where the policy requires approval) gets the policy's result,
+            WARN by default or STOP (SUPPLIER_UNAPPROVED); otherwise OK. A supplier with no profile and a policy that does not
+            require approval is OK, as before Purchasing. It refuses nothing itself: the caller stops on STOP and shows the
+            message on WARN, and keeps policyFromDate. Requires a purchasing permission as get#PurchasePolicy does
+            (PERMISSION_DENIED); refuses an organization outside the user's (RECORD_UNAVAILABLE) and an unknown supplier
+            (SUPPLIER_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="usable" type="Boolean"><description>false for STOP</description></parameter>
+            <parameter name="result"><description>OK, WARN or STOP</description></parameter>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="approvalStatusId"/>
+            <parameter name="supplierProfileId"/>
+            <parameter name="policyFromDate"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/PurchasePolicy.js"/>
+            <set field="checked" from="ec.resource.script(module).execute('checkSupplier', context)"/>
+            <set field="usable" from="checked.usable"/>
+            <set field="result" from="checked.result"/>
+            <set field="reasonCode" from="checked.reasonCode"/>
+            <set field="message" from="checked.message"/>
+            <set field="approvalStatusId" from="checked.approvalStatusId"/>
+            <set field="supplierProfileId" from="checked.supplierProfileId"/>
+            <set field="policyFromDate" from="checked.policyFromDate"/>
+        </actions>
+    </service>
+</services>
