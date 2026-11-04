@@ -65,6 +65,8 @@ const production = () => ec.resource.script("component://mr-mantle/service/mantl
 const productionPolicy = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionPolicy.js")
 const payables = () => ec.resource.script("component://mr-mantle/service/mantle/account/Payables.js")
 const quantities = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuantities.js")
+// impl-manufacturing P8: the run's quality gates
+const productionQuality = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuality.js")
 const statusText = statusId => (statusId ? one(STATUS, {statusId})?.description || statusId : "")
 const facilityName = facility => (facility ? facility.facilityName || facility.facilityId : "")
 
@@ -172,13 +174,18 @@ function factsOf(run) {
     // impl-manufacturing P7: the quantity events and losses recorded on it
     const quantityEvents = find("mantle.work.production.ProductionQuantityEvent", {workEffortId: run.workEffortId}).count()
     const losses = find("mantle.work.production.ProductionLoss", {workEffortId: run.workEffortId}).count()
+    // impl-manufacturing P8: the inspections of its gates
+    const inspections = find("mantle.product.quality.QualityInspection", {workEffortId: run.workEffortId})
+        .condition("statusId", "not-equals", "QiCancelled")
+        .count()
     const parts = []
     if (issuances) parts.push(issuances + (issuances === 1 ? " issue" : " issues"))
     if (receipts) parts.push(receipts + (receipts === 1 ? " receipt" : " receipts"))
     if (timeEntries) parts.push(timeEntries + (timeEntries === 1 ? " time entry" : " time entries"))
     if (quantityEvents) parts.push(quantityEvents + (quantityEvents === 1 ? " quantity event" : " quantity events"))
     if (losses) parts.push(losses + (losses === 1 ? " loss" : " losses"))
-    return {issuances, receipts, timeEntries, quantityEvents, losses, any: parts.length > 0, text: parts.join(", ")}
+    if (inspections) parts.push(inspections + (inspections === 1 ? " inspection" : " inspections"))
+    return {issuances, receipts, timeEntries, quantityEvents, losses, inspections, any: parts.length > 0, text: parts.join(", ")}
 }
 
 // ===== the actions =====
@@ -275,6 +282,9 @@ function releaseGate(run, lines, p) {
             ]
         }
     }
+    // the quality gates the release keeps: an operation naming a template that is not published blocks it (P8)
+    const quality = productionQuality().releaseCheck(run, lines)
+    if (quality && !quality.allowed) return quality
     const shortages = shortagesOf(run, lines)
     const policy = productionPolicy().effective(run.ownerPartyId, run.facilityId, ec.user.nowTimestamp).policy
     const staged = policy.shortageReleaseEnumId === "PsrStaged"
@@ -296,6 +306,7 @@ function releaseGate(run, lines, p) {
         impact: [
             "Freezes the lines and stamps the release time; the run keeps the production policy in effect now",
             routed ? "Creates the operations from the routing" : "No routing: the run keeps its quantities and time itself",
+            ...(quality?.impact || []),
             ...(shortages.length ? ["Releases staged: " + shortText(shortages) + " stay blocked for issue until covered"] : [])
         ]
     }
@@ -379,6 +390,11 @@ function check(run, action, p, lines = production().linesOf(run.workEffortId)) {
                               "; nothing is posted"
                       ]
         }
+    }
+    // a failed quality gate holds the run until its inspection is disposed or inspected again (P8)
+    if (action === "start" || action === "resume") {
+        const blocked = productionQuality().startGate(run)
+        if (blocked) return blocked
     }
     if (action === "start") return {allowed: true, impact: ["The work order is running; its operations may start"]}
     if (action === "hold")
@@ -485,10 +501,13 @@ function apply(run, action, p, key, gate) {
                 frozenDate: null,
                 stagedShortQuantity: null
             })
+        // the quality gates end with the release (P8)
+        productionQuality().endGates(run)
         setStatus(run, "WeInPlanning", why || "Unreleased", {
             productionReleaseDate: null,
             productStandardCostId: null,
-            productionStagedRevision: null
+            productionStagedRevision: null,
+            productionGatesDate: null
         })
     } else if (action === "start") setStatus(run, "WeInProgress", why, {actualStartDate: ec.user.nowTimestamp})
     else if (action === "hold") setStatus(run, "WeOnHold", why)
@@ -1254,6 +1273,8 @@ function operations(p) {
               actualCompletionDate: op.actualCompletionDate
           }))
     const byRouting = new Map(base.map(row => [row.routingOperationWorkEffortId, row]))
+    // an in-process quality gate not passed holds the operations after it, naming its inspection (P8)
+    const gateBlocks = draft ? {} : productionQuality().operationBlocks(run)
     const shortLines = lines.filter(line => dec(line.stagedShortQuantity).compare(0) > 0)
     const operationRows = base.map(row => {
         const predecessorIds = idList(comps.get(row.routingOperationWorkEffortId)?.predecessorWorkEffortIds)
@@ -1272,6 +1293,7 @@ function operations(p) {
         else if (run.statusId === "WeOnHold") readinessText = "Work order on hold"
         else if (!["WeApproved", "WeInProgress"].includes(run.statusId)) readinessText = "Work order " + statusText(run.statusId)
         else if (waiting.length) readinessText = "Waiting for " + waiting.map(pred => pred.workEffortName).join(", ")
+        else if (gateBlocks[row.workEffortId]) readinessText = gateBlocks[row.workEffortId].message
         else if (short.length)
             readinessText =
                 "Short of " +
@@ -1294,7 +1316,8 @@ function operations(p) {
                         : line.routingOperationWorkEffortId === row.routingOperationWorkEffortId)
             ).length,
             ready,
-            readinessText
+            readinessText,
+            blockingInspectionId: gateBlocks[row.workEffortId]?.qualityInspectionId || null
         })
     })
     return {operationRows, draft, routed: routingIds.length > 0, statusId: run.statusId}

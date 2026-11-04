@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The production schedule (design-manufacturing ProductionSchedule, §11; impl-manufacturing P12, F40): the states and kinds
+    of a ProductionScheduleChange; its two notices are in ProductionScheduleNotificationData.xml. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.StatusType statusTypeId="ProductionScheduleChange" description="Production schedule change"/>
+    <moqui.basic.StatusItem statusId="SchApplied" statusTypeId="ProductionScheduleChange" description="Applied" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="SchRequested" statusTypeId="ProductionScheduleChange" description="Override requested"
+            sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="SchRefused" statusTypeId="ProductionScheduleChange" description="Override refused"
+            sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SchRequested" toStatusId="SchApplied"
+            transitionName="Approve override"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SchRequested" toStatusId="SchRefused"
+            transitionName="Refuse override"/>
+
+    <moqui.basic.EnumerationType enumTypeId="ScheduleChangeKind" description="Schedule Change Kind"/>
+    <moqui.basic.Enumeration enumId="SckMove" enumTypeId="ScheduleChangeKind" description="Move" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SckUnschedule" enumTypeId="ScheduleChangeKind" description="Unschedule" sequenceNum="2"/>
+</entity-facade-xml>

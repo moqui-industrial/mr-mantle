@@ -134,8 +134,39 @@ function outputFigures(run, line, losses = lossesOf(run.workEffortId), policy = 
     let good = zero(),
         held = zero()
     const byAsset = new Map()
-    for (const receipt of receipts)
-        byAsset.set(receipt.assetId, dec(byAsset.get(receipt.assetId)).add(dec(receipt.quantityAccepted)))
+    // a receipt with an inspection is held by what its inspections still hold (a disposition's Release, Use as is and Scrap
+    // take it; a re-inspection takes the earlier one's), so a part released from a held asset counts good at once
+    // (impl-manufacturing P8); a receipt with none by its asset's status now
+    const inspected = receipts.length
+        ? Array.from(
+              find("mantle.product.quality.QualityInspection")
+                  .condition(
+                      "assetReceiptId",
+                      "in",
+                      receipts.map(row => row.assetReceiptId)
+                  )
+                  .condition("statusId", "not-equals", "QiCancelled")
+                  .list()
+          )
+        : []
+    for (const receipt of receipts) {
+        const own = inspected.filter(row => row.assetReceiptId === receipt.assetReceiptId)
+        if (!own.length) {
+            byAsset.set(receipt.assetId, dec(byAsset.get(receipt.assetId)).add(dec(receipt.quantityAccepted)))
+            continue
+        }
+        const scrapped = sum(
+            lineLosses.filter(
+                loss => approved(loss) && loss.lossTypeEnumId === "PltOutputScrap" && loss.assetId === receipt.assetId
+            ),
+            loss => loss.quantity
+        )
+        const left = atLeastZero(dec(receipt.quantityAccepted).subtract(scrapped))
+        const stillHeld = sum(own, row => row.heldQuantity)
+        const heldHere = stillHeld.compare(left) > 0 ? left : stillHeld
+        held = held.add(heldHere)
+        good = good.add(left.subtract(heldHere))
+    }
     for (const [assetId, quantity] of byAsset) {
         const scrapped = sum(
             lineLosses.filter(loss => approved(loss) && loss.lossTypeEnumId === "PltOutputScrap" && loss.assetId === assetId),
@@ -216,6 +247,9 @@ function completeCheck(run, p = {}, lines = production().linesOf(run.workEffortI
     const finish = yes(p.finishRemainder)
     const outputs = lines.filter(line => line.lineRoleEnumId === "PrlrOutput")
     if (!outputs.length) return {allowed: false, reasonCode: "LINES_REQUIRED", message: "The work order has no output line"}
+    // no final inspection pending or failed, each in-process gate passed (impl-manufacturing P8, ProductionQuality.js)
+    const qualityBlock = ec.resource.script("component://mr-mantle/service/mantle/work/ProductionQuality.js").completeGate(run)
+    if (qualityBlock) return qualityBlock
     const impact = []
     const pending = losses.filter(loss => loss.statusId === "PlsPending")
     if (pending.length)
@@ -1544,6 +1578,8 @@ const operations = {
     completeCheck,
     complete,
     afterReceipt,
+    // impl-manufacturing P8: a scrap disposition of an open run's output takes the loss path (ProductionQuality.js)
+    applyLoss,
     lossCostEvent,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown production quantity operation " + op)
