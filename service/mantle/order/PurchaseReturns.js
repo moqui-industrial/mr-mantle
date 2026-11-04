@@ -182,6 +182,21 @@ function replacement(p) {
             replacedQuantity: dec(item.replacedQuantity).add(line.quantity),
             responseDate: ec.user.nowTimestamp
         })
+        // a replaced unit's original bill stands, so the receipt's bill match base takes it back (impl-purchasing F-P8-4)
+        if (item.assetReceiptId) {
+            const receipt = one("mantle.product.receipt.AssetReceipt", {assetReceiptId: item.assetReceiptId})
+            try {
+                call("mantle.account.InvoiceMatchServices.queue#MatchReevaluation", {
+                    assetReceiptId: item.assetReceiptId,
+                    orderId: receipt?.orderId || null,
+                    orderItemSeqId: receipt?.orderItemSeqId || null,
+                    staleReason: "Supplier return " + header.returnId + " replaced on order " + order.orderId
+                })
+            } catch (error) {
+                ec.message.clearErrors()
+                ec.logger.error("Bill matches of receipt " + item.assetReceiptId + " were not queued: " + error.message)
+            }
+        }
         const fresh = one(ITEM, {returnId: header.returnId, returnItemSeqId: item.returnItemSeqId})
         if (
             ["ReturnShipped", "ReturnReceived", "ReturnManResp"].includes(fresh.statusId) &&

@@ -588,6 +588,21 @@ function issueSupplierReturn(p) {
         })
         left = left.subtract(take)
     }
+    // released stock sent back leaves the receipt's bill match base too (impl-purchasing F-P8-4): its bills are evaluated
+    // again; a failure to queue them is logged and the issue stands
+    if (left.compare(0) > 0 && receipt)
+        try {
+            call("mantle.account.InvoiceMatchServices.queue#MatchReevaluation", {
+                assetReceiptId: receipt.assetReceiptId,
+                orderId: receipt.orderId || null,
+                orderItemSeqId: receipt.orderItemSeqId || null,
+                staleReason:
+                    "Supplier return " + p.returnId + " sent back " + text(left) + " of receipt " + receipt.assetReceiptId
+            })
+        } catch (error) {
+            ec.message.clearErrors()
+            ec.logger.error("Bill matches of receipt " + receipt.assetReceiptId + " were not queued: " + error.message)
+        }
     return posting.complete(begun.op, facility.ownerPartyId, SOURCE, source.shipmentItemSourceId, {
         resultCode: "ISSUED",
         shipmentId: shipment.shipmentId,

@@ -172,6 +172,9 @@ function receiptsOf(orderId, orderItemSeqId) {
     const byReceipt = Object.fromEntries(Array.from(status.receiptRows || []).map(row => [row.assetReceiptId, row]))
     const quantityOf = (row, field) =>
         byReceipt[row.assetReceiptId]?.[field] != null ? dec(byReceipt[row.assetReceiptId][field]) : zero()
+    const returned = supplierReturnedOf(receipts, receiptId =>
+        byReceipt[receiptId]?.returnedToSupplierQuantity != null ? dec(byReceipt[receiptId].returnedToSupplierQuantity) : zero()
+    )
     return receipts.map(row => ({
         record: row,
         assetReceiptId: row.assetReceiptId,
@@ -181,8 +184,68 @@ function receiptsOf(orderId, orderItemSeqId) {
         held: quantityOf(row, "heldQuantity"),
         // scrapped or sent back to the supplier at inspection: no longer match-eligible (P8 review B2); Return to supplier
         // stock not yet sent back is in held, so it is not subtracted twice (P14 review B1)
-        inspectionRejected: quantityOf(row, "inspectionRemovedQuantity")
+        inspectionRejected: quantityOf(row, "inspectionRemovedQuantity"),
+        // released stock a supplier return sent back that no bill accounts for (F-P8-4)
+        supplierReturned: returned[row.assetReceiptId] || zero()
     }))
+}
+// What supplier returns sent back of each receipt that is no longer match-eligible (impl-purchasing F-P8-4, decided Nov 4 as
+// a correction of the base): a supplier return item names its receipt (ReturnItem.assetReceiptId); what it issued to its
+// return shipment, less what Return to supplier dispositions sent back (already out, in inspectionRemovedQuantity), less what
+// the supplier replaced (replacedQuantity: the replacement is free on its own order, so the original bill stands for it), went
+// back for good. settle#Return credits a return against the billed quantity first, so returned units up to what bills linked
+// to the receipt are billed-then-credited and stay in the base (the original bill stays matched, credited or not); the rest
+// went back unbilled and leaves the base, so a later bill cannot match it. One indexed read when no supplier return names
+// the receipts.
+function supplierReturnedOf(receipts, dispositionReturnedOf) {
+    const out = {}
+    const receiptIds = receipts.map(row => row.assetReceiptId)
+    if (!receiptIds.length) return out
+    const items = Array.from(
+        find("mantle.order.return.ReturnItem")
+            .condition("assetReceiptId", "in", receiptIds)
+            .condition("statusId", "not-equals", "ReturnCancelled")
+            .list()
+    )
+    if (!items.length) return out
+    const returnIds = [...new Set(items.map(row => row.returnId))]
+    const cancelled = new Set(
+        Array.from(
+            find("mantle.order.return.ReturnHeader")
+                .condition("returnId", "in", returnIds)
+                .condition("statusId", "ReturnCancelled")
+                .list()
+        ).map(row => row.returnId)
+    )
+    const live = items.filter(row => !cancelled.has(row.returnId))
+    if (!live.length) return out
+    const itemKey = row => row.returnId + ":" + row.returnItemSeqId
+    const receiptOfItem = Object.fromEntries(live.map(row => [itemKey(row), row.assetReceiptId]))
+    const sources = Array.from(find("mantle.shipment.ShipmentItemSource").condition("returnId", "in", returnIds).list()).filter(
+        row => row.statusId !== "SisCancelled" && itemKey(row) in receiptOfItem
+    )
+    const receiptOfSource = Object.fromEntries(sources.map(row => [row.shipmentItemSourceId, receiptOfItem[itemKey(row)]]))
+    const totals = {issued: {}, replaced: {}, billed: {}}
+    const add = (kind, receiptId, value) => (totals[kind][receiptId] = (totals[kind][receiptId] || zero()).add(dec(value)))
+    if (sources.length)
+        for (const row of Array.from(
+            find("mantle.product.issuance.AssetIssuance")
+                .condition("shipmentItemSourceId", "in", Object.keys(receiptOfSource))
+                .list()
+        ))
+            add("issued", receiptOfSource[row.shipmentItemSourceId], row.quantity)
+    for (const row of live) add("replaced", row.assetReceiptId, row.replacedQuantity)
+    const returnedReceiptIds = [...new Set(live.map(row => row.assetReceiptId))]
+    for (const row of Array.from(find(OIB).condition("assetReceiptId", "in", returnedReceiptIds).list()))
+        add("billed", row.assetReceiptId, row.quantity)
+    for (const receiptId of returnedReceiptIds) {
+        const unbilled = (totals.issued[receiptId] || zero())
+            .subtract(dispositionReturnedOf(receiptId))
+            .subtract(totals.replaced[receiptId] || zero())
+            .subtract(totals.billed[receiptId] || zero())
+        if (unbilled.compare(0) > 0) out[receiptId] = unbilled
+    }
+    return out
 }
 // What other bills have billed of an order line, or of one receipt (billing links of other invoices; a cancelled bill's
 // links are zero).
@@ -221,6 +284,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     const accepted = receipts.reduce((sum, row) => sum.add(row.accepted), zero())
     const held = receipts.reduce((sum, row) => sum.add(row.held), zero())
     const inspectionRejected = receipts.reduce((sum, row) => sum.add(row.inspectionRejected), zero())
+    const supplierReturned = receipts.reduce((sum, row) => sum.add(row.supplierReturned), zero())
     const orderKey = {orderId: item.orderId, orderItemSeqId: item.orderItemSeqId}
     const priorBilled = billedByOthers(scope.invoiceId, orderKey)
     const thisBill = takenOf(taken, "order", orderKeyText(orderKey))
@@ -233,7 +297,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     const base = service
         ? serviceBase(item, policy)
         : basis === "ImbReceived"
-          ? accepted.subtract(held).subtract(inspectionRejected)
+          ? accepted.subtract(held).subtract(inspectionRejected).subtract(supplierReturned)
           : orderQuantity
     const used = priorBilled.add(thisBill)
     const quantity = dec(allocation.quantity)
@@ -245,7 +309,10 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
     if (allocation.assetReceiptId) {
         receipt = receipts.find(row => row.assetReceiptId === allocation.assetReceiptId)
         if (!receipt) denied("SOURCE_INVALID", "Receipt " + allocation.assetReceiptId + " is not of this order line")
-        const receiptBase = receipt.accepted.subtract(receipt.held).subtract(receipt.inspectionRejected)
+        const receiptBase = receipt.accepted
+            .subtract(receipt.held)
+            .subtract(receipt.inspectionRejected)
+            .subtract(receipt.supplierReturned)
         const receiptUsed = billedByOthers(scope.invoiceId, {assetReceiptId: receipt.assetReceiptId}).add(
             takenOf(taken, "receipt", receipt.assetReceiptId)
         )
@@ -352,6 +419,7 @@ function checkAllocation(scope, line, allocation, policy, taken = newTaken()) {
         orderUnitAmount: orderUnit,
         acceptedQuantity: receipt ? receipt.accepted : service ? serviceAccepted : accepted,
         heldQuantity: receipt ? receipt.held : held,
+        supplierReturnedQuantity: receipt ? receipt.supplierReturned : supplierReturned,
         priorBilledQuantity: priorBilled,
         remainingQuantity: remaining,
         priceVariance,
@@ -465,12 +533,16 @@ function propose(scope, line, policy, orderId, taken = newTaken()) {
                 (a, b) => Number(a.receivedDate || 0) - Number(b.receivedDate || 0)
             )
             let orderLeft = receipts
-                .reduce((sum, receipt) => sum.add(receipt.accepted).subtract(receipt.held), zero())
+                .reduce(
+                    (sum, receipt) => sum.add(receipt.accepted).subtract(receipt.held).subtract(receipt.supplierReturned),
+                    zero()
+                )
                 .subtract(used)
             for (const receipt of receipts) {
                 if (remaining.compare(0) <= 0 || orderLeft.compare(0) <= 0) break
                 const receiptLeft = receipt.accepted
                     .subtract(receipt.held)
+                    .subtract(receipt.supplierReturned)
                     .subtract(billedByOthers(scope.invoiceId, {assetReceiptId: receipt.assetReceiptId}))
                     .subtract(takenOf(taken, "receipt", receipt.assetReceiptId))
                 const allocation = Object.assign({assetReceiptId: receipt.assetReceiptId}, orderKey)
@@ -1171,7 +1243,7 @@ function legacyBills(organizationPartyId, p) {
     const wanted = Math.max(1, Math.min(200, Number(p.limit) || 100))
     const out = []
     let after = p.afterInvoiceId || null
-    for (let read = 0; out.length < wanted && read < 5000;) {
+    for (let read = 0; out.length < wanted && read < 5000; ) {
         let query = find(I, {toPartyId: organizationPartyId})
             .condition("fromPartyId", "not-equals", organizationPartyId)
             .condition("statusId", "not-equals", "InvoiceCancelled")

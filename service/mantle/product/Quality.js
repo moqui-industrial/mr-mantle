@@ -1662,6 +1662,11 @@ function sourceStatus(p) {
             (sum, row) => sum.add(row.dispositionEnumId === "QdReturnSupplier" ? dec(row.returnedQuantity) : dec(row.quantity)),
             zero
         )
+        // what Return to supplier dispositions sent back (in inspectionRemoved), apart: bill matching takes a supplier
+        // return's other stock out without counting these twice (impl-purchasing F-P8-4)
+        const returnedToSupplier = ownDispositions
+            .filter(row => row.dispositionEnumId === "QdReturnSupplier")
+            .reduce((sum, row) => sum.add(dec(row.returnedQuantity)), zero)
         const eligible = accepted.subtract(held).subtract(inspectionRemoved)
         return {
             assetReceiptId: receipt.assetReceiptId,
@@ -1675,6 +1680,7 @@ function sourceStatus(p) {
             matchEligibleQuantity: eligible.compare(0) > 0 ? eligible : zero,
             inspectionRejectedQuantity: inspectionRejected,
             inspectionRemovedQuantity: inspectionRemoved,
+            returnedToSupplierQuantity: returnedToSupplier,
             openInspectionIds: own.filter(row => openStatuses.includes(row.statusId)).map(row => row.qualityInspectionId)
         }
     })

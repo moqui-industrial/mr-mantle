@@ -67,6 +67,95 @@ function as(kind, name, p) {
         login("john.doe")
     }
 }
+// F-P8-4: an approved order of eight at 5.00, received and accepted; its order line and receipt.
+function received(quantity) {
+    const order = svc("mantle.order.OrderServices.create#Order", {
+        customerPartyId: org,
+        vendorPartyId: supplier,
+        currencyUomId: "USD",
+        facilityId: facility
+    })
+    const item = svc("mantle.order.OrderServices.add#OrderProductQuantity", {
+        orderId: order.orderId,
+        orderPartSeqId: order.orderPartSeqId,
+        productId: product,
+        quantity,
+        unitAmount: 5,
+        itemTypeEnumId: "ItemInventory"
+    })
+    svc("mantle.order.OrderServices.place#Order", {orderId: order.orderId})
+    svc("mantle.order.OrderServices.approve#Order", {orderId: order.orderId})
+    const shipment = svc("mantle.shipment.ShipmentServices.create#OrderPartShipment", {
+        orderId: order.orderId,
+        orderPartSeqId: "01",
+        destinationFacilityId: facility
+    })
+    svc("mantle.shipment.ShipmentServices.receive#ShipmentProduct", {
+        shipmentId: shipment.shipmentId,
+        productId: product,
+        quantityAccepted: quantity,
+        quantityRejected: 0,
+        facilityId: facility
+    })
+    const receipt = rows("mantle.product.receipt.AssetReceipt", {shipmentId: shipment.shipmentId})[0]
+    return {orderId: order.orderId, orderItemSeqId: item.orderItemSeqId, assetReceiptId: receipt.assetReceiptId}
+}
+// A supplier return of released stock of the receipt, authorized, issued and shipped by the warehouse.
+function sentBack(source, quantity, response) {
+    const returnId = svc(R + "create#ReturnFromOrder", {orderId: source.orderId, orderPartSeqId: "01"}).returnId
+    const added = as("buyer", R + "add#ReceiptToReturn", {
+        returnId,
+        assetReceiptId: source.assetReceiptId,
+        returnQuantity: quantity,
+        returnResponseEnumId: response
+    })
+    const authorized = as("buyer", R + "authorize#SupplierReturn", {returnId, supplierRmaId: "RMA-" + returnId})
+    const shipmentId = authorized.result?.shipmentId
+    const issued = as("warehouse", "mantle.shipment.WarehouseTaskServices.issue#SupplierReturnStock", {
+        operationKey: key(),
+        shipmentId,
+        returnId,
+        returnItemSeqId: added.returnItemSeqId,
+        quantity
+    })
+    const shipped = as("warehouse", "mantle.shipment.WarehouseTaskServices.ship#SupplierReturn", {
+        operationKey: key(),
+        shipmentId
+    })
+    return {
+        returnId,
+        returnItemSeqId: added.returnItemSeqId,
+        errors: [added, authorized, issued, shipped].map(r => r.error).join("")
+    }
+}
+// The supplier's bill of one product line, taken in by AP.
+function supplierBill(quantity) {
+    const invoiceId = as("ap", "mantle.account.InvoiceServices.import#Bill", {
+        organizationPartyId: org,
+        supplierPartyId: supplier,
+        referenceNumber: prefix + "-" + key()
+    }).invoiceId
+    svc("mantle.account.InvoiceServices.create#InvoiceItem", {
+        invoiceId,
+        itemTypeEnumId: "ItemInventory",
+        productId: product,
+        quantity,
+        amount: 5
+    })
+    return invoiceId
+}
+const allocations = (invoiceId, source, quantity) => [
+    {
+        invoiceItemSeqId: rows("mantle.account.invoice.InvoiceItem", {invoiceId})[0].invoiceItemSeqId,
+        orderId: source.orderId,
+        orderItemSeqId: source.orderItemSeqId,
+        assetReceiptId: source.assetReceiptId,
+        quantity: String(quantity)
+    }
+]
+const M = "mantle.account.InvoiceMatchServices."
+const appliedMatch = invoiceId => one("mantle.account.invoice.InvoiceMatch", {invoiceId, statusId: "ImApplied"})
+const openHolds = invoiceId => rows("mantle.account.invoice.InvoiceHold", {invoiceId}).filter(row => !row.releasedDate)
 const returnOf = () => svc(R + "create#ReturnFromOrder", {orderId: ids.orderId, orderPartSeqId: "01"}).returnId
 
 spec({
@@ -88,6 +177,13 @@ spec({
         user("editor", ["PURCHASE_ORDER_EDIT"])
         user("reader", ["PURCHASE_APPROVE"])
         user("other", ["PURCHASE_ORDER_EDIT", "RETURN_AUTHORIZE"], otherOrg)
+        // the bill match of returned stock (F-P8-4): the warehouse sends back, AP takes in, matches and settles
+        user("warehouse", ["STOCK_ISSUE", "SHIPMENT_SHIP"])
+        user("ap", ["PAYABLE_EDIT", "PAYABLE_VIEW", "PAYABLE_IMPORT", "INVOICE_MATCH"])
+        svc("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", {
+            organizationPartyId: org,
+            filterDate: ec.user.nowTimestamp
+        })
         // ten bought at 5.00, six received and accepted (not delivered, so no receipt bill)
         const order = svc("mantle.order.OrderServices.create#Order", {
             customerPartyId: org,
@@ -224,5 +320,98 @@ feature("a replacement is an approved purchase order at no price with its expect
         r.retry.result.alreadyApplied == true
         r.retry.result.orderId == r.created.result.orderId
         r.nothing.error.includes("NOTHING_TO_REPLACE")
+    }
+})
+
+feature("released stock sent back unbilled leaves the bill match: a bill for the eight received holds, six eligible", {
+    when() {
+        // the earlier feature's approval gate off again: these orders are approved directly
+        for (const row of rows("mantle.order.purchase.PurchasePolicy", {organizationPartyId: org}))
+            svc("update#mantle.order.purchase.PurchasePolicy", {
+                organizationPartyId: org,
+                fromDate: row.fromDate,
+                approvalGateEnabled: "N"
+            })
+        const source = received(8)
+        const returned = sentBack(source, 2, "RrspCredit")
+        const invoiceId = supplierBill(8)
+        const whole = as("ap", M + "evaluate#InvoiceMatch", {invoiceId, allocationList: allocations(invoiceId, source, 8)})
+        const applied = as("ap", M + "apply#InvoiceMatch", {invoiceId, allocationList: allocations(invoiceId, source, 6)})
+        return {returned, whole, applied, holds: openHolds(invoiceId)}
+    },
+    then({returned, whole, applied, holds}) {
+        returned.errors == ""
+        whole.sourceRows[0].refusedReason == "QUANTITY_EXCESS"
+        String(whole.sourceRows[0].supplierReturnedQuantity) == "2"
+        String(whole.sourceRows[0].remainingQuantity) == "6"
+        applied.error == ""
+        applied.resultEnumId == "ImrException"
+        holds.length == 1
+    }
+})
+
+feature("a billed return credited and an unbilled return replaced leave their bills matched", {
+    when() {
+        // billed, then two sent back: the bill's match is stale and stays matched; the credit keeps it so
+        const billed = received(8)
+        const billId = supplierBill(8)
+        const applied = as("ap", M + "apply#InvoiceMatch", {invoiceId: billId, allocationList: allocations(billId, billed, 8)})
+        for (const statusId of ["InvoiceReceived", "InvoiceApproved"])
+            if (one("mantle.account.invoice.Invoice", {invoiceId: billId}).statusId != statusId)
+                svc("update#mantle.account.invoice.Invoice", {invoiceId: billId, statusId})
+        const credited = sentBack(billed, 2, "RrspCredit")
+        const staleAfterShip = appliedMatch(billId).staleDate
+        svc(M + "run#MatchReevaluation", {})
+        const afterShip = appliedMatch(billId)
+        const preview = as("ap", R + "preview#ReturnSettlement", {returnId: credited.returnId})
+        const settled = as("ap", R + "settle#Return", {
+            returnId: credited.returnId,
+            previewVersion: preview.previewVersion,
+            operationKey: key()
+        })
+        svc(M + "run#MatchReevaluation", {})
+        const afterCredit = appliedMatch(billId)
+        // unbilled, two sent back and replaced: a bill for all eight matches again
+        const replacedSource = received(8)
+        const replaced = sentBack(replacedSource, 2, "RrspReplace")
+        const laterBill = supplierBill(8)
+        const before = as("ap", M + "evaluate#InvoiceMatch", {
+            invoiceId: laterBill,
+            allocationList: allocations(laterBill, replacedSource, 8)
+        })
+        const replacement = as("buyer", R + "create#ReplacementOrder", {operationKey: key(), returnId: replaced.returnId})
+        const after = as("ap", M + "evaluate#InvoiceMatch", {
+            invoiceId: laterBill,
+            allocationList: allocations(laterBill, replacedSource, 8)
+        })
+        return {
+            applied,
+            credited,
+            staleAfterShip,
+            afterShip,
+            settled,
+            afterCredit,
+            billHolds: openHolds(billId),
+            replaced,
+            before,
+            replacement,
+            after
+        }
+    },
+    then(r) {
+        r.applied.resultEnumId == "ImrMatched"
+        r.credited.errors == ""
+        r.staleAfterShip != null
+        r.afterShip.staleDate == null
+        r.afterShip.resultEnumId == "ImrMatched"
+        r.settled.error == ""
+        r.settled.resultCode == "SETTLED"
+        r.afterCredit.resultEnumId == "ImrMatched"
+        r.billHolds.length == 0
+        r.replaced.errors == ""
+        r.before.sourceRows[0].refusedReason == "QUANTITY_EXCESS"
+        r.replacement.error == ""
+        r.after.resultEnumId == "ImrMatched"
+        String(r.after.sourceRows[0].supplierReturnedQuantity) == "0"
     }
 })
