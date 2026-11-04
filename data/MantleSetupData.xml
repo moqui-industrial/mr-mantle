@@ -119,6 +119,10 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PRODUCTION_POLICY_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="SUPPLY_PLAN_RUN" description="Supply Plan Run"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLY_PLAN_RUN" fromDate="0"/>
+    <!-- SUPPLY_PLAN_VIEW reads a supply plan without running or converting it (get#SupplyPlan; impl-purchasing P14a, the
+        Purchasing reader's Replenishment) -->
+    <userPermissions userPermissionId="SUPPLY_PLAN_VIEW" description="Supply Plan View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLY_PLAN_VIEW" fromDate="0"/>
     <!-- A return's authorization, Customer Service's right (crosscut §3.18 Authorize; no Warehouse group holds it):
         WarehouseTaskServices.request#ReturnLabel admits it beside SHIPMENT_SHIP -->
     <userPermissions userPermissionId="RETURN_AUTHORIZE" description="Return Authorize"/>

@@ -4,7 +4,7 @@
 // the components, a phantom's blown through; a kit's sales demand counts as its components' and a kit assembly run is shown
 // and not netted; held stock is a pending-release line, netted only by the schedule's option within the lead time; an
 // obsolete product and one with no source are exceptions; converting the make suggestion creates a draft run with its lines,
-// RequirementSupply and WrfDelivers, a second conversion answers that run, a buy suggestion is not converted here, and a
+// RequirementSupply and WrfDelivers, a second conversion answers that run, a buy suggestion is the buyer's (Replenishment.spec), and a
 // superseded plan is refused; a run nets the draft run on its line; a second facility's surplus is a transfer; and the
 // permissions and the organization are checked. The users are in spec-local groups.
 const S = "mantle.product.SupplyPlanningServices.",
@@ -389,8 +389,9 @@ feature("converting the make suggestion creates a draft run with its supply link
         converted.createdCount == 1
         converted.failedCount == 1
         made.resultCode == "CREATED"
+        // a buy is converted by a buyer (PURCHASE_ORDER_EDIT; impl-purchasing P14a, Replenishment.spec)
         buy.ok == false
-        buy.reasonCode == "METHOD_NOT_CONVERTED"
+        buy.reasonCode == "PERMISSION_DENIED"
         runRow.purposeEnumId == "WepProductionRun"
         runRow.statusId == "WeInPlanning"
         runRow.facilityId == line

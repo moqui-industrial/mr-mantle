@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A product's reorder rule at a facility is its ProductFacility row (minimum and maximum stock, reorder quantity and
+    method; Products P7), kept through Warehouse's mantle.facility.FacilityServices.store#ProductFacilityPolicy
+    (CX-FACILITY-POLICY). Purchasing's snooze of a rule (impl-purchasing P14a, design-purchasing §8 ReorderRules): until
+    snoozeThruDate, for snoozeReason, an automatic conversion leaves the rule's shortage, which the supply plan still
+    shows. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="ProductFacility" package="mantle.facility">
+        <field name="snoozeThruDate" type="date-time" enable-audit-log="true"><description>Until when the reorder rule is
+            snoozed: an automatic conversion leaves its shortage, which is still planned and shown.</description></field>
+        <field name="snoozeReason" type="text-medium" enable-audit-log="true"><description>Why the rule is
+            snoozed.</description></field>
+    </extend-entity>
+</entities>

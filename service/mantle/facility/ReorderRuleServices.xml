@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Reorder rules (impl-purchasing P14a; design-purchasing §8 ReorderRules and §15, R-PUR-19), over ReorderRules.js. A
+    product's reorder rule at a facility is its ProductFacility row, kept only through Warehouse's
+    FacilityServices.store#ProductFacilityPolicy (CX-FACILITY-POLICY), which checks STOCK_POLICY_PLAN and the organization;
+    these suggest levels for it, apply them through it, and validate the catalog import's reorder-rule rows by its checks. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="preview" noun="ReorderLevels" allow-remote="false">
+        <description>Suggested reorder levels of products at a facility: per product its average daily demand over the
+            history (what was issued from the facility and those under it), its lead time (its supplier's standard lead
+            time, else the one given), the safety stock (the safety days of demand), and the suggested minimum (demand over
+            the lead time plus the safety stock) and maximum (the minimum plus the cover days of demand), in whole units.
+            The products given, else those with a rule at the facility (at most 200). A product without demand history
+            (NO_DEMAND_HISTORY) or without a lead time (NO_LEAD_TIME) is named and gets no suggestion. Writes nothing.
+            Requires STOCK_POLICY_PLAN or STOCK_POLICY_MANAGE (PERMISSION_DENIED); refuses a facility outside the user's
+            organizations and history, safety, cover or lead days out of range (LEVELS_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="productIds" type="List"/>
+            <parameter name="productId"/>
+            <parameter name="historyDays" type="Integer" default="90"/>
+            <parameter name="safetyDays" type="BigDecimal" default="0"/>
+            <parameter name="coverDays" type="BigDecimal" default="30"/>
+            <parameter name="leadTimeDays" type="BigDecimal"><description>For a product with no supplier lead
+                time.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="historyDays" type="Integer"/>
+            <parameter name="levelRows" type="List"><description>Per product: productId, pseudoId, productName, facilityId,
+                currentMinimum, currentMaximum, reorderMethodEnumId, ok, averageDailyDemand, leadTimeDays, leadTimeSource,
+                safetyStock, suggestedMinimum and suggestedMaximum, or reasonCode and message.</description></parameter>
+            <parameter name="suggestedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/facility/ReorderRules.js')
+                    .execute('preview', context)"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="facilityId" from="out.facilityId"/>
+            <set field="historyDays" from="out.historyDays"/>
+            <set field="levelRows" from="out.levelRows"/>
+            <set field="suggestedCount" from="out.suggestedCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="ReorderLevels" allow-remote="false">
+        <description>Apply levels to products' reorder rules: each row's minimum and maximum stock (and the reorder method
+            given) through FacilityServices.store#ProductFacilityPolicy, in its own transaction with the reason given, so a
+            row the store refuses (its permission, organization or level checks) is named with its reason and the other rows
+            are kept. Refuses no reason (REASON_REQUIRED) and no rows (ROWS_REQUIRED); a row without a minimum is named
+            (LEVELS_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"><description>The facility of rows that name none.</description></parameter>
+            <parameter name="levelRows" type="List" required="true"><description>Each with productId, facilityId,
+                minimumStock and maximumStock.</description></parameter>
+            <parameter name="reorderMethodEnumId"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>Per row: productId, facilityId, ok, reasonCode and
+                message.</description></parameter>
+            <parameter name="appliedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/facility/ReorderRules.js')
+                    .execute('apply', context)"/>
+            <set field="results" from="out.results"/>
+            <set field="appliedCount" from="out.appliedCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+        </actions>
+    </service>
+    <service verb="validate" noun="ReorderRuleImportRow" allow-remote="false">
+        <description>The catalog import's validator of a reorder-rule row (kind reorderRules,
+            data/ReorderRuleImportData.xml): the facility of the import's organization, the update mode against the rule
+            there, and the values checked by store#ProductFacilityPolicy's own rules without writing; the normalized
+            parameters are the store's, which the import then calls for the row.</description>
+        <in-parameters>
+            <parameter name="kindId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="rowParameters" type="Map"/>
+            <parameter name="updateMode"/>
+            <parameter name="registryFingerprint"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="normalizedParameters" type="Map"/>
+            <parameter name="sourceFingerprint"/>
+            <parameter name="changes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/facility/ReorderRules.js')
+                    .execute('validateImportRow', context)"/>
+            <set field="valid" from="out.valid"/>
+            <set field="errors" from="out.errors"/>
+            <set field="warnings" from="out.warnings"/>
+            <set field="normalizedParameters" from="out.normalizedParameters"/>
+            <set field="sourceFingerprint" from="out.sourceFingerprint"/>
+            <set field="changes" from="out.changes"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Reorder-rule rows as a row kind of Products' catalog import (impl-purchasing P14a, design-purchasing §15, PRD-IMPORT):
+    each row a product's rule at a facility of the import's organization, validated by store#ProductFacilityPolicy's own
+    checks (ReorderRuleServices.validate#ReorderRuleImportRow) and stored through it with its row result. -->
+<entity-facade-xml type="seed">
+    <mantle.product.ProductCatalogImportKind kindId="reorderRules" description="Reorder rules" permissionId="STOCK_POLICY_PLAN"
+            readPermissionId="STOCK_POLICY_PLAN" validatorService="mantle.facility.ReorderRuleServices.validate#ReorderRuleImportRow"
+            storeService="mantle.facility.FacilityServices.store#ProductFacilityPolicy" fixedParametersJson="{}"
+            keyFields="productId,facilityId" sequenceNum="7"
+            columnsJson="[{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Product ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Facility ID&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;minimumStock&quot;,&quot;label&quot;:&quot;Minimum stock&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;maximumStock&quot;,&quot;label&quot;:&quot;Maximum stock&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;reorderQuantity&quot;,&quot;label&quot;:&quot;Reorder quantity&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;reorderMethodEnumId&quot;,&quot;label&quot;:&quot;Reorder method enum id&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;daysToShip&quot;,&quot;label&quot;:&quot;Days to ship&quot;,&quot;type&quot;:&quot;decimal&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;snoozeThruDate&quot;,&quot;label&quot;:&quot;Snoozed through&quot;,&quot;type&quot;:&quot;date&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;snoozeReason&quot;,&quot;label&quot;:&quot;Snooze reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false},{&quot;name&quot;:&quot;changeReason&quot;,&quot;label&quot;:&quot;Change reason&quot;,&quot;type&quot;:&quot;text&quot;,&quot;required&quot;:false}]"/>
+</entity-facade-xml>
