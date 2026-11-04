@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Purchase requests (design-purchasing §4 RequestDetail; impl-purchasing P10, F3, F18, F57): a request line's unit and cost
+    centre (the cost centre is carried to OrderItem.costCenterId when the line is sourced), and the audit log on its product,
+    quantity, unit, required date, supplier and cost centre, logged on create and update ("true", F57), so a request's
+    revision is the time of the last change to them and a decision made before it is refused
+    (mantle.request.RequestServices, PurchaseRequests.js). The request's organization is its OrgInternal RequestParty. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <field name="productId" type="id" enable-audit-log="true"/>
+        <field name="quantity" type="number-decimal" enable-audit-log="true"/>
+        <field name="requiredByDate" type="date-time" enable-audit-log="true"/>
+        <field name="supplierPartyId" type="id" enable-audit-log="true"/>
+        <field name="quantityUomId" type="id" enable-audit-log="true"><description>The unit of the quantity (the product's
+            unit by default)</description></field>
+        <field name="costCenterId" type="id" enable-audit-log="true"><description>The cost centre of the line: the request's
+            organization or one that rolls up to it (PrtOrgRollup); a sourced line carries it to
+            OrderItem.costCenterId</description></field>
+        <relationship type="one-nofk" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" title="CostCenter" related="mantle.party.Party" short-alias="costCenter">
+            <key-map field-name="costCenterId" related="partyId"/></relationship>
+    </extend-entity>
+</entities>

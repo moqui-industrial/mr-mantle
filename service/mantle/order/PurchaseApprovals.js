@@ -18,10 +18,11 @@ const POLICY = "mantle.order.purchase.PurchaseApprovalPolicy",
     ORDER = "mantle.order.OrderHeader",
     ITEM = "mantle.order.OrderItem",
     PARTY = "mantle.party.Party",
-    PROFILE = "mantle.party.supplier.SupplierProfile"
-// each source's topic and policy source type; P10 adds requests and P12 awards
-const topics = {[ORDER]: "PurchaseOrderApproval", [PARTY]: "PurchaseSupplierApproval"}
-const sourceTypes = {[ORDER]: "PasOrder", [PARTY]: "PasSupplier"}
+    PROFILE = "mantle.party.supplier.SupplierProfile",
+    REQUEST = "mantle.request.Request"
+// each source's topic and policy source type; P10 adds requests (PurchaseRequests.js requestSource) and P12 awards
+const topics = {[ORDER]: "PurchaseOrderApproval", [PARTY]: "PurchaseSupplierApproval", [REQUEST]: "PurchaseRequestApproval"}
+const sourceTypes = {[ORDER]: "PasOrder", [PARTY]: "PasSupplier", [REQUEST]: "PasRequest"}
 const policyFields = [
     "organizationPartyId",
     "sourceTypeEnumId",
@@ -301,6 +302,8 @@ function messageOf(source, state) {
         approvalPolicyId: state.current?.purchaseApprovalPolicyId || null
     }
     if (source.sourceEntityName === ORDER) message.orderId = source.sourceId
+    // P10: a source's own fields for its topic's title and link (a request's id, name and revision time)
+    if (source.message) Object.assign(message, source.message)
     return message
 }
 // The approvers' messages of a source are read once its step is decided: each unread copy is marked read, so the approval
@@ -851,6 +854,14 @@ function decideSource(p, decision) {
         return call("mantle.order.PurchaseServices.decide#SupplierApproval", {
             organizationPartyId: message.organizationPartyId,
             supplierPartyId: p.recordId,
+            sourceRevision: message.sourceRevision ?? null,
+            decision,
+            reason: text(p.reason)
+        })
+    // P10: a purchase request at the revision in the message
+    if (p.recordEntityName === REQUEST)
+        return call("mantle.request.RequestServices.decide#PurchaseRequestApproval", {
+            requestId: p.recordId,
             sourceRevision: message.sourceRevision ?? null,
             decision,
             reason: text(p.reason)

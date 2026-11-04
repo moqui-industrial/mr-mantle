@@ -15,6 +15,8 @@ const policy = ec.resource.script("component://mr-mantle/service/mantle/order/Pu
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseApprovals.js")
 // P9: a revised order's approval releases the revision's Change hold (PurchaseRevisions.js)
 const revisions = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
+// P10: a request-sourced line's approval converts the request's commitment (PurchaseRequests.js)
+const requests = () => ec.resource.script("component://mr-mantle/service/mantle/request/PurchaseRequests.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -510,6 +512,8 @@ function decide(p) {
         } else {
             // the budget of the lines with no request, at the order's revision (D10): Stop refuses, Warn warns
             approvals().reserveBudget(po, revision, p.budgetOverrideReason)
+            // P10: a line sourced from a purchase request passes on the request's commitment (convert#Commitment)
+            requests().convertOrderCommitments(po, revision, p.budgetOverrideReason)
             // P9: a revised order's Change hold is released, back to Approved (or to Placed, approved below)
             const released = revisionHold
                 ? revisions().releaseRevisionHold(revisionHold, "Revision " + revision + " approved")
@@ -535,6 +539,7 @@ const operations = {create, update, storeItem, removeItem, place, cancel, clone,
     isPurchasePart,
     purchaseOrder,
     supplierOf,
+    costCenterOf,
     placedBy,
     requirePermission,
     approvalWarnings,
