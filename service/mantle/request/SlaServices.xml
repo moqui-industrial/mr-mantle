@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Service levels of support cases (impl-customer-service P4, CS-SLA, CS-JOBS, D23; Sla.js has the rules): the policies and
+    their targets, a case's clocks from intake (start#CaseEpisode, from ensure#CaseProfile), what every path records on them
+    (record#CaseEvent, from the rules of entity/Request.eecas.xml), a manager's correction, a case's history, and the warning
+    and breach scan (the scan_CaseSla ServiceJob). The settings and reads check SUPPORT_POLICY_EDIT, SUPPORT_CASE_MANAGE or
+    SUPPORT_CASE_EDIT and the organization; the rule services are internal. Business time is
+    mantle.work.CalendarServices' (BusinessTime.js). Only these services write Request.responseRequiredDate on a case. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== the rules (internal) ===== -->
+    <service verb="start" noun="CaseEpisode" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, from ensure#CaseProfile: a new case's clocks, once. The organization's policy whose conditions
+            hold at the accepted intake time, the most specific first (a service agreement, the customer, the queue, the type,
+            the default), and its target for the case's priority band; a first response and a first resolution episode bound
+            to that row, target and calendar (the policy's, else the queue team's working hours), with their due and warning
+            times in business time; the case's due date becomes the resolution due date. With no policy it records that and
+            leaves the case's due date. No permission: every entry point gets its clocks.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="started" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="serviceLevelPolicyId"/>
+        </out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="out" from="sla.execute('startEpisode', context)"/>
+            <set field="started" from="!!out.started"/>
+            <set field="reason" from="out.reason || null"/>
+            <set field="serviceLevelPolicyId" from="out.serviceLevelPolicyId || null"/>
+        </actions>
+    </service>
+    <service verb="record" noun="CaseEvent" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the rules of entity/Request.eecas.xml (D23), so every path records: kind status (a case's
+            status, due date or resolution changed by any screen or service: the status event, and the clocks paused, resumed,
+            met, reopened as a new resolution episode or cancelled; a due date written outside the service levels is
+            recorded), message (a message filed on the case: an outward response its channel accepted meets first response, a
+            customer's message is a reply, which ends a wait for the customer: the case moves back to an open status) or work
+            (work made or linked). Not a case: nothing. A failure is logged, never the change's.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="kind" required="true"><description>status, message or work</description></parameter>
+            <parameter name="statusId"/>
+            <parameter name="fromStatusId"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="dueChanged" type="Boolean"/>
+            <parameter name="requestResolutionEnumId"/>
+            <parameter name="resolutionChanged" type="Boolean"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="workEffortId"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            if (!(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', requestId).disableAuthz().count() > 0)) return
+            ec.message.pushErrors()
+            try {
+                const sla = ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')
+                const op = {status: 'recordStatus', message: 'recordMessage', work: 'recordWork'}[kind]
+                if (!op) throw new Error('Unknown case event kind ' + kind)
+                sla.execute(op, context)
+            } catch (err) {
+                ec.logger.error(`Case ${requestId}: the service level event (${kind}) was not recorded: ${err && err.message ? err.message : err}`)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+
+    <!-- ===== a case's clocks ===== -->
+    <service verb="get" noun="CaseSlaHistory">
+        <description>A case's clocks and their events (design CaseDetail's clocks, CaseAnalytics CaseMetrics): each clock's
+            state, start, due, warning and actual times in its zone, its elapsed and remaining business time, pauses and breach,
+            and the policy row and calendar it was bound to; each event in order with its reason and who. A case of the user's
+            organizations only (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="clocks" type="List"/>
+            <parameter name="events" type="List"/>
+            <parameter name="configured" type="Boolean"><description>The case has clocks</description></parameter>
+            <parameter name="noPolicy" type="Boolean"><description>No policy applied to the case at intake</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="out" from="sla.execute('history', context)"/>
+            <set field="clocks" from="out.clocks"/>
+            <set field="events" from="out.events"/>
+            <set field="configured" from="!!out.configured"/>
+            <set field="noPolicy" from="!!out.noPolicy"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="CaseSla">
+        <description>A manager's correction of a case clock's due date with a reason (REASON_REQUIRED, DUE_REQUIRED): an event
+            keeps the earlier figure, a clock already ended is met or missed again by its actual time, and the case's due date
+            follows its resolution clock. Needs SUPPORT_CASE_MANAGE and the case's organization (RECORD_UNAVAILABLE); refuses a
+            cancelled case's clock (CLOCK_CANCELLED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="caseSlaEpisodeId" required="true"/>
+            <parameter name="dueDate" type="Timestamp" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="caseSlaEpisodeId"/></out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="caseSlaEpisodeId" from="sla.execute('correct', context).caseSlaEpisodeId"/>
+        </actions>
+    </service>
+
+    <!-- ===== policies (design ServiceLevelPolicies) ===== -->
+    <service verb="find" noun="Policies">
+        <description>An organization's service level policies (SlaPolicyList), the most specific first: each row's conditions,
+            rank, calendar, period and state (Draft, Scheduled, In effect, Ended: with includeEnded only), pauses, reopen and
+            targets per priority band. Needs SUPPORT_POLICY_EDIT, SUPPORT_CASE_MANAGE or SUPPORT_CASE_EDIT and the
+            organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="serviceLevelPolicyId"/>
+            <parameter name="includeEnded" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="policies" type="List"/></out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="policies" from="sla.execute('findPolicies', context).policies"/>
+        </actions>
+    </service>
+    <service verb="save" noun="Policy">
+        <description>A service level policy row (SlaPolicyEdit): new, from a date (now when not given) or as a draft (no from
+            date); a draft changed or published; a published row replaced from a date (the new row names it, previousPolicyId,
+            and it ends there with its targets); or ended (end). Its conditions: a service queue of the organization
+            (QUEUE_UNAVAILABLE), a request type (TYPE_UNKNOWN), a customer it serves (CUSTOMER_UNAVAILABLE), a service agreement
+            of the organization (AGREEMENT_UNAVAILABLE); its calendar the organization's or a team's (CALENDAR_UNAVAILABLE); its
+            targets per priority band in whole business minutes, a warning before its target (TARGET_INVALID, TARGETS_REQUIRED).
+            Refuses a published row with the same conditions as another over the same dates (EQUAL_RANK_OVERLAP). An episode
+            keeps the row it began with. Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="serviceLevelPolicyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="policyName"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="agreementId"/>
+            <parameter name="calendarId"/>
+            <parameter name="timeZone"/>
+            <parameter name="holdPauses"/>
+            <parameter name="maxPauseMinutes"/>
+            <parameter name="reopenEnumId"/>
+            <parameter name="targets" type="List"><description>Maps of priorityBandEnumId, firstResponseMinutes,
+                resolutionMinutes and warningMinutes; a band with neither target is left out</description></parameter>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="serviceLevelPolicyId"/></out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="serviceLevelPolicyId" from="sla.execute('savePolicy', context).serviceLevelPolicyId"/>
+        </actions>
+    </service>
+    <service verb="simulate" noun="Policy">
+        <description>SlaSimulation: when a case received at receivedDate with a priority (or band) is due for first response
+            and resolution on a policy (given, or the one a case of the organization, queue, type and customer would get), with
+            the pauses given (resolution only), the warnings, the working hours and the holidays over the span, in the
+            schedule's zone. Needs SUPPORT_POLICY_EDIT, SUPPORT_CASE_MANAGE or SUPPORT_CASE_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="serviceLevelPolicyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="receivedDate" type="Timestamp"/>
+            <parameter name="priority"/>
+            <parameter name="priorityBandEnumId"/>
+            <parameter name="pauses" type="List"><description>Maps of fromDate and thruDate</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="simulation" type="Map"><description>configured, policyName, bandText, receivedText, timeZone,
+                calendarText, hoursText, clocks (label, targetText, dueText, dueDate, warningText, pausedText), holidays (name,
+                fromText, thruText) and explanation</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="simulation" from="sla.execute('simulate', context)"/>
+        </actions>
+    </service>
+
+    <!-- ===== the scan (CS-JOBS) ===== -->
+    <service verb="scan" noun="CaseSla" authenticate="anonymous-all" allow-remote="false">
+        <description>The warning and breach scan (the scan_CaseSla ServiceJob): a bounded batch (limit, 200) of running clocks
+            past their warning or due time not yet recorded, oldest due first, then in the rest of the batch the paused ones
+            past their policy's longest pause not yet recorded; each in its own transaction
+            (mark#CaseSlaEpisode): its breach or warning recorded once per episode and told on SupportCaseSlaBreach or
+            SupportCaseSlaWarning, a pause past the policy's longest recorded. A clock that fails is logged with its case and
+            named in failedList, and the rest go on.</description>
+        <in-parameters><parameter name="limit" type="Integer" default="200"/></in-parameters>
+        <out-parameters>
+            <parameter name="scannedCount" type="Integer"/>
+            <parameter name="markedCount" type="Integer"/>
+            <parameter name="failedList" type="List"><description>Maps of requestId, caseSlaEpisodeId and message</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="out" from="sla.execute('scan', context)"/>
+            <set field="scannedCount" from="out.scannedCount"/>
+            <set field="markedCount" from="out.markedCount"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
+    <service verb="mark" noun="CaseSlaEpisode" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for scan#CaseSla: one clock's breach, warning or long pause, once (by its event key), in the
+            caller's new transaction.</description>
+        <in-parameters><parameter name="caseSlaEpisodeId" required="true"/></in-parameters>
+        <out-parameters><parameter name="notified" type="Integer"/></out-parameters>
+        <actions>
+            <set field="sla" from="ec.resource.script('component://mr-mantle/service/mantle/request/Sla.js')"/>
+            <set field="notified" from="sla.execute('mark', context).notified || 0"/>
+        </actions>
+    </service>
+</services>

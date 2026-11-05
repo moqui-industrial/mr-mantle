@@ -222,6 +222,19 @@ function ensure(p) {
         communicationEventId: p.communicationEventId || event?.communicationEventId || null,
         emailMessageId: p.emailMessageId || mail?.emailMessageId || null
     })
+    // its clocks (P4, mantle.request.SlaServices.start#CaseEpisode): a failure is logged, never the case's
+    ec.message.pushErrors()
+    try {
+        ec.resource
+            .script("component://mr-mantle/service/mantle/request/Sla.js")
+            .execute("startEpisode", {requestId: p.requestId})
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+    } catch (error) {
+        ec.logger.error("Case " + p.requestId + ": its service level clocks were not started: " + (error?.message || error))
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
     return {
         isCase: true,
         created: true,
@@ -538,6 +551,11 @@ function transition(p) {
         fields.requestResolutionEnumId = resolutionEnumId || (toStatusId === "ReqCancelled" ? "RrRejected" : "RrCompleted")
     }
     call("update#" + REQUEST, fields)
+    // the reason on the clocks' events of this move (P4: a pause, a resume, a reopen)
+    if (text(p.reason))
+        ec.resource
+            .script("component://mr-mantle/service/mantle/request/Sla.js")
+            .attachReason(theCase.requestId, toStatusId, p.reason)
     if (text(p.reason))
         call("mantle.request.RequestServices.add#RequestComment", {
             requestId: theCase.requestId,
