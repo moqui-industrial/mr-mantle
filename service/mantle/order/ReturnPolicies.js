@@ -50,11 +50,43 @@ const escapeHtml = value =>
     String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c])
 
 // ===== access =====
+// Customer Service P15: the Support app's claim (CustomerReturns.js asCustomer) that the signed-in account or the RMA's link acts
+// for one customer of one organization, checked there by ExternalAccess, never a request's input. It stands in for entering and
+// reading the customer's own returns (a list naming SUPPORT_CASE_EDIT), and for authorizing only to withdraw one (withdraw).
+const SUPPORT_CLAIM = "SupportCustomerClaim"
+const supportClaim = () => ec.context.sharedMap[SUPPORT_CLAIM] || null
+function asCustomer(claim, work) {
+    const shared = ec.context.sharedMap,
+        before = shared[SUPPORT_CLAIM]
+    shared[SUPPORT_CLAIM] = {
+        organizationPartyId: claim.organizationPartyId,
+        customerPartyId: claim.customerPartyId,
+        withdraw: !!claim.withdraw
+    }
+    try {
+        return work()
+    } finally {
+        if (before == null) delete shared[SUPPORT_CLAIM]
+        else shared[SUPPORT_CLAIM] = before
+    }
+}
+const claimedFor = (organizationPartyId, customerPartyId) => {
+    const claim = supportClaim()
+    return (
+        !!claim &&
+        claim.organizationPartyId === organizationPartyId &&
+        (!customerPartyId || claim.customerPartyId === customerPartyId)
+    )
+}
 function requirePermission(...permissions) {
+    const claim = supportClaim()
+    if (claim && (permissions.includes("SUPPORT_CASE_EDIT") || (claim.withdraw && permissions.join() === "RETURN_AUTHORIZE")))
+        return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
 function requireOrganization(organizationPartyId) {
+    if (claimedFor(organizationPartyId)) return String(organizationPartyId)
     if (
         !organizationPartyId ||
         !isInternal(organizationPartyId) ||
@@ -69,7 +101,9 @@ function customerReturn(returnId, lock = false) {
     const unavailable = () => denied("RECORD_UNAVAILABLE", "Return " + (returnId || "") + " is not available")
     const header = blank(returnId) ? null : lock ? find(HEADER, {returnId}).forUpdate(true).one() : one(HEADER, {returnId})
     if (!header || !isInternal(header.vendorPartyId) || isInternal(header.customerPartyId)) unavailable()
-    if (!facilityScope.owns(facilityScope.scope(), header.vendorPartyId)) unavailable()
+    if (supportClaim()) {
+        if (!claimedFor(header.vendorPartyId, header.customerPartyId)) unavailable()
+    } else if (!facilityScope.owns(facilityScope.scope(), header.vendorPartyId)) unavailable()
     return header
 }
 // A sales order of one of the user's organizations to a customer that is not internal.
@@ -79,7 +113,9 @@ function salesOrder(orderId, orderPartSeqId) {
     const parts = order ? rows("mantle.order.OrderPart", {orderId}) : []
     const part = orderPartSeqId ? parts.find(row => row.orderPartSeqId === orderPartSeqId) : parts[0]
     if (!part || !isInternal(part.vendorPartyId) || isInternal(part.customerPartyId)) unavailable()
-    if (!facilityScope.owns(facilityScope.scope(), part.vendorPartyId)) unavailable()
+    if (supportClaim()) {
+        if (!claimedFor(part.vendorPartyId, part.customerPartyId)) unavailable()
+    } else if (!facilityScope.owns(facilityScope.scope(), part.vendorPartyId)) unavailable()
     return {order, part}
 }
 // The return's revision: the last change of its header, items or parties, so a decision bound to it stops counting when any of
@@ -834,7 +870,12 @@ function submit(p) {
         carrierPartyId: text(p.carrierPartyId) || header.carrierPartyId || null,
         shipmentMethodEnumId: text(p.shipmentMethodEnumId) || header.shipmentMethodEnumId || null
     })
-    setAssignee(header.returnId, text(p.assigneePartyId) || assigneeOf(header.returnId) || ec.user.userAccount?.partyId || null)
+    // a customer's own request (the Support app's claim) is assigned by no one: an agent takes it
+    if (!supportClaim())
+        setAssignee(
+            header.returnId,
+            text(p.assigneePartyId) || assigneeOf(header.returnId) || ec.user.userAccount?.partyId || null
+        )
     if (!blank(p.requestId))
         call("mantle.request.RequestServices.link#RequestRecord", {
             requestId: p.requestId,
@@ -950,6 +991,10 @@ function notifyDecision(header, decisionText) {
         return 0
     }
 }
+// Customer Service P15 (F60): a decision's notice to the customer, queued for the commit (SupportNotices.js: only where Customer
+// Service is set up for the organization, never the decision's reason).
+const customerNotice = (returnId, decision) =>
+    ec.resource.script("component://mr-mantle/service/mantle/request/SupportNotices.js").queueReturnDecision(returnId, decision)
 // An exception asked for at the return's current revision: the request recorded, the approvers told (ReturnExceptionApproval,
 // its message naming the revision). A failure to notify is logged and the request stays.
 function requestExceptionCore(returnId, reason) {
@@ -1034,6 +1079,7 @@ function decide(p, fromTopic = false) {
         header,
         decision === "approve" ? "Exception approved: " + exceptionText : "Exception refused: " + text(p.reason)
     )
+    customerNotice(header.returnId, decision === "approve" ? "exceptionApproved" : "exceptionRefused")
     return {
         returnId: header.returnId,
         decision,
@@ -1176,6 +1222,8 @@ function authorize(p) {
         ec.logger.error("RMA of return " + header.returnId + " was not stored: " + error.message)
     }
     notifyDecision(header, "Authorized until " + lib.dateText(stamp(core.expireMs)))
+    // P15 (F60): the customer told, with the return's Support link, once this commits
+    customerNotice(header.returnId, "authorized")
     const shipmentId = rows("mantle.shipment.ShipmentItemSource", {returnId: header.returnId})[0]?.shipmentId || null
     const result = {
         resultCode: "AUTHORIZED",
@@ -1627,6 +1675,23 @@ function send(p) {
         )[0] || one(CONTENT, {returnContentId: storeAuthorization(header.returnId)})
     const printed = printOf(header)
     const fileName = String(stored.contentLocation).substring(String(stored.contentLocation).lastIndexOf("/") + 1)
+    // P15 (F60): with no link given, the RMA's own: a ReturnRma capability on the organization's first published site with the
+    // Support app (CustomerReturn), until the authorization expires; none without a site
+    if (blank(p.linkUrl)) {
+        try {
+            const expires = msOf(header.authorizationExpireDate)
+            p.linkUrl = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").create({
+                recordType: "ReturnHeader",
+                recordId: header.returnId,
+                scopes: "ReturnRma",
+                thruDate: expires && expires > nowMs() ? stamp(expires + 30 * dayMs) : null,
+                validDays: 90
+            }).url
+        } catch (error) {
+            ec.message.clearErrors()
+            ec.logger.warn("Return " + header.returnId + ": no Support link for the RMA mail: " + error.message)
+        }
+    }
     const body =
         (p.note ? "<p>" + escapeHtml(p.note).replace(/\n/g, "<br>") + "</p>" : "") +
         "<p>" +
@@ -1694,6 +1759,13 @@ const operations = {
 }
 ;({
     revisionOf,
+    // P15: the Support app's customer reads and requests (CustomerReturns.js)
+    asCustomer,
+    evaluateCore,
+    evaluationResult,
+    effectsOf,
+    topItems,
+    currentRows,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown return policy operation " + op)

@@ -1043,4 +1043,136 @@
         service: 'mantle.request.CaseFeedbackServices.submit#CaseFeedback',
         fields: ['siteId', 'token', 'values', 'operationId'],
     },
+    // Customer Service P15: the Support app's help, cases, returns and order cancel (mantle.request.SupportCaseServices,
+    // KnowledgeServices, mantle.order.ReturnPolicyServices, OrderChangeServices)
+    getSupportHome: {
+        service: 'mantle.request.SupportCaseServices.get#SupportHome',
+        fields: ['siteId', 'query'],
+    },
+    findCustomerCases: {
+        service: 'mantle.request.SupportCaseServices.find#CustomerCases',
+        fields: [
+            'siteId',
+            'query',
+            'statusCategory',
+            'customerPartyId',
+            'cursor',
+            'limit',
+        ],
+    },
+    getCaseIntake: {
+        service: 'mantle.request.SupportCaseServices.get#CaseIntake',
+        fields: ['siteId', 'token', 'orderId', 'wikiPageId', 'query'],
+    },
+    createCustomerCase: {
+        service: 'mantle.request.SupportCaseServices.create#CustomerCase',
+        fields: [
+            'siteId',
+            'token',
+            'customerPartyId',
+            'requestCategoryId',
+            'requestTypeEnumId',
+            'requestName',
+            'description',
+            'templateValues',
+            'orderId',
+            'wikiPageId',
+            'firstName',
+            'lastName',
+            'emailAddress',
+            'website',
+            'file',
+            'operationId',
+        ],
+    },
+    getCustomerCase: {
+        service: 'mantle.request.SupportCaseServices.get#CustomerCase',
+        fields: ['siteId', 'requestId', 'token'],
+    },
+    replyCustomerCase: {
+        service: 'mantle.request.SupportCaseServices.reply#CustomerCase',
+        fields: ['siteId', 'requestId', 'token', 'body', 'file', 'operationId'],
+    },
+    requestCaseReopen: {
+        service: 'mantle.request.SupportCaseServices.request#CaseReopen',
+        fields: ['siteId', 'requestId', 'token', 'reason', 'operationId'],
+    },
+    cancelCustomerCase: {
+        service: 'mantle.request.SupportCaseServices.cancel#CustomerCase',
+        fields: ['siteId', 'requestId', 'token', 'expectedRevision', 'reason'],
+    },
+    getCaseFile: {
+        service: 'mantle.request.SupportCaseServices.get#CaseFile',
+        fields: ['siteId', 'requestId', 'token', 'fileId'],
+    },
+    getCustomerArticle: {
+        service: 'mantle.request.KnowledgeServices.get#CustomerArticle',
+        fields: ['siteId', 'wikiPageId'],
+    },
+    rateArticle: {
+        service: 'mantle.request.KnowledgeServices.rate#Article',
+        fields: ['siteId', 'wikiPageId', 'token', 'helpful', 'comment'],
+    },
+    findCustomerReturns: {
+        service: 'mantle.order.ReturnPolicyServices.find#CustomerReturns',
+        fields: ['siteId', 'query', 'customerPartyId', 'cursor', 'limit'],
+    },
+    getReturnableOrder: {
+        service: 'mantle.order.ReturnPolicyServices.get#ReturnableOrder',
+        fields: ['siteId', 'orderId'],
+    },
+    requestCustomerReturn: {
+        service: 'mantle.order.ReturnPolicyServices.request#CustomerReturn',
+        fields: [
+            'siteId',
+            'orderId',
+            'lines',
+            'customerReference',
+            'note',
+            'file',
+            'operationId',
+        ],
+    },
+    getCustomerReturn: {
+        service: 'mantle.order.ReturnPolicyServices.get#CustomerReturn',
+        fields: ['siteId', 'returnId', 'token'],
+    },
+    addReturnEvidence: {
+        service: 'mantle.order.ReturnPolicyServices.add#ReturnEvidence',
+        fields: ['siteId', 'returnId', 'token', 'note', 'file', 'operationId'],
+    },
+    withdrawCustomerReturn: {
+        service: 'mantle.order.ReturnPolicyServices.withdraw#CustomerReturn',
+        fields: [
+            'siteId',
+            'returnId',
+            'token',
+            'expectedRevision',
+            'reason',
+            'operationId',
+        ],
+    },
+    getReturnLabel: {
+        service: 'mantle.order.ReturnPolicyServices.get#ReturnLabel',
+        fields: ['siteId', 'returnId', 'token'],
+    },
+    requestOrderCancel: {
+        service: 'mantle.order.OrderChangeServices.request#CustomerCancel',
+        fields: [
+            'siteId',
+            'orderId',
+            'lines',
+            'reason',
+            'consent',
+            'operationId',
+        ],
+    },
+    getOrderCancelRequest: {
+        service: 'mantle.order.OrderChangeServices.get#CustomerCancel',
+        fields: ['siteId', 'requestId'],
+    },
+    withdrawOrderCancel: {
+        service: 'mantle.order.OrderChangeServices.withdraw#CustomerCancel',
+        fields: ['siteId', 'requestId', 'expectedRevision', 'reason'],
+    },
 })

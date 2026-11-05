@@ -85,6 +85,18 @@ const records = {
         permissions: ["SUPPORT_CASE_EDIT"],
         scopes: ["CaseView"],
         page: {app: "support", path: "/CustomerCase?token="},
+        // P15: the customer's own account reaches it (self), and a contact reaches only a case they filed or report, unless
+        // a customer administrator (organization-wide visibility; design §8 Access)
+        self: true,
+        contactAllows(recordId, grantRows) {
+            if (grantRows.some(row => row.administrator === "Y")) return true
+            const partyId = ec.user.userAccount?.partyId
+            if (!partyId) return false
+            if (one("mantle.request.Request", {requestId: recordId})?.filedByPartyId === partyId) return true
+            return rows("mantle.request.RequestParty", {requestId: recordId, partyId}).some(
+                row => ["Reporter", "Customer"].includes(row.roleTypeId) && lib.entityLib.active(row)
+            )
+        },
         resolve(recordId) {
             if (!recordId || !one("mantle.request.support.CaseProfile", {requestId: recordId})) return null
             const parties = rows("mantle.request.RequestParty", {requestId: recordId}).filter(row => lib.entityLib.active(row))
@@ -101,6 +113,8 @@ const records = {
         permissions: ["RETURN_AUTHORIZE", "SUPPORT_CASE_EDIT"],
         scopes: ["ReturnRma"],
         page: {app: "support", path: "/CustomerReturn?token="},
+        // P15: the customer's own account reaches it (self)
+        self: true,
         resolve(recordId) {
             const header = one("mantle.order.return.ReturnHeader", {returnId: recordId})
             if (!header || header.statusId === "ReturnCancelled") return null
@@ -226,6 +240,28 @@ function grants(organizationPartyId, app) {
 function contactOf(partyId, organizationPartyId, app) {
     return !!partyId && grants(organizationPartyId, app).some(row => row.outsidePartyId === partyId)
 }
+// The self relationship (Customer Service P15; design-customer-service §8 Access, review X6): a signed-in account whose own
+// party is the outside party, not internal and not working for an internal organization, with its current email address
+// verified (a PASS account's VerifiedAddress of that address), reaches that party's records of a kind that allows it with no invitation. A
+// customer contact's account is a different party, so this never reaches a colleague's or an employer's records.
+function selfOf(partyId) {
+    const account = ec.user.userAccount
+    if (!account?.partyId || !partyId || account.partyId !== partyId || internal(partyId)) return false
+    if (account.disabled === "Y") return false
+    const works = rows("mantle.party.PartyRelationship", {fromPartyId: partyId}).some(
+        row =>
+            ["PrtEmployee", "PrtAgent", "PrtMember", "PrtRepresentative"].includes(row.relationshipTypeEnumId) &&
+            lib.entityLib.active(row) &&
+            internal(row.toPartyId)
+    )
+    if (works) return false
+    // the account's current address verified (a changed email needs fresh verification; an older verified one is not it)
+    const email = String(account.emailAddress || "").trim().toLowerCase()
+    if (!email) return false
+    return rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
+        row => !!row.verifiedAt && String(row.emailAddress || "").trim().toLowerCase() === email
+    )
+}
 // What a page may reach: a token's record within its scope, or a record whose outside party the signed-in user is a
 // contact of. organizationPartyId, when given, is the organization the page serves (its app mount's target).
 function check(p) {
@@ -255,19 +291,37 @@ function check(p) {
     // a contact needs the organization the page serves, and a grant for this record type's app there; a party-less kind (a
     // queue's intake) is reached only by its token
     const record = recordOf(p.recordType, p.recordId)
-    if (
-        kind.partyless ||
-        !record ||
-        !p.organizationPartyId ||
-        record.organizationPartyId !== p.organizationPartyId ||
-        !contactOf(record.partyId, p.organizationPartyId, kind.page.app)
-    )
+    if (kind.partyless || !record || !p.organizationPartyId || record.organizationPartyId !== p.organizationPartyId)
         unavailable()
+    // P15: the account's own party (self), else a contact grant, which a kind may narrow (a case: the contact's own unless an
+    // administrator)
+    if (kind.self && selfOf(record.partyId))
+        return {via: "self", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
+    const held = grants(p.organizationPartyId, kind.page.app).filter(row => row.outsidePartyId === record.partyId)
+    if (!held.length || (kind.contactAllows && !kind.contactAllows(p.recordId, held))) unavailable()
     return {via: "contact", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
 }
 // The outside parties a signed-in user is a contact of, for an app of an organization.
 function contactParties(organizationPartyId, app) {
     return [...new Set(grants(organizationPartyId, app).map(row => row.outsidePartyId))]
+}
+// The outside parties a signed-in user may act for on an app of an organization (Customer Service P15): each contact grant's
+// party with whether it is a customer administrator, and the account's own party through the self relationship when it is
+// a party of the app's kind (selfRole, a Customer for Support). [{partyId, administrator, via}]
+function actingParties(organizationPartyId, app, selfRole = null) {
+    const byParty = new Map()
+    for (const row of grants(organizationPartyId, app)) {
+        const was = byParty.get(row.outsidePartyId)
+        byParty.set(row.outsidePartyId, {
+            partyId: row.outsidePartyId,
+            administrator: !!was?.administrator || row.administrator === "Y",
+            via: "contact"
+        })
+    }
+    const own = ec.user.userAccount?.partyId
+    if (own && selfRole && !byParty.has(own) && one("mantle.party.PartyRole", {partyId: own, roleTypeId: selfRole}) && selfOf(own))
+        byParty.set(own, {partyId: own, administrator: true, via: "self"})
+    return Array.from(byParty.values())
 }
 // The issuer's permission for a capability's own organization, so a link to a record since cancelled can be revoked.
 function requireCapabilityIssuer(row) {
@@ -320,15 +374,21 @@ function list(p) {
 const appKinds = {
     billing: {permissions: ["RECEIVABLE_EDIT"]},
     supplier: {permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"]},
-    support: {permissions: ["SUPPORT_CONTACT_INVITE"]}
+    // P15 (F57): a customer may be a person (a consumer) under the Support app
+    support: {permissions: ["SUPPORT_CONTACT_INVITE"], persons: true}
 }
 function invite(p) {
     const app = appKinds[p.app]
     if (!app) denied("APP_INVALID", "Choose the app to invite the contact to")
     requirePermissions(app, p.organizationPartyId)
     const party = one("mantle.party.Party", {partyId: p.partyId})
-    if (!party || internal(p.partyId) || party.partyTypeEnumId !== "PtyOrganization")
+    if (!party || internal(p.partyId) || (party.partyTypeEnumId !== "PtyOrganization" && !app.persons))
         denied("PARTY_INVALID", "Choose an outside organization")
+    if (!party.partyTypeEnumId || !["PtyOrganization", "PtyPerson"].includes(party.partyTypeEnumId))
+        denied("PARTY_INVALID", "Choose an outside organization or person")
+    // a Support invitation is for a customer of the organization (Customer Service P15)
+    if (p.app === "support" && !one("mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: "Customer"}))
+        denied("PARTY_INVALID", "Choose a customer")
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
     const siteId = apps.sitesFor(p.app, p.organizationPartyId)[0]
     if (!siteId) denied("SITE_UNAVAILABLE", "The organization has no published site with this app")
@@ -342,7 +402,15 @@ function invite(p) {
         siteId,
         tokenHash: ec.user.singleUseCodeHash(token),
         emailHash: ec.user.singleUseCodeHash(email),
-        scopes: JSON.stringify([{app: p.app, partyId: p.partyId, organizationPartyId: p.organizationPartyId}]),
+        scopes: JSON.stringify([
+            Object.assign(
+                {app: p.app, partyId: p.partyId, organizationPartyId: p.organizationPartyId},
+                // P15: a customer administrator sees the customer's cases, not only their own
+                p.app === "support" && (p.administrator === true || p.administrator === "Y" || p.administrator === "true")
+                    ? {administrator: "Y"}
+                    : {}
+            )
+        ]),
         inviterPartyId: ec.user.userAccount?.partyId,
         expiresAt
     })
@@ -359,8 +427,11 @@ function bindContact(partyId, scopes) {
     for (const scope of Array.isArray(scopes) ? scopes : []) {
         if (!scope?.partyId || !scope.organizationPartyId || !appKinds[scope.app]) continue
         const key = {partyId, outsidePartyId: scope.partyId, organizationPartyId: scope.organizationPartyId, app: scope.app}
-        if (!rows(G, key).some(row => lib.entityLib.active(row)))
-            call("create#" + G, {...key, fromDate: ec.user.nowTimestamp})
+        const administrator = scope.administrator === "Y" ? "Y" : null
+        const current = rows(G, key).find(row => lib.entityLib.active(row))
+        if (!current) call("create#" + G, {...key, administrator, fromDate: ec.user.nowTimestamp})
+        else if (administrator && current.administrator !== "Y")
+            call("update#" + G, {contactGrantId: current.contactGrantId, administrator})
     }
 }
 ;({
@@ -372,6 +443,9 @@ function bindContact(partyId, scopes) {
     tokenCapability,
     contactOf,
     contactParties,
+    // Customer Service P15: the self relationship and the parties a signed-in user acts for
+    selfOf,
+    actingParties,
     revoke,
     revokeActive,
     list,

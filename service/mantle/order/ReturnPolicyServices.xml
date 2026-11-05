@@ -510,4 +510,87 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="alreadyApplied" from="!!found.alreadyApplied"/>
         </actions>
     </service>
+
+    <!-- ===== the Support app's return pages (impl-customer-service P15, CS-PORTAL; CustomerReturns.js): PASS operations,
+        each checking the support mount's organization and the asker (the RMA's ReturnRma link, or a signed-in account acting
+        for the return's customer), then P9's rules on the Support app's claim for that customer ===== -->
+    <service verb="find" noun="CustomerReturns" authenticate="anonymous-all" allow-remote="false">
+        <description>findCustomerReturns: the signed-in account's customers' returns with the organization (not an agent's draft), newest first: reference, the customer's reference, order, customer status, requested, authorized and received quantities, remedy, RMA expiry and tracking; no amount.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('findCustomerReturns', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ReturnableOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>getReturnableOrder: RequestReturn's choices: the customer's orders, and for one the lines it may return now (a self-service policy's, within its window and what is left, the policy's remedies, whether proof is asked), the customer-visible reasons, the policy's instructions and fee.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('getReturnableOrder', input)"/>
+        </actions>
+    </service>
+    <service verb="request" noun="CustomerReturn" authenticate="anonymous-all" allow-remote="false">
+        <description>requestCustomerReturn: the customer's return of an order's lines through submit#CustomerReturn on the claim (the server picks the facility and keeps the policy and window; only returnable lines, customer-visible reasons and the policy's remedies; a requested remedy is not an approved refund), evidence kept as ReturnContent (Customer evidence). The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('requestCustomerReturn', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CustomerReturn" authenticate="anonymous-all" allow-remote="false">
+        <description>getCustomerReturn: a return the RMA's link or the signed-in account reaches: its reference, status in the customer's words, quantities, remedy and what was issued (never an amount), RMA expiry and instructions, tracking, the customer's evidence, its revision and what the page may do (add evidence, download the label, withdraw, or ask an agent).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('getCustomerReturn', input)"/>
+        </actions>
+    </service>
+    <service verb="add" noun="ReturnEvidence" authenticate="anonymous-all" allow-remote="false">
+        <description>addReturnEvidence (TOKEN_WRITES for an RMA link): a file (staged and scanned) or message kept as ReturnContent of the Customer evidence type while the return is open. The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('addReturnEvidence', input)"/>
+        </actions>
+    </service>
+    <service verb="withdraw" noun="CustomerReturn" authenticate="anonymous-all" allow-remote="false">
+        <description>withdrawCustomerReturn (TOKEN_WRITES for an RMA link): the customer withdraws a requested or authorized return at the revision shown, before any physical or financial effect (cancel#CustomerReturn on the claim); after it, Unprocessable with the advice to ask an agent.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('withdrawCustomerReturn', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ReturnLabel" authenticate="anonymous-all" allow-remote="false">
+        <description>getReturnLabel: an authorized return's label (request#ReturnLabel's, from its route segment), kept once as ReturnContent (Return label), for the download through the facade.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('getReturnLabel', input)"/>
+        </actions>
+    </service>
+    <service verb="send" noun="ReturnDecisionNotice" authenticate="anonymous-all" allow-remote="false">
+        <description>The customer told of a return decision (decision: authorized, exceptionApproved or exceptionRefused) by mail
+            from the organization (MANTLE_RETURN_DECISION_EMAIL) with the return's CustomerReturn link (a ReturnRma capability on
+            its first published site with the Support app; none, and logged, without one); never the decision's reason. Only
+            where Customer Service is set up for the organization (a service policy) and for a return the customer sees.
+            authorize#Return and decide#ReturnException queue it for their commit (impl-customer-service P15, F60;
+            SupportNotices.js); a failure is logged, never thrown.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="decision" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Boolean"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportNotices.js').sendReturnDecision(context)"/>
+            <set field="sent" from="!!out.sent"/>
+            <set field="emailMessageId" from="out.emailMessageId"/>
+            <set field="reason" from="out.reason"/>
+        </actions>
+    </service>
 </services>

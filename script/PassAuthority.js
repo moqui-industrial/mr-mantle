@@ -16,7 +16,17 @@ const TOKEN_WRITES = [
     'reportDropShipDelivery',
     // Customer Service P13: a feedback invitation's link
     'submitCaseFeedback',
+    // Customer Service P15: a queue's form token, a case's CaseView link, an article view's rating nonce and an RMA link
+    'createCustomerCase',
+    'replyCustomerCase',
+    'requestCaseReopen',
+    'cancelCustomerCase',
+    'rateArticle',
+    'addReturnEvidence',
+    'withdrawCustomerReturn',
 ]
+/* Operations answered as a file (download: the result's location stays here, the transport streams it). */
+const DOWNLOADS = ['getAttachment', 'getExport', 'getCaseFile', 'getReturnLabel']
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {
     session: 'start',
@@ -185,8 +195,9 @@ function run(p) {
         )
     if (def.fields.includes('file')) full.file = p.file
     const result = callService(def.service, full)
-    if (operation === 'getAttachment' || operation === 'getExport') {
-        const file = result.attachment || result.export
+    // a file the transport streams: a forum attachment, an export, and the Support app's case file and return label (P15)
+    if (DOWNLOADS.includes(operation)) {
+        const file = result.attachment || result.export || result.file
         // the file's place stays here; the transport streams it
         const { location, ...shown } = result
         return {

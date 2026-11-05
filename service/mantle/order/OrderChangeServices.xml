@@ -269,4 +269,30 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('find', context))</script>
         </actions>
     </service>
+
+    <!-- ===== the Support app's cancel request (impl-customer-service P15, X7, F162; CustomerOrders.js): PASS operations ===== -->
+    <service verb="request" noun="CustomerCancel" authenticate="anonymous-all" allow-remote="false">
+        <description>requestOrderCancel: the signed-in account asks to cancel the open remainder of chosen lines of its customer's order, with the reason and its consent: a cancel-kind proposal through save#OrderChange on the Support app's claim for the customer, applied at once only under customerImmediateCancel ("Cancelled"), else "Cancellation requested" for an agent in OrderChanges. The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerOrders.js').execute('requestCustomerCancel', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CustomerCancel" authenticate="anonymous-all" allow-remote="false">
+        <description>getOrderCancelRequest (F162): the customer's read of its cancel request: its state in the customer's words, its lines and whether the filer may withdraw it; never a decision's reason or approver.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerOrders.js').execute('getCustomerCancel', input)"/>
+        </actions>
+    </service>
+    <service verb="withdraw" noun="CustomerCancel" authenticate="anonymous-all" allow-remote="false">
+        <description>withdrawOrderCancel (F162): the filer withdraws an open cancel request of their own (withdraw#OrderChange's own path).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerOrders.js').execute('withdrawCustomerCancel', input)"/>
+        </actions>
+    </service>
 </services>

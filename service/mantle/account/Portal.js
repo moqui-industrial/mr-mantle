@@ -404,7 +404,6 @@ function resolvePending(p) {
 
 // ---- Supplier: a purchase order's bill ----
 
-const billTypes = ["application/pdf", "image/png", "image/jpeg"]
 function checkOrder(p) {
     const organizationPartyId = served(p.siteId, "supplier")
     return access.check({token: p.token, scope: "BillUpload", recordType: "Order", recordId: p.orderId, organizationPartyId})
@@ -456,56 +455,13 @@ function getSubmission(p) {
     }
     return {order: orderView(checked.recordId), submissionList: list, submission}
 }
-// Stage the file under PASS's media root and scan it, as Forum stages an attachment; refuse it unless it is clean.
-// A bill file's type from its leading bytes; null for anything but a PDF, PNG or JPEG.
-const signatures = [
-    {type: "application/pdf", extension: "pdf", bytes: [0x25, 0x50, 0x44, 0x46, 0x2d]},
-    {type: "image/png", extension: "png", bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]},
-    {type: "image/jpeg", extension: "jpg", bytes: [0xff, 0xd8, 0xff]}
-]
-function sniff(location) {
-    const stream = ec.resource.getLocationReference(location).openStream()
-    let head
-    try {
-        head = Array.from(stream.readAllBytes().slice(0, 8)).map(b => b & 0xff)
-    } finally {
-        stream.close()
-    }
-    return signatures.find(sig => sig.bytes.every((b, i) => head[i] === b)) || null
-}
-// Stage the file under PASS's media root and scan it, as Forum stages an attachment. Its leading bytes must be the type
-// it says it is, and it is kept under a name whose extension is that type's; anything else, or a file that is not
-// clean, is refused. noun names the file in the refusals (Purchasing's quote and acknowledgement files use it too, P16).
+// Stage the file under PASS's media root and scan it, as Forum stages an attachment; refuse it unless it is clean. The rules
+// are the shared PortalMedia.js (F58, Customer Service P15); noun names the file in the refusals (Purchasing's quote and
+// acknowledgement files use it too, P16), a bill kept under bills/, the supplier's other files under supplier/.
 function stage(file, noun = "bill") {
-    const maxBytes = 10485760
-    if (!file || Number(file.size) < 1 || Number(file.size) > maxBytes) fail("Unprocessable", "Attach the " + noun + ", at most 10 MB")
-    const type = String(file.contentType || "")
-    if (!billTypes.includes(type)) fail("Unprocessable", "Attach the " + noun + " as a PDF, PNG or JPEG file")
-    const scanner = System.getProperty("pass_scanner_service"),
-        root = System.getProperty("pass_media_root")
-    if (!scanner || !root) fail("Unavailable", "Files cannot be received now")
-    const location = String(root).replace(/\/$/, "") + (noun === "bill" ? "/bills/" : "/supplier/") + ec.user.randomString(32)
-    file.write(location)
-    const refuse = (message, why) => {
-        ec.resource.getLocationReference(location).delete()
-        if (why) ec.logger.warn("Supplier bill file refused: " + why)
-        fail("Unprocessable", message)
-    }
-    const kind = sniff(location)
-    if (!kind || kind.type !== type) refuse("The file is not the PDF, PNG or JPEG it says it is", "content is not " + type)
-    let clean = false
-    try {
-        clean = ec.service.sync().throwOnError(true).name(scanner).parameters({location, mimeType: type}).call().clean === true
-    } catch (error) {
-        ec.message.clearErrors()
-        ec.logger.error("Supplier bill file at " + location + " could not be scanned; refused")
-    }
-    if (!clean) refuse("The file could not be accepted; send another copy")
-    const base = String(file.name || noun)
-        .replace(/\.[^.]*$/, "")
-        .replace(/[^a-zA-Z0-9_ -]/g, "_")
-        .slice(0, 90) || noun
-    return {location, filename: base + "." + kind.extension, byteSize: Number(file.size)}
+    return ec.resource
+        .script("component://mr-mantle/service/mantle/party/PortalMedia.js")
+        .stage(file, noun, noun === "bill" ? "bills" : "supplier")
 }
 function submitSupplierBill(p) {
     const checked = checkOrder(p)
