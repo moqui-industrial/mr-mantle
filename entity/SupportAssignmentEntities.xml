@@ -19,7 +19,8 @@ along with this software (see the LICENSE.md file). If not, see
     no new form element, F71), one winning rule then the fallback; the cursor of a rule (round robin's last agent, the last
     result) is a record of its own, locked with the assignment so two intakes never take the same slot. A team's saved
     replies are shared with its user group (moqui.security.UserGroup SVT_<team>, of type UgtServiceTeam), which
-    mantle.request.SupportCaseServices keeps in step with the team's members (F3). Saved replies: the text is a framework
+    mantle.request.SupportCaseServices keeps in step with the team's members (F3), and an organization's service-wide replies
+    with its group SVO_<organization> (UgtServiceOrganization), the members of all its teams. Saved replies: the text is a framework
     EmailTextBlock (D24, a Comms text block); SavedReply holds its organization, language and declared variables, and
     SavedReplyAction its ordered case actions, both keyed by emailTextBlockId. mantle.request.SupportCaseServices writes and
     reads these (assign#Case, save#AssignmentRule, preview#Assignment, preview#SavedReply, apply#SavedReply); nothing here acts
@@ -58,6 +59,8 @@ along with this software (see the LICENSE.md file). If not, see
         <seed-data>
             <!-- a service team's user group (its saved replies' audience, F3) -->
             <moqui.basic.Enumeration enumId="UgtServiceTeam" description="Service team" enumTypeId="UserGroupType"/>
+            <!-- an organization's service agents, the members of all its teams (SVO_<organization>: its service-wide replies) -->
+            <moqui.basic.Enumeration enumId="UgtServiceOrganization" description="Service organization" enumTypeId="UserGroupType"/>
         </seed-data>
     </entity>
 

@@ -11,7 +11,8 @@
 // (SupportCaseUnassigned). The rule's cursor (ServiceAssignmentCursor) is locked for the assignment, so two intakes at once
 // take two slots. assign#Case runs from ensure#CaseProfile (a new case) and update#Case (a move to another queue); preview
 // runs the same evaluator without writing. Reassignment never touches the case's clocks. A queue with no rule keeps P2's
-// behaviour. A team's user group (SVT_<team>, the audience of its saved replies) follows its members.
+// behaviour. A team's user group (SVT_<team>, the audience of its saved replies) follows its members, and its organization's
+// (SVO_<organization>, the audience of its service-wide replies) the members of all its teams.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const time = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
 const {find, one, rows, call, denied, access, ms} = lib
@@ -55,27 +56,20 @@ const partyName = partyId => (partyId ? lib.partyNames([partyId])[partyId] || pa
 const openStatuses = ["ReqSubmitted", "ReqReviewed", "ReqInProgress", "ReqWaitingCustomer", "ReqOnHold"]
 
 // ===== a team's user group (F3): its saved replies' audience, in step with its members =====
+// A team's group (SVT_<team>) holds the users of its members; its organization's group (SVO_<organization>) the users of the
+// members of all its teams: the audience of a service-wide reply of that organization, so a reply never reaches another
+// organization's users (a group spanning organizations would show it to them in Comms).
 const teamGroupId = teamPartyId => "SVT_" + teamPartyId
-// The group of the team, made on first use, and its members: a current UserGroupMember for each user of each current member,
-// ended for a user who is no longer one. Idempotent.
-function syncTeamGroup(teamPartyId) {
-    if (!teamPartyId) return {userGroupId: null}
-    const userGroupId = teamGroupId(teamPartyId)
-    const teamName = one("mantle.party.Organization", {partyId: teamPartyId})?.organizationName || teamPartyId
+const organizationGroupId = organizationPartyId => "SVO_" + organizationPartyId
+// The group, made on first use or renamed, and its members: a current UserGroupMember for each user of the parties, ended for
+// a user who is no longer one. Idempotent.
+function syncGroup(userGroupId, description, groupTypeEnumId, memberPartyIds) {
     const group = one("moqui.security.UserGroup", {userGroupId})
-    if (!group)
-        call("create#moqui.security.UserGroup", {
-            userGroupId,
-            description: "Service team " + teamName,
-            groupTypeEnumId: "UgtServiceTeam"
-        })
-    else if (group.description !== "Service team " + teamName) {
-        group.set("description", "Service team " + teamName)
+    if (!group) call("create#moqui.security.UserGroup", {userGroupId, description, groupTypeEnumId})
+    else if (group.description !== description) {
+        group.set("description", description)
         group.update()
     }
-    const memberPartyIds = cases()
-        .currentRows(RELATIONSHIP, {toPartyId: teamPartyId, relationshipTypeEnumId: "PrtServiceTeam"})
-        .map(row => row.fromPartyId)
     const wanted = new Set(
         memberPartyIds.length
             ? Array.from(find("moqui.security.UserAccount").condition("partyId", "in", memberPartyIds).list()).map(
@@ -94,7 +88,31 @@ function syncTeamGroup(teamPartyId) {
     const has = new Set(live.map(row => row.userId))
     for (const userId of wanted)
         if (!has.has(userId)) call("create#moqui.security.UserGroupMember", {userGroupId, userId, fromDate: now()})
-    return {userGroupId, userIds: Array.from(wanted)}
+    return Array.from(wanted)
+}
+const membersOf = teamPartyId =>
+    cases()
+        .currentRows(RELATIONSHIP, {toPartyId: teamPartyId, relationshipTypeEnumId: "PrtServiceTeam"})
+        .map(row => row.fromPartyId)
+// The team's group and its organization's.
+function syncTeamGroup(teamPartyId) {
+    if (!teamPartyId) return {userGroupId: null}
+    const userGroupId = teamGroupId(teamPartyId)
+    const nameOf = partyId => one("mantle.party.Organization", {partyId})?.organizationName || partyId
+    const userIds = syncGroup(userGroupId, "Service team " + nameOf(teamPartyId), "UgtServiceTeam", membersOf(teamPartyId))
+    const organizationPartyId = one("mantle.party.Party", {partyId: teamPartyId})?.ownerPartyId
+    if (organizationPartyId && organizationPartyId !== "_NA_") {
+        const teamIds = rows("mantle.party.Party", {ownerPartyId: organizationPartyId})
+            .map(row => row.partyId)
+            .filter(partyId => one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgTeam"}))
+        syncGroup(
+            organizationGroupId(organizationPartyId),
+            "Service agents of " + nameOf(organizationPartyId),
+            "UgtServiceOrganization",
+            Array.from(new Set(teamIds.flatMap(membersOf)))
+        )
+    }
+    return {userGroupId, userIds}
 }
 
 // ===== participation =====
@@ -688,6 +706,7 @@ const operations = {
 }
 ;({
     teamGroupId,
+    organizationGroupId,
     syncTeamGroup,
     saveParticipation,
     endParticipation,

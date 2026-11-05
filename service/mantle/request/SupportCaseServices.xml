@@ -528,7 +528,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="sync" noun="ServiceTeamGroup" authenticate="anonymous-all" allow-remote="false">
         <description>Puts a service team's user group (SVT_ and the team's id, made on first use; the audience of its saved
-            replies, F3) in step with its current members: each of their users a current member, any other ended.
+            replies, F3) in step with its current members: each of their users a current member, any other ended; and its
+            organization's group (SVO_ and the organization's id; its service-wide replies) with the members of all its teams.
             save#ServiceTeam and save#ServiceTeamMember run it; internal, for loaded data.</description>
         <in-parameters><parameter name="teamPartyId" required="true"/></in-parameters>
         <out-parameters>
