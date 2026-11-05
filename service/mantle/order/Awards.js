@@ -350,7 +350,10 @@ function offerRow(ctx, basisContext, item, offer, comparedQuantity) {
     const expired = status === "OrderProposed" && sourcingScript().expired(part)
     const basis = basisOf(cache, line, item)
     const lineUom = line.quantityUomId || cache.product(line.productId)?.amountUomId || null
-    const risk = policyModule.supplierUsable(ctx.rfq.organizationPartyId, quote.supplierPartyId)
+    // the buying policy's supplier check, once per supplier of the comparison (not per offer line)
+    ctx.supplierChecks ??= {}
+    ctx.supplierChecks[quote.supplierPartyId] ??= policyModule.supplierUsable(ctx.rfq.organizationPartyId, quote.supplierPartyId)
+    const risk = ctx.supplierChecks[quote.supplierPartyId]
     const row = {
         requestItemSeqId: item.requestItemSeqId,
         orderId: quote.orderId,
