@@ -97,11 +97,26 @@ const revisionText = revision => (revision ? lib.dateText(revision) : "")
 const amountRead = () => hasAny(amountPermissions)
 
 // ===== the order =====
+// Warehouse's one lock order (F294) is the shipment, then the order parts and header: a pick locks its shipment and never
+// the order, and a pack or reopen locks the shipment before the order. So the order's lock is taken after its shipments,
+// in id order: a pick, pack or reopen of the order then either commits before the checks (which see it: STOCK_CHANGED) or
+// waits for the change, and apply's own reopen never waits on a shipment while holding the order.
+function lockShipmentsOf(orderId) {
+    const shipmentIds = [
+        ...new Set(
+            rows(SOURCE, {orderId})
+                .map(row => row.shipmentId)
+                .filter(Boolean)
+        )
+    ].sort()
+    for (const shipmentId of shipmentIds) find(SHIPMENT, {shipmentId}).forUpdate(true).one()
+}
 // A sales order: every part sold by an internal organization to an outside party. Scoped, one of the user's organizations
 // sells it; a missing order, a purchase order and another organization's are refused alike (RECORD_UNAVAILABLE).
 function orderOf(orderId, options = {}) {
     const unavailable = () => denied("RECORD_UNAVAILABLE", "Order " + (orderId || "") + " is not available")
     if (blank(orderId)) unavailable()
+    if (options.lock) lockShipmentsOf(orderId)
     const order = options.lock ? find(ORDER, {orderId}).forUpdate(true).one() : one(ORDER, {orderId})
     const parts = order ? rows(PART, {orderId}) : []
     if (!parts.length || !parts.every(part => isInternal(part.vendorPartyId) && !isInternal(part.customerPartyId))) unavailable()
@@ -823,7 +838,7 @@ function apply(p) {
     if (operation.old) return lib.previous(operation)
     if (!truthy(p.confirmed)) denied("CONFIRMATION_REQUIRED", "Confirm the change; nothing changes until you do")
     if (blank(p.previewVersion)) denied("PREVIEW_REQUIRED", "Preview the change before applying it")
-    // the order first, then the proposal (the one lock order)
+    // the one lock order: the proposal, the order's shipments, then the order (orderOf)
     const ch = changeOf(p.requestId, {lock: true, lockOrder: true})
     const result = applyChange(ch, p, {policy: false})
     lib.complete(operation, REQUEST, ch.requestId, result)
