@@ -447,6 +447,21 @@ function recordRouteError(route, error) {
         ec.logger.error("Route " + route.serviceRouteId + ": its last error was not kept: " + failure)
     }
 }
+const ACKS_PER_HOUR = 3
+function acknowledgedEnough(emailAccountId, address) {
+    const to = String(address || "")
+        .trim()
+        .toLowerCase()
+    if (!to) return true
+    const sent = find(MESSAGE)
+        .condition({emailAccountId, headersString: "Auto-Submitted: auto-replied"})
+        .condition(ec.entity.conditionFactory.makeCondition("toAddresses", "equals", to).ignoreCase())
+        .condition("messageDate", "greater-equals", new Date(Number(ms(now())) - 3600000))
+        .count()
+    if (sent < ACKS_PER_HOUR) return false
+    ec.logger.warn("Mail to " + emailAccountId + " from " + to + ": " + sent + " acknowledgements in the last hour, none sent")
+    return true
+}
 // mailIntake: create#RequestFromEmail for a rule whose value names a queue. handled false: the rule may not file into the
 // queue, and create#RequestFromEmail goes on as for no project.
 function mailIntake(p) {
@@ -518,8 +533,9 @@ function mailIntake(p) {
             return Object.assign(result, {requestId, created: true, held: true})
         }
         // one acknowledgement of a new case, from the message's account, in its thread (never for a reply, a held or an
-        // automatic message)
-        if (route?.acknowledge === "Y" && emailAccountId)
+        // automatic message), and at most a few an hour to one address: a sender whose autoresponder marks nothing as
+        // automatic and starts a new thread each time stops getting answers, so two systems cannot mail each other forever
+        if (route?.acknowledge === "Y" && emailAccountId && !acknowledgedEnough(emailAccountId, message.fromAddress))
             call(R + "send#IntakeConfirmation", {
                 requestId,
                 emailAccountId,
