@@ -710,7 +710,12 @@ function logCall(p) {
     const outcome = text(p.outcomeEnumId) || "CcoReached"
     if (!callOutcomes.includes(outcome)) denied("OUTCOME_INVALID", outcome + " is not a call outcome")
     const customerPartyId = theCase.customerPartyId
-    const reporterPartyId = theCase.parties.find(row => row.roleTypeId === "Reporter")?.partyId || null
+    // the case's contact: its reporter when that is the customer's side (an agent who entered the case is not), else its customer
+    const reporterPartyId =
+        theCase.parties
+            .filter(row => row.roleTypeId === "Reporter")
+            .map(row => row.partyId)
+            .find(partyId => !cases.isInternal(partyId) && !cases.organizationsOf(partyId).length) || null
     const contactPartyId = text(p.contactPartyId) || reporterPartyId || customerPartyId
     const isContact =
         contactPartyId === customerPartyId ||
