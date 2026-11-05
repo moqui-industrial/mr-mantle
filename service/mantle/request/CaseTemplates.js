@@ -106,18 +106,15 @@ function requireOrganization(organizationPartyId) {
     return String(organizationPartyId)
 }
 // A case template of one of the user's organizations; a missing form, a form that is no template and another
-// organization's are refused alike (RECORD_UNAVAILABLE). checkOrganization false: the template's customer-visible
-// projection, which names no customer or case.
-function templateOf(formId, checkOrganization = true) {
+// organization's are refused alike (RECORD_UNAVAILABLE).
+function templateOf(formId) {
     const form = blank(formId) ? null : one(FORM, {formId})
     const unavailable = () => denied("RECORD_UNAVAILABLE", "Template " + (formId || "") + " is not available")
     if (!form || form.purposeEnumId !== PURPOSE || !form.ownerPartyId) unavailable()
-    if (checkOrganization) {
-        try {
-            requireOrganization(form.ownerPartyId)
-        } catch (error) {
-            unavailable()
-        }
+    try {
+        requireOrganization(form.ownerPartyId)
+    } catch (error) {
+        unavailable()
     }
     return form
 }
@@ -270,11 +267,10 @@ function checkValues(formId, values, audience = "internal", asOfDate = null, dra
         valid: errors.length === 0
     }
 }
-// validate#TemplateValues. The agent's audience needs the template's organization; the customer's checks only the form
-// (the Support app checks its queue and contact first).
+// validate#TemplateValues. Either audience needs the template's organization (P15 adds the customer contact's path).
 function validateValues(p) {
     const audience = p.audience === "customer" ? "customer" : "internal"
-    templateOf(p.formId, audience !== "customer")
+    templateOf(p.formId)
     const out = checkValues(p.formId, p.values, audience, p.asOfDate || null, false)
     if ((p.refuse === true || p.refuse === "true") && !out.valid)
         denied("TEMPLATE_VALUES_INVALID", out.errors.map(error => error.message).join("; "))
@@ -432,7 +428,8 @@ function summaryOf(form) {
 function getTemplate(p) {
     const customer = p.audience === "customer"
     if (!customer) requirePermission("SUPPORT_POLICY_EDIT", "SUPPORT_CASE_EDIT")
-    const form = templateOf(p.formId, !customer)
+    // the customer's projection too is the template's organization's (P15 adds the customer contact's path)
+    const form = templateOf(p.formId)
     const drafts = !customer && (p.includeDrafts === true || p.includeDrafts === "true") && access.has("SUPPORT_POLICY_EDIT")
     const asOf = drafts ? null : p.asOfDate || null
     const all = formAt(form.formId, asOf, drafts)

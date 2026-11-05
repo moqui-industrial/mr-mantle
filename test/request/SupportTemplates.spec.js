@@ -205,6 +205,10 @@ feature("a template's fields, options and conditions, the allowlist's refusals, 
         const agentView = run(state.agent, S + "get#CaseTemplate", {formId}).template
         const customerView = run(state.agent, S + "get#CaseTemplate", {formId, audience: "customer"}).template
         const otherView = code(run(state.otherAdmin, S + "get#CaseTemplate", {formId}))
+        const otherCustomerView = code(run(state.otherAdmin, S + "get#CaseTemplate", {formId, audience: "customer"}))
+        const otherCustomerValues = code(
+            run(state.otherAdmin, S + "validate#TemplateValues", {formId, values: {}, audience: "customer"})
+        )
         Object.assign(state, {kind: kind.fieldName, serial: serial.fieldName, assessment: assessment.fieldName})
         return {
             created,
@@ -222,7 +226,9 @@ feature("a template's fields, options and conditions, the allowlist's refusals, 
             queueRow,
             agentView,
             customerView,
-            otherView
+            otherView,
+            otherCustomerView,
+            otherCustomerValues
         }
     },
     then(r) {
@@ -253,6 +259,9 @@ feature("a template's fields, options and conditions, the allowlist's refusals, 
         r.customerView.fields.map(field => field.fieldName) == ["productKind", "serialNumber"]
         r.customerView.fields[1].require.value == "equipment"
         r.otherView == "RECORD_UNAVAILABLE"
+        // the customer's projection too is the template's organization's
+        r.otherCustomerView == "RECORD_UNAVAILABLE"
+        r.otherCustomerValues == "RECORD_UNAVAILABLE"
     }
 })
 

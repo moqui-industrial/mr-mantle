@@ -541,8 +541,8 @@ along with this software (see the LICENSE.md file). If not, see
             a hidden field's value is dropped, a required one must be there (REQUIRED), each value is of its type (a choice
             one of the field's options then, a date, a text within its length), and for the customer's audience a value for
             an internal field is refused (FIELD_NOT_OFFERED). Answers the cleaned values and the errors; with refuse, an
-            invalid submit is refused (TEMPLATE_VALUES_INVALID). The agent's audience needs the template's organization; the
-            customer's reads the form only.</description>
+            invalid submit is refused (TEMPLATE_VALUES_INVALID). Either audience needs the template's organization (P15 adds
+            the customer contact's path).</description>
         <in-parameters>
             <parameter name="formId" required="true"/>
             <parameter name="values" type="Map"/>
@@ -573,7 +573,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="CaseTemplate">
         <description>A template as of asOfDate (now) for an audience: the customer's (audience customer) is its
             customer-visible fields only, with their options and the rules among them, never a draft or an internal field (the
-            Support app's form, P15), and needs no permission; the agent's (internal) has every field and needs
+            Support app's form, P15), and needs the template's organization (P15 adds the customer contact's path); the agent's (internal) has every field and needs
             SUPPORT_POLICY_EDIT or SUPPORT_CASE_EDIT and the template's organization, and with includeDrafts
             (SUPPORT_POLICY_EDIT) the editor's rows: every field, option and condition not ended, with its state, and the
             template's problems.</description>
