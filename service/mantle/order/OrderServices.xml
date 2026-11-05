@@ -2918,10 +2918,11 @@ General Order Placement and eCommerce Usage
                     <!-- a sales part (an outside customer of an internal seller): the seller's salesCommercialRevisionOnly
                         (impl-customer-service P10, F55; off by default) -->
                     <if condition="customerInternal == 0">
-                        <entity-find-one entity-name="mantle.ledger.config.PartyAcctgPreference" value-field="sellerPreference"
-                                disable-authz="true">
-                            <field-map field-name="organizationPartyId" from="revisionPart.vendorPartyId"/></entity-find-one>
-                        <set field="commercialOnly" from="sellerPreference?.salesCommercialRevisionOnly == 'Y'"/>
+                        <!-- the seller's preference, or its parent organization's (find#PartyAcctgPreference) -->
+                        <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="sellerFound"
+                                out-map-add-to-existing="false" disable-authz="true"
+                                in-map="{organizationPartyId:revisionPart.vendorPartyId}"/>
+                        <set field="commercialOnly" from="sellerFound.partyAcctgPreference?.salesCommercialRevisionOnly == 'Y'"/>
                         <continue/>
                     </if>
                     <entity-find-count entity-name="mantle.party.PartyRole" count-field="vendorInternal" disable-authz="true">
