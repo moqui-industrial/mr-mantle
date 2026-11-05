@@ -40,6 +40,22 @@ function respond(response, answer) {
     }
     if (answer.download) {
         const file = answer.download
+        // the authority checked the asker; the file is read as the authority (a record's content may sit in the database
+        // resource store, which the delegated public account may not read itself), before anything is written
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        let bytes
+        try {
+            const stream = ec.resource
+                .getLocationReference(file.location)
+                .openStream()
+            try {
+                bytes = stream.readAllBytes()
+            } finally {
+                stream.close()
+            }
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
         response.setContentType(file.contentType)
         response.setHeader('Cache-Control', 'no-store')
         response.setHeader(
@@ -49,14 +65,7 @@ function respond(response, answer) {
                 String(file.filename).replace(/["\\\r\n]/g, '_') +
                 '"',
         )
-        const stream = ec.resource
-            .getLocationReference(file.location)
-            .openStream()
-        try {
-            response.write(stream.readAllBytes())
-        } finally {
-            stream.close()
-        }
+        response.write(bytes)
         return
     }
     response.setContentType('application/json')
