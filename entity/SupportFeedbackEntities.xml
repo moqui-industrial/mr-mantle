@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Case feedback (design-customer-service §7 SatisfactionResults, ResponseDetail, §8 Feedback, §9 FeedbackDeliveryPolicy;
+    impl-customer-service P13, CS-FEEDBACK, CS-JOBS): a resolved case's customer is invited to rate it once, through
+    Commons' FormInvitation (FormPublicationEntities.xml) with the case's resolution episode as its context, on the PASS
+    Support app's Feedback page. An organization's FeedbackDeliveryPolicy says which resolved cases are invited, when, with
+    which feedback form (a dated DbForm, purpose DbfpCaseFeedback, its rating's option keys the score), how long the link
+    works, how many reminders and who follows a low score up; a FeedbackFollowUp is that follow-up. The rules are
+    mantle.request.CaseFeedbackServices (CaseFeedback.js). Nothing here acts until an organization has a policy. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="FeedbackDeliveryPolicy" package="mantle.request.support" cache="never">
+        <description>How an organization invites a resolved case's customer to give feedback (design FeedbackDeliveryPolicy),
+            effective-dated with its key fields audit-logged: the case types and queues it covers (comma separated; empty: all),
+            the delay after resolution, once per case or once per resolution, the feedback form, the channel (email), the
+            days the link works, the reminders (how many, how many days apart), the score at or below which a follow-up is
+            made, the team that follows up and in how many days. An invitation keeps the row it was made under. Saved by
+            mantle.request.CaseFeedbackServices.save#InvitationPolicy.</description>
+        <field name="feedbackPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="formId" type="id" enable-audit-log="true"/>
+        <field name="requestTypeEnumIds" type="text-medium" enable-audit-log="true"/>
+        <field name="requestCategoryIds" type="text-medium" enable-audit-log="true"/>
+        <field name="delayMinutes" type="number-integer" enable-audit-log="true"/>
+        <field name="frequencyEnumId" type="id" enable-audit-log="true"/>
+        <field name="channelEnumId" type="id" enable-audit-log="true"/>
+        <field name="tokenDays" type="number-integer" enable-audit-log="true"/>
+        <field name="reminderCount" type="number-integer" enable-audit-log="true"/>
+        <field name="reminderDays" type="number-integer"/>
+        <field name="lowScoreThreshold" type="number-integer" enable-audit-log="true"/>
+        <field name="followUpTeamPartyId" type="id" enable-audit-log="true"/>
+        <field name="followUpDays" type="number-integer"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one" title="FeedbackFrequency" related="moqui.basic.Enumeration" short-alias="frequency">
+            <key-map field-name="frequencyEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="FeedbackChannel" related="moqui.basic.Enumeration" short-alias="channel">
+            <key-map field-name="channelEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="FollowUpTeam" related="mantle.party.Party" short-alias="followUpTeam">
+            <key-map field-name="followUpTeamPartyId" related="partyId"/></relationship>
+        <index name="FEEDBACK_POL_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Feedback Frequency" enumTypeId="FeedbackFrequency"/>
+            <moqui.basic.Enumeration enumId="FdfPerCase" description="Once per case" sequenceNum="1" enumTypeId="FeedbackFrequency"/>
+            <moqui.basic.Enumeration enumId="FdfPerResolution" description="Once per resolution" sequenceNum="2" enumTypeId="FeedbackFrequency"/>
+            <moqui.basic.EnumerationType description="Feedback Channel" enumTypeId="FeedbackChannel"/>
+            <moqui.basic.Enumeration enumId="FdcEmail" description="Email" sequenceNum="1" enumTypeId="FeedbackChannel"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FeedbackFollowUp" package="mantle.request.support" cache="never">
+        <description>The follow-up of a low score (design ResponseDetail FeedbackFollowUp): the invitation and response, the
+            case and its organization, the score, the team and the person it is assigned to, when it is due, what was done
+            (an action and a note) and its state (open, acknowledged, done). The response itself is never changed.</description>
+        <field name="followUpId" type="id" is-pk="true"/>
+        <field name="invitationId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="requestId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="score" type="number-integer"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="assigneePartyId" type="id" enable-audit-log="true"/>
+        <field name="dueDate" type="date-time"/>
+        <field name="actionEnumId" type="id"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="note" type="text-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="updatedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.FormInvitation" short-alias="invitation"/>
+        <relationship type="one-nofk" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one-nofk" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="FeedbackFollowUpAction" related="moqui.basic.Enumeration" short-alias="action">
+            <key-map field-name="actionEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="FeedbackFollowUpStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <index name="FEEDBACK_FU_INV"><index-field name="invitationId"/></index>
+        <index name="FEEDBACK_FU_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Feedback Follow-up Status" enumTypeId="FeedbackFollowUpStatus"/>
+            <moqui.basic.Enumeration enumId="FfsOpen" description="Open" sequenceNum="1" enumTypeId="FeedbackFollowUpStatus"/>
+            <moqui.basic.Enumeration enumId="FfsAcknowledged" description="Acknowledged" sequenceNum="2" enumTypeId="FeedbackFollowUpStatus"/>
+            <moqui.basic.Enumeration enumId="FfsDone" description="Done" sequenceNum="3" enumTypeId="FeedbackFollowUpStatus"/>
+            <moqui.basic.EnumerationType description="Feedback Follow-up Action" enumTypeId="FeedbackFollowUpAction"/>
+            <moqui.basic.Enumeration enumId="FfaCall" description="Call the customer" sequenceNum="1" enumTypeId="FeedbackFollowUpAction"/>
+            <moqui.basic.Enumeration enumId="FfaEmail" description="Write to the customer" sequenceNum="2" enumTypeId="FeedbackFollowUpAction"/>
+            <moqui.basic.Enumeration enumId="FfaCoach" description="Review with the agent" sequenceNum="3" enumTypeId="FeedbackFollowUpAction"/>
+            <moqui.basic.Enumeration enumId="FfaNone" description="No action needed" sequenceNum="4" enumTypeId="FeedbackFollowUpAction"/>
+        </seed-data>
+    </entity>
+</entities>

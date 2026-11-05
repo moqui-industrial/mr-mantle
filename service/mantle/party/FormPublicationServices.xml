@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Commons form publication and invitations (design-drawers-commons §19, crosscut X16; FormPublicationEntities.xml,
+    FormPublication.js). An app makes and sends its invitations with its own services (Customer Service:
+    mantle.request.CaseFeedbackServices); these are the parts every app shares. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="guard" noun="FormResponse" authenticate="anonymous-all" allow-remote="false">
+        <description>Refuses (RESPONSE_LOCKED) when the response answers a FormInvitation, which keeps it as submitted; the
+            FormPublication.eecas.xml rules run the same check before every write of a response and its answers, so
+            org.moqui.impl.ScreenServices.update#FormResponse and delete#FormResponse refuse such a response. A response with
+            no invitation passes.</description>
+        <in-parameters><parameter name="formResponseId" required="true"/></in-parameters>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').guardResponse(formResponseId)</script></actions>
+    </service>
+</services>

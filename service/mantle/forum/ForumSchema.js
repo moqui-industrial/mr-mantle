@@ -1034,4 +1034,13 @@
             'operationId',
         ],
     },
+    // Customer Service P13: the Support app's Feedback page (mantle.request.CaseFeedbackServices)
+    getCaseFeedbackInvitation: {
+        service: 'mantle.request.CaseFeedbackServices.get#Invitation',
+        fields: ['siteId', 'token'],
+    },
+    submitCaseFeedback: {
+        service: 'mantle.request.CaseFeedbackServices.submit#CaseFeedback',
+        fields: ['siteId', 'token', 'values', 'operationId'],
+    },
 })

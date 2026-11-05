@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Case feedback (design-customer-service §7, §8 Feedback, §9; impl-customer-service P13, CS-FEEDBACK, CS-JOBS; CaseFeedback.js):
+    the feedback forms (dated DbForms of an organization, edited by the case template rules), the delivery policy, the
+    invitations (Commons' FormInvitation) and their send job, the PASS Support app's Feedback page operations
+    (getCaseFeedbackInvitation and submitCaseFeedback in mr-pass Schema.js and Routes.js, served remotely by PassApi) and the
+    follow-up of a low score. Each service checks its permission and organization itself; BOSS's screens call them after
+    ironstone.customerservice.AccessServices. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== feedback forms (SUPPORT_POLICY_EDIT and the form's organization) ===== -->
+    <service verb="create" noun="FeedbackForm" allow-remote="false">
+        <description>A new dated feedback form (DbForm purpose DbfpCaseFeedback) of the organization: the default required rating
+            of 1 to 5 (scale 3: 1 to 3) with an optional reason, comment and consent to be contacted, or the published fields of
+            another of its feedback forms (sourceFormId); its fields are drafts until publish#FeedbackForm.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="description" required="true"/>
+            <parameter name="comments"/>
+            <parameter name="scale" type="Integer"/>
+            <parameter name="sourceFormId"/>
+        </in-parameters>
+        <out-parameters><parameter name="formId"/></out-parameters>
+        <actions>
+            <set field="formId" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('createFeedbackForm', context).formId"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="FeedbackForm" allow-remote="false">
+        <description>The form's drafts start at fromDate (now or later), each replacing the row it replaces; refused while the
+            form has a problem (FORM_INVALID: a case template's problems, or no rating, RATING_REQUIRED). A response reads the
+            form as of its time, so earlier answers keep their questions.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="publishedFieldNames" type="List"/></out-parameters>
+        <actions>
+            <set field="publishedFieldNames" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('publishFeedbackForm', context).publishedFieldNames"/>
+        </actions>
+    </service>
+    <service verb="save" noun="FeedbackFormField" allow-remote="false">
+        <description>A field of a feedback form, by the case template field rules (SupportCaseServices.save#CaseTemplateField):
+            a draft changed in place; a published field's label, help, required flag, order and options from now; a new kind or
+            a change from a later date a successor field. Every field is customer-visible. A rating's option keys are its
+            scores.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="fieldName"/>
+            <parameter name="newFieldName"/>
+            <parameter name="title"/>
+            <parameter name="tooltip"/>
+            <parameter name="fieldTypeEnumId"/>
+            <parameter name="isRequired"/>
+            <parameter name="layoutSequenceNum"/>
+            <parameter name="optionText"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="fieldName"/><parameter name="successor" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('saveField', context)"/>
+            <set field="fieldName" from="saved.fieldName"/>
+            <set field="successor" from="!!saved.successor"/>
+        </actions>
+    </service>
+    <service verb="save" noun="FeedbackFormCondition" allow-remote="false">
+        <description>A show or require rule between two fields of a feedback form (SupportCaseServices.save#CaseTemplateCondition's
+            rules).</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="sourceFieldName" required="true"/>
+            <parameter name="operator"/>
+            <parameter name="value"/>
+            <parameter name="targetFieldName" required="true"/>
+            <parameter name="effect"/>
+        </in-parameters>
+        <out-parameters><parameter name="dependencySeqId"/></out-parameters>
+        <actions>
+            <set field="dependencySeqId" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('saveCondition', context).dependencySeqId"/>
+        </actions>
+    </service>
+    <service verb="end" noun="FeedbackFormPart" allow-remote="false">
+        <description>A field (with its rules), an option or a rule of a feedback form ends at thruDate (now or later); a draft is
+            deleted. An answered field or option is ended, never deleted.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="part" required="true"><description>field, option or condition</description></parameter>
+            <parameter name="fieldName"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('endPart', context)</script>
+        </actions>
+    </service>
+    <service verb="rename" noun="FeedbackForm" allow-remote="false">
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="description" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('rename', context)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="FeedbackForm" allow-remote="false">
+        <description>A feedback form for its editor (SUPPORT_POLICY_EDIT or SUPPORT_CASE_EDIT and its organization): its
+            summary, fields as of now, and with includeDrafts (the default) the rows an editor works on with their states,
+            its rules, its problems, its rating and the policies using it.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="includeDrafts" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="form" type="Map"/></out-parameters>
+        <actions>
+            <set field="form" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('getFeedbackForm', context).form"/>
+        </actions>
+    </service>
+
+    <!-- ===== the delivery policy ===== -->
+    <service verb="save" noun="InvitationPolicy" allow-remote="false">
+        <description>The organization's feedback delivery policy from fromDate (now or later), ending the current row; end=true
+            ends it, so no new invitation is made. SUPPORT_POLICY_EDIT and the organization; the form must be one of its
+            published feedback forms with a rating (FORM_NOT_PUBLISHED), the types case types and the queues its own.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="formId"/>
+            <parameter name="requestTypeEnumIds"/>
+            <parameter name="requestCategoryIds"/>
+            <parameter name="delayMinutes"/>
+            <parameter name="frequencyEnumId"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="tokenDays"/>
+            <parameter name="reminderCount"/>
+            <parameter name="reminderDays"/>
+            <parameter name="lowScoreThreshold"/>
+            <parameter name="followUpTeamPartyId"/>
+            <parameter name="followUpDays"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="feedbackPolicyId"/></out-parameters>
+        <actions>
+            <set field="feedbackPolicyId" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('saveInvitationPolicy', context).feedbackPolicyId"/>
+        </actions>
+    </service>
+
+    <!-- ===== invitations and their job ===== -->
+    <service verb="queue" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the SupportCaseFeedbackInvitation rule (entity/FormPublication.eecas.xml): create#Invitation
+            after the commit of a case's resolution, only where some organization has a feedback policy. A failure is logged,
+            never the change's.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('queueInvitation', context)</script>
+        </actions>
+    </service>
+    <service verb="create" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal: a resolved case's feedback invitation under its organization's policy now (its types and queues,
+            once per case or per resolution episode by invitationKey), for the case's customer at the reporter's email (a
+            customer contact's) else the customer's, with the resolution episode as its context, scheduled after the delay and
+            expiring the policy's days later; else why none (reason: NOT_A_CASE, NOT_RESOLVED, NO_POLICY, NOT_ELIGIBLE,
+            NO_CUSTOMER, NO_ADDRESS, FORM_NOT_PUBLISHED, ALREADY_INVITED).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="invitationId"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('createInvitation', context)"/>
+            <set field="created" from="!!out.created"/>
+            <set field="invitationId" from="out.invitationId"/>
+            <set field="reason" from="out.reason"/>
+        </actions>
+    </service>
+    <service verb="send" noun="Invitations" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800">
+        <description>The send_CaseFeedbackInvitations job: a bounded batch (limit, 100) of the scheduled invitations due and the
+            reminders due, oldest first (of invitationIds when given), each in its own transaction (send#Invitation), a failing
+            one logged by its id and the rest going on; the sent ones past expiry marked expired. A rerun sends nothing twice.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer"/>
+            <parameter name="invitationIds"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Integer"/>
+            <parameter name="reminded" type="Integer"/>
+            <parameter name="expired" type="Integer"/>
+            <parameter name="suppressed" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('sendInvitations', context)"/>
+            <script>for (const name of ['sent', 'reminded', 'expired', 'suppressed', 'failed', 'failedList']) context[name] = out[name]</script>
+        </actions>
+    </service>
+    <service verb="send" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for send#Invitations, in its new transaction: one invitation, locked, sent when it is scheduled and
+            due (its link a new ExternalAccessCapability on the Support app's Feedback page of the organization's site, ending at
+            the invitation's expiry; a case reopened since is not sent, FinSuppressed; no site with the Support app is
+            FinFailed), or reminded when a reminder is due; anything else is left alone. done: sent, reminded, expired,
+            suppressed, failed or notDue.</description>
+        <in-parameters><parameter name="invitationId" required="true"/></in-parameters>
+        <out-parameters><parameter name="done"/><parameter name="error"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('sendInvitation', context)"/>
+            <set field="done" from="out.done"/>
+            <set field="error" from="out.error"/>
+        </actions>
+    </service>
+
+    <!-- ===== the Support app's Feedback page (PASS operations: input map in, result map out) ===== -->
+    <service verb="get" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>getCaseFeedbackInvitation: for a token of the Support app's site (the support mount's target), the form as of
+            now (its fields, options, and show and require rules), the organization's name and the customer's label, and the
+            receipt once answered; never the case. A forged, expired, revoked or another site's token is NotFound; lookups count
+            against the requester's limit (Tarpit).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('getInvitation', input)"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="CaseFeedback" authenticate="anonymous-all" allow-remote="false">
+        <description>submitCaseFeedback (a bearer link's write, TOKEN_WRITES): the customer's answer to the invitation the token
+            opens, throttled per requester (Tarpit), checked on the server against the form as of now (its show and require
+            rules, each value of its type; Unprocessable with the reasons), kept as one FormResponse
+            (org.moqui.impl.ScreenServices.create#FormResponse) linked from the invitation, which a repeat answers
+            (alreadyApplied); a score at or under the policy's low score makes the follow-up.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('submitCaseFeedback', input)"/>
+        </actions>
+    </service>
+    <service verb="check" noun="SupportAppReadiness" authenticate="anonymous-all" allow-remote="false">
+        <description>The Support app's readiness checks for a site (PublicApps.js): its target an internal organization with a
+            service policy and a feedback policy, and the site's canonical host.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('appReadiness', input)"/>
+        </actions>
+    </service>
+
+    <!-- ===== the follow-up ===== -->
+    <service verb="record" noun="FeedbackFollowUp" allow-remote="false">
+        <description>A low score's follow-up: its assignee (a member of the follow-up team; only a manager assigns someone else),
+            due date, action, a note added with its time and author, and its state (open, acknowledged, done). A service manager
+            (SUPPORT_CASE_MANAGE), or an agent of the follow-up team, of the organization. The response is never
+            changed.</description>
+        <in-parameters>
+            <parameter name="followUpId" required="true"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="actionEnumId"/>
+            <parameter name="note"/>
+            <parameter name="statusEnumId"/>
+        </in-parameters>
+        <out-parameters><parameter name="followUpId"/></out-parameters>
+        <actions>
+            <set field="followUpId" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('recordFollowUp', context).followUpId"/>
+        </actions>
+    </service>
+</services>

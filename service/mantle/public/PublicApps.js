@@ -17,6 +17,11 @@ const apps = {
         target: 'organization',
         readiness: 'mantle.account.PortalServices.check#AppReadiness',
     },
+    // Customer Service's Support app (impl-customer-service P13, F56): its target the service organization
+    support: {
+        target: 'organization',
+        readiness: 'mantle.request.CaseFeedbackServices.check#SupportAppReadiness',
+    },
 }
 /* Whether a target id names a record of the target type. */
 const targets = {

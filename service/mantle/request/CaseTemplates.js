@@ -110,7 +110,8 @@ function requireOrganization(organizationPartyId) {
 function templateOf(formId) {
     const form = blank(formId) ? null : one(FORM, {formId})
     const unavailable = () => denied("RECORD_UNAVAILABLE", "Template " + (formId || "") + " is not available")
-    if (!form || form.purposeEnumId !== PURPOSE || !form.ownerPartyId) unavailable()
+    // P13: a case feedback form (CaseFeedback.js) is edited by the same rules, every field customer-visible
+    if (!form || ![PURPOSE, "DbfpCaseFeedback"].includes(form.purposeEnumId) || !form.ownerPartyId) unavailable()
     try {
         requireOrganization(form.ownerPartyId)
     } catch (error) {
@@ -965,6 +966,9 @@ const operations = {saveTemplate, saveField, saveCondition, endPart, validateTem
     checkValues,
     record,
     templatesOf,
+    // P13: the feedback forms' reads and checks (CaseFeedback.js)
+    formAt,
+    problemsOf,
     TYPES,
     OPERATORS,
     EFFECTS,
