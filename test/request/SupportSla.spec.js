@@ -1,10 +1,11 @@
 // Service levels of support cases (impl-customer-service P4: CS-SLA, CS-JOBS, D23; F64, F83; mantle.request.SlaServices,
-// Sla.js; the SupportCaseSla rules of entity/Request.eecas.xml): with no policy a case has no clocks (Mantle's default); the
-// policy saves and their refusals (permission, targets, equal-rank overlap); selection by precedence (customer over the
-// default) bound at intake, and a policy started later leaving an open case on its row; a case's clocks from intake on the
-// team's working hours, the case's due date written by the clock; first response met by a sent reply only (a note and a send
-// that failed do not); waiting for the customer pausing resolution and an internal hold not; a status change by another
-// path (the Request entity) recorded; a reopen starting a new resolution episode and keeping the first breach; a manager's
+// Sla.js; the SupportCaseSla rules of entity/Request.eecas.xml): with no policy a case has no clocks, and a request that is
+// not a case gets nothing from the rules (Mantle's default); the policy saves and their refusals (permission, targets,
+// equal-rank overlap); selection by precedence (customer over the default) bound at intake, and a policy started later
+// leaving an open case on its row; a case's clocks from intake on the team's working hours, the case's due date written by
+// the clock; first response met by a sent reply only (a note, an acknowledgement and a send that failed do not); waiting for
+// the customer pausing resolution until the customer replies, and an internal hold not; a status change by another path
+// (the Request entity) recorded; a reopen starting a new resolution episode and keeping the first breach; a manager's
 // correction keeping the earlier figure; the scan naming a failing clock and warning the rest; another organization's case
 // refused. Standalone: spec-local organizations, customers, groups and users; the clock pinned from Friday 6 Nov 2026 16:30
 // in Chicago. Run: ./moq test mr-mantle --spec SupportSla
@@ -83,7 +84,7 @@ const newCase = (customerPartyId = customer, priority = 5) =>
 const move = (requestId, toStatusId, extra = {}) =>
     run(state.manager, S + "transition#Case", Object.assign({requestId, toStatusId}, extra))
 // a message on the case, as Chatter and the mail filing leave one: a note, or a mail in a state (ES_SENT once sent)
-function message(requestId, typeId, fromPartyId, mailStatusId) {
+function message(requestId, typeId, fromPartyId, mailStatusId, purposeEnumId) {
     let emailMessageId = null
     if (mailStatusId)
         emailMessageId = call("create#moqui.basic.email.EmailMessage", {
@@ -101,6 +102,7 @@ function message(requestId, typeId, fromPartyId, mailStatusId) {
         emailMessageId,
         body: "An answer"
     }).communicationEventId
+    if (purposeEnumId) call("create#mantle.party.communication.CommunicationEventPurpose", {communicationEventId, purposeEnumId})
     run("john.doe", "create#mantle.request.RequestCommEvent", {requestId, communicationEventId})
     return communicationEventId
 }
@@ -162,15 +164,31 @@ spec({
     }
 })
 
-feature("with no policy a case has no clocks and keeps its due date (Mantle's default)", {
+feature("with no policy a case has no clocks; a request that is not a case gets nothing from the rules (Mantle's default)", {
     when() {
         const requestId = newCase()
-        return {requestId, episodes: rows(EPISODE, {requestId}), kinds: events(requestId)}
+        // a plain request (no service queue): its status, due date and messages go by the rules untouched
+        const plainId = call("create#mantle.request.Request", {requestName: "Not a case", statusId: "ReqSubmitted"}).requestId
+        const due = new Date(chicago("2026-11-20", "12:00"))
+        call("update#mantle.request.Request", {requestId: plainId, statusId: "ReqReviewed", responseRequiredDate: due})
+        message(plainId, "Email", state.agent, "ES_SENT")
+        return {
+            requestId,
+            episodes: rows(EPISODE, {requestId}),
+            kinds: events(requestId),
+            plain: one("mantle.request.Request", {requestId: plainId}),
+            plainEvents: events(plainId),
+            plainEpisodes: rows(EPISODE, {requestId: plainId})
+        }
     },
-    then({requestId, episodes, kinds}) {
+    then({requestId, episodes, kinds, plain, plainEvents, plainEpisodes}) {
         requestId != null
         episodes.length == 0
         kinds == ["SetNoPolicy"]
+        plain.statusId == "ReqReviewed"
+        at(plain.responseRequiredDate) == chicago("2026-11-20", "12:00")
+        plainEvents.length == 0
+        plainEpisodes.length == 0
     }
 })
 
@@ -249,7 +267,10 @@ feature("a note and a send that failed do not meet first response; a sent reply 
         now("2026-11-10", "09:15")
         message(state.caseA, "Comment", state.agent)
         message(state.caseA, "Email", state.agent, "ES_READY")
+        // an automatic acknowledgement, sent, is no response
+        const acknowledgement = message(state.caseA, "Email", state.agent, "ES_SENT", "CpAcknowledgement")
         const before = clock(state.caseA, "SlcFirstResponse").stateEnumId
+        assert(acknowledgement)
         now("2026-11-10", "09:45")
         message(state.caseA, "Email", state.agent, "ES_SENT")
         return {before, after: clock(state.caseA, "SlcFirstResponse"), kinds: events(state.caseA)}
@@ -262,43 +283,51 @@ feature("a note and a send that failed do not meet first response; a sent reply 
     }
 })
 
-feature("waiting for the customer pauses resolution, an internal hold does not, and another path's move is recorded", {
-    when() {
-        now("2026-11-10", "10:00")
-        const waiting = move(state.caseA, "ReqWaitingCustomer", {reason: "Asked for the serial number"})
-        const paused = clock(state.caseA, "SlcResolution")
-        const pausedDue = one("mantle.request.Request", {requestId: state.caseA}).responseRequiredDate
-        now("2026-11-11", "10:00")
-        move(state.caseA, "ReqInProgress")
-        const resumed = clock(state.caseA, "SlcResolution")
-        move(state.caseA, "ReqOnHold", {reason: "Waiting on the warehouse"})
-        const held = clock(state.caseA, "SlcResolution").stateEnumId
-        // a move by another path (the Request entity, as Projects' triage and complete#RequestFromWork write it)
-        call("update#mantle.request.Request", {requestId: state.caseA, statusId: "ReqInProgress"})
-        const pause = rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetPause"})[0]
-        return {
-            waiting,
-            paused,
-            pausedDue,
-            resumed,
-            held,
-            pause,
-            statuses: rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetStatus"})
+feature(
+    "waiting for the customer pauses resolution until the customer replies, an internal hold does not, and another path's move is recorded",
+    {
+        when() {
+            now("2026-11-10", "10:00")
+            const waiting = move(state.caseA, "ReqWaitingCustomer", {reason: "Asked for the serial number"})
+            const paused = clock(state.caseA, "SlcResolution")
+            const pausedDue = one("mantle.request.Request", {requestId: state.caseA}).responseRequiredDate
+            // the customer's reply ends the wait: the case moves back to In progress and the clock resumes
+            now("2026-11-11", "10:00")
+            message(state.caseA, "Email", customer)
+            const resumed = clock(state.caseA, "SlcResolution")
+            const replied = one("mantle.request.Request", {requestId: state.caseA}).statusId
+            move(state.caseA, "ReqOnHold", {reason: "Waiting on the warehouse"})
+            const held = clock(state.caseA, "SlcResolution").stateEnumId
+            // a move by another path (the Request entity, as Projects' triage and complete#RequestFromWork write it)
+            call("update#mantle.request.Request", {requestId: state.caseA, statusId: "ReqInProgress"})
+            const pause = rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetPause"})[0]
+            return {
+                waiting,
+                paused,
+                pausedDue,
+                resumed,
+                replied,
+                held,
+                pause,
+                statuses: rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetStatus"})
+            }
+        },
+        then({waiting, paused, pausedDue, resumed, replied, held, pause, statuses}) {
+            waiting.error == ""
+            paused.stateEnumId == "SlsPaused"
+            pausedDue == null
+            pause.reasonText == "Asked for the serial number"
+            // 14.5 h were left at the pause; from Wednesday 10:00 that is Thursday 16:30; 8 h of working time paused
+            resumed.stateEnumId == "SlsRunning"
+            at(resumed.dueDate) == chicago("2026-11-12", "16:30")
+            resumed.pausedMinutes == 480
+            replied == "ReqInProgress"
+            statuses[1].reasonText == "The customer replied"
+            held == "SlsRunning"
+            statuses.map(row => row.statusId) == ["ReqWaitingCustomer", "ReqInProgress", "ReqOnHold", "ReqInProgress"]
         }
-    },
-    then({waiting, paused, pausedDue, resumed, held, pause, statuses}) {
-        waiting.error == ""
-        paused.stateEnumId == "SlsPaused"
-        pausedDue == null
-        pause.reasonText == "Asked for the serial number"
-        // 14.5 h were left at the pause; from Wednesday 10:00 that is Thursday 16:30; 8 h of working time paused
-        resumed.stateEnumId == "SlsRunning"
-        at(resumed.dueDate) == chicago("2026-11-12", "16:30")
-        resumed.pausedMinutes == 480
-        held == "SlsRunning"
-        statuses.map(row => row.statusId) == ["ReqWaitingCustomer", "ReqInProgress", "ReqOnHold", "ReqInProgress"]
     }
-})
+)
 
 feature(
     "a reopen starts a new resolution episode and keeps the first breach; a policy row started later leaves the open case on its row",

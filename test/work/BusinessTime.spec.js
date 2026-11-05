@@ -1,9 +1,9 @@
 // Business time (impl-customer-service P4, F13, F65; mantle.work.CalendarServices get#BusinessTimeDue, get#BusinessTimeElapsed,
 // store#WorkingHours, get#WorkingHours; BusinessTime.js): a team's working hours on its schedule calendar, stored by its
 // manager and refused to someone else; minutes due across a weekend and the organization's holiday (an all-day WepHoliday it
-// owns), to the minute in the schedule's zone; elapsed minutes less a pause; around the clock with no hours; and hours
-// changed from a date leaving the days before as they were. Standalone: spec-local parties and users, the clock pinned to
-// Friday 6 Nov 2026 16:30 in Chicago. Run: ./moq test mr-mantle --spec BusinessTime
+// owns), to the minute in the schedule's zone and across the daylight saving changes; elapsed minutes less a pause; around
+// the clock with no hours; and hours changed from a date leaving the days before as they were. Standalone: spec-local
+// parties and users, the clock pinned to Friday 6 Nov 2026 16:30 in Chicago. Run: ./moq test mr-mantle --spec BusinessTime
 const prefix = "BTS"
 const org = prefix + "_ORG",
     otherOrg = prefix + "_OTHER_ORG",
@@ -11,8 +11,9 @@ const org = prefix + "_ORG",
     zone = "America/Chicago",
     since = "2000-01-01T00:00:00Z"
 const C = "mantle.work.CalendarServices."
-// Chicago is UTC-6 in November: a wall time there as a Date
-const chicago = (day, clock) => new Date(Date.parse(day + "T" + clock + ":00-06:00"))
+// Chicago is UTC-6 in November: a wall time there as a Date (summer time, UTC-5, with daylight)
+const chicago = (day, clock, offset = "-06:00") => new Date(Date.parse(day + "T" + clock + ":00" + offset))
+const daylight = (day, clock) => chicago(day, clock, "-05:00")
 const friday = chicago("2026-11-06", "16:30")
 // a timestamp a service answers as epoch millis
 const at = value => (value == null ? null : /^-?\d+$/.test(String(value)) ? Number(value) : Date.parse(String(value)))
@@ -133,10 +134,20 @@ feature("business minutes skip the weekend and the organization's holiday, to th
                 thruDate: chicago("2026-11-10", "12:30"),
                 pauseList: [{fromDate: chicago("2026-11-10", "09:00"), thruDate: chicago("2026-11-10", "10:00")}]
             }),
-            clock: call(C + "get#BusinessTimeDue", {organizationPartyId: org, startDate: friday, minutes: 240})
+            clock: call(C + "get#BusinessTimeDue", {organizationPartyId: org, startDate: friday, minutes: 240}),
+            // across the daylight saving changes the hours keep their wall time: Friday 30 Oct 16:30 (summer time) to Monday
+            // 2 Nov 12:30 (standard), and Friday 12 Mar 2027 16:30 (standard) to Monday 15 Mar 12:30 (summer)
+            fallBack: due(240, daylight("2026-10-30", "16:30")),
+            fallElapsed: call(C + "get#BusinessTimeElapsed", {
+                partyId: team,
+                organizationPartyId: org,
+                fromDate: daylight("2026-10-30", "16:30"),
+                thruDate: chicago("2026-11-02", "12:30")
+            }),
+            springForward: due(240, chicago("2027-03-12", "16:30"))
         }
     },
-    then({tuesday, monday, elapsed, paused, clock}) {
+    then({tuesday, monday, elapsed, paused, clock, fallBack, fallElapsed, springForward}) {
         tuesday.configured == true
         at(tuesday.dueDate) == chicago("2026-11-10", "12:30").getTime()
         at(monday.dueDate) == chicago("2026-11-09", "12:30").getTime()
@@ -145,6 +156,9 @@ feature("business minutes skip the weekend and the organization's holiday, to th
         // no schedule: around the clock
         clock.configured == false
         at(clock.dueDate) == chicago("2026-11-06", "20:30").getTime()
+        at(fallBack.dueDate) == chicago("2026-11-02", "12:30").getTime()
+        fallElapsed.minutes == 240
+        at(springForward.dueDate) == daylight("2027-03-15", "12:30").getTime()
     }
 })
 

@@ -6,10 +6,10 @@
 // row, target and calendar (the policy's, else the queue team's working hours, BusinessTime.js) and storing its deadlines,
 // so a later publish, holiday or hours edit re-selects and rewrites nothing. First response is met by the first outward
 // response its channel accepted (a sent reply; never a note, an acknowledgement or a send that failed) and never restarts;
-// resolution pauses while the case waits for the customer (and on an internal hold only when the policy says so), ends when
-// the case is resolved, and a reopen starts a new resolution episode, the earlier one keeping its figures. The rules of
-// entity/Request.eecas.xml record every path (a status change from any screen or service, a message, work); only these
-// functions write Request.responseRequiredDate on a case (the current resolution due date, empty while paused), through the
+// resolution pauses while the case waits for the customer, until they reply (and on an internal hold only when the policy
+// says so), ends when the case is resolved, and a reopen starts a new resolution episode, the earlier one keeping its
+// figures. The rules of entity/Request.eecas.xml record every path (a status change from any screen or service, a
+// message, work); only these functions write Request.responseRequiredDate on a case (the current resolution due date, empty while paused), through the
 // Request entity, so update#Request's guard (CASE_MANAGED) holds for every other path. The scan (scan#CaseSla) records
 // warnings and breaches once per episode. Refusals carry reason codes (EntityLib.denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -22,6 +22,7 @@ const REQUEST = "mantle.request.Request",
     PROFILE = "mantle.request.support.CaseProfile",
     QUEUE = "mantle.request.support.ServiceQueue",
     MAPPING = "mantle.request.support.CaseStatusMapping",
+    TRANSITION = "mantle.request.support.CaseTransition",
     POLICY = "mantle.request.support.ServiceLevelPolicy",
     TARGET = "mantle.request.support.ServiceLevelTarget",
     EPISODE = "mantle.request.support.CaseSlaEpisode",
@@ -487,14 +488,44 @@ function recordMessage(p) {
             complete(first, Math.max(atMs, msOf(first.startDate) ?? atMs), {communicationEventId: event.communicationEventId})
         return {response: !!added}
     }
-    if (event.fromPartyId)
+    if (
+        event.fromPartyId &&
         addEvent({
             requestId,
             eventTypeEnumId: "SetCustomerReply",
             communicationEventId: event.communicationEventId,
             eventKey: "reply:" + event.communicationEventId
         })
+    )
+        endCustomerWait(requestId)
     return {}
+}
+// A customer's reply while the case waits for them ends the wait (design §9 ServiceLevelPolicies: the customer wait pauses
+// resolution): the case moves back by its workflow to the open status it waited from (else In progress, else the first
+// open one; a move that needs no resolution or reason), and the status rule resumes the clock. A reply on a resolved case is
+// P8's reopen.
+function endCustomerWait(requestId) {
+    const profile = one(PROFILE, {requestId})
+    const request = one(REQUEST, {requestId})
+    if (!profile || !request) return
+    const workflowId = profile.caseWorkflowId || "CwfDefault"
+    if (mappingCategory(workflowId, request.statusId) !== "CscPaused") return
+    const movesOf = caseWorkflowId =>
+        currentRows(TRANSITION, {caseWorkflowId, statusId: request.statusId}).filter(
+            row =>
+                row.resolutionRequired !== "Y" &&
+                row.reasonRequired !== "Y" &&
+                mappingCategory(workflowId, row.toStatusId) === "CscOpen"
+        )
+    const moves = movesOf(workflowId).length ? movesOf(workflowId) : movesOf("CwfDefault")
+    if (!moves.length) return
+    const waitedFrom = rows(EVENT, {requestId, eventTypeEnumId: "SetStatus", statusId: request.statusId}).sort(
+        (a, b) => Number(ms(b.eventDate)) - Number(ms(a.eventDate))
+    )[0]?.fromStatusId
+    const move =
+        moves.find(row => row.toStatusId === waitedFrom) || moves.find(row => row.toStatusId === "ReqInProgress") || moves[0]
+    call("update#" + REQUEST, {requestId, statusId: move.toStatusId})
+    attachReason(requestId, move.toStatusId, "The customer replied")
 }
 // Work made or linked on a case (the SupportCaseSlaWork rule).
 function recordWork(p) {

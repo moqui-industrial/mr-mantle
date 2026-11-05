@@ -47,8 +47,8 @@ along with this software (see the LICENSE.md file). If not, see
             status, due date or resolution changed by any screen or service: the status event, and the clocks paused, resumed,
             met, reopened as a new resolution episode or cancelled; a due date written outside the service levels is
             recorded), message (a message filed on the case: an outward response its channel accepted meets first response, a
-            customer's message is a reply) or work (work made or linked). Not a case: nothing. A failure is logged, never the
-            change's.</description>
+            customer's message is a reply, which ends a wait for the customer: the case moves back to an open status) or work
+            (work made or linked). Not a case: nothing. A failure is logged, never the change's.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="kind" required="true"><description>status, message or work</description></parameter>
