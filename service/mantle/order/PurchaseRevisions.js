@@ -152,7 +152,7 @@ function releaseRevisionHold(hold, comment) {
         return {statusId: one(ORDER, {orderId: hold.orderId}).statusId, stillHeld}
     })
 }
-// release#OrderHold of a revision's Change hold by an ORDER_APPROVE holder (F-P9-2): with the approval gate on, an applied
+// release#OrderHold of a revision's Change hold by an ORDER_CHANGE_HOLD_RELEASE holder (F-P9-2; X4): with the approval gate on, an applied
 // revision not approved at its revision returns to Placed for its approval, not to Approved or Sent past the gate. Answers the
 // status to return to.
 function releaseReturn(hold, returnTo) {
