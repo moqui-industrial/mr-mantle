@@ -49,7 +49,6 @@ const REQUEST = "mantle.request.Request",
     ASSOC = "mantle.product.ProductAssoc",
     DECISION = "mantle.order.purchase.PurchaseApprovalDecision",
     POLICY = "mantle.order.purchase.PurchaseApprovalPolicy",
-    CAPABILITY = "mantle.party.ExternalAccessCapability",
     OPERATION = lib.operationEntity
 const quoteStatuses = ["OrderRequested", "OrderProposed"]
 const deadStatuses = ["OrderCancelled", "OrderRejected"]
@@ -78,9 +77,6 @@ const retryableCodes = [
     "BUDGET_STOP",
     "FAILED"
 ]
-// a capability of a quote order's supplier (P16 issues them for the quote's response page): every one ends when the quote
-// is not awarded
-const capabilityRecordTypes = ["Order", "Quote", "SupplierQuote"]
 const dayMs = 24 * 60 * 60 * 1000
 
 const blank = value => value == null || String(value).trim() === ""
@@ -1569,21 +1565,6 @@ const defaultRegret = (rfq, organizationName) =>
     (rfq.request.requestName ? " (" + rfq.request.requestName + ")" : "") +
     ". We have closed this request, and your quote was not selected this time. We appreciate your time and hope to work with you on a future request.\n\n" +
     organizationName
-// The capabilities of a quote's supplier pages, ended now (P16 issues them; a quote not awarded takes no more answers).
-function revokeCapabilities(orderId) {
-    let revoked = 0
-    for (const row of rows(CAPABILITY, {recordId: orderId})) {
-        if (!capabilityRecordTypes.includes(row.recordType) || row.revokedDate) continue
-        if (row.thruDate && ms(row.thruDate) <= Number(ec.user.nowTimestamp)) continue
-        call("update#" + CAPABILITY, {
-            capabilityId: row.capabilityId,
-            revokedDate: ec.user.nowTimestamp,
-            revokedByUserId: ec.user.userId
-        })
-        revoked++
-    }
-    return revoked
-}
 // One recipient's regret notice, in its own transaction: sent, queued or failed; one that went is the quote's
 // OrderEmailMessage in the supplier's role.
 function mailRegret(rfq, quote, recipient, fromAddress, fromName, body, subject, emailTemplateId) {
@@ -1727,7 +1708,7 @@ function close(p) {
             internalNote: "Y",
             userId: ec.user.userId
         })
-        revokeCapabilities(quote.orderId)
+        // its supplier links end by P16's SupplierPortalRevoke EECA on the quote's leaving OrderRequested/OrderProposed
     }
     // the RFQ completed; a draft never sent with nothing awarded is cancelled, one with an award goes by Submitted (the flow)
     const closedStatusId = !awardedQuotes.length && rfq.request.statusId === "ReqDraft" ? "ReqCancelled" : "ReqCompleted"
