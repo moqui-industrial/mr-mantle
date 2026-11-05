@@ -16,8 +16,10 @@ along with this software (see the LICENSE.md file). If not, see
     OrderConfirmations.js): the order as placed, read back from the audit log, rendered to a PDF and stored once as an
     OrderContent (OctOrderConfirmation); each resend attaches the stored PDF to a mail client draft sent through
     mantle.party.CommunicationServices.send#EmailDraft to a checked recipient and is recorded as an OrderEmailMessage with
-    the content it sent. Nothing runs when an order is placed (F55: no placement rule, so Mantle's default is unchanged; the
-    first store renders the order as of its placed time). Each service requires SUPPORT_CASE_EDIT or ORDER_APPROVE and an
+    the content it sent. An organization with PartyAcctgPreference.orderConfirmationOnPlace Y has it stored when an order is
+    placed (store#PlacedOrderConfirmation, OrderReturn.secas.xml); the flag is off by default, so Mantle's placement path is
+    unchanged, and an order with none is rendered as of its placed time by the first store or resend (F55). A resend whose
+    send fails is cancelled (cancel#FailedConfirmationSend, entity/OrderConfirmation.eecas.xml). Each service requires SUPPORT_CASE_EDIT or ORDER_APPROVE and an
     order of the user's organizations. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="OrderConfirmationPrint" allow-remote="false">
@@ -71,6 +73,36 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="contentLocation" from="out.contentLocation"/>
             <set field="stored" from="out.stored"/>
             <set field="placedDate" from="out.placedDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PlacedOrderConfirmation" allow-remote="false">
+        <description>Internal, for the OrderPlacedStoreConfirmation rule: when the selling organization's
+            PartyAcctgPreference.orderConfirmationOnPlace is Y, store the placed sales order's confirmation as
+            store#OrderConfirmation does, without the user's permission or organization checks (the placing user may be a
+            store customer); else nothing. Stores nothing for a purchase order or an order not placed. Never fails: a failure
+            is logged with the order and answered as stored false.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderContentId"/>
+            <parameter name="stored" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="out" from="ec.resource.script(module).execute('storeOnPlace', context)"/>
+            <set field="orderContentId" from="out.orderContentId"/>
+            <set field="stored" from="out.stored"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="FailedConfirmationSend" allow-remote="false">
+        <description>Internal, for the OrderConfirmationSendFailed rule: a resend's message (an OrderEmailMessage with an
+            orderContentId) whose send failed and waits in the Outbox is cancelled (ES_CANCELLED, its sendError kept), so
+            the stored PDF is not left where a mailbox user could change the recipient. Any other message is left as it
+            is.</description>
+        <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
+        <out-parameters><parameter name="cancelled" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="cancelled" from="ec.resource.script(module).execute('cancelFailed', context).cancelled"/>
         </actions>
     </service>
     <service verb="resend" noun="OrderConfirmation" allow-remote="false">

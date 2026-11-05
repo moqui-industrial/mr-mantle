@@ -82,7 +82,7 @@ function user(kind, permissions, organizationPartyId) {
     return id
 }
 // a sales order of the organization to the customer, its lines made at one time and placed at a later one
-function salesOrder(orderId, placed, productStoreId = null) {
+function salesOrder(orderId, placed, productStoreId = null, vendorPartyId = org) {
     const now = Number(ec.user.nowTimestamp)
     call("create#mantle.order.OrderHeader", {
         orderId,
@@ -94,7 +94,7 @@ function salesOrder(orderId, placed, productStoreId = null) {
     call("create#mantle.order.OrderPart", {
         orderId,
         orderPartSeqId: "01",
-        vendorPartyId: org,
+        vendorPartyId,
         customerPartyId: customer,
         statusId: "OrderOpen"
     })
@@ -194,6 +194,13 @@ spec({
             organizationPartyId: org
         })
         salesOrder(prefix + "_SO_STORE", true, prefix + "_STORE")
+        // the other organization stores its confirmations at placement (orderConfirmationOnPlace); the spec's own is off
+        call("create#mantle.ledger.config.PartyAcctgPreference", {
+            organizationPartyId: otherOrg,
+            baseCurrencyUomId: "USD",
+            orderConfirmationOnPlace: "Y"
+        })
+        salesOrder(prefix + "_SO_AUTO", false, null, otherOrg)
         call("create#mantle.order.OrderItem", Object.assign({orderId: prefix + "_SO_STORE", orderItemSeqId: "03"}, added))
     },
     cleanupSpec() {
@@ -278,6 +285,46 @@ feature("a retry answers the first send; a second resend to a contact is a secon
         records.length == 2
         records.every(row => row.orderContentId == contents[0].orderContentId)
         contents.length == 1
+    }
+})
+
+feature("placement stores the confirmation only for an organization that turned it on; a failed resend is cancelled", {
+    when() {
+        const stored = orderId => rows("mantle.order.OrderContent", {orderId, orderContentTypeEnumId: "OctOrderConfirmation"})
+        // the default (off): the spec organization's order placed in setup had none until its first resend
+        const defaultRecord = one("mantle.order.OrderEmailMessage", {orderId: prefix + "_SO"})
+        const placed = run(state.agent, "update#mantle.order.OrderHeader", {
+            orderId: prefix + "_SO_AUTO",
+            statusId: "OrderPlaced",
+            placedDate: ec.user.nowTimestamp
+        })
+        // after the placement commits, in a transaction of its own
+        const end = Date.now() + 10000
+        let auto = stored(prefix + "_SO_AUTO")
+        while (!auto.length && Date.now() < end) auto = stored(prefix + "_SO_AUTO")
+        // a resend whose send fails (no capture: the spec's mail server refuses the connection, and the mail client puts it in
+        // the Outbox with a sendError) is cancelled
+        capture.disable()
+        let resent
+        try {
+            resent = run(state.agent, S + "resend#OrderConfirmation", {
+                orderId: prefix + "_SO",
+                toAddress: "orders@confirmation-customer.example",
+                operationKey: prefix + "-failed"
+            })
+            messageOf(resent.emailMessageId)
+        } finally {
+            capture.enable()
+        }
+        const failed = one("moqui.basic.email.EmailMessage", {emailMessageId: resent.emailMessageId})
+        return {defaultRecord, placed, auto, failed}
+    },
+    then({defaultRecord, placed, auto, failed}) {
+        defaultRecord != null
+        placed.error == ""
+        auto.length == 1
+        failed.statusId == "ES_CANCELLED"
+        failed.sendError != null
     }
 })
 

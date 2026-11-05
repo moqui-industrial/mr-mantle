@@ -2,7 +2,8 @@
 // F55; OrderConfirmationServices.xml). Sales orders have no commercial revision (F55), so the version a customer was sent is
 // the order as placed: its lines read back from the audit log as of the placed time (product, quantity and unit price are
 // audit-logged on create and update), rendered to a PDF and stored once as the order's OrderContent of type
-// OctOrderConfirmation. Nothing runs at placement: the first store or resend renders the order as of its placed time, and
+// OctOrderConfirmation: at placement for an organization with orderConfirmationOnPlace (off by default), else by the first
+// store or resend, rendered as of the order's placed time; and
 // every later resend attaches the stored PDF, never a new render. A resend goes to a checked recipient (an email of the
 // order's customer or of a current contact or employee of it) as a mail client draft of an account the user may send from,
 // through send#EmailDraft, filed on the order, and is recorded as an OrderEmailMessage naming the recipient's party and the
@@ -41,17 +42,19 @@ function requirePermission() {
 }
 // A sales order of one of the user's organizations: every part sold by an internal organization to an outside party. A
 // missing order, a purchase order and another organization's are refused alike (RECORD_UNAVAILABLE).
-function salesOrder(orderId, lock = false) {
+function salesOrder(orderId, lock = false, scoped = true) {
     const unavailable = () => denied("RECORD_UNAVAILABLE", "Order " + (orderId || "") + " is not available")
     if (blank(orderId)) unavailable()
     const order = lock ? find(ORDER, {orderId}).forUpdate(true).one() : one(ORDER, {orderId})
     const parts = order ? rows(PART, {orderId}) : []
     if (!parts.length || !parts.every(part => isInternal(part.vendorPartyId) && !isInternal(part.customerPartyId))) unavailable()
     const organizationPartyId = parts[0].vendorPartyId
-    const userScope = facilityScope.scope()
-    if (!parts.every(part => facilityScope.owns(userScope, part.vendorPartyId))) unavailable()
+    if (scoped) {
+        const userScope = facilityScope.scope()
+        if (!parts.every(part => facilityScope.owns(userScope, part.vendorPartyId))) unavailable()
+    }
     const customerPartyIds = Array.from(new Set(parts.map(part => part.customerPartyId).filter(Boolean)))
-    return {order, parts, orderId: String(orderId), organizationPartyId, customerPartyIds}
+    return {order, parts, orderId: String(orderId), organizationPartyId, customerPartyIds, scoped}
 }
 
 // ===== the order as placed =====
@@ -165,20 +168,20 @@ function printOf(so) {
 // ===== the stored confirmation =====
 const storedOf = orderId =>
     rows(CONTENT, {orderId, orderContentTypeEnumId: contentType}).sort((a, b) => ms(a.contentDate) - ms(b.contentDate))[0] || null
-// The order's stored confirmation, made once: an order with none is rendered as of its placed time and stored, under the
-// order's lock so two first resends store one.
+// The order's stored confirmation, made once: an order with none is rendered as of its placed time and stored. The render
+// (a PDF) runs before the order's lock, which is taken only to check again and store, so a slow render never holds up the
+// order's next change (an approval right after placement); a render that loses the race is dropped.
 function storeOf(so) {
     const existing = storedOf(so.orderId)
     if (existing) return {content: existing, stored: false}
-    const locked = salesOrder(so.orderId, true)
+    const printed = printOf(so)
+    const pdf = ec.resource.xslFoTransform(printed.printHtml, null, null, "application/pdf")
+    salesOrder(so.orderId, true, so.scoped)
     const again = storedOf(so.orderId)
     if (again) return {content: again, stored: false}
-    const printed = printOf(locked)
     const key = printed.contentHash.replace(/[^A-Za-z0-9]/g, "").slice(0, 24)
     const location = "dbresource://mantle/content/order-confirmation/" + so.orderId + "/" + key + "/" + printed.fileName
-    ec.resource
-        .getLocationReference(location)
-        .putBytes(ec.resource.xslFoTransform(printed.printHtml, null, null, "application/pdf"))
+    ec.resource.getLocationReference(location).putBytes(pdf)
     const orderContentId = call("create#" + CONTENT, {
         orderId: so.orderId,
         orderContentTypeEnumId: contentType,
@@ -329,7 +332,37 @@ function resend(p) {
     return Object.assign(result, {alreadyApplied: false})
 }
 
-const operations = {print, store, resend}
+// store#PlacedOrderConfirmation: at placement (the OrderPlacedStoreConfirmation rule), for an organization that turned
+// orderConfirmationOnPlace on; no user checks, never failing.
+function storeOnPlace(p) {
+    try {
+        const order = one(ORDER, {orderId: p.orderId})
+        const part = order?.placedDate ? rows(PART, {orderId: p.orderId})[0] : null
+        if (!part || !isInternal(part.vendorPartyId) || isInternal(part.customerPartyId)) return {stored: false}
+        const preference = one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: part.vendorPartyId})
+        if (preference?.orderConfirmationOnPlace !== "Y") return {stored: false}
+        const out = storeOf(salesOrder(p.orderId, false, false))
+        return {orderContentId: out.content.orderContentId, stored: out.stored}
+    } catch (error) {
+        ec.logger.error("Order " + p.orderId + "'s confirmation was not stored at placement: " + error.message)
+        ec.message.clearErrors()
+        return {stored: false}
+    }
+}
+
+// cancel#FailedConfirmationSend: a resend whose send failed is cancelled, not left editable in the shared mailbox's Outbox.
+function cancelFailed(p) {
+    const sends = find(EMAIL, {emailMessageId: p.emailMessageId}).condition("orderContentId", "is-not-null", null).count()
+    if (!sends) return {cancelled: false}
+    const message = find("moqui.basic.email.EmailMessage", {emailMessageId: p.emailMessageId}).forUpdate(true).one()
+    if (!message || message.statusId !== "ES_READY" || !message.sendError) return {cancelled: false}
+    message.set("statusId", "ES_CANCELLED")
+    message.update()
+    ec.logger.warn("Order confirmation message " + p.emailMessageId + " was not sent and is cancelled: " + message.sendError)
+    return {cancelled: true}
+}
+
+const operations = {print, store, resend, storeOnPlace, cancelFailed}
 ;({
     allowedRecipients,
     execute: (op, parameters) => {
