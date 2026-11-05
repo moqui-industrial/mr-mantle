@@ -2,4 +2,6 @@
 # the measured ./moq test-all of Nov 4, 2026 (on 4 workers). Raise it only with the user's agreement.
 # Nov 4, 2026: raised by Purchasing's measured share (the user's agreement, impl-purchasing): its seventeen
 # regression specs' feature time in the final ./moq test-apps, 32.5 s, rounded up.
-server = 335
+# Nov 5, 2026: raised by Customer Service's measured share (the user's agreement, impl-customer-service): its fifteen
+# regression specs' feature time in the final ./moq test-apps, 34.2 s, rounded up.
+server = 370
