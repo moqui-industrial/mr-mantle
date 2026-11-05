@@ -215,6 +215,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId"/>
             <parameter name="assigneePartyId"/>
             <parameter name="facilityId"/>
+            <parameter name="carrierPartyId"><description>The return label's carrier, when not the order's</description></parameter>
+            <parameter name="shipmentMethodEnumId"/>
             <parameter name="exceptionReason"/>
             <parameter name="draft" type="Boolean"/>
         </in-parameters>

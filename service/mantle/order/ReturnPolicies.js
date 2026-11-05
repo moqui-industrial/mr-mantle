@@ -829,7 +829,10 @@ function submit(p) {
         returnPolicyId: core.policy?.returnPolicyId || null,
         policyEvaluatedDate: ec.user.nowTimestamp,
         manualReview: core.manualReview ? "Y" : "N",
-        facilityId: header.facilityId || destination
+        facilityId: header.facilityId || destination,
+        // the return label's carrier and service (request#ReturnLabel reads them), when given
+        carrierPartyId: text(p.carrierPartyId) || header.carrierPartyId || null,
+        shipmentMethodEnumId: text(p.shipmentMethodEnumId) || header.shipmentMethodEnumId || null
     })
     setAssignee(header.returnId, text(p.assigneePartyId) || assigneeOf(header.returnId) || ec.user.userAccount?.partyId || null)
     if (!blank(p.requestId))
