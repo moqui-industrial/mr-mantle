@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Service levels of support cases (design-customer-service §3 CaseDetail, §7 CaseAnalytics, §9 ServiceLevelPolicies;
+    impl-customer-service P4, CS-SLA, CS-JOBS, D23, F32): an organization's service level policies and their targets per
+    priority band are effective-dated rows with their key fields audit-logged (a draft has no from date; publishing a row
+    from a date ends the row it replaces). A case's clocks are records of their own, because they are measurements: an
+    episode per clock (first response, and a resolution episode per opening of the case) binds the policy row, target and
+    calendar chosen at intake and stores its start, due, warning and actual times, its pauses and its breach; its events are
+    what happened to it (a status change, a response, a customer reply, work, a warning, a breach, a reasoned correction that
+    keeps the earlier figure). A holiday or working-hours edit changes no stored deadline. Written by
+    mantle.request.SlaServices only (Sla.js); nothing here exists until an organization has a policy. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ServiceLevelPolicy" package="mantle.request.support" cache="never">
+        <description>A service level policy of an organization (design ServiceLevelPolicies SlaPolicyEdit), effective-dated:
+            its conditions (a service queue, a request type, a customer, a service agreement; none is the organization's
+            default), the calendar its business time is counted on (empty: the queue's team's working hours), whether an
+            internal hold pauses resolution, the longest pause before a warning, and what a reopen does. The most specific
+            policy whose conditions all hold applies (agreement, then customer, then queue, then type, then the default;
+            impl-customer-service §4); two published rows with the same conditions over the same dates are refused. A row
+            replacing another names it (previousPolicyId). Saved by mantle.request.SlaServices.save#Policy.</description>
+        <field name="serviceLevelPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="policyName" type="text-medium" enable-audit-log="true"/>
+        <field name="requestCategoryId" type="id" enable-audit-log="true"><description>A service queue</description></field>
+        <field name="requestTypeEnumId" type="id" enable-audit-log="true"/>
+        <field name="customerPartyId" type="id" enable-audit-log="true"/>
+        <field name="agreementId" type="id" enable-audit-log="true"><description>A service agreement (AgrService) of the
+            organization with the customer</description></field>
+        <field name="calendarId" type="id" enable-audit-log="true"/>
+        <field name="timeZone" type="text-short"><description>The zone of a policy counted around the clock (no calendar)</description></field>
+        <field name="holdPauses" type="text-indicator" enable-audit-log="true"><description>Y: an internal hold (ReqOnHold)
+            pauses resolution as waiting for the customer does</description></field>
+        <field name="maxPauseMinutes" type="number-integer" enable-audit-log="true"><description>A pause longer than this
+            (business minutes) warns; never a successful resolution</description></field>
+        <field name="reopenEnumId" type="id" enable-audit-log="true"/>
+        <field name="previousPolicyId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.RequestCategory" short-alias="category"/>
+        <relationship type="one-nofk" title="RequestType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="requestTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Customer" related="mantle.party.Party" short-alias="customer">
+            <key-map field-name="customerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one-nofk" related="mantle.work.calendar.Calendar" short-alias="calendar"/>
+        <relationship type="one-nofk" title="SlaReopen" related="moqui.basic.Enumeration" short-alias="reopen">
+            <key-map field-name="reopenEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.request.support.ServiceLevelTarget" short-alias="targets">
+            <key-map field-name="serviceLevelPolicyId"/></relationship>
+        <index name="SLA_POLICY_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <!-- what a reopen does to the resolution clock -->
+            <moqui.basic.EnumerationType description="Service Level Reopen" enumTypeId="SlaReopen"/>
+            <moqui.basic.Enumeration enumId="SrpNewEpisode" description="A new resolution clock with the full target" sequenceNum="1" enumTypeId="SlaReopen"/>
+            <moqui.basic.Enumeration enumId="SrpNone" description="No resolution clock after a reopen" sequenceNum="2" enumTypeId="SlaReopen"/>
+            <!-- the service agreement a policy's condition reads (F32, F50): an Agreement of this type between the organization
+                and the customer, active by its dates and, when it has one, its status (AgmStActive); the purchase agreement
+                services keep refusing it, unchanged -->
+            <moqui.basic.Enumeration enumId="AgrService" description="Service" enumTypeId="AgreementType"/>
+            <!-- a message that answers no one (an automatic acknowledgement): it never meets first response -->
+            <moqui.basic.Enumeration enumId="CpAcknowledgement" description="Automatic acknowledgement" enumTypeId="CommunicationPurpose"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ServiceLevelTarget" package="mantle.request.support" cache="never">
+        <description>A policy row's targets for one priority band (CasePriorityBand), effective-dated with its row: the first
+            response and resolution in business minutes, and how long before each is due a warning goes. A band with no
+            target has no clock.</description>
+        <field name="serviceLevelTargetId" type="id" is-pk="true"/>
+        <field name="serviceLevelPolicyId" type="id"/>
+        <field name="priorityBandEnumId" type="id"/>
+        <field name="firstResponseMinutes" type="number-integer" enable-audit-log="true"/>
+        <field name="resolutionMinutes" type="number-integer" enable-audit-log="true"/>
+        <field name="warningMinutes" type="number-integer" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.request.support.ServiceLevelPolicy" short-alias="policy"/>
+        <relationship type="one" title="CasePriorityBand" related="moqui.basic.Enumeration" short-alias="band">
+            <key-map field-name="priorityBandEnumId" related="enumId"/></relationship>
+        <index name="SLA_TARGET_POLICY"><index-field name="serviceLevelPolicyId"/></index>
+    </entity>
+
+    <entity entity-name="CaseSlaEpisode" package="mantle.request.support" cache="never">
+        <description>One clock of a case (design CaseDetail's clocks, CaseAnalytics): first response (one per case, never
+            restarted) or resolution (a new one each time the case reopens, sequenceNum 1, 2, ...), bound at its start to the
+            policy row, target and calendar (with its zone and organization) chosen then, with its target and warning in
+            business minutes. Its times: start, due and warning (stored, so a later holiday or hours edit changes none), actual
+            (the response or resolution), the pause running (pausedDate) and the business minutes paused so far, the warning
+            and breach the scan recorded. State: running, paused, met, missed (done late), unmet (the case closed without it)
+            or cancelled (the case was cancelled; out of the success rate).</description>
+        <field name="caseSlaEpisodeId" type="id" is-pk="true"/>
+        <field name="requestId" type="id"/>
+        <field name="clockEnumId" type="id"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="serviceLevelPolicyId" type="id"/>
+        <field name="serviceLevelTargetId" type="id"/>
+        <field name="priorityBandEnumId" type="id"/>
+        <field name="calendarId" type="id"/>
+        <field name="timeZone" type="text-short"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="targetMinutes" type="number-integer"/>
+        <field name="warningMinutes" type="number-integer"/>
+        <field name="startDate" type="date-time"/>
+        <field name="dueDate" type="date-time"/>
+        <field name="warningDate" type="date-time"/>
+        <field name="actualDate" type="date-time"/>
+        <field name="pausedDate" type="date-time"/>
+        <field name="pausedMinutes" type="number-integer"/>
+        <field name="warnedDate" type="date-time"/>
+        <field name="breachedDate" type="date-time"/>
+        <field name="stateEnumId" type="id"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one" title="SlaClock" related="moqui.basic.Enumeration" short-alias="clock">
+            <key-map field-name="clockEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.support.ServiceLevelPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" related="mantle.request.support.ServiceLevelTarget" short-alias="target"/>
+        <relationship type="one-nofk" related="mantle.work.calendar.Calendar" short-alias="calendar"/>
+        <relationship type="one" title="CaseSlaState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId" related="enumId"/></relationship>
+        <index name="CASE_SLA_EP_REQ"><index-field name="requestId"/></index>
+        <index name="CASE_SLA_EP_DUE"><index-field name="stateEnumId"/><index-field name="dueDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Service Level Clock" enumTypeId="SlaClock"/>
+            <moqui.basic.Enumeration enumId="SlcFirstResponse" description="First response" sequenceNum="1" enumTypeId="SlaClock"/>
+            <moqui.basic.Enumeration enumId="SlcResolution" description="Resolution" sequenceNum="2" enumTypeId="SlaClock"/>
+            <moqui.basic.EnumerationType description="Case Service Level State" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsRunning" description="Running" sequenceNum="1" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsPaused" description="Paused" sequenceNum="2" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsMet" description="Met" sequenceNum="3" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsMissed" description="Missed" sequenceNum="4" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsUnmet" description="Closed without it" sequenceNum="5" enumTypeId="CaseSlaState"/>
+            <moqui.basic.Enumeration enumId="SlsCancelled" description="Cancelled" sequenceNum="6" enumTypeId="CaseSlaState"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="CaseSlaEvent" package="mantle.request.support" cache="never">
+        <description>What happened to a case's clocks, in order (design CaseAnalytics; D23): received, each status change from
+            any path, an outward response accepted by its channel, a customer reply, work made or linked, a pause and a resume
+            with the reason, met or missed, a reopen, a warning, a breach, a pause past its limit, a due date changed outside
+            the service levels, and a manager's correction (the earlier and the new due date, the reason). Never edited or
+            deleted. eventKey makes a rule or a scan that runs twice record once.</description>
+        <field name="caseSlaEventId" type="id" is-pk="true"/>
+        <field name="requestId" type="id"/>
+        <field name="caseSlaEpisodeId" type="id"/>
+        <field name="eventTypeEnumId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="fromStatusId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="previousDueDate" type="date-time"/>
+        <field name="dueDate" type="date-time"/>
+        <field name="reasonText" type="text-medium"/>
+        <field name="userId" type="id"/>
+        <field name="eventKey" type="text-medium"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one-nofk" related="mantle.request.support.CaseSlaEpisode" short-alias="episode"/>
+        <relationship type="one" title="CaseSlaEventType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="eventTypeEnumId" related="enumId"/></relationship>
+        <index name="CASE_SLA_EV_REQ"><index-field name="requestId"/></index>
+        <index name="CASE_SLA_EV_KEY" unique="true"><index-field name="eventKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Case Service Level Event" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetIntake" description="Received" sequenceNum="1" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetNoPolicy" description="No service level applies" sequenceNum="2" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetStatus" description="Status changed" sequenceNum="3" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetResponse" description="Responded" sequenceNum="4" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetCustomerReply" description="Customer replied" sequenceNum="5" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetWork" description="Work made or linked" sequenceNum="6" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetPause" description="Paused" sequenceNum="7" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetResume" description="Resumed" sequenceNum="8" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetMet" description="Met" sequenceNum="9" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetMissed" description="Met late" sequenceNum="10" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetUnmet" description="Closed without it" sequenceNum="11" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetReopen" description="Reopened" sequenceNum="12" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetCancelled" description="Cancelled" sequenceNum="13" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetWarning" description="Due soon" sequenceNum="14" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetBreach" description="Breached" sequenceNum="15" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetPauseLimit" description="Paused too long" sequenceNum="16" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetResolution" description="Resolution changed" sequenceNum="17" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetDueChanged" description="Due date changed outside service levels" sequenceNum="18" enumTypeId="CaseSlaEventType"/>
+            <moqui.basic.Enumeration enumId="SetCorrection" description="Corrected" sequenceNum="19" enumTypeId="CaseSlaEventType"/>
+        </seed-data>
+    </entity>
+</entities>

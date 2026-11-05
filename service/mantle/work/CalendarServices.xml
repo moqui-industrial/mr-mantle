@@ -1005,4 +1005,157 @@ along with this software (see the LICENSE.md file). If not, see
             createdCount = stored.createdCount; updatedCount = stored.updatedCount; failedCount = stored.failedCount
         ]]></script></actions>
     </service>
+    <!-- ===== working hours and business time (impl-customer-service P4, F13, F65; BusinessTime.js): a person's own weekly
+        working hours, a team's or another party's on its schedule calendar, and the business minutes of a schedule, less the
+        organization's holidays (all-day WepHoliday work efforts it owns), to the minute in the schedule's zone. Projects,
+        Manufacturing and Customer Service's service levels count on the same functions. ===== -->
+    <service verb="define" noun="Schedule" type="interface">
+        <description>The schedule a business time is counted on: a calendar, else a party's schedule calendar (a team's working
+            hours); with neither, or with no working hours on it, around the clock (configured false). The organization's
+            holidays come off; with none given, the calendar owner's organization's.</description>
+        <in-parameters>
+            <parameter name="calendarId"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="timeZone"><description>For a schedule with no calendar zone; default the user's</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="get" noun="BusinessTimeDue" allow-remote="false">
+        <description>When the given business minutes after startDate end on a schedule: the clock starts at the first working
+            moment at or after startDate and counts only working time less holidays, at most a year on (dueDate null after
+            that). Reads only working times: no permission.</description>
+        <implements service="mantle.work.CalendarServices.define#Schedule"/>
+        <in-parameters>
+            <parameter name="startDate" type="Timestamp" required="true"/>
+            <parameter name="minutes" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="configured" type="Boolean"><description>The schedule has working hours (false: around the clock)</description></parameter>
+            <parameter name="calendarId"/>
+            <parameter name="timeZone"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const time = ec.resource.script('component://mr-mantle/service/mantle/work/BusinessTime.js')
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const schedule = time.scheduleOf(context)
+                const ctx = time.forCall()
+                const startMs = Number(String(startDate.getTime ? startDate.getTime() : startDate))
+                const due = time.dueAfter(ctx, schedule, startMs, minutes)
+                dueDate = due == null ? null : new Date(due)
+                configured = time.configuredOf(ctx, schedule, startMs, startMs + 7 * time.dayMs)
+                calendarId = schedule.calendarId
+                timeZone = schedule.timeZone
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+    <service verb="get" noun="BusinessTimeElapsed" allow-remote="false">
+        <description>The business minutes of a schedule from fromDate to thruDate (now when not given), less holidays and the
+            pauses given, whole minutes. Reads only working times: no permission.</description>
+        <implements service="mantle.work.CalendarServices.define#Schedule"/>
+        <in-parameters>
+            <parameter name="fromDate" type="Timestamp" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pauseList" type="List"><description>Maps of fromDate and thruDate (thruDate empty: to thruDate)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="minutes" type="Integer"/>
+            <parameter name="configured" type="Boolean"/>
+            <parameter name="calendarId"/>
+            <parameter name="timeZone"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const time = ec.resource.script('component://mr-mantle/service/mantle/work/BusinessTime.js')
+            const millis = (value) => value == null || value === '' ? null : Number(String(value.getTime ? value.getTime() : value))
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const schedule = time.scheduleOf(context)
+                const ctx = time.forCall()
+                const fromMs = millis(fromDate)
+                const thruMs = millis(thruDate) ?? Number(String(ec.user.nowTimestamp.getTime()))
+                const pauses = Array.from(pauseList || []).map((row) => [millis(row.fromDate), millis(row.thruDate) ?? thruMs])
+                    .filter(([from, thru]) => from != null && thru > from)
+                minutes = time.elapsedMinutes(ctx, schedule, fromMs, thruMs, pauses)
+                configured = time.configuredOf(ctx, schedule, fromMs, Math.max(thruMs, fromMs + 7 * time.dayMs))
+                calendarId = schedule.calendarId
+                timeZone = schedule.timeZone
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+    <service verb="store" noun="WorkingHours">
+        <description>Weekly working hours: the working days (0 Sunday to 6 Saturday) from workStart to workEnd (HH:mm) in the
+            time zone (default the calendar's, else the user's), as a WetAvailable work effort repeating weekly. With no party
+            or calendar, the user's own (owned by the user's party, an Assignee of it; sourceReferenceId names the series, so
+            Commons' Preferences keep theirs), as get#FreeBusy and get#PartyCapacity read them. With partyId (a team or another
+            party) on the party's schedule calendar, a resource calendar it owns, made on first use; with calendarId on that
+            calendar. With fromDate the series in effect ends there and a new one starts (dated rows: a past day keeps its
+            hours); without it the series in effect is changed in place. Another party's or a calendar's hours need edit on its
+            calendar, to manage the party (a current relationship in the Manager role, as a team's manager has), or
+            WORKING_HOURS_EDIT for a party of the user's organizations (PERMISSION_DENIED); refuses no working day
+            (DAYS_REQUIRED) and an end before the start (HOURS_INVALID).</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="calendarId"/>
+            <parameter name="workDays" type="Object"><description>A list or a comma list of weekday numbers; default Monday to Friday</description></parameter>
+            <parameter name="workStart" default-value="09:00"/>
+            <parameter name="workEnd" default-value="17:00"/>
+            <parameter name="timeZone"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="sourceReferenceId"><description>The user's own series' name; default WorkingHours</description></parameter>
+            <parameter name="workEffortName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="calendarId"/>
+            <parameter name="timeZone"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const time = ec.resource.script('component://mr-mantle/service/mantle/work/BusinessTime.js')
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const out = time.storeWorkingHours(context)
+                workEffortId = out.workEffortId
+                calendarId = out.calendarId
+                timeZone = out.timeZone
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+    <service verb="get" noun="WorkingHours" allow-remote="false">
+        <description>The weekly working hours in effect of the user (no party or calendar), a party (its schedule calendar) or a
+            calendar: the days, workStart and workEnd in its zone, since when, and a text ("Mon-Fri 09:00-17:00
+            (America/Chicago)"); configured false when none is set. No permission: working times only.</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="calendarId"/>
+            <parameter name="sourceReferenceId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="configured" type="Boolean"/>
+            <parameter name="calendarId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="workDays" type="List"/>
+            <parameter name="workStart"/>
+            <parameter name="workEnd"/>
+            <parameter name="timeZone"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="text"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const time = ec.resource.script('component://mr-mantle/service/mantle/work/BusinessTime.js')
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const out = time.workingHours(context)
+                configured = !!out.configured
+                calendarId = out.calendarId ?? null
+                workEffortId = out.workEffortId ?? null
+                workDays = out.workDays ?? []
+                workStart = out.workStart ?? null
+                workEnd = out.workEnd ?? null
+                timeZone = out.timeZone ?? null
+                fromDate = out.fromDate ?? null
+                text = out.text
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
 </services>

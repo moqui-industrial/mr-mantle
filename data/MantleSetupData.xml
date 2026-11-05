@@ -85,6 +85,10 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_POLICY_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="WARRANTY_APPROVE" description="Warranty Approve"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="WARRANTY_APPROVE" fromDate="0"/>
+    <!-- the working hours of another party (a service team's, mantle.work.CalendarServices.store#WorkingHours) for a party of the
+        user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
+    <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WORKING_HOURS_EDIT" fromDate="0"/>
     <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
         WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
         receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
@@ -683,6 +687,21 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="SupportCaseCustomerReply" inboxEnumId="NinNotifications" description="Customer Replied on a Case" typeString="info"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${fromName} replied on case ${requestId}: ${requestName}"/>
+    <!-- the service level topics (mantle.request.SlaServices.scan#CaseSla; impl-customer-service P4, CS-JOBS): a case's clock near
+        its due time (SupportCaseSlaWarning) and past it (SupportCaseSlaBreach), each once per episode, to the case's assignee, else
+        the managers of the queue's team: requestId, requestName, customerName, clockLabel (First response or Resolution),
+        dueText, the case as the record. The app that works cases sets the links (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SupportCaseSlaWarning" inboxEnumId="NinNotifications" description="Case Due Soon" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${clockLabel} of case ${requestId} is due ${dueText}: ${requestName}"/>
+    <moqui.security.user.NotificationTopic topic="SupportCaseSlaBreach" inboxEnumId="NinNotifications" description="Case Past Its Due Time" typeString="danger"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${clockLabel} of case ${requestId} was due ${dueText}: ${requestName}"/>
+    <!-- the warning and breach scan of case clocks (CS-JOBS): every five minutes, a bounded batch, a failing case logged by its
+        id and the rest going on, idempotent by episode -->
+    <moqui.service.job.ServiceJob jobName="scan_CaseSla" description="Warn of and record case service level breaches"
+            serviceName="mantle.request.SlaServices.scan#CaseSla" cronExpression="0 0/5 * * * ?" paused="N" errorHistoryOnly="Y"
+            transactionTimeout="1800"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="MantleDavServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y" nameIsPattern="Y"
             artifactName="mantle\.(work\.CalendarDavServices|party\.ContactDavServices)\.(get#DavCollections|get#DavObjects|put#DavObject|delete#DavObject)"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleDavServicesALL" userGroupId="ALL_USERS" artifactGroupId="MantleDavServices"
