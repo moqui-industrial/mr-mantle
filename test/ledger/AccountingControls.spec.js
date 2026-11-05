@@ -1602,7 +1602,8 @@ feature("currencies, rate imports and finance settings are read and kept through
         })
         const badFlag = rejected("SetupServices.store#Preferences", {
             organizationPartyId: org,
-            settings: { realTimeGlSummary: "X" },
+            // impl-customer-service F111: orderConfirmationOnPlace is one of the flags
+            settings: { orderConfirmationOnPlace: "X" },
             lastUpdatedStamp: stored.settings.lastUpdatedStamp,
             changeReason: "Spec flag",
         })
@@ -1628,6 +1629,7 @@ feature("currencies, rate imports and finance settings are read and kept through
         preferences.inherited == false
         preferences.settings.baseCurrencyUomId == "USD"
         stored.settings.invoiceIdPrefix == "NFC"
+        stored.settings.orderConfirmationOnPlace == "N"
         badFlag.includes("Enabled or Disabled")
         setup.currenciesCount > 0
         setup.currencies.length == Math.min(25, setup.currenciesCount)

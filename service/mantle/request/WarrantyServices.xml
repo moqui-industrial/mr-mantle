@@ -61,6 +61,46 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.context.putAll(warrantyOut)</script>
         </actions>
     </service>
+    <service verb="define" noun="ClaimEvidenceParameters" type="interface">
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="recordEntityName" required="true"><description>mantle.product.asset.Asset,
+                mantle.order.OrderHeader, mantle.account.invoice.Invoice or mantle.party.agreement.Agreement</description></parameter>
+            <parameter name="recordId" required="true"/>
+            <parameter name="claimRevision" type="Integer"><description>The revision the user saw; given and not the current
+                one, refused (STALE_REVISION)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="claimRevision" type="Integer"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+    </service>
+    <service verb="link" noun="ClaimEvidence" allow-remote="false">
+        <description>Links one piece of a warranty claim's evidence on its own (RequestDetail's record links, impl-customer-service
+            F185): its serial or asset, order, invoice or agreement, checked as save#WarrantyClaim checks it (the customer's
+            delivered serial, a sale or invoice of the organization to the customer, a service agreement with the customer).
+            The link moves the claim's revision and supersedes its decisions; a record already linked changes nothing. Refuses a
+            record of another kind (NOT_EVIDENCE), a second record of a kind the claim links (EVIDENCE_LINKED: take it off first,
+            or change it on WarrantyAssessment), a closed or merged case (CASE_CLOSED, CASE_MERGED), a case that is not a claim
+            (NOT_A_CLAIM) and a stale revision. Requires SUPPORT_CASE_EDIT and a case of the user's organizations.</description>
+        <implements service="mantle.request.WarrantyServices.define#ClaimEvidenceParameters"/>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('linkEvidence', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="unlink" noun="ClaimEvidence" allow-remote="false">
+        <description>Takes one piece of a warranty claim's evidence off it (RequestDetail's record links, F185): the link
+            removed, the record kept; the claim's revision moves and its decisions are superseded. A record not linked changes
+            nothing. Refuses as link#ClaimEvidence does. Requires SUPPORT_CASE_EDIT and a case of the user's
+            organizations.</description>
+        <implements service="mantle.request.WarrantyServices.define#ClaimEvidenceParameters"/>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('unlinkEvidence', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
     <service verb="get" noun="WarrantyClaim" allow-remote="false">
         <description>One claim for WarrantyAssessment: the case (customer, organization, assignee, claim date, status), its
             evidence (product, quantity, fault, serial and its owner and status, order, invoice, agreement, prior claims on the
