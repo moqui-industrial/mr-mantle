@@ -110,6 +110,7 @@ spec({
         state.agent2 = user("AGENT2", ["SUPPORT_CASE_EDIT"])
         state.outsider = user("OUTSIDER", ["SUPPORT_CASE_EDIT"])
         state.reader = user("READER", [])
+        state.manager = user("MANAGER", ["SUPPORT_CASE_MANAGE", "SUPPORT_CASE_EDIT"])
         state.otherAdmin = user("OTHER_ADMIN", ["SUPPORT_POLICY_EDIT", "SUPPORT_CASE_MANAGE", "SUPPORT_CASE_EDIT"], otherOrg)
     },
     setup() {
@@ -141,6 +142,12 @@ feature("the service settings: a team and its members, queues, the defaults and 
             run(state.admin, S + "save#ServiceTeamMember", {teamPartyId: state.team, partyId})
         )
         const managerByAgent = run(state.agent, S + "save#ServiceTeamMember", {teamPartyId: state.team, partyId: state.reader})
+        // a manager who does not manage the team, and a member who does not work for the organization, are refused
+        const notTheirTeam = run(state.manager, S + "save#ServiceTeamMember", {teamPartyId: state.team, partyId: state.reader})
+        const outsiderMember = run(state.admin, S + "save#ServiceTeamMember", {
+            teamPartyId: state.team,
+            partyId: state.otherAdmin
+        })
         const queue = run(state.admin, S + "save#ServiceQueue", {
             organizationPartyId: org,
             description: "Spec Support",
@@ -214,6 +221,8 @@ feature("the service settings: a team and its members, queues, the defaults and 
             team,
             members,
             managerByAgent,
+            notTheirTeam,
+            outsiderMember,
             queue,
             restrictedNoTeam,
             otherTeamQueue,
@@ -234,6 +243,8 @@ feature("the service settings: a team and its members, queues, the defaults and 
         r.team.error == ""
         r.members.every(member => member.error == "" && member.partyRelationshipId)
         code(r.managerByAgent) == "PERMISSION_DENIED"
+        code(r.notTheirTeam) == "PERMISSION_DENIED"
+        code(r.outsiderMember) == "MEMBER_UNAVAILABLE"
         r.queue.error == ""
         r.category.ownerPartyId == org
         code(r.restrictedNoTeam) == "TEAM_REQUIRED"

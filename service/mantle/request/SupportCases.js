@@ -809,11 +809,17 @@ function saveMember(p) {
     if (!manages && !access.has("SUPPORT_POLICY_EDIT"))
         denied("PERMISSION_DENIED", "Only a manager of the team or the service administrator changes its members")
     const person = p.partyId ? one("mantle.party.Party", {partyId: p.partyId}) : null
-    if (!person || person.partyTypeEnumId !== "PtyPerson" || person.disabled === "Y")
+    // a member works for the team's organization (a customer's contact or another organization's agent never joins, and
+    // so never sees a restricted queue's cases through Mantle's record visibility)
+    const end = p.end === true || p.end === "Y" || p.end === "true"
+    if (
+        !person ||
+        person.partyTypeEnumId !== "PtyPerson" ||
+        (!end && (person.disabled === "Y" || !organizationsOf(p.partyId).includes(organizationPartyId)))
+    )
         denied("MEMBER_UNAVAILABLE", (p.partyId || "") + " is not someone who can join a team")
     const roleTypeId = p.roleTypeId === "Manager" ? "Manager" : "Agent"
     const live = teamMembers(p.teamPartyId).filter(row => row.fromPartyId === p.partyId)
-    const end = p.end === true || p.end === "Y" || p.end === "true"
     for (const row of live)
         if (end || row.fromRoleTypeId !== roleTypeId) {
             row.set("thruDate", p.fromDate || now())
