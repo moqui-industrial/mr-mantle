@@ -512,6 +512,18 @@ function sendInvitation(p) {
         set({statusEnumId: "FinSuppressed", lastError: L("The case was reopened before the invitation was sent")})
         return {done: "suppressed"}
     }
+    // a send not made (no link, or the mail not gone): tried again on the next runs, a first send up to MAX_ATTEMPTS times
+    // and then Not delivered; a reminder not made is not tried again
+    const notSent = error => {
+        const attempts = Number(invitation.attemptCount || 0) + 1
+        set({
+            attemptCount: attempts,
+            lastError: String(error).substring(0, 250),
+            statusEnumId: !reminder && attempts >= MAX_ATTEMPTS ? "FinFailed" : invitation.statusEnumId,
+            nextReminderDate: reminder ? null : invitation.nextReminderDate
+        })
+        return {done: "failed", error}
+    }
     const issued = (() => {
         try {
             return externalAccess().create({
@@ -525,25 +537,10 @@ function sendInvitation(p) {
             return {error: error.message}
         }
     })()
-    if (!issued.url) {
-        set({
-            statusEnumId: "FinFailed",
-            lastError: issued.error || L("The organization has no published site with the Support app")
-        })
-        return {done: "failed"}
-    }
+    if (!issued.url) return notSent(issued.error || L("The organization has no published site with the Support app"))
     const sent = mail(invitation, issued.url, reminder)
     const policy = one(POLICY, {feedbackPolicyId: invitation.policyId})
-    if (!sent.went) {
-        const attempts = Number(invitation.attemptCount || 0) + 1
-        set({
-            attemptCount: attempts,
-            lastError: String(sent.error).substring(0, 250),
-            statusEnumId: !reminder && attempts >= MAX_ATTEMPTS ? "FinFailed" : invitation.statusEnumId,
-            nextReminderDate: reminder ? null : invitation.nextReminderDate
-        })
-        return {done: "failed", error: sent.error}
-    }
+    if (!sent.went) return notSent(sent.error)
     const reminders = Number(invitation.reminderCount || 0) + (reminder ? 1 : 0)
     const nextMs = at + Number(policy?.reminderDays || 3) * dayMs
     set({
@@ -599,10 +596,21 @@ function sendInvitations(p) {
     let expiring = find(INVITATION, {statusEnumId: "FinSent"}).condition("expireDate", "less-equals", now())
     if (scope.length) expiring = expiring.condition("invitationId", "in", scope)
     for (const row of Array.from(expiring.limit(limit).list())) {
-        row.set("statusEnumId", "FinExpired")
-        row.set("nextReminderDate", null)
-        row.update()
-        counts.expired++
+        ec.message.pushErrors()
+        try {
+            row.set("statusEnumId", "FinExpired")
+            row.set("nextReminderDate", null)
+            row.update()
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            counts.expired++
+        } catch (error) {
+            ec.logger.error("Feedback invitation " + row.invitationId + " was not marked expired: " + error.message)
+            counts.failed++
+            failedList.push({invitationId: row.invitationId, message: error.message})
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
     }
     return Object.assign(counts, {failedList})
 }

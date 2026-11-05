@@ -212,8 +212,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="send" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
         <description>Internal, for send#Invitations, in its new transaction: one invitation, locked, sent when it is scheduled and
             due (its link a new ExternalAccessCapability on the Support app's Feedback page of the organization's site, ending at
-            the invitation's expiry; a case reopened since is not sent, FinSuppressed; no site with the Support app is
-            FinFailed), or reminded when a reminder is due; anything else is left alone. done: sent, reminded, expired,
+            the invitation's expiry; a case reopened since is not sent, FinSuppressed; a send with no link, no site with the
+            Support app, or whose mail did not go is tried again on the next runs, FinFailed after three tries), or reminded when a reminder is due; anything else is left alone. done: sent, reminded, expired,
             suppressed, failed or notDue.</description>
         <in-parameters><parameter name="invitationId" required="true"/></in-parameters>
         <out-parameters><parameter name="done"/><parameter name="error"/></out-parameters>
