@@ -438,6 +438,10 @@ feature(
                 end: "Y",
                 changeReason: "Done"
             })
+            // the evaluation's warning ends with its rule, though another rule is still in effect
+            login(users.buyer)
+            const warnEnded = check(supplierA)
+            login(users.admin)
             svc(S + "store#ScorecardAction", {
                 organizationPartyId: org,
                 scorecardActionId: blockRule.scorecardActionId,
@@ -445,9 +449,9 @@ feature(
                 changeReason: "Done"
             })
             login("john.doe")
-            return {before, warned, insufficient, blocked, otherSupplierRisk, noReasonEnd, ended, noneRisk}
+            return {before, warned, insufficient, blocked, otherSupplierRisk, noReasonEnd, ended, noneRisk, warnEnded}
         },
-        then({before, warned, insufficient, blocked, otherSupplierRisk, noReasonEnd, ended, noneRisk}) {
+        then({before, warned, insufficient, blocked, otherSupplierRisk, noReasonEnd, ended, noneRisk, warnEnded}) {
             before.result == "OK"
             warned.result == "WARN"
             warned.reasonCode == "SUPPLIER_SCORE_WARNING"
@@ -460,6 +464,7 @@ feature(
             noReasonEnd.includes("RISK_INVALID")
             ended.result == "OK"
             noneRisk.includes("PERMISSION_DENIED")
+            warnEnded.result == "OK"
         }
     }
 )
@@ -484,14 +489,20 @@ feature(
                 periodFromDate: daysAgo(1),
                 periodThruDate: daysAgo(10)
             })
+            // a retry with the same operation key and the default period (to now) answers the first result
+            const keyed = {organizationPartyId: org, supplierPartyId: supplierB, operationKey: prefix + "_EVAL_KEY"}
+            const firstRun = svc(S + "evaluate#SupplierScorecard", keyed)
+            const retry = svc(S + "evaluate#SupplierScorecard", keyed)
             const mixed = svc(
                 S + "evaluate#SupplierScorecard",
                 Object.assign({organizationPartyId: org, supplierPartyIds: [otherSupplier, supplierB]}, period())
             )
             login("john.doe")
-            return {buyer, otherOrganization, backwards, mixed}
+            return {buyer, otherOrganization, backwards, mixed, firstRun, retry}
         },
-        then({buyer, otherOrganization, backwards, mixed}) {
+        then({buyer, otherOrganization, backwards, mixed, firstRun, retry}) {
+            retry.alreadyApplied == true
+            retry.resultRows[0].supplierScorecardId == firstRun.resultRows[0].supplierScorecardId
             buyer.includes("PERMISSION_DENIED")
             otherOrganization.includes("RECORD_UNAVAILABLE")
             backwards.includes("PERIOD_INVALID")

@@ -517,6 +517,13 @@ function measure(organizationPartyId, supplierPartyId, from, thru, policy, crite
     const evidence = []
     const missing = []
     const items = {}
+    // a line's first acknowledged date, read once per line (a line may have several receipts)
+    const firstPromises = {}
+    const firstPromiseOfLine = (orderId, orderItemSeqId, item) => {
+        const key = orderId + ":" + orderItemSeqId
+        if (!(key in firstPromises)) firstPromises[key] = firstPromiseOf(orderId, orderItemSeqId, item)
+        return firstPromises[key]
+    }
     const itemOf = (orderId, orderItemSeqId) => {
         const key = orderId + ":" + orderItemSeqId
         if (!(key in items)) items[key] = one("mantle.order.OrderItem", {orderId, orderItemSeqId})
@@ -540,7 +547,9 @@ function measure(organizationPartyId, supplierPartyId, from, thru, policy, crite
         const item = itemOf(receipt.orderId, receipt.orderItemSeqId)
         const quantity = dec(receipt.quantityAccepted).add(dec(receipt.quantityRejected))
         const firstPromise =
-            policy.dueDateBasisEnumId === "SddbRequired" ? null : firstPromiseOf(receipt.orderId, receipt.orderItemSeqId, item)
+            policy.dueDateBasisEnumId === "SddbRequired"
+                ? null
+                : firstPromiseOfLine(receipt.orderId, receipt.orderItemSeqId, item)
         const due = firstPromise ?? ms(item?.requiredByDate)
         const row = {
             metricEnumId: "SsmOnTime",
@@ -809,9 +818,14 @@ function evaluateOne(p) {
     const result = measure(organizationPartyId, p.supplierPartyId, from, thru, policy, criteria)
     const response = result.insufficient ? null : scoreResponse(organizationPartyId, result.score, at)
     const previous =
-        rows(SCORECARD, {organizationPartyId, supplierPartyId: p.supplierPartyId})
-            .filter(row => ms(row.periodFromDate) === from && ms(row.periodThruDate) === thru)
-            .sort((a, b) => ms(b.evaluatedDate) - ms(a.evaluatedDate))[0] || null
+        Array.from(
+            find(SCORECARD, {organizationPartyId, supplierPartyId: p.supplierPartyId})
+                .condition("periodFromDate", new Date(from))
+                .condition("periodThruDate", new Date(thru))
+                .orderBy("-evaluatedDate")
+                .limit(1)
+                .list()
+        )[0] || null
     const created = call("create#" + SCORECARD, {
         organizationPartyId,
         supplierPartyId: p.supplierPartyId,
@@ -877,10 +891,17 @@ function evaluate(p) {
             ? Array.from(p.supplierPartyIds)
             : String(p.supplierPartyIds || p.supplierPartyId || "").split(",")
     supplierPartyIds = [...new Set(supplierPartyIds.map(id => String(id).trim()).filter(Boolean))]
-    if (!supplierPartyIds.length) supplierPartyIds = suppliersInPeriod(organizationPartyId, from, thru)
-    const request = {organizationPartyId, supplierPartyIds, from, thru}
+    // the request as asked: a period or supplier list left to its default (now, the period's suppliers) is hashed as not
+    // given, so a retry later answers the first result instead of a key conflict
+    const request = {
+        organizationPartyId,
+        supplierPartyIds: supplierPartyIds.slice().sort(),
+        periodFromDate: blank(p.periodFromDate) ? null : ms(p.periodFromDate),
+        periodThruDate: blank(p.periodThruDate) ? null : ms(p.periodThruDate)
+    }
     const operation = blank(p.operationKey) ? null : lib.operation(p, "SupplierScorecard", organizationPartyId, request)
     if (operation?.old) return lib.previous(operation)
+    if (!supplierPartyIds.length) supplierPartyIds = suppliersInPeriod(organizationPartyId, from, thru)
     const resultRows = supplierPartyIds.map(supplierPartyId => {
         const row = {supplierPartyId, supplierName: partyName(supplierPartyId)}
         try {
@@ -941,7 +962,13 @@ function responseOf(organizationPartyId, supplierPartyId, at) {
             .limit(1)
             .list()
     )[0]
-    if (latest && latest.resultEnumId === "SsrScored" && latest.effectEnumId)
+    // the response the evaluation drew, while the rule that drew it is in effect (ending or changing it lifts it)
+    if (
+        latest &&
+        latest.resultEnumId === "SsrScored" &&
+        latest.effectEnumId &&
+        actions.some(action => action.scorecardActionId === latest.scorecardActionId)
+    )
         responses.push({
             effectEnumId: latest.effectEnumId,
             supplierScorecardId: latest.supplierScorecardId,
