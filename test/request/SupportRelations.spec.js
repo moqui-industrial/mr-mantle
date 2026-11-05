@@ -306,6 +306,8 @@ feature("a merge keeps the kept case's clock and carries the source's breach; th
             items: rows(ITEM, {caseRelationId: merged.caseRelationIds?.[0]}),
             moveSource: move(source, "ReqInProgress"),
             updateSource: run(state.manager, S + "update#Case", {requestId: source, priority: 3}),
+            // the note is on both cases: its author may delete it from neither (it would leave both)
+            deleteNote: run(state.agent, R + "delete#RequestComment", {requestId: target, communicationEventId: note}),
             lineage: run(state.agent, S + "get#CaseLineage", {requestId: source}).lineage,
             targetLineage: run(state.agent, S + "get#CaseLineage", {requestId: target}).lineage
         }
@@ -354,6 +356,8 @@ feature("a merge keeps the kept case's clock and carries the source's breach; th
         r.items.some(row => row.itemTypeEnumId == "CriClock" && row.carriedEpisodeId != null)
         code(r.moveSource) == "CASE_MERGED"
         code(r.updateSource) == "CASE_MERGED"
+        r.deleteNote.error.includes("by a merge or split; it stays")
+        one("mantle.party.communication.CommunicationEvent", {communicationEventId: r.note}) != null
         r.lineage.mergedIntoRequestId == r.target
         r.lineage.actionable == false
         r.targetLineage.relations.some(row => row.relationText == "Merged from" && row.otherRequestId == r.source)
