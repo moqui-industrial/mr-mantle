@@ -930,6 +930,8 @@ const operations = {
     mappingFor,
     revisionOf,
     openStatuses,
+    // P12: the dated save of Knowledge.js's sources
+    startRow,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown support case operation " + op)
