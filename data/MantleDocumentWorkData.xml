@@ -43,7 +43,7 @@ along with this software (see the LICENSE.md file). If not, see
         <conditions conditionSeqId="01" fieldNameAlias="workEffortTypeEnumId" fieldValue="WetProject"/>
         <!-- the generic entity screen until the IronStone Projects app has a project screen -->
         <links linkSeqId="01" linkSet="boss" label="Project" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.work.effort.WorkEffort&amp;workEffortId=${workEffortId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.work.effort.WorkEffort&amp;workEffortId=${workEffortId}"/>
     </dataDocuments>
 
     <!-- Task -->

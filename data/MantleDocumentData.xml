@@ -103,7 +103,7 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- a personal contact's owner: search#Party, search#Universal and the party drop-downs show it only to that user -->
         <fields fieldSeqId="93" fieldPath="privateOwnerUserId"/>
         <links linkSeqId="01" linkSet="boss" label="Party" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.party.Party&amp;partyId=${partyId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.party.Party&amp;partyId=${partyId}"/>
     </dataDocuments>
     <dataDocuments dataDocumentId="MantleCommunicationEvent" indexName="mantle" documentName="Communication Event"
             primaryEntityName="mantle.party.communication.CommunicationEvent" documentTitle="${subject}">
@@ -140,7 +140,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="40" fieldPath="purposes:purposeEnumId"/>
         <fields fieldSeqId="41" fieldPath="purposes:description" fieldNameAlias="purpose"/>
         <links linkSeqId="01" linkSet="boss" label="Communication" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.party.communication.CommunicationEvent&amp;communicationEventId=${communicationEventId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.party.communication.CommunicationEvent&amp;communicationEventId=${communicationEventId}"/>
     </dataDocuments>
 
     <!-- ========== Product ========== -->
@@ -212,7 +212,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="84" fieldPath="toAssocs:productAssocTypeEnumId" fieldNameAlias="toProductAssocTypeEnumId"/>
         <fields fieldSeqId="85" fieldPath="toAssocs:type:description" fieldNameAlias="assocTypeTo"/>
         <links linkSeqId="01" linkSet="boss" label="Product" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.product.Product&amp;productId=${productId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.product.Product&amp;productId=${productId}"/>
     </dataDocuments>
 
     <!-- ========== Facility ========== -->
@@ -235,7 +235,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="23" fieldPath="contactMechs:postalAddress:postalCode"/>
         <fields fieldSeqId="24" fieldPath="contactMechs:postalAddress:stateProvinceGeo:geoName" fieldNameAlias="state"/>
         <links linkSeqId="01" linkSet="boss" label="Facility" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.facility.Facility&amp;facilityId=${facilityId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.facility.Facility&amp;facilityId=${facilityId}"/>
     </dataDocuments>
 
     <!-- ========== Wiki Page ========== -->
@@ -261,7 +261,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="12" fieldPath="histories:userId"/>
         <!-- causing issues with false update notice for other fields on UserAccount like during login: <fields fieldSeqId="01" fieldPath="histories:user:username"/> -->
         <links linkSeqId="01" linkSet="boss" label="Wiki Page" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=moqui.resource.wiki.WikiPage&amp;wikiPageId=${wikiPageId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=moqui.resource.wiki.WikiPage&amp;wikiPageId=${wikiPageId}"/>
     </dataDocuments>
 
     <!-- ================ -->
@@ -293,7 +293,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="30" fieldPath="items:productId"/>
         <fields fieldSeqId="31" fieldPath="items:itemDescription"/>
         <links linkSeqId="01" linkSet="boss" label="Order" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.order.OrderHeader&amp;orderId=${orderId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.order.OrderHeader&amp;orderId=${orderId}"/>
     </dataDocuments>
     <dataDocuments dataDocumentId="MantleInvoice" indexName="mantle" documentName="Invoice"
             primaryEntityName="mantle.account.invoice.Invoice" documentTitle="${invoiceId}">
@@ -322,7 +322,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="21" fieldPath="otherPartyOrderId"/>
         <fields fieldSeqId="22" fieldPath="externalId"/>
         <links linkSeqId="01" linkSet="boss" label="Invoice" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.account.invoice.Invoice&amp;invoiceId=${invoiceId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.account.invoice.Invoice&amp;invoiceId=${invoiceId}"/>
     </dataDocuments>
     <dataDocuments dataDocumentId="MantleShipment" indexName="mantle" documentName="Shipment"
             primaryEntityName="mantle.shipment.Shipment" documentTitle="${shipmentId}">
@@ -346,7 +346,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="16" fieldPath="otherPartyOrderId"/>
         <fields fieldSeqId="17" fieldPath="externalId"/>
         <links linkSeqId="01" linkSet="boss" label="Shipment" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.shipment.Shipment&amp;shipmentId=${shipmentId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.shipment.Shipment&amp;shipmentId=${shipmentId}"/>
     </dataDocuments>
     <dataDocuments dataDocumentId="MantleAsset" indexName="mantle" documentName="Asset"
             primaryEntityName="mantle.product.asset.Asset" documentTitle="${assetId}">
@@ -370,7 +370,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="17" fieldPath="availableToPromiseTotal"/>
         <fields fieldSeqId="18" fieldPath="receivedDate"/>
         <links linkSeqId="01" linkSet="boss" label="Asset" urlType="plain"
-                linkUrl="/apps/tools/AutoScreen/AutoEdit/AutoEditMaster?aen=mantle.product.asset.Asset&amp;assetId=${assetId}"/>
+                linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.product.asset.Asset&amp;assetId=${assetId}"/>
     </dataDocuments>
 
     <moqui.entity.feed.DataFeed dataFeedId="MantleSearch" dataFeedTypeEnumId="DTFDTP_RT_PUSH" indexOnStartEmpty="Y"
