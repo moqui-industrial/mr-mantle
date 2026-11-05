@@ -1059,13 +1059,16 @@ function exceptionApproved(returnId, revision) {
 // ===== authorization =====
 // Whether an item may be answered at approval (responseImmediate Y): the policy allows instant credit (a credit or refund) or
 // advance replacement, and the actor holds the settlement authority: RECEIVABLE_EDIT for a credit or replacement, PAYMENT_EDIT
-// too for a refund.
-function immediateAllowed(policy, responseEnumId) {
+// too for a refund. Where the organization does not settle returns separately Mantle answers the item at approval as the
+// actor, approving the credit memo (Incoming to Approved, a transition that needs INVOICE_APPROVE), so a credit or refund
+// needs INVOICE_APPROVE too there; without it the item waits for receipt rather than failing the authorization.
+function immediateAllowed(policy, responseEnumId, settles) {
     if (!policy) return false
     if (responseEnumId === "RrspReplace") return policy.advanceReplacement === "Y" && access.has("RECEIVABLE_EDIT")
-    if (responseEnumId === "RrspCredit") return policy.instantCredit === "Y" && access.has("RECEIVABLE_EDIT")
+    const approvesCredit = settles || access.has("INVOICE_APPROVE")
+    if (responseEnumId === "RrspCredit") return policy.instantCredit === "Y" && access.has("RECEIVABLE_EDIT") && approvesCredit
     if (responseEnumId === "RrspRefund")
-        return policy.instantCredit === "Y" && access.has("RECEIVABLE_EDIT") && access.has("PAYMENT_EDIT")
+        return policy.instantCredit === "Y" && access.has("RECEIVABLE_EDIT") && access.has("PAYMENT_EDIT") && approvesCredit
     return false
 }
 // authorize#Return (RETURN_AUTHORIZE): an open customer return with lines, at its revision when one is given, its lines checked
@@ -1114,9 +1117,10 @@ function authorize(p) {
     if (core.manualReview && blank(p.reason))
         denied("REASON_REQUIRED", "No return policy applies to return " + header.returnId + ": give the reason you authorize it")
     const immediateItems = []
+    const settles = !!call("mantle.order.ReturnServices.get#ReturnSettlementMode", {returnId: header.returnId}).settlementRequired
     for (const item of items) {
         const line = core.evaluated.find(row => row.returnItemSeqId === item.returnItemSeqId)
-        const immediate = flag(p.immediate) && immediateAllowed(line?.policy || core.policy, item.returnResponseEnumId)
+        const immediate = flag(p.immediate) && immediateAllowed(line?.policy || core.policy, item.returnResponseEnumId, settles)
         if (immediate) immediateItems.push(item.returnItemSeqId)
         if ((item.responseImmediate || "N") !== (immediate ? "Y" : "N"))
             call("mantle.order.ReturnServices.update#ReturnItem", {

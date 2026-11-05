@@ -118,9 +118,7 @@ spec({
             organizationPartyId: org,
             filterDate: ec.user.nowTimestamp
         })
-        // the organization settles its returns through settle#Return (Accounting's D11 flag), so an immediate response
-        // allowed at authorization is recorded and not processed here
-        svc("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: org, returnSettlementRequired: "Y"})
+        // the organization keeps Mantle's default (returnSettlementRequired N): Mantle answers an immediate item at approval
         party(customer, "Return policy customer", "Customer")
         svc("create#mantle.facility.Facility", {facilityId: facility, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
         for (const productId of [productA, productB])
@@ -133,11 +131,12 @@ spec({
             })
         user("agent", ["SUPPORT_CASE_EDIT"])
         user("authorizer", ["RETURN_AUTHORIZE"])
-        user("creditor", ["RETURN_AUTHORIZE", "RECEIVABLE_EDIT"])
+        user("receivable", ["RETURN_AUTHORIZE", "RECEIVABLE_EDIT"])
+        user("creditor", ["RETURN_AUTHORIZE", "RECEIVABLE_EDIT", "INVOICE_APPROVE"])
         user("manager", ["RETURN_EXCEPTION_APPROVE"])
         user("admin", ["RETURN_POLICY_EDIT"])
         ids.orderId = sale([
-            [productA, 3, 20],
+            [productA, 4, 20],
             [productB, 2, 10]
         ])
     },
@@ -175,7 +174,7 @@ feature("with no policy a return is manual review, and its authorization needs a
     },
     then({evaluated, submitted, noReason, agentAuthorize, header}) {
         evaluated.outcome == "ManualReview"
-        evaluated.lineRows.find(row => row.productId == productA).eligibleQuantity == "3"
+        evaluated.lineRows.find(row => row.productId == productA).eligibleQuantity == "4"
         submitted.error == ""
         submitted.outcome == "ManualReview"
         header.statusId == "ReturnRequested"
@@ -263,7 +262,7 @@ feature("two drafts cannot together return more than was shipped and invoiced", 
         code(second) == "QUANTITY_EXCEEDS_ELIGIBLE"
         code(raise) == "QUANTITY_EXCEEDS_ELIGIBLE"
         evaluated.lineRows.find(row => row.productId == productB).eligibleQuantity == "0"
-        evaluated.lineRows.find(row => row.productId == productA).eligibleQuantity == "2"
+        evaluated.lineRows.find(row => row.productId == productA).eligibleQuantity == "3"
     }
 })
 
@@ -333,27 +332,51 @@ feature(
     }
 )
 
-feature("an instant credit at authorization needs the policy and the settlement authority", {
-    when() {
-        const submitted = run(users.agent, P + "submit#CustomerReturn", {
-            operationKey: key(),
-            orderId: ids.orderId,
-            lineList: [line(ids.orderId, productA, 1)]
-        })
-        const authorized = run(users.creditor, P + "authorize#Return", {
-            operationKey: key(),
-            returnId: submitted.returnId,
-            immediate: true
-        })
-        ids.immediateReturn = submitted.returnId
-        return {authorized, item: items(submitted.returnId)[0]}
-    },
-    then({authorized, item}) {
-        authorized.error == ""
-        authorized.result.immediateItems.length == 1
-        item.responseImmediate == "Y"
+feature(
+    "an instant credit at authorization needs the policy and the settlement authority, INVOICE_APPROVE where Mantle answers it",
+    {
+        when() {
+            const submit = () =>
+                run(users.agent, P + "submit#CustomerReturn", {
+                    operationKey: key(),
+                    orderId: ids.orderId,
+                    lineList: [line(ids.orderId, productA, 1)]
+                }).returnId
+            // RECEIVABLE_EDIT without INVOICE_APPROVE: authorized, the credit waits for receipt (F-P9-6)
+            const waitingId = submit()
+            const waiting = run(users.receivable, P + "authorize#Return", {
+                operationKey: key(),
+                returnId: waitingId,
+                immediate: true
+            })
+            const submitted = submit()
+            const authorized = run(users.creditor, P + "authorize#Return", {
+                operationKey: key(),
+                returnId: submitted,
+                immediate: true
+            })
+            ids.immediateReturn = submitted
+            return {
+                waiting,
+                waitingItem: items(waitingId)[0],
+                waitingBillings: rows("mantle.order.return.ReturnItemBilling", {returnId: waitingId}).length,
+                authorized,
+                item: items(submitted)[0],
+                billings: rows("mantle.order.return.ReturnItemBilling", {returnId: submitted}).length
+            }
+        },
+        then({waiting, waitingItem, waitingBillings, authorized, item, billings}) {
+            waiting.error == ""
+            waiting.result.immediateItems.length == 0
+            waitingItem.responseImmediate == "N"
+            waitingBillings == 0
+            authorized.error == ""
+            authorized.result.immediateItems.length == 1
+            item.responseImmediate == "Y"
+            billings == 1
+        }
     }
-})
+)
 
 feature("an exception: the reason the policy does not allow, approved through the topic at the message's revision", {
     when() {
