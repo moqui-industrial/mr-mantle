@@ -455,6 +455,33 @@ feature("cancel before any effect cancels the return shipment; a cancel after re
     }
 })
 
+feature("a replacement at authorization where the organization does not settle separately: only an advance replacement", {
+    when() {
+        // the unit the cancelled exception return freed, for a replacement
+        const submitted = run(users.agent, P + "submit#CustomerReturn", {
+            operationKey: key(),
+            orderId: ids.orderId,
+            lineList: [line(ids.orderId, productA, 1, "RrsnDefective", "RrspReplace")]
+        })
+        const refused = run(users.authorizer, P + "authorize#Return", {operationKey: key(), returnId: submitted.returnId})
+        const refusedItem = items(submitted.returnId)[0]
+        const refusedStatus = one("mantle.order.return.ReturnHeader", {returnId: submitted.returnId}).statusId
+        // the policy changed from now to allow an advance replacement
+        const changed = run(users.admin, P + "save#Policy", {returnPolicyId: ids.policyId, advanceReplacement: "Y"})
+        const authorized = run(users.authorizer, P + "authorize#Return", {operationKey: key(), returnId: submitted.returnId})
+        return {refused, refusedItem, refusedStatus, changed, authorized, item: items(submitted.returnId)[0]}
+    },
+    then({refused, refusedItem, refusedStatus, changed, authorized, item}) {
+        code(refused) == "REPLACEMENT_AFTER_RECEIPT"
+        !refusedItem.replacementOrderId
+        refusedStatus == "ReturnRequested"
+        changed.error == ""
+        authorized.error == ""
+        authorized.result.resultCode == "AUTHORIZED"
+        item.replacementOrderId != null
+    }
+})
+
 feature("the RMA link's record kind, and the RMA print", {
     when() {
         const access = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")

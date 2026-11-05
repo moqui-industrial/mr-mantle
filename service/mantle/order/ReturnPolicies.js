@@ -1116,8 +1116,29 @@ function authorize(p) {
     }
     if (core.manualReview && blank(p.reason))
         denied("REASON_REQUIRED", "No return policy applies to return " + header.returnId + ": give the reason you authorize it")
-    const immediateItems = []
+    // where the organization does not settle returns separately, Mantle's approval places a replacement order for every
+    // replacement item at once (respond#ReturnItems); that is an advance replacement, so only where the policy allows one
     const settles = !!call("mantle.order.ReturnServices.get#ReturnSettlementMode", {returnId: header.returnId}).settlementRequired
+    if (!settles) {
+        const early = items.filter(item => {
+            if (item.returnResponseEnumId !== "RrspReplace") return false
+            const policy = core.evaluated.find(row => row.returnItemSeqId === item.returnItemSeqId)?.policy || core.policy
+            return policy?.advanceReplacement !== "Y"
+        })
+        if (early.length)
+            denied(
+                "REPLACEMENT_AFTER_RECEIPT",
+                "Return " +
+                    header.returnId +
+                    ": " +
+                    partyName(header.vendorPartyId) +
+                    " does not settle returns separately, so authorizing would place the replacement now, and the return policy" +
+                    " allows no advance replacement; change the remedy of item " +
+                    early.map(item => item.returnItemSeqId).join(", ") +
+                    " or replace after receipt"
+            )
+    }
+    const immediateItems = []
     for (const item of items) {
         const line = core.evaluated.find(row => row.returnItemSeqId === item.returnItemSeqId)
         const immediate = flag(p.immediate) && immediateAllowed(line?.policy || core.policy, item.returnResponseEnumId, settles)
