@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Case assignment and saved replies (design-customer-service §9 AgentTeams, AssignmentRules, SavedReplies; impl-customer-service
+    P5, CS-ASSIGNMENT, CS-REPLIES, D24, F3, F71). Assignment: a team member's participation (eligible, the most open cases,
+    a substitute, a calendar) is effective-dated rows beside P2's membership (PrtServiceTeam); a queue's assignment rules are
+    effective-dated rows with their key fields audit-logged and typed condition rows (an allowlisted field, operator and value;
+    no new form element, F71), one winning rule then the fallback; the cursor of a rule (round robin's last agent, the last
+    result) is a record of its own, locked with the assignment so two intakes never take the same slot. A team's saved
+    replies are shared with its user group (moqui.security.UserGroup SVT_<team>, of type UgtServiceTeam), which
+    mantle.request.SupportCaseServices keeps in step with the team's members (F3). Saved replies: the text is a framework
+    EmailTextBlock (D24, a Comms text block); SavedReply holds its organization, language and declared variables, and
+    SavedReplyAction its ordered case actions, both keyed by emailTextBlockId. mantle.request.SupportCaseServices writes and
+    reads these (assign#Case, save#AssignmentRule, preview#Assignment, preview#SavedReply, apply#SavedReply); nothing here acts
+    until an organization has a rule or a saved reply. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- the rule a case was last assigned by and why (audit-logged, so each evaluation stays readable) -->
+    <extend-entity entity-name="CaseProfile" package="mantle.request.support">
+        <field name="assignmentRuleId" type="id" enable-audit-log="update"><description>The assignment rule row the case was
+            last assigned by (assign#Case)</description></field>
+        <field name="assignmentOutcomeEnumId" type="id" enable-audit-log="update"/>
+        <field name="assignmentReason" type="text-medium" enable-audit-log="update"/>
+    </extend-entity>
+
+    <entity entity-name="ServiceTeamParticipation" package="mantle.request.support" cache="never">
+        <description>How a team member takes cases (design AgentTeams TeamParticipation), effective-dated beside the dated
+            membership: whether assignment rules may pick them, the most open cases they hold, the agent who takes their turn
+            when they are out, and the calendar of their working hours (else their own schedule calendar, else the team's).
+            Saved by mantle.request.SupportCaseServices.save#ServiceTeamMember.</description>
+        <field name="participationId" type="id" is-pk="true"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="assignmentEligible" type="text-indicator" enable-audit-log="true"/>
+        <field name="maxActiveCases" type="number-integer" enable-audit-log="true"/>
+        <field name="substitutePartyId" type="id" enable-audit-log="true"/>
+        <field name="calendarId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" title="Substitute" related="mantle.party.Party" short-alias="substitute">
+            <key-map field-name="substitutePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.calendar.Calendar" short-alias="calendar"/>
+        <index name="SVC_TEAM_PART"><index-field name="teamPartyId"/><index-field name="partyId"/></index>
+        <seed-data>
+            <!-- a service team's user group (its saved replies' audience, F3) -->
+            <moqui.basic.Enumeration enumId="UgtServiceTeam" description="Service team" enumTypeId="UserGroupType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ServiceAssignmentRule" package="mantle.request.support" cache="never">
+        <description>An assignment rule of a service queue (design AssignmentRules), effective-dated with its key fields
+            audit-logged: its order among the queue's rules (sequenceNum, the lowest first), its conditions
+            (ServiceAssignmentCondition rows, all must hold), the distribution (manual leaves the case for an agent to take;
+            round robin; least open), who is eligible (the team, the queue's by default, and optionally only some of its
+            members), whether their working hours count, the most open cases an agent may hold, and the fallback assignee.
+            A draft has no from date; a change of a published rule is a new row naming the one it replaces (previousRuleId),
+            which it ends; rootRuleId is the first row's id, which the cursor is kept by. Saved by
+            mantle.request.SupportCaseServices.save#AssignmentRule.</description>
+        <field name="assignmentRuleId" type="id" is-pk="true"/>
+        <field name="rootRuleId" type="id"/>
+        <field name="previousRuleId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="requestCategoryId" type="id" enable-audit-log="true"/>
+        <field name="ruleName" type="text-medium" enable-audit-log="true"/>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"/>
+        <field name="distributionEnumId" type="id" enable-audit-log="true"/>
+        <field name="eligibleTeamPartyId" type="id" enable-audit-log="true"/>
+        <field name="eligiblePartyIds" type="text-medium" enable-audit-log="true"><description>Only these members of the team,
+            comma separated; empty: every member</description></field>
+        <field name="respectSchedule" type="text-indicator" enable-audit-log="true"/>
+        <field name="maxOpenCases" type="number-integer" enable-audit-log="true"/>
+        <field name="fallbackPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.request.RequestCategory" short-alias="queue"/>
+        <relationship type="one" title="AssignmentDistribution" related="moqui.basic.Enumeration" short-alias="distribution">
+            <key-map field-name="distributionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="eligibleTeamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Fallback" related="mantle.party.Party" short-alias="fallback">
+            <key-map field-name="fallbackPartyId" related="partyId"/></relationship>
+        <index name="SVC_ASSIGN_RULE_QUEUE"><index-field name="requestCategoryId"/></index>
+        <index name="SVC_ASSIGN_RULE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Assignment Distribution" enumTypeId="AssignmentDistribution"/>
+            <moqui.basic.Enumeration enumId="AdManual" description="Manual: an agent takes it" sequenceNum="1" enumTypeId="AssignmentDistribution"/>
+            <moqui.basic.Enumeration enumId="AdRoundRobin" description="Round robin" sequenceNum="2" enumTypeId="AssignmentDistribution"/>
+            <moqui.basic.Enumeration enumId="AdLeastOpen" description="Fewest open cases" sequenceNum="3" enumTypeId="AssignmentDistribution"/>
+            <!-- what an evaluation did (CaseProfile, the cursor's last result) -->
+            <moqui.basic.EnumerationType description="Assignment Outcome" enumTypeId="AssignmentOutcome"/>
+            <moqui.basic.Enumeration enumId="AoAssigned" description="Assigned by the rule" sequenceNum="1" enumTypeId="AssignmentOutcome"/>
+            <moqui.basic.Enumeration enumId="AoFallback" description="Assigned to the fallback" sequenceNum="2" enumTypeId="AssignmentOutcome"/>
+            <moqui.basic.Enumeration enumId="AoManual" description="Left for an agent to take" sequenceNum="3" enumTypeId="AssignmentOutcome"/>
+            <moqui.basic.Enumeration enumId="AoNoAgent" description="No eligible agent: left unassigned" sequenceNum="4" enumTypeId="AssignmentOutcome"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ServiceAssignmentCondition" package="mantle.request.support" cache="never">
+        <description>A typed condition of an assignment rule row (design AssignmentRuleEdit; F71): an allowlisted case field,
+            an operator that field takes and a value of its type, checked by save#AssignmentRule. A rule's conditions are
+            its row's: a change of a published rule copies them onto its new row.</description>
+        <field name="assignmentRuleId" type="id" is-pk="true"/>
+        <field name="conditionSeqId" type="id" is-pk="true"/>
+        <field name="fieldEnumId" type="id"/>
+        <field name="operatorEnumId" type="id"/>
+        <field name="conditionValue" type="text-medium"/>
+        <relationship type="one" related="mantle.request.support.ServiceAssignmentRule" short-alias="rule"/>
+        <relationship type="one" title="AssignmentConditionField" related="moqui.basic.Enumeration" short-alias="field">
+            <key-map field-name="fieldEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="AssignmentConditionOperator" related="moqui.basic.Enumeration" short-alias="operator">
+            <key-map field-name="operatorEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <!-- the case fields a condition reads (enumCode the value's kind) -->
+            <moqui.basic.EnumerationType description="Assignment Condition Field" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfType" description="Case type" sequenceNum="1" enumCode="RequestType" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfBand" description="Priority band" sequenceNum="2" enumCode="CasePriorityBand" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfPriority" description="Priority" sequenceNum="3" enumCode="priority" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfChannel" description="Channel" sequenceNum="4" enumCode="SalesChannel" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfTag" description="Tag" sequenceNum="5" enumCode="RequestTag" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.Enumeration enumId="AcfCustomer" description="Customer" sequenceNum="6" enumCode="customer" enumTypeId="AssignmentConditionField"/>
+            <moqui.basic.EnumerationType description="Assignment Condition Operator" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoIs" description="is" sequenceNum="1" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoIsNot" description="is not" sequenceNum="2" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoAtMost" description="is at most" sequenceNum="3" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoAtLeast" description="is at least" sequenceNum="4" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoHas" description="has" sequenceNum="5" enumTypeId="AssignmentConditionOperator"/>
+            <moqui.basic.Enumeration enumId="AcoHasNot" description="does not have" sequenceNum="6" enumTypeId="AssignmentConditionOperator"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ServiceAssignmentCursor" package="mantle.request.support" cache="never">
+        <description>The distribution state of an assignment rule (design AssignmentRules: a record of its own, locked with the
+            assignment so two intakes cannot take the same slot), kept by the rule's first row (rootRuleId) across its
+            changes: the agent round robin gave the last case, and the last result for the rule list.</description>
+        <field name="rootRuleId" type="id" is-pk="true"/>
+        <field name="lastPartyId" type="id"/>
+        <field name="lastRequestId" type="id"/>
+        <field name="lastOutcomeEnumId" type="id"/>
+        <field name="lastResultText" type="text-medium"/>
+        <field name="lastAssignedDate" type="date-time"/>
+        <field name="assignedCount" type="number-integer"/>
+    </entity>
+
+    <entity entity-name="SavedReply" package="mantle.request.support" cache="never">
+        <description>A saved reply's service facts (design SavedReplies; CS-REPLIES, D24), keyed by its Comms text block
+            (moqui.basic.email.EmailTextBlock, which holds the title, shortcut, body, owner and the group it is shared with:
+            personal, a team's group or the service-wide group): the organization it is for, its language, the variables it
+            uses, and whether it is offered. Its case actions are SavedReplyAction rows.</description>
+        <field name="emailTextBlockId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="localeId" type="text-short"/>
+        <field name="variableNames" type="text-medium"><description>The variables the text uses, comma separated (as the
+            last save found them)</description></field>
+        <field name="disabled" type="text-indicator"/>
+        <field name="subject" type="text-medium"><description>The subject of the reply when it starts a thread</description></field>
+        <relationship type="one" related="moqui.basic.email.EmailTextBlock" short-alias="textBlock"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+    </entity>
+
+    <entity entity-name="SavedReplyAction" package="mantle.request.support" cache="never">
+        <description>A case action of a saved reply (design SavedReplies ReplyEdit), in sequence: set the status (with a
+            resolution or reason), add a tag, assign (an agent, or the user who applies it), set the priority, or add an internal
+            note. apply#SavedReply runs them on the case with the reply, in one transaction, after the agent saw them in
+            preview#SavedReply.</description>
+        <field name="savedReplyActionId" type="id" is-pk="true"/>
+        <field name="emailTextBlockId" type="id"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="actionEnumId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="resolutionEnumId" type="id"/>
+        <field name="tagEnumId" type="id"/>
+        <field name="assigneePartyId" type="id"/>
+        <field name="priority" type="number-integer"/>
+        <field name="noteText" type="text-long"/>
+        <relationship type="one" related="mantle.request.support.SavedReply" short-alias="reply"/>
+        <relationship type="one" title="SavedReplyAction" related="moqui.basic.Enumeration" short-alias="action">
+            <key-map field-name="actionEnumId" related="enumId"/></relationship>
+        <index name="SAVED_REPLY_ACTION_TB"><index-field name="emailTextBlockId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Saved Reply Action" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraSetStatus" description="Set the status" sequenceNum="1" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraAddTag" description="Add a tag" sequenceNum="2" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraAssign" description="Assign to" sequenceNum="3" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraAssignSelf" description="Assign to me" sequenceNum="4" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraSetPriority" description="Set the priority" sequenceNum="5" enumTypeId="SavedReplyAction"/>
+            <moqui.basic.Enumeration enumId="SraAddNote" description="Add an internal note" sequenceNum="6" enumTypeId="SavedReplyAction"/>
+        </seed-data>
+    </entity>
+</entities>

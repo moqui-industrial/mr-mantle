@@ -697,6 +697,13 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="SupportCaseSlaBreach" inboxEnumId="NinNotifications" description="Case Past Its Due Time" typeString="danger"
             showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${clockLabel} of case ${requestId} was due ${dueText}: ${requestName}"/>
+    <!-- the assignment topic (mantle.request.SupportCaseServices.assign#Case; impl-customer-service P5, CS-ASSIGNMENT): a case
+        no eligible agent could take, left unassigned, to the managers of its queue's team: requestId, requestName,
+        customerName, queueName, reason, the case as the record. The app that works cases sets the link (IronStone Customer
+        Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SupportCaseUnassigned" inboxEnumId="NinNotifications" description="Case Left Unassigned" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="No agent could take case ${requestId} in ${queueName}: ${requestName}"/>
     <!-- the warning and breach scan of case clocks (CS-JOBS): every five minutes, a bounded batch, a failing case logged by its
         id and the rest going on, idempotent by episode -->
     <moqui.service.job.ServiceJob jobName="scan_CaseSla" description="Warn of and record case service level breaches"
