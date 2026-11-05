@@ -376,6 +376,19 @@ function caseOf(requestId, lock = false) {
         revision: revisionOf(requestId, request)
     }
 }
+// P8: a case merged into another is no longer worked (CaseRelations.js): a change is refused naming the case it went into.
+function refuseMerged(theCase) {
+    const merged = Array.from(
+        find("mantle.request.support.CaseRelation", {fromRequestId: theCase.requestId, relationTypeEnumId: "CrtMerge"})
+            .limit(1)
+            .list()
+    )[0]
+    if (merged)
+        denied(
+            "CASE_MERGED",
+            "Case " + theCase.requestId + " was merged into case " + merged.toRequestId + "; work on case " + merged.toRequestId
+        )
+}
 function checkRevision(theCase, caseRevision) {
     if (!blank(caseRevision) && Number(caseRevision) !== theCase.revision)
         denied("STALE_CASE", "Case " + theCase.requestId + " changed; its current revision is " + theCase.revision)
@@ -509,6 +522,7 @@ function create(p) {
 function update(p) {
     requirePermission("SUPPORT_CASE_EDIT")
     const theCase = caseOf(p.requestId, true)
+    refuseMerged(theCase)
     checkRevision(theCase, p.caseRevision)
     const mine = !theCase.assigneePartyId || theCase.assigneePartyId === ec.user.userAccount?.partyId
     if (!mine && !access.has("SUPPORT_CASE_MANAGE"))
@@ -563,6 +577,7 @@ function completedDate(theCase) {
 function transition(p) {
     requirePermission("SUPPORT_CASE_EDIT")
     const theCase = caseOf(p.requestId, true)
+    refuseMerged(theCase)
     checkRevision(theCase, p.caseRevision)
     const fromStatusId = theCase.request.statusId
     const toStatusId = text(p.toStatusId)
@@ -613,6 +628,7 @@ function transition(p) {
 function tags(p) {
     requirePermission("SUPPORT_CASE_EDIT")
     const theCase = caseOf(p.requestId)
+    refuseMerged(theCase)
     const wanted = listOf(p.tagEnumIds)
     for (const tagEnumId of wanted)
         if (one("moqui.basic.Enumeration", {enumId: tagEnumId})?.enumTypeId !== "RequestTag")
@@ -931,6 +947,14 @@ function customerReply(p) {
     if (!profile) return {}
     const event = one("mantle.party.communication.CommunicationEvent", {communicationEventId: p.communicationEventId})
     if (!event?.fromPartyId || event.communicationEventTypeId === "Comment") return {}
+    // P8: a message a merge or split referenced on this case is the source's, no new reply
+    if (
+        find("mantle.request.support.CaseRelationItem", {
+            toRequestId: p.requestId,
+            communicationEventId: p.communicationEventId
+        }).count() > 0
+    )
+        return {}
     // an automatic message (an autoresponder's, filed on its case only: P6) tells no one
     const purpose = purposeEnumId =>
         one("mantle.party.communication.CommunicationEventPurpose", {
@@ -1043,6 +1067,10 @@ const operations = {
     partiesOf,
     roleParty,
     transitionFor,
+    // P8: CaseRelations.js (merge, split, follow-up, closing)
+    refuseMerged,
+    listOf,
+    typeOf,
     assignParty: assign,
     transitionCase: transition,
     setTags: tags,

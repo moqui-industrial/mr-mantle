@@ -309,7 +309,10 @@ feature(
                 replied,
                 held,
                 pause,
-                statuses: rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetStatus"})
+                // in the order they were made (a read without an order comes back in the table's order, which updates change)
+                statuses: rows(EVENT, {requestId: state.caseA, eventTypeEnumId: "SetStatus"}).sort(
+                    (a, b) => Number(a.caseSlaEventId) - Number(b.caseSlaEventId)
+                )
             }
         },
         then({waiting, paused, pausedDue, resumed, replied, held, pause, statuses}) {
