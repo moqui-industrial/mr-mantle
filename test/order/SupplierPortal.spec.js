@@ -515,10 +515,23 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
             orderId: prefix + "_PO",
             holdTypeEnumId: "OhtChange",
             sourceId: prefix + "_CHANGE",
-            appliedRevision: 2,
+            appliedRevision: 3,
             returnStatusId: "OrderSent",
             placedDate: ec.user.nowTimestamp
         })
+        // the revision applied under the hold, not yet approved or sent: line 01 raised to 12 at 6.00, a line added
+        call("update#mantle.order.OrderItem", {orderId: prefix + "_PO", orderItemSeqId: "01", quantity: 12, unitAmount: 6})
+        call("create#mantle.order.OrderItem", {
+            orderId: prefix + "_PO",
+            orderItemSeqId: "02",
+            orderPartSeqId: "01",
+            itemTypeEnumId: "ItemInventory",
+            productId: product,
+            itemDescription: "Unsent revision line",
+            quantity: 3,
+            unitAmount: 5
+        })
+        call("update#mantle.order.OrderHeader", {orderId: prefix + "_PO", orderRevision: 3})
         const held = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO"}, state.contact)
         const heldAcknowledged = page(
             "acknowledgePurchaseOrder",
@@ -535,6 +548,12 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
     },
     then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged}) {
         held.capabilities.canAcknowledge === false
+        // the order as last sent: revision 2, line 01 at 10, no added line (P17 review)
+        held.order.revision === 2
+        held.lines.length === 1
+        held.lines[0].quantityText === "10"
+        !JSON.stringify(held).includes("Unsent revision line")
+        !held.lines[0].priceText.includes("6")
         heldAcknowledged.errorKind === "Conflict"
         heldAcknowledged.errorMessage.includes("The buyer is revising this order")
         unsentId != null

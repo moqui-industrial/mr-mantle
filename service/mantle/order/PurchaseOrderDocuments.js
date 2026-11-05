@@ -438,6 +438,8 @@ function recipientsOfOrganization(organizationPartyId) {
 const operations = {print, send}
 ;({
     issue,
+    // P17 review: the order as of a time, for the Supplier app's page of the revision last sent (SupplierPortal.js)
+    orderAt,
     // P9: the reminders' recipients (PurchaseRevisions.js), as the send's
     recipientsOf,
     execute: (op, parameters) => {
