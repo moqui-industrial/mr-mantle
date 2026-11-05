@@ -156,9 +156,18 @@ spec({
             "KNS_CASE",
             "Email",
             state.agent,
-            "<p>Hello Ana Spec, hold the pair button for five seconds.</p><p>Write to ana@example.com or call 555-123-4567 about order KNSORD77.</p>"
+            "<p>Hello Ana Spec, hold the pair button for five seconds. Thanks, Ana!</p><p>Write to ana@example.com or call 555-123-4567 about order KNSORD77.</p>"
         )
         state.note = message("KNS_CASE", "Comment", state.agent, "<p>Internal: the customer was rude.</p>")
+        // an email among staff is internal too
+        state.staffEmail = call("create#mantle.party.communication.CommunicationEvent", {
+            communicationEventTypeId: "Email",
+            fromPartyId: state.agent,
+            toPartyId: state.author,
+            body: "<p>The board costs us 4 dollars.</p>",
+            entryDate: ec.user.nowTimestamp
+        }).communicationEventId
+        call("create#mantle.request.RequestCommEvent", {requestId: "KNS_CASE", communicationEventId: state.staffEmail})
     },
     setup() {
         ec.artifactExecution.disableAuthz()
@@ -454,6 +463,7 @@ feature("an article from a case: redacted, unpublished, in the source's draft sp
                 : null,
             again: create(state.author, {title: "Pairing a Z100 thermostat", communicationEventIds: [state.outward]}),
             internalNote: create(state.author, {title: "Notes", communicationEventIds: [state.note]}),
+            staffEmail: create(state.author, {title: "Costs", communicationEventIds: [state.staffEmail], preview: true}),
             byAgent: create(state.agent, {title: "By an agent", body: "text"}),
             otherOrganization: create(state.otherAdmin, {title: "Theirs", body: "text"}),
             notDraftSpace: create(state.author, {title: "Elsewhere", body: "text", wikiSpaceId: "KNSINT"})
@@ -465,6 +475,7 @@ feature("an article from a case: redacted, unpublished, in the source's draft sp
         !r.preview.text.includes("ana@example.com")
         !r.preview.text.includes("555-123-4567")
         !r.preview.text.includes("KNSORD77")
+        !/\bAna\b/.test(r.preview.text)
         r.made.error == ""
         r.made.wikiSpaceId == "KNSDRFT"
         r.made.pagePath == "drafts/Pairing a Z100 thermostat"
@@ -476,8 +487,45 @@ feature("an article from a case: redacted, unpublished, in the source's draft sp
         r.link != null
         code(r.again) == "PAGE_EXISTS"
         code(r.internalNote) == "INTERNAL_MESSAGE"
+        code(r.staffEmail) == "INTERNAL_MESSAGE"
         code(r.byAgent) == "PERMISSION_DENIED"
         code(r.otherOrganization) == "RECORD_UNAVAILABLE"
         code(r.notDraftSpace) == "SPACE_UNAVAILABLE"
+    }
+})
+
+feature("a part of a space kept internal is never suggested to customers, even when it is not suggested at all", {
+    when() {
+        call(W + "create#WikiSpace", {wikiSpaceId: "KNSKB", description: "Spec knowledge base"})
+        const faq = page("KNSKB", "faq", "Z200 heater reset", "Hold reset.")
+        const staff = page("KNSKB", "staff", "Z200 heater reset codes", "Service codes.")
+        const save = values =>
+            run(
+                state.admin,
+                K + "save#ServiceKnowledgeSource",
+                Object.assign({organizationPartyId: org, localeLanguage: "en"}, values)
+            )
+        save({wikiSpaceId: "KNSKB", audienceEnumId: "SkaCustomer"})
+        save({wikiSpaceId: "KNSKB", pagePathPrefix: "staff", audienceEnumId: "SkaInternal", allowSuggestions: "N"})
+        const ids = out => (out.articleList || []).map(row => row.wikiPageId)
+        return {
+            faq,
+            staff,
+            customerIds: ids(
+                run(state.agent, K + "find#ArticleSuggestions", {
+                    organizationPartyId: org,
+                    text: "Z200 heater reset",
+                    customerVisible: true
+                })
+            ),
+            agentIds: ids(run(state.agent, K + "find#ArticleSuggestions", {organizationPartyId: org, text: "Z200 heater reset"})),
+            published: run(state.agent, K + "get#PublishedArticle", {wikiPageId: staff.wikiPageId})
+        }
+    },
+    then(r) {
+        r.customerIds.includes(r.faq.wikiPageId)
+        !r.customerIds.includes(r.staff.wikiPageId)
+        !r.agentIds.includes(r.staff.wikiPageId)
+        code(r.published) == "ARTICLE_UNAVAILABLE"
     }
 })

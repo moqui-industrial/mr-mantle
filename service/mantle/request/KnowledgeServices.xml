@@ -178,6 +178,26 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="workEffortIds" from="out.workEffortIds"/>
         </actions>
     </service>
+    <service verb="review" noun="ArticleFeedbackItem" allow-remote="false">
+        <description>Internal to review#ArticleFeedback, which runs it in a transaction of its own per feedback: the feedback
+            refused when of another organization (RECORD_UNAVAILABLE) or reviewed already (ALREADY_REVIEWED); for AfdImprove the
+            task given linked to its page, else one made (the batch's comments in it); the feedback reviewed. Needs
+            SUPPORT_KNOWLEDGE_EDIT.</description>
+        <in-parameters>
+            <parameter name="articleFeedbackId" required="true"/>
+            <parameter name="articleFeedbackIds" type="List"/>
+            <parameter name="decisionEnumId" required="true"/>
+            <parameter name="reviewNote" allow-html="safe"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="workEffortId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="workEffortId" from="knowledge.execute('reviewFeedbackItem', context).workEffortId || null"/>
+        </actions>
+    </service>
     <service verb="make" noun="ArticleTask" allow-remote="false">
         <description>Internal, for review#ArticleFeedback and suggest#ArticleEdit, which check the permission: a task on a page
             (WikiPageWorkEffort) for an assignee (a review team), with the case it came from (RequestWorkEffort).</description>
@@ -215,9 +235,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="ArticleFromCase">
         <description>A draft article from a case (design CaseToArticle ArticleDraft) in a draft space of the case's
             organization's knowledge sources: the title and text given, or the text of the outward and customer messages chosen
-            (communicationEventIds; an internal note or message is refused: INTERNAL_MESSAGE), with the case's personal data
-            (its customer's and contact's names, email addresses, phone numbers and street addresses, the orders and returns
-            it is on, and anything shaped like an email address or phone number) replaced; a new page, unpublished, linked to
+            (communicationEventIds: an email of the service desk to the customer or contact, or theirs; a note, or an email among
+            staff or to anyone else, is internal and refused: INTERNAL_MESSAGE), with the case's personal data (the names, ids,
+            email addresses, phone numbers and street addresses of its parties outside the service desk and of its emails'
+            senders and recipients, the records it is linked to but its products, the customer's orders, returns and invoices,
+            and anything shaped like an email address or phone number) replaced; a new page, unpublished, linked to
             the case by WikiPageRequest, and left to Commons' review and publication. With preview, the redacted text and what
             was taken out, nothing written. Needs SUPPORT_KNOWLEDGE_EDIT, the case of the user's organization
             (RECORD_UNAVAILABLE) and a draft space the user may add pages to (SPACE_UNAVAILABLE); refuses a page already at

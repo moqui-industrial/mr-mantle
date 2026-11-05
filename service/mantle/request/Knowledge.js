@@ -142,12 +142,20 @@ const covers = (source, page) => {
     const path = String(page.pagePath || "")
     return !prefix || path === prefix || path.startsWith(prefix + "/")
 }
-// The source a page belongs to among the given ones: of its space, the longest matching prefix (the first by priority of
-// equal ones).
+// The source a page belongs to among the given ones: of its space, the longest matching prefix (of equal ones an internal
+// source, else the first by priority, so a page two sources claim alike is never taken for a customer article).
 function sourceOfPage(sources, page) {
     let best = null
-    for (const source of sources)
-        if (covers(source, page) && (!best || prefixOf(source).length > prefixOf(best).length)) best = source
+    for (const source of sources) {
+        if (!covers(source, page)) continue
+        const length = prefixOf(source).length,
+            bestLength = best ? prefixOf(best).length : -1
+        if (
+            length > bestLength ||
+            (length === bestLength && source.audienceEnumId === "SkaInternal" && best.audienceEnumId !== "SkaInternal")
+        )
+            best = source
+    }
     return best
 }
 // The source an article is in for an organization (or any organization), or null.
@@ -276,7 +284,11 @@ function suggestions(p) {
     if (!customerVisible) requireOrganization(organizationPartyId)
     else if (!organizationPartyId || !isInternal(organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Organization " + (organizationPartyId || "") + " is not available")
-    const sources = currentSources([organizationPartyId]).filter(source => source.allowSuggestions !== "N")
+    // a page's own source is found among all the current ones (an internal part not suggested still keeps its pages from a
+    // broader customer source); only the sources suggested, and on a customer-visible surface only customer and public ones,
+    // are offered
+    const allSources = currentSources([organizationPartyId])
+    const sources = allSources.filter(source => source.allowSuggestions !== "N")
     const offered = customerVisible ? sources.filter(source => customerAudiences.includes(source.audienceEnumId)) : sources
     const requesterLanguageCode = requesterLanguage(p, theCase)
     const words = wordsOf(blank(p.text) && theCase ? theCase.request.requestName : p.text)
@@ -291,7 +303,7 @@ function suggestions(p) {
         const space = one(SPACE, {wikiSpaceId: spaceId})
         if (!space) continue
         if (customerVisible ? space.restrictView === "Y" : !scope.spaceIds.has(spaceId)) continue
-        const spaceSources = sources.filter(source => source.wikiSpaceId === spaceId)
+        const spaceSources = allSources.filter(source => source.wikiSpaceId === spaceId)
         const pages = find(PAGE, {wikiSpaceId: spaceId})
             .condition(
                 factory.makeCondition(
@@ -385,7 +397,7 @@ function publishedArticle(p) {
         ec.message.clearErrors()
         unavailable()
     }
-    if (!out || (out.versionName && out.versionName !== page.publishedVersionName)) unavailable()
+    if (!out?.versionName || out.versionName !== page.publishedVersionName) unavailable()
     return {
         article: {
             wikiPageId: page.wikiPageId,
@@ -512,54 +524,29 @@ function reviewFeedback(p) {
     const results = []
     const tasks = new Map()
     const fail = (articleFeedbackId, error) => {
-        const code = lib.reasonCode(error)
+        const message = String(error.message || error).replace(/^(Error: )+/, "")
+        const code = lib.reasonCode({message}) || (/([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+):/.exec(message) || [])[1]
         results.push({
             articleFeedbackId,
             outcome: outcomeOf[code] || "Failed",
-            message: String(error.message || error).split("\n")[0]
+            message: message.split("\n")[0]
         })
     }
     for (const articleFeedbackId of ids) {
         try {
+            // the feedback, its task and its link in one transaction (review#ArticleFeedbackItem), so a failure leaves neither
             const feedback = one(FEEDBACK, {articleFeedbackId})
-            if (
-                !feedback ||
-                !feedback.organizationPartyId ||
-                (organizations && !organizations.includes(feedback.organizationPartyId))
-            )
-                denied("RECORD_UNAVAILABLE", "Feedback " + articleFeedbackId + " is not available")
-            if (feedback.statusId === "AfbReviewed")
-                denied("ALREADY_REVIEWED", "Feedback " + articleFeedbackId + " was reviewed already")
-            let workEffortId = null
-            if (decisionEnumId === "AfdImprove") {
-                workEffortId = linkedTask?.workEffortId || tasks.get(feedback.wikiPageId) || null
-                if (!workEffortId) {
-                    const page = one(PAGE, {wikiPageId: feedback.wikiPageId})
-                    const source = page ? articleSource(page, [feedback.organizationPartyId]) : null
-                    const comments = rows(FEEDBACK, {wikiPageId: feedback.wikiPageId, statusId: "AfbSubmitted"})
-                        .filter(row => ids.includes(row.articleFeedbackId) && row.comment)
-                        .map(row => "- " + (row.helpful === "Y" ? "Helpful: " : "Not helpful: ") + row.comment)
-                    workEffortId = lib.probe("mantle.request.KnowledgeServices.make#ArticleTask", {
-                        wikiPageId: feedback.wikiPageId,
-                        workEffortName: "Improve article: " + pageTitle(page),
-                        description: [p.reviewNote, comments.join("\n")].filter(Boolean).join("\n\n") || null,
-                        assigneePartyId: p.assigneePartyId || source?.reviewTeamPartyId || null,
-                        dueDate: p.dueDate || null
-                    }).workEffortId
-                    tasks.set(feedback.wikiPageId, workEffortId)
-                } else if (linkedTask && !one(PAGE_TASK, {wikiPageId: feedback.wikiPageId, workEffortId}))
-                    lib.probe("create#" + PAGE_TASK, {wikiPageId: feedback.wikiPageId, workEffortId})
-            }
-            lib.probe("update#" + FEEDBACK, {
+            const out = lib.probe("mantle.request.KnowledgeServices.review#ArticleFeedbackItem", {
                 articleFeedbackId,
-                statusId: "AfbReviewed",
+                articleFeedbackIds: ids,
                 decisionEnumId,
-                reviewNote: text(plain(p.reviewNote))?.substring(0, 4000) || null,
-                reviewedByUserId: ec.user.userId,
-                reviewedDate: now(),
-                workEffortId
+                reviewNote: p.reviewNote || null,
+                assigneePartyId: p.assigneePartyId || null,
+                dueDate: p.dueDate || null,
+                workEffortId: linkedTask?.workEffortId || (feedback ? tasks.get(feedback.wikiPageId) : null) || null
             })
-            results.push({articleFeedbackId, outcome: "Done", message: "", workEffortId})
+            if (out.workEffortId && feedback) tasks.set(feedback.wikiPageId, out.workEffortId)
+            results.push({articleFeedbackId, outcome: "Done", message: "", workEffortId: out.workEffortId || null})
         } catch (error) {
             ec.logger.warn("Article feedback " + articleFeedbackId + " was not reviewed: " + (error.message || error))
             fail(articleFeedbackId, error)
@@ -573,6 +560,50 @@ function reviewFeedback(p) {
     }
     if (op) lib.complete(op, FEEDBACK, ids[0], result)
     return result
+}
+
+// review#ArticleFeedbackItem: one feedback of review#ArticleFeedback, in its own transaction: refused when of another
+// organization (RECORD_UNAVAILABLE) or reviewed already (ALREADY_REVIEWED); for AfdImprove the task given (an earlier one of
+// the batch, or the one to link) linked to the page, else one made with the batch's comments on the page; the feedback
+// reviewed.
+function reviewFeedbackItem(p) {
+    requirePermission("SUPPORT_KNOWLEDGE_EDIT")
+    const {articleFeedbackId, decisionEnumId} = p
+    const organizations = userOrganizations()
+    const feedback = one(FEEDBACK, {articleFeedbackId})
+    if (!feedback || !feedback.organizationPartyId || (organizations && !organizations.includes(feedback.organizationPartyId)))
+        denied("RECORD_UNAVAILABLE", "Feedback " + articleFeedbackId + " is not available")
+    if (feedback.statusId === "AfbReviewed") denied("ALREADY_REVIEWED", "Feedback " + articleFeedbackId + " was reviewed already")
+    let workEffortId = null
+    if (decisionEnumId === "AfdImprove") {
+        workEffortId = p.workEffortId || null
+        if (!workEffortId) {
+            const page = one(PAGE, {wikiPageId: feedback.wikiPageId})
+            const source = page ? articleSource(page, [feedback.organizationPartyId]) : null
+            const batch = listOf(p.articleFeedbackIds)
+            const comments = rows(FEEDBACK, {wikiPageId: feedback.wikiPageId, statusId: "AfbSubmitted"})
+                .filter(row => batch.includes(row.articleFeedbackId) && row.comment)
+                .map(row => "- " + (row.helpful === "Y" ? "Helpful: " : "Not helpful: ") + row.comment)
+            workEffortId = makeTask({
+                wikiPageId: feedback.wikiPageId,
+                workEffortName: "Improve article: " + pageTitle(page),
+                description: [p.reviewNote, comments.join("\n")].filter(Boolean).join("\n\n") || null,
+                assigneePartyId: p.assigneePartyId || source?.reviewTeamPartyId || null,
+                dueDate: p.dueDate || null
+            }).workEffortId
+        } else if (!one(PAGE_TASK, {wikiPageId: feedback.wikiPageId, workEffortId}))
+            call("create#" + PAGE_TASK, {wikiPageId: feedback.wikiPageId, workEffortId})
+    }
+    call("update#" + FEEDBACK, {
+        articleFeedbackId,
+        statusId: "AfbReviewed",
+        decisionEnumId,
+        reviewNote: text(plain(p.reviewNote))?.substring(0, 4000) || null,
+        reviewedByUserId: ec.user.userId,
+        reviewedDate: now(),
+        workEffortId
+    })
+    return {workEffortId}
 }
 
 // ===== suggest an edit (F15) =====
@@ -598,8 +629,20 @@ function suggestEdit(p) {
 }
 
 // ===== an article from a case =====
-// The personal data of a case, to take out of an article: its customer's and contact's names, their email addresses, phone
-// numbers and street addresses, and the orders and returns it is on; and any email address or phone number by its shape.
+// The parties outside the service desk on a case: its parties of any role and the senders and recipients of its emails that
+// are not staff.
+function outsideParties(theCase) {
+    const ids = theCase.parties.map(row => row.partyId)
+    for (const row of rows("mantle.request.RequestCommEvent", {requestId: theCase.requestId})) {
+        const event = one("mantle.party.communication.CommunicationEvent", {communicationEventId: row.communicationEventId})
+        if (event) ids.push(event.fromPartyId, event.toPartyId)
+    }
+    return Array.from(new Set(ids.filter(Boolean))).filter(partyId => !isStaff(partyId))
+}
+// The personal data of a case, to take out of an article: the names of the parties outside the service desk on it (first,
+// last and full), their ids, email addresses, phone numbers and street addresses; the records it is linked to but its
+// products (orders, returns, invoices, shipments...); the customer's own orders, returns and invoices; and any email address
+// or phone number by its shape.
 function personalTerms(theCase) {
     const terms = []
     const add = (kind, value) => {
@@ -607,15 +650,16 @@ function personalTerms(theCase) {
         if (term && term.length >= 3 && !terms.some(row => row.term.toLowerCase() === term.toLowerCase()))
             terms.push({kind, term})
     }
-    const partyIds = Array.from(
-        new Set(theCase.parties.filter(row => ["Customer", "Reporter"].includes(row.roleTypeId)).map(row => row.partyId))
-    ).filter(partyId => !isStaff(partyId))
+    const partyIds = outsideParties(theCase)
     for (const partyId of partyIds) {
+        add("name", partyId)
         const person = one("mantle.party.Person", {partyId})
         if (person) {
             add("name", [person.firstName, person.middleName, person.lastName].filter(Boolean).join(" "))
             add("name", [person.firstName, person.lastName].filter(Boolean).join(" "))
+            add("name", person.firstName)
             add("name", person.lastName)
+            add("name", person.nickname)
         }
         add("name", one("mantle.party.Organization", {partyId})?.organizationName)
         for (const row of rows("mantle.party.contact.PartyContactMech", {partyId})) {
@@ -626,12 +670,26 @@ function personalTerms(theCase) {
             if (phone?.contactNumber) add("phone", phone.contactNumber)
             const address = one("mantle.party.contact.PostalAddress", {contactMechId: row.contactMechId})
             if (address?.address1) add("address", address.address1)
+            if (address?.address2) add("address", address.address2)
             if (address?.postalCode) add("address", address.postalCode)
         }
     }
+    const keep = ["mantle.product.Product", "mantle.product.category.ProductCategory", "mantle.party.Party", PAGE]
     for (const link of rows("mantle.request.RequestRecord", {requestId: theCase.requestId}))
-        if (["mantle.order.OrderHeader", "mantle.order.return.ReturnHeader"].includes(link.recordEntityName))
-            add("order", link.recordId)
+        if (link.recordId && !keep.includes(link.recordEntityName)) add("order", link.recordId)
+    // the customer's own orders, returns and invoices (the most recent), an id quoted in a message though not linked
+    const customerIds = Array.from(
+        new Set(theCase.parties.filter(row => row.roleTypeId === "Customer").map(row => row.partyId))
+    ).filter(partyId => !isStaff(partyId))
+    const recent = (entity, field, idField, orderBy) =>
+        customerIds.length
+            ? Array.from(
+                  find(entity).condition(field, "in", customerIds).selectField(idField).orderBy(orderBy).limit(200).list()
+              ).map(row => row[idField])
+            : []
+    for (const id of recent("mantle.order.OrderPart", "customerPartyId", "orderId", "-orderId")) add("order", id)
+    for (const id of recent("mantle.order.return.ReturnHeader", "customerPartyId", "returnId", "-returnId")) add("order", id)
+    for (const id of recent("mantle.account.invoice.Invoice", "toPartyId", "invoiceId", "-invoiceId")) add("order", id)
     return terms.sort((a, b) => b.term.length - a.term.length)
 }
 const placeholders = {
@@ -654,16 +712,18 @@ function redact(value, terms) {
             return placeholders[kind]
         })
     }
+    // an email address first (a name in it is part of the address)
+    replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "email")
     // a term as a whole word (a last name inside another word stays)
     for (const {kind, term} of terms)
         replace(new RegExp((/^\w/.test(term) ? "\\b" : "") + escapeRegExp(term) + (/\w$/.test(term) ? "\\b" : ""), "gi"), kind)
-    replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "email")
     // a phone number: seven digits or more, not a date
     replace(/\+?\d[\d ().-]{6,}\d/g, "phone", found => found.replace(/\D/g, "").length >= 7 && !/^\d{4}-\d{2}-\d{2}$/.test(found))
     return {text: out, removed: Object.entries(removed).map(([kind, count]) => ({kind, count}))}
 }
-// The messages of a case and what each is for an article: outward (an email of the service desk), customer (an email of the
-// customer or the contact), or internal (a note, an internal message): an internal one is never offered or taken.
+// The messages of a case and what each is for an article: outward (an email of the service desk to the customer or the
+// contact), customer (an email of the customer or the contact), or internal (a note, an email among staff or to anyone else
+// such as a supplier): an internal one is never offered or taken.
 function caseMessages(theCase) {
     const customerSide = new Set(
         theCase.parties
@@ -680,7 +740,13 @@ function caseMessages(theCase) {
     ).map(event => ({
         event,
         kind:
-            event.communicationEventTypeId !== "Email" ? "internal" : customerSide.has(event.fromPartyId) ? "customer" : "outward"
+            event.communicationEventTypeId !== "Email"
+                ? "internal"
+                : customerSide.has(event.fromPartyId)
+                  ? "customer"
+                  : customerSide.has(event.toPartyId) && isStaff(event.fromPartyId)
+                    ? "outward"
+                    : "internal"
     }))
 }
 // create#ArticleFromCase: a draft article from a case's answer in a source's draft space of the case's organization: the
@@ -773,6 +839,7 @@ const operations = {
     recordFeedback,
     makeTask,
     reviewFeedback,
+    reviewFeedbackItem,
     suggestEdit,
     articleFromCase
 }
@@ -784,6 +851,7 @@ const operations = {
     caseMessages: requestId => caseMessages(caseOf(requestId)),
     personalTerms: requestId => personalTerms(caseOf(requestId)),
     customerAudiences,
+    isStaff,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off (the
     // wiki's own rules are asked as the user: get#WikiViewScope, get#WikiPageAccess)
     execute: (op, parameters) => {
