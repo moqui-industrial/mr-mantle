@@ -915,4 +915,214 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="statusId" from="out.statusId"/>
         </actions>
     </service>
+
+    <!-- ===== P8: merge, split and closing (CS-MERGE, CS-JOBS; CaseRelations.js): the lineage of cases (CaseRelation and its
+        items), the merge's carried clocks (SlaServices' Sla.js), the follow-up of a reply to a closed case, and auto-close ===== -->
+    <service verb="define" noun="MergeCasesParameters" type="interface">
+        <in-parameters>
+            <parameter name="targetRequestId" required="true"><description>The case kept</description></parameter>
+            <parameter name="sourceRequestIds" type="List" required="true"><description>The cases merged into it (at most
+                10)</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="MergeCases">
+        <description>What a merge would do (design MergeCases MergeSelection, MergePreview), writing nothing: each case's
+            subject, customer, queue, status, assignee, participants, messages by audience, files, work, linked records and
+            clocks, the clocks each source would carry (an open one as an obligation on the kept case, due as it was; a breach
+            kept), the problems that stop it, each naming its case (CASE_MERGED, CASE_CLOSED, TARGET_NOT_OPEN,
+            ORGANIZATION_MISMATCH, CUSTOMER_MISMATCH: another customer's duplicate is only linked), and the case revisions
+            to confirm with. Needs SUPPORT_CASE_MANAGE and every case of the user's organizations (RECORD_UNAVAILABLE);
+            refuses no source (SOURCE_REQUIRED), the kept case among the sources (SAME_CASE) and more than 10
+            (TOO_MANY_CASES).</description>
+        <implements service="mantle.request.SupportCaseServices.define#MergeCasesParameters"/>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="preview" from="relations.execute('previewMerge', context).preview"/>
+        </actions>
+    </service>
+    <service verb="merge" noun="Cases">
+        <description>Merges cases into the case kept (design MergeCases MergeConfirm), atomically: every case locked, each
+            source's relation (CrtMerge) with the reason and its items; its messages referenced on the kept case with their
+            audience and times unchanged, its records and work linked to it, its files listed; each open clock of a source
+            carried as an obligation, its breach kept, the kept case's own clocks untouched; the source cancelled as a
+            duplicate when open, and closed, so its changes are refused naming the kept case (CASE_MERGED) and a reply to
+            it goes to the kept case. Needs SUPPORT_CASE_MANAGE, the cases of the user's organizations
+            (RECORD_UNAVAILABLE), one customer and organization and no problem of preview#MergeCases (its code, naming the
+            case), a reason (REASON_REQUIRED) and an operation key (OPERATION_KEY_REQUIRED; a retry answers the first
+            result); a case changed since its revision is refused naming the current one (STALE_CASE).</description>
+        <implements service="mantle.request.SupportCaseServices.define#MergeCasesParameters"/>
+        <in-parameters>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+            <parameter name="caseRevisions"><description>The revisions the merge was previewed at: a map by case, or text
+                "id:revision,id:revision" (preview#MergeCases' caseRevisions)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="targetRequestId"/>
+            <parameter name="mergedRequestIds" type="List"/>
+            <parameter name="caseRelationIds" type="List"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="out" from="relations.execute('merge', context)"/>
+            <set field="targetRequestId" from="out.targetRequestId"/>
+            <set field="mergedRequestIds" from="out.mergedRequestIds"/>
+            <set field="caseRelationIds" from="out.caseRelationIds"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="define" noun="SplitCaseParameters" type="interface">
+        <in-parameters>
+            <parameter name="requestId" required="true"><description>The case split from</description></parameter>
+            <parameter name="communicationEventIds" type="List"><description>Its messages the new case takes</description></parameter>
+            <parameter name="recordKeys" type="List"><description>Its linked records the new case takes, each
+                "recordEntityName|recordId"</description></parameter>
+            <parameter name="workEffortIds" type="List"/>
+            <parameter name="requestContentIds" type="List"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="SplitCase">
+        <description>What a split would take (design SplitCase SplitSelection), writing nothing: the source's messages
+            (oldest first), linked records, work and files, each with its audience and whether it is chosen, and when the new
+            case's clock would start (the earliest chosen message's receipt, else now). Needs SUPPORT_CASE_EDIT, the case of
+            the user's organizations (RECORD_UNAVAILABLE), open (CASE_NOT_OPEN) and not merged (CASE_MERGED); refuses a chosen
+            item not on it (EVIDENCE_UNAVAILABLE).</description>
+        <implements service="mantle.request.SupportCaseServices.define#SplitCaseParameters"/>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="preview" from="relations.execute('previewSplit', context).preview"/>
+        </actions>
+    </service>
+    <service verb="split" noun="Case">
+        <description>A new case from some of a case's evidence (design SplitCase SplitNewCase), atomically: the source's
+            customer, contact and organization, the subject (NAME_REQUIRED), type, queue (one of the organization's:
+            QUEUE_UNAVAILABLE, TYPE_NOT_OFFERED), priority (PRIORITY_INVALID) and description given; its clocks from the
+            earliest chosen message's receipt, or from a start a manager gives with its reason (SUPPORT_CASE_MANAGE,
+            START_REASON_REQUIRED, DATE_INVALID for a time ahead), else now; assigned by the queue's rules unless an assignee
+            is given (ASSIGNEE_UNAVAILABLE); no template values unless they are given (then checked:
+            TEMPLATE_VALUES_INVALID). The chosen messages are referenced on it with their audience (the same customer reads
+            both cases), records and work linked, files listed; the relation (CrtSplit) and its items; the source stays open.
+            Needs SUPPORT_CASE_EDIT (another agent's case SUPPORT_CASE_MANAGE), the case of the user's organizations
+            (RECORD_UNAVAILABLE), open and not merged, an operation key (a retry answers the first result) and its revision
+            (STALE_CASE).</description>
+        <implements service="mantle.request.SupportCaseServices.define#SplitCaseParameters"/>
+        <in-parameters>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="priority"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="intakeDate" type="Timestamp"><description>A manager's start of the new case's clocks</description></parameter>
+            <parameter name="startReason"/>
+            <parameter name="reason"/>
+            <parameter name="templateFormId"/>
+            <parameter name="templateValues" type="Map"/>
+            <parameter name="caseRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"><description>The new case</description></parameter>
+            <parameter name="caseRelationId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="out" from="relations.execute('split', context)"/>
+            <set field="requestId" from="out.requestId"/>
+            <set field="caseRelationId" from="out.caseRelationId"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="create" noun="FollowUpCase">
+        <description>An agent's follow-up case of a closed or cancelled case, or one past its reopen window (design
+            StatusCategories: a cancelled case is only followed up): the same customer, organization and contact, the case's
+            queue while it is one, assigned by its rules, linked by the relation (CrtFollowUp). Needs SUPPORT_CASE_EDIT and the
+            case of the user's organizations (RECORD_UNAVAILABLE); refuses an open case (CASE_OPEN), one that can still be
+            reopened (CASE_REOPENABLE) and a merged one (CASE_MERGED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="caseRelationId"/>
+        </out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="out" from="relations.execute('createFollowUp', context)"/>
+            <set field="requestId" from="out.requestId"/>
+            <set field="caseRelationId" from="out.caseRelationId"/>
+        </actions>
+    </service>
+    <service verb="make" noun="FollowUpCase" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, after the commit of a customer's reply on a closed or cancelled case (or one past its reopen
+            window; Sla.js recordMessage, CaseRelations.js replyArrived): the follow-up case with the reply on it, once per
+            reply; a later reply joins the follow-up still open.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="followUpRequestId"/></out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="followUpRequestId" from="relations.execute('followUpReply', context).requestId || null"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseLineage">
+        <description>A case's lineage (design CaseDetail's lineage): each relation from or to it (merged into or from, split
+            into or from, followed up by or a follow-up of) with the other case, who, when, why and its items with their
+            audience; the case it was merged into (its redirect); whether it is closed, cancelled or resolved, may still be
+            reopened (the reopen window) or followed up, and whether it is still worked (actionable). A case of the user's
+            organizations only (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="lineage" type="Map"/></out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="lineage" from="relations.execute('lineage', context)"/>
+        </actions>
+    </service>
+    <service verb="close" noun="ResolvedCases" authenticate="anonymous-all" allow-remote="false">
+        <description>Auto-close (the close_ResolvedCases ServiceJob; design ServiceDefaults, CS-JOBS): for each organization
+            whose ServicePolicy in effect has an auto-close delay (autoCloseDays), a bounded batch (limit, 200) of its cases
+            resolved longer ago than that and not closed, oldest first; each in its own transaction (close#ResolvedCase) gets
+            CaseProfile.closedDate and keeps ReqCompleted, after which a reply makes a follow-up case. A case that fails is
+            logged and named in failedList and the rest go on, and one with a clock still running is named without taking a
+            place in the batch (CLOCK_OPEN); a rerun changes nothing.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="200"/>
+            <parameter name="requestIds" type="List"><description>Only these cases (a walk's own), else every organization's</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scannedCount" type="Integer"/>
+            <parameter name="closedCount" type="Integer"/>
+            <parameter name="failedList" type="List"><description>Maps of requestId and message</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="out" from="relations.execute('closeResolved', context)"/>
+            <set field="scannedCount" from="out.scannedCount"/>
+            <set field="closedCount" from="out.closedCount"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
+    <service verb="close" noun="ResolvedCase" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for close#ResolvedCases: one case, locked, closed when it is still Completed, not closed and
+            resolved longer ago than the delay, in the caller's new transaction; a resolved case with a clock still running
+            is refused (CLOCK_OPEN), never closed.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="autoCloseDays" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="closed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="relations" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseRelations.js')"/>
+            <set field="closed" from="!!relations.execute('closeOne', context).closed"/>
+        </actions>
+    </service>
 </services>

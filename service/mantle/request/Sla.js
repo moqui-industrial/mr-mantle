@@ -27,7 +27,8 @@ const REQUEST = "mantle.request.Request",
     TARGET = "mantle.request.support.ServiceLevelTarget",
     EPISODE = "mantle.request.support.CaseSlaEpisode",
     EVENT = "mantle.request.support.CaseSlaEvent",
-    COMM = "mantle.party.communication.CommunicationEvent"
+    COMM = "mantle.party.communication.CommunicationEvent",
+    RELATION_ITEM = "mantle.request.support.CaseRelationItem"
 const FIRST = "SlcFirstResponse",
     RESOLUTION = "SlcResolution"
 const RUNNING = "SlsRunning",
@@ -35,7 +36,8 @@ const RUNNING = "SlsRunning",
     MET = "SlsMet",
     MISSED = "SlsMissed",
     UNMET = "SlsUnmet",
-    CANCELLED = "SlsCancelled"
+    CANCELLED = "SlsCancelled",
+    MERGED = "SlsMerged"
 const openStates = [RUNNING, PAUSED]
 const minuteMs = 60000
 // message types that answer no one: a note, an automatic message, a status update, an internal message
@@ -80,6 +82,10 @@ function mappingCategory(caseWorkflowId, statusId) {
         currentRows(MAPPING, {caseWorkflowId: "CwfDefault", statusId})[0]
     return row?.statusCategoryEnumId || null
 }
+// Whether a status pauses a resolution clock of a policy: an internal hold only when the policy says so, else a status the
+// workflow maps to Paused.
+const pausesBy = (policy, caseWorkflowId, status) =>
+    status === "ReqOnHold" ? policy?.holdPauses === "Y" : mappingCategory(caseWorkflowId, status) === "CscPaused"
 function bandOf(priority) {
     const value = priority == null || priority === "" ? 5 : Number(priority)
     return (
@@ -186,14 +192,40 @@ function addEvent(fields) {
     return call("create#" + EVENT, Object.assign({eventDate: ec.user.nowTimestamp, userId: ec.user.userId || null}, fields))
         .caseSlaEventId
 }
+// The case's request locked FOR UPDATE before any of its clocks is written: the order update#Case, transition#Case and
+// merge#Cases lock in (the request, then its episodes), so a clock's writer and a case's change never wait on each other.
+const lockRequest = requestId => find(REQUEST, {requestId}).forUpdate(true).one()
 const episodesOf = requestId => Array.from(find(EPISODE, {requestId}).orderBy("clockEnumId").orderBy("sequenceNum").list())
+// A case's own clock in progress (a clock a merge carried onto it is an obligation beside it, P8)
 const openEpisode = (requestId, clockEnumId) =>
     Array.from(
-        find(EPISODE, {requestId, clockEnumId}).condition("stateEnumId", "in", openStates).orderBy("-sequenceNum").list()
+        find(EPISODE, {requestId, clockEnumId})
+            .condition("stateEnumId", "in", openStates)
+            .condition("carriedFromEpisodeId", "is-null", null)
+            .orderBy("-sequenceNum")
+            .list()
     )[0] || null
+// P8: the clocks in progress a merge carried onto the case from its sources (CaseRelations.js): each follows the case's own
+// clock of its kind (met by its response, paused and resumed with it, met or missed when it resolves) with its own due time
+const carriedOpen = (requestId, clockEnumId) =>
+    Array.from(
+        find(EPISODE, {requestId, clockEnumId})
+            .condition("stateEnumId", "in", openStates)
+            .condition("carriedFromEpisodeId", "is-not-null", null)
+            .list()
+    )
+// The case's own latest clock of a kind (none carried)
+const lastOwn = (requestId, clockEnumId) =>
+    Array.from(
+        find(EPISODE, {requestId, clockEnumId})
+            .condition("carriedFromEpisodeId", "is-null", null)
+            .orderBy("-sequenceNum")
+            .limit(1)
+            .list()
+    )[0]
 // The case's due date mirrors its current resolution clock (empty while it is paused), written through the entity.
 function mirrorDue(requestId) {
-    const episode = Array.from(find(EPISODE, {requestId, clockEnumId: RESOLUTION}).orderBy("-sequenceNum").limit(1).list())[0]
+    const episode = lastOwn(requestId, RESOLUTION)
     if (!episode) return
     const due = episode.stateEnumId === PAUSED ? null : msOf(episode.dueDate)
     const request = one(REQUEST, {requestId})
@@ -326,8 +358,7 @@ function recordStatus(p) {
         const policy = resolution?.serviceLevelPolicyId
             ? one(POLICY, {serviceLevelPolicyId: resolution.serviceLevelPolicyId})
             : null
-        const pauses = status =>
-            status === "ReqOnHold" ? policy?.holdPauses === "Y" : mappingCategory(profile.caseWorkflowId, status) === "CscPaused"
+        const pauses = status => pausesBy(policy, profile.caseWorkflowId, status)
         if (statusId === "ReqCancelled" || category === "CscCancelled") {
             for (const episode of episodesOf(requestId).filter(row => openStates.includes(row.stateEnumId))) {
                 episode.set("stateEnumId", CANCELLED)
@@ -336,12 +367,11 @@ function recordStatus(p) {
                 addEvent({requestId, caseSlaEpisodeId: episode.caseSlaEpisodeId, eventTypeEnumId: "SetCancelled", statusId})
             }
         } else if (statusId === "ReqCompleted" || category === "CscResolved" || category === "CscClosed") {
-            if (resolution) {
-                if (resolution.stateEnumId === PAUSED) resume(ctx, resolution, at)
-                complete(resolution, at, {statusId})
+            for (const clock of [resolution].concat(carriedOpen(requestId, RESOLUTION)).filter(Boolean)) {
+                if (clock.stateEnumId === PAUSED) resume(ctx, clock, at)
+                complete(clock, at, {statusId})
             }
-            const first = openEpisode(requestId, FIRST)
-            if (first) {
+            for (const first of [openEpisode(requestId, FIRST)].concat(carriedOpen(requestId, FIRST)).filter(Boolean)) {
                 // resolved with no response: the first response clock closes unmet, never as met
                 first.set("stateEnumId", UNMET)
                 first.set("actualDate", null)
@@ -352,9 +382,7 @@ function recordStatus(p) {
             }
         } else if (fromStatusId === "ReqCompleted" || fromCategory === "CscResolved") {
             // a reopen: a new resolution episode, bound to the row of the case's earlier one; first response never restarts
-            const last = Array.from(
-                find(EPISODE, {requestId, clockEnumId: RESOLUTION}).orderBy("-sequenceNum").limit(1).list()
-            )[0]
+            const last = lastOwn(requestId, RESOLUTION)
             const lastPolicy = last ? one(POLICY, {serviceLevelPolicyId: last.serviceLevelPolicyId}) : null
             if (last && (lastPolicy?.reopenEnumId || "SrpNewEpisode") === "SrpNewEpisode") {
                 const schedule = scheduleOfEpisode(last)
@@ -387,29 +415,39 @@ function recordStatus(p) {
                     dueDate: stamp(dueMs)
                 })
             } else addEvent({requestId, eventTypeEnumId: "SetReopen", fromStatusId, statusId})
-        } else if (resolution) {
-            if (pauses(statusId) && resolution.stateEnumId === RUNNING) {
-                resolution.set("stateEnumId", PAUSED)
-                resolution.set("pausedDate", stamp(at))
-                resolution.update()
-                addEvent({
-                    requestId,
-                    caseSlaEpisodeId: resolution.caseSlaEpisodeId,
-                    eventTypeEnumId: "SetPause",
-                    fromStatusId,
-                    statusId
-                })
-            } else if (!pauses(statusId) && resolution.stateEnumId === PAUSED) {
-                const out = resume(ctx, resolution, at)
-                addEvent({
-                    requestId,
-                    caseSlaEpisodeId: resolution.caseSlaEpisodeId,
-                    eventTypeEnumId: "SetResume",
-                    fromStatusId,
-                    statusId,
-                    dueDate: resolution.dueDate,
-                    reasonText: durationText(out.pausedMinutes) + " paused"
-                })
+        } else {
+            // the case's resolution clock and those a merge carried onto it pause and resume together, each by its policy
+            for (const clock of [resolution].concat(carriedOpen(requestId, RESOLUTION)).filter(Boolean)) {
+                const clockPolicy =
+                    clock === resolution
+                        ? policy
+                        : clock.serviceLevelPolicyId
+                          ? one(POLICY, {serviceLevelPolicyId: clock.serviceLevelPolicyId})
+                          : null
+                const paused = pausesBy(clockPolicy, profile.caseWorkflowId, statusId)
+                if (paused && clock.stateEnumId === RUNNING) {
+                    clock.set("stateEnumId", PAUSED)
+                    clock.set("pausedDate", stamp(at))
+                    clock.update()
+                    addEvent({
+                        requestId,
+                        caseSlaEpisodeId: clock.caseSlaEpisodeId,
+                        eventTypeEnumId: "SetPause",
+                        fromStatusId,
+                        statusId
+                    })
+                } else if (!paused && clock.stateEnumId === PAUSED) {
+                    const out = resume(ctx, clock, at)
+                    addEvent({
+                        requestId,
+                        caseSlaEpisodeId: clock.caseSlaEpisodeId,
+                        eventTypeEnumId: "SetResume",
+                        fromStatusId,
+                        statusId,
+                        dueDate: clock.dueDate,
+                        reasonText: durationText(out.pausedMinutes) + " paused"
+                    })
+                }
             }
         }
         mirrorDue(requestId)
@@ -418,7 +456,7 @@ function recordStatus(p) {
         addEvent({requestId, eventTypeEnumId: "SetResolution", statusId, reasonText: enumText(p.requestResolutionEnumId)})
     if (p.dueChanged) {
         // a due date written by anything but these functions (a raw entity write; update#Request refuses one): recorded
-        const current = Array.from(find(EPISODE, {requestId, clockEnumId: RESOLUTION}).orderBy("-sequenceNum").limit(1).list())[0]
+        const current = lastOwn(requestId, RESOLUTION)
         const expected = current ? (current.stateEnumId === PAUSED ? null : msOf(current.dueDate)) : undefined
         const written = msOf(p.responseRequiredDate)
         if (current && expected !== written)
@@ -460,8 +498,11 @@ function staffSide(partyId) {
 function recordMessage(p) {
     const requestId = p.requestId
     if (!one(PROFILE, {requestId})) return {}
+    // P8: a message a merge or split referenced on this case (CaseRelationItem) is the source's, no new response or reply
+    if (find(RELATION_ITEM, {toRequestId: requestId, communicationEventId: p.communicationEventId}).count() > 0) return {}
     const event = one(COMM, {communicationEventId: p.communicationEventId})
     if (!event || ["CeCancelled", "CeBounced"].includes(event.statusId)) return {}
+    lockRequest(requestId)
     if (notResponses.includes(event.communicationEventTypeId)) return {}
     // an acknowledgement or another automatic message (an autoresponder's), and a call logged as internal (P6), are no
     // response and no customer reply; nor is a logged call that did not reach the customer
@@ -485,8 +526,8 @@ function recordMessage(p) {
             eventKey: "response:" + event.communicationEventId,
             eventDate: stamp(atMs)
         })
-        const first = added ? openEpisode(requestId, FIRST) : null
-        if (first)
+        const firsts = added ? [openEpisode(requestId, FIRST)].concat(carriedOpen(requestId, FIRST)).filter(Boolean) : []
+        for (const first of firsts)
             complete(first, Math.max(atMs, msOf(first.startDate) ?? atMs), {communicationEventId: event.communicationEventId})
         return {response: !!added}
     }
@@ -498,8 +539,14 @@ function recordMessage(p) {
             communicationEventId: event.communicationEventId,
             eventKey: "reply:" + event.communicationEventId
         })
-    )
+    ) {
         endCustomerWait(requestId)
+        // P8: a reply on a resolved, closed, cancelled or merged case reopens it within the reopen window, else makes a
+        // follow-up case, and one to a merged case goes to the case it was merged into (CaseRelations.js)
+        ec.resource
+            .script("component://mr-mantle/service/mantle/request/CaseRelations.js")
+            .replyArrived(requestId, event.communicationEventId)
+    }
     return {}
 }
 // A customer's reply while the case waits for them ends the wait (design §9 ServiceLevelPolicies: the customer wait pauses
@@ -541,12 +588,102 @@ function recordWork(p) {
     return {}
 }
 
+// ===== P8: a merge's clocks (CaseRelations.js) =====
+// The source's clocks on a merge into the case kept: each one in progress is carried as an obligation (a copy on the case kept,
+// its start, due time, pauses and breach kept, so no elapsed time is reset and no deadline relaxed), which then follows the
+// kept case's own clock of its kind; the source's own ends Merged with its figures. A clock of the source already ended with
+// a breach is carried as an event, its breach kept on the source. The kept case's own clocks are not touched. Returns the
+// clocks carried (the source's episode, its copy when it was open, whether it breached).
+function carryOnMerge(sourceRequestId, targetRequestId, caseRelationId) {
+    const ctx = time.forCall()
+    const at = nowMs()
+    const target = one(REQUEST, {requestId: targetRequestId})
+    const targetProfile = one(PROFILE, {requestId: targetRequestId})
+    const carried = []
+    for (const episode of episodesOf(sourceRequestId)) {
+        if (openStates.includes(episode.stateEnumId)) {
+            const fields = lib.map(episode)
+            for (const field of ["caseSlaEpisodeId", "lastUpdatedStamp"]) delete fields[field]
+            const copyId = call(
+                "create#" + EPISODE,
+                Object.assign(fields, {
+                    requestId: targetRequestId,
+                    carriedFromEpisodeId: episode.caseSlaEpisodeId,
+                    caseRelationId
+                })
+            ).caseSlaEpisodeId
+            const copy = one(EPISODE, {caseSlaEpisodeId: copyId})
+            // a carried resolution clock pauses and runs as the kept case does now
+            if (copy.clockEnumId === RESOLUTION) {
+                const copyPolicy = copy.serviceLevelPolicyId
+                    ? one(POLICY, {serviceLevelPolicyId: copy.serviceLevelPolicyId})
+                    : null
+                const paused = pausesBy(copyPolicy, targetProfile?.caseWorkflowId, target?.statusId)
+                if (paused && copy.stateEnumId === RUNNING) {
+                    copy.set("stateEnumId", PAUSED)
+                    copy.set("pausedDate", stamp(at))
+                    copy.update()
+                } else if (!paused && copy.stateEnumId === PAUSED) resume(ctx, copy, at)
+            }
+            episode.set("stateEnumId", MERGED)
+            episode.set("actualDate", stamp(at))
+            episode.update()
+            addEvent({
+                requestId: sourceRequestId,
+                caseSlaEpisodeId: episode.caseSlaEpisodeId,
+                eventTypeEnumId: "SetMerged",
+                dueDate: episode.dueDate,
+                reasonText: "Merged into case " + targetRequestId,
+                eventKey: "merged:" + episode.caseSlaEpisodeId
+            })
+            addEvent({
+                requestId: targetRequestId,
+                caseSlaEpisodeId: copyId,
+                eventTypeEnumId: "SetCarried",
+                dueDate: copy.dueDate,
+                reasonText:
+                    "From case " +
+                    sourceRequestId +
+                    (episode.breachedDate ? ", breached " + textAt(msOf(episode.breachedDate), episode.timeZone) : ""),
+                eventKey: "carried:" + episode.caseSlaEpisodeId
+            })
+            carried.push({
+                caseSlaEpisodeId: episode.caseSlaEpisodeId,
+                carriedEpisodeId: copyId,
+                clockEnumId: episode.clockEnumId,
+                breached: !!episode.breachedDate
+            })
+        } else if (episode.breachedDate) {
+            addEvent({
+                requestId: targetRequestId,
+                eventTypeEnumId: "SetCarried",
+                dueDate: episode.dueDate,
+                reasonText:
+                    enumText(episode.clockEnumId) +
+                    " of case " +
+                    sourceRequestId +
+                    " breached " +
+                    textAt(msOf(episode.breachedDate), episode.timeZone),
+                eventKey: "carried:" + episode.caseSlaEpisodeId
+            })
+            carried.push({
+                caseSlaEpisodeId: episode.caseSlaEpisodeId,
+                carriedEpisodeId: null,
+                clockEnumId: episode.clockEnumId,
+                breached: true
+            })
+        }
+    }
+    return carried
+}
+
 // ===== correct#CaseSla =====
 // A manager's reasoned correction of a clock's due date: the earlier figure stays on its event; a clock already ended is met or
 // missed again by its actual time.
 function correct(p) {
     requirePermission("SUPPORT_CASE_MANAGE")
     const theCase = caseOf(p.requestId)
+    lockRequest(theCase.requestId)
     const episode = one(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId})
     if (!episode || episode.requestId !== theCase.requestId)
         denied("RECORD_UNAVAILABLE", "Clock " + (p.caseSlaEpisodeId || "") + " is not this case's")
@@ -592,9 +729,15 @@ function history(p) {
         if (!policies.has(id)) policies.set(id, one(POLICY, {serviceLevelPolicyId: id}))
         return policies.get(id)
     }
+    // a clock a merge carried (P8) comes before the case's own of its kind, so the last of a kind is the case's own
+    const carriedFirst = (a, b) => (a.carriedFromEpisodeId ? 0 : 1) - (b.carriedFromEpisodeId ? 0 : 1)
     const clocks = episodesOf(theCase.requestId)
         .sort((a, b) =>
-            a.clockEnumId === b.clockEnumId ? Number(a.sequenceNum) - Number(b.sequenceNum) : a.clockEnumId === FIRST ? -1 : 1
+            a.clockEnumId === b.clockEnumId
+                ? carriedFirst(a, b) || Number(a.sequenceNum) - Number(b.sequenceNum)
+                : a.clockEnumId === FIRST
+                  ? -1
+                  : 1
         )
         .map(episode => {
             const schedule = scheduleOfEpisode(episode)
@@ -619,9 +762,13 @@ function history(p) {
                     : null
             const breached = !!episode.breachedDate || (open && episode.stateEnumId === RUNNING && due != null && due < now)
             const policy = policyOf(episode.serviceLevelPolicyId)
+            const carriedFromRequestId = episode.carriedFromEpisodeId
+                ? one(EPISODE, {caseSlaEpisodeId: episode.carriedFromEpisodeId})?.requestId || null
+                : null
             const label =
                 enumText(episode.clockEnumId) +
-                (episode.clockEnumId === RESOLUTION && Number(episode.sequenceNum) > 1 ? " " + episode.sequenceNum : "")
+                (episode.clockEnumId === RESOLUTION && Number(episode.sequenceNum) > 1 ? " " + episode.sequenceNum : "") +
+                (carriedFromRequestId ? " (from case " + carriedFromRequestId + ")" : "")
             const color = breached
                 ? "negative"
                 : episode.stateEnumId === PAUSED
@@ -637,6 +784,7 @@ function history(p) {
                 caseSlaEpisodeId: episode.caseSlaEpisodeId,
                 clockEnumId: episode.clockEnumId,
                 sequenceNum: Number(episode.sequenceNum || 1),
+                carriedFromRequestId,
                 label,
                 stateEnumId: episode.stateEnumId,
                 stateText: breached && open ? "Breached" : enumText(episode.stateEnumId),
@@ -1046,9 +1194,11 @@ function simulate(p) {
 // One episode of the scan, in its transaction: its warning or breach, once each, told to the case's assignee (else the
 // managers of the queue's team), and a pause past the policy's longest.
 function mark(p) {
+    const found = one(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId})
+    if (!found || !openStates.includes(found.stateEnumId)) return {}
+    const request = lockRequest(found.requestId)
     const episode = find(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId}).forUpdate(true).one()
     if (!episode || !openStates.includes(episode.stateEnumId)) return {}
-    const request = one(REQUEST, {requestId: episode.requestId})
     if (!request || !one(PROFILE, {requestId: episode.requestId}))
         throw new Error("its case " + episode.requestId + " is not a support case")
     const now = nowMs()
@@ -1270,6 +1420,16 @@ const operations = {
 }
 ;({
     attachReason,
+    // P8: a merge's clocks, and the clock statuses CaseRelations.js reads
+    carryOnMerge: (sourceRequestId, targetRequestId, caseRelationId) => {
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            return carryOnMerge(sourceRequestId, targetRequestId, caseRelationId)
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    },
+    mappingCategory,
     riskRequestIds,
     awaitingResponseIds,
     durationText,

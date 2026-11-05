@@ -363,6 +363,28 @@ function tokenCase(subject, sender, organizationPartyId) {
         (customerPartyId && cases.customerSidesOf(sender.partyId).includes(customerPartyId))
     return verified ? requestId : null
 }
+// P8: a mail answering a request: joined to it, or to the case it was merged into; the customer side's own mail to a closed or
+// cancelled case, or one past its reopen window, makes a follow-up case (or joins the open one) (CaseRelations.js mailTarget).
+function answering(requestId, threadBy, sender, automatic) {
+    const target = ec.resource
+        .script("component://mr-mantle/service/mantle/request/CaseRelations.js")
+        .mailTarget(requestId, sender, automatic)
+    if (target.action === "followUp")
+        return {
+            action: "followUp",
+            followUpOf: target.followUpOf,
+            customerPartyId: target.customerPartyId,
+            threadBy,
+            reason: "A reply to case " + requestId + ", which is closed: a follow-up case"
+        }
+    return {
+        action: "join",
+        requestId: target.requestId,
+        threadBy,
+        mergedFrom: target.mergedFrom || null,
+        followUpOf: target.followUpOf || null
+    }
+}
 // What a message to a queue makes, as decided before anything is written (mailIntake applies it; preview#ServiceRoute shows
 // it): join (the request its thread or verified token names), case (a customer's), held (for review) or ignore, with why.
 function resolveMail(message, queue, route) {
@@ -374,9 +396,9 @@ function resolveMail(message, queue, route) {
     if (automatic && autoPolicy === "SagIgnore")
         return Object.assign(decision, {action: "ignore", reason: "An automatic message, ignored by the route: " + automatic})
     const referenced = referencedRequest(message, sender, organizationPartyId)
-    if (referenced) return Object.assign(decision, {action: "join", requestId: referenced, threadBy: "reference"})
+    if (referenced) return Object.assign(decision, answering(referenced, "reference", sender, automatic))
     const token = tokenCase(message.subject, sender, organizationPartyId)
-    if (token) return Object.assign(decision, {action: "join", requestId: token, threadBy: "token"})
+    if (token) return Object.assign(decision, answering(token, "token", sender, automatic))
     if (automatic)
         return Object.assign(decision, {action: "ignore", reason: "An automatic message on no case, made nothing: " + automatic})
     if (sender.kind === "customer") return Object.assign(decision, {action: "case", customerPartyId: sender.customerPartyId})
@@ -506,6 +528,29 @@ function mailIntake(p) {
             })
             return Object.assign(result, {requestId: decision.requestId, joined: true})
         }
+        // P8: the customer's reply to a closed case: its follow-up case, acknowledged as a new case
+        if (decision.action === "followUp") {
+            const made = ec.resource
+                .script("component://mr-mantle/service/mantle/request/CaseRelations.js")
+                .makeFollowUp(decision.followUpOf, {
+                    emailMessageId: p.emailMessageId,
+                    receivedMs: Number(ms(message.receivedDate || message.messageDate || now())),
+                    senderPartyId: decision.sender.partyId,
+                    emailContactMechId: decision.sender.contactMechId || null,
+                    description: String(message.bodyText || plain(message.body))
+                        .trim()
+                        .substring(0, 20000)
+                })
+            if (route?.acknowledge === "Y" && emailAccountId && !acknowledgedEnough(emailAccountId, message.fromAddress))
+                call(R + "send#IntakeConfirmation", {
+                    requestId: made.requestId,
+                    emailAccountId,
+                    parentEmailMessageId: p.emailMessageId,
+                    emailTextBlockId: route.ackTextBlockId || null,
+                    emailIdentityId: route.replyEmailIdentityId || null
+                })
+            return Object.assign(result, {requestId: made.requestId, created: true, followUpOf: decision.followUpOf})
+        }
         const sender = decision.sender.partyId ? decision.sender : reviewPerson(message)
         const typeId = route?.requestTypeEnumId || listOf(queue.queue.offeredTypeEnumIds)[0] || "RqtSupport"
         const created = call(R + "create#Request", {
@@ -575,6 +620,7 @@ function previewRoute(p) {
     const joined = decision.requestId ? one(REQUEST, {requestId: decision.requestId}) : null
     const outcomes = {
         join: "Adds the message to " + (joined?.requestName ? "“" + joined.requestName + "”" : "request " + decision.requestId),
+        followUp: "Makes a follow-up case of case " + decision.followUpOf + ", which is closed",
         case: "Makes a case in " + (queue.category.description || queue.category.requestCategoryId),
         held:
             "Holds it for review in " +
@@ -599,7 +645,9 @@ function previewRoute(p) {
             customerName: decision.customerPartyId ? cases.partyName(decision.customerPartyId) : "",
             requestTypeEnumId: route?.requestTypeEnumId || listOf(queue.queue.offeredTypeEnumIds)[0] || "RqtSupport",
             priority: route?.defaultPriority ?? 5,
-            acknowledged: decision.action === "case" && route?.acknowledge === "Y",
+            acknowledged: ["case", "followUp"].includes(decision.action) && route?.acknowledge === "Y",
+            followUpOf: decision.followUpOf || null,
+            mergedFrom: decision.mergedFrom || null,
             unknownSenderEnumId: route?.unknownSenderEnumId || policy?.unknownSenderEnumId || "SusReview"
         }
     }

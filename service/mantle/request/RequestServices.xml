@@ -406,7 +406,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="delete" noun="RequestComment">
         <description>Deletes a comment on a request that has no replies: a Comment joined to the request by RequestCommEvent,
-            by its author or a user in the ADMIN group, with its join, party, purpose and content rows
+            by its author or a user in the ADMIN group, never one a support case merge or split referenced on another case
+            (mantle.request.support.CaseRelationItem), with its join, party, purpose and content rows
             (mantle.party.CommunicationServices.delete#CommunicationEventRows).</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
@@ -442,6 +443,11 @@ along with this software (see the LICENSE.md file). If not, see
             const isAuthor = !!partyId && value.fromPartyId === partyId
             if (action === 'delete') {
                 if (!isAuthor && !(ec.user.userId && ec.user.isInGroup('ADMIN'))) { ec.message.addError('You may delete only your own comments'); return }
+                // a support case's comment a merge or split referenced on another case is evidence on both: deleting it here
+                // would delete it there too (impl-customer-service P8, F-P8-4)
+                const item = Array.from(ec.entity.find('mantle.request.support.CaseRelationItem')
+                        .condition('communicationEventId', communicationEventId).limit(1).list())[0]
+                if (item) { ec.message.addError(`Comment ${communicationEventId} is on case ${item.toRequestId} too, by a merge or split; it stays`); return }
             } else if (!isAuthor) { ec.message.addError('You may change only your own comments'); return }
             commEvent = value.getMap()
         ]]></script></actions>
