@@ -364,10 +364,12 @@ function apply(p) {
         send
     })
     if (operation.old) {
-        // a retry: the first result; a reply whose send failed is sent again by its message ID, never a second reply
+        // a retry: the first result; a reply whose send failed is sent again by its message ID, never a second reply. The
+        // case's lock serializes retries; the message is read, not locked: its filing after the send locks it and then files
+        // on this case, so a lock here would wait on the filing while the filing waits on the case.
         const earlier = lib.previous(operation)
         if (earlier.emailMessageId) {
-            const message = find(MESSAGE, {emailMessageId: earlier.emailMessageId}).forUpdate(true).one()
+            const message = one(MESSAGE, {emailMessageId: earlier.emailMessageId})
             if (message?.statusId === "ES_READY" && message.sendError)
                 call("org.moqui.impl.EmailClientServices.send#Draft", {emailMessageId: earlier.emailMessageId})
             Object.assign(earlier, deliveryOf(earlier.emailMessageId), {
