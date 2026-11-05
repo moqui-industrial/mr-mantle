@@ -139,7 +139,9 @@ function requireIssuer(recordType, recordId) {
     return record
 }
 function scopeList(scopes) {
-    return (Array.isArray(scopes) ? scopes : String(scopes || "").split(",")).map(scope => String(scope).trim()).filter(Boolean)
+    return (Array.isArray(scopes) ? scopes : String(scopes || "").split(","))
+        .map(scope => String(scope).trim())
+        .filter(Boolean)
 }
 // A new capability with its token, shown once; the caller has checked who may issue it.
 function create(p) {
@@ -275,11 +277,7 @@ function revokeActive(recordType, recordId, scope, issuerKind = "organization") 
             scopeList(row.scopes).includes(scope) &&
             (issuerKind == null || (row.issuerKind || "organization") === issuerKind)
         )
-            call("update#" + C, {
-                capabilityId: row.capabilityId,
-                revokedDate: ec.user.nowTimestamp,
-                revokedByUserId: ec.user.userId
-            })
+            call("update#" + C, {capabilityId: row.capabilityId, revokedDate: ec.user.nowTimestamp, revokedByUserId: ec.user.userId})
 }
 // The links of a record, newest first, without their tokens.
 function list(p) {
@@ -312,9 +310,7 @@ function invite(p) {
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
     const siteId = apps.sitesFor(p.app, p.organizationPartyId)[0]
     if (!siteId) denied("SITE_UNAVAILABLE", "The organization has no published site with this app")
-    const email = String(p.emailAddress || "")
-        .trim()
-        .toLowerCase()
+    const email = String(p.emailAddress || "").trim().toLowerCase()
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) denied("EMAIL_INVALID", "Enter the contact's email address")
     const token = ec.user.randomString(32) + ec.user.randomString(32)
     const invitationId = ec.user.randomString(32)
@@ -341,7 +337,8 @@ function bindContact(partyId, scopes) {
     for (const scope of Array.isArray(scopes) ? scopes : []) {
         if (!scope?.partyId || !scope.organizationPartyId || !appKinds[scope.app]) continue
         const key = {partyId, outsidePartyId: scope.partyId, organizationPartyId: scope.organizationPartyId, app: scope.app}
-        if (!rows(G, key).some(row => lib.entityLib.active(row))) call("create#" + G, {...key, fromDate: ec.user.nowTimestamp})
+        if (!rows(G, key).some(row => lib.entityLib.active(row)))
+            call("create#" + G, {...key, fromDate: ec.user.nowTimestamp})
     }
 }
 ;({

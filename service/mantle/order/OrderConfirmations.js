@@ -365,7 +365,7 @@ function cancelFailed(p) {
 const operations = {print, store, resend, storeOnPlace, cancelFailed}
 ;({
     allowedRecipients,
-    // P9: the RMA mail's sender (ReturnPolicies.js send#ReturnAuthorization)
+    // P10: the order-change confirmation's sender (OrderChanges.js confirm)
     senderAccount,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown order confirmation operation " + op)
