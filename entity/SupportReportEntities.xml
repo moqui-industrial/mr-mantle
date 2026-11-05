@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Views for reading support cases with their service level clocks in one query (design-customer-service §7;
+    impl-customer-service P14, CS-REPORTING): no records of their own. CaseClockRequest is a clock with its case's queue,
+    type, channel, priority and status, for the reports' cohorts by the case's queue; CaseRequestClock is a case with each of
+    its clocks (none: one row with no clock), for a case list by its clocks (Needs response, SLA risk) and Home's counts, in
+    place of a list of request ids read first (F112). P14 review: CaseStatusChange, a request's status changes with its queue,
+    for the case volumes; and CaseSlaEpisode's indexes by start, end and breach, which the reports and Home read by period. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <view-entity entity-name="CaseClockRequest" package="mantle.request.support">
+        <member-entity entity-alias="EP" entity-name="mantle.request.support.CaseSlaEpisode"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="EP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="EP"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="requestTypeEnumId"/>
+        <alias entity-alias="REQ" name="salesChannelEnumId"/>
+        <alias entity-alias="REQ" name="priority"/>
+        <alias entity-alias="REQ" name="requestStatusId" field="statusId"/>
+        <alias entity-alias="REQ" name="requestDate"/>
+    </view-entity>
+    <view-entity entity-name="CaseRequestClock" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="EP" entity-name="mantle.request.support.CaseSlaEpisode" join-from-alias="CP"
+                join-optional="true">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="CP"><exclude field="requestId"/></alias-all>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+        <alias entity-alias="EP" name="caseSlaEpisodeId"/>
+        <alias entity-alias="EP" name="clockEnumId"/>
+        <alias entity-alias="EP" name="clockStateEnumId" field="stateEnumId"/>
+        <alias entity-alias="EP" name="clockDueDate" field="dueDate"/>
+        <alias entity-alias="EP" name="clockWarningDate" field="warningDate"/>
+        <alias entity-alias="EP" name="clockBreachedDate" field="breachedDate"/>
+    </view-entity>
+    <!-- A request's status changes (the audit log of Request.statusId) with its queue, type and channel, so the case volumes
+        read the changes of their queues in the query (by the queue's requests, then the audit log's entity, field and key
+        index) rather than every request's changes in the period -->
+    <view-entity entity-name="CaseStatusChange" package="mantle.request.support">
+        <member-entity entity-alias="AUD" entity-name="moqui.entity.EntityAuditLog"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="AUD">
+            <key-map field-name="pkPrimaryValue" related="requestId"/></member-entity>
+        <alias-all entity-alias="AUD"/>
+        <alias entity-alias="REQ" name="requestId"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="requestTypeEnumId"/>
+        <alias entity-alias="REQ" name="salesChannelEnumId"/>
+    </view-entity>
+    <!-- The reports' cohorts and Home's measures read the clocks of a period by their start, end and breach -->
+    <extend-entity entity-name="CaseSlaEpisode" package="mantle.request.support">
+        <index name="CASE_SLA_EP_START"><index-field name="startDate"/></index>
+        <index name="CASE_SLA_EP_ACTUAL"><index-field name="actualDate"/></index>
+        <index name="CASE_SLA_EP_BREACH"><index-field name="breachedDate"/></index>
+    </extend-entity>
+</entities>
