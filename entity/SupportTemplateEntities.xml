@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Case templates (design-customer-service §3 NewCase, §9 CaseTemplates; impl-customer-service P7, CS-TEMPLATES, F69-F71):
+    a template is a dated DbForm (DbForm.isDated, purpose DbfpCaseTemplate) owned by an organization, with its fields,
+    options and DbFormFieldDependency rows effective-dated by the framework (docs/ui/Db-Forms.md); a case's values are a
+    FormResponse of it, linked from the case's CaseProfile (formResponseId) and read as of its response date. There is no
+    CaseTemplate, field, dependency or value record of Mantle's own: the two fields below are on the framework's rows, so
+    the owner and each field's audience are read and dated with the form itself. Saved through
+    mantle.request.SupportCaseServices (save#CaseTemplate, save#CaseTemplateField, save#CaseTemplateCondition,
+    end#CaseTemplatePart; CaseTemplates.js). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- the organization whose case template a DbForm is, as RequestCategory's owner (F6) -->
+    <extend-entity entity-name="DbForm" package="moqui.screen.form">
+        <field name="ownerPartyId" type="id" enable-audit-log="true"><description>The organization whose case template this
+            form is (purpose DbfpCaseTemplate); a form with no owner is no organization's template</description></field>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration description="Case template" enumId="DbfpCaseTemplate" enumTypeId="DbFormPurpose"/>
+        </seed-data>
+    </extend-entity>
+    <!-- who a case template's field is for: on the field's own dated row, so a response reads the audience it was submitted
+        under. A published field's audience is not edited: a change is a successor field from a date (create#DbFormFieldSuccessor),
+        so an internal answer never becomes customer-visible. No audience is internal. -->
+    <extend-entity entity-name="DbFormField" package="moqui.screen.form">
+        <field name="audienceEnumId" type="id" enable-audit-log="true"><description>CfaCustomer: the customer sees and
+            answers it (the Support app's form, a customer-visible print); CfaInternal or empty: agents only</description></field>
+        <relationship type="one-nofk" title="CaseFieldAudience" related="moqui.basic.Enumeration" short-alias="audience">
+            <key-map field-name="audienceEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Case Field Audience" enumTypeId="CaseFieldAudience"/>
+            <moqui.basic.Enumeration enumId="CfaCustomer" description="Customer-visible" sequenceNum="1" enumTypeId="CaseFieldAudience"/>
+            <moqui.basic.Enumeration enumId="CfaInternal" description="Internal" sequenceNum="2" enumTypeId="CaseFieldAudience"/>
+        </seed-data>
+    </extend-entity>
+</entities>

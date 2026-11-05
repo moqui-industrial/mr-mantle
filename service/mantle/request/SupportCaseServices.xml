@@ -146,7 +146,10 @@ along with this software (see the LICENSE.md file). If not, see
             (link#RequestRecord), its profile (ensure#CaseProfile) and its assignee. Needs SUPPORT_CASE_EDIT and the
             organization (RECORD_UNAVAILABLE); refuses a customer it does not serve (CUSTOMER_UNAVAILABLE), a queue not its
             (QUEUE_UNAVAILABLE) or not taking the type (TYPE_NOT_OFFERED), an assignee outside the queue's team
-            (ASSIGNEE_UNAVAILABLE) and an organization with no service policy (SERVICE_NOT_CONFIGURED).</description>
+            (ASSIGNEE_UNAVAILABLE) and an organization with no service policy (SERVICE_NOT_CONFIGURED). P7: the case's
+            template (templateFormId, one of the organization's, else the queue's) takes templateValues, checked by
+            validate#TemplateValues before anything is made (TEMPLATE_VALUES_INVALID, TEMPLATE_UNAVAILABLE) and kept as a
+            FormResponse linked from the profile.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="customerPartyId" required="true"/>
@@ -161,6 +164,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="records" type="List"><description>Maps of recordEntityName and recordId</description></parameter>
             <parameter name="communicationEventId"/>
             <parameter name="emailMessageId"/>
+            <!-- P7: the case template and its values (field name to value; names not on the template are left out) -->
+            <parameter name="templateFormId"/>
+            <parameter name="templateValues" type="Map"/>
         </in-parameters>
         <out-parameters><parameter name="requestId"/></out-parameters>
         <actions>
@@ -249,7 +255,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A service queue (design Queues QueueEdit): its category (a new one owned by the organization, or one
             already its: QUEUE_ORGANIZATION) with name, parent and responsible party, and a ServiceQueue row from its date:
             the offered types, visibility (a restricted queue needs its team: TEAM_REQUIRED), responsible team (one of the
-            organization's: TEAM_UNAVAILABLE) and fallback assignee. With end, ends the queue's row (not a queue new
+            organization's: TEAM_UNAVAILABLE) and fallback assignee (P7: and its template, kept unless templateFormId is given,
+            empty for none). With end, ends the queue's row (not a queue new
             intake goes to: QUEUE_IN_USE); its cases stay. Needs SUPPORT_POLICY_EDIT and the organization.</description>
         <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
         <in-parameters>
@@ -262,6 +269,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="visibilityEnumId"/>
             <parameter name="responsibleTeamPartyId"/>
             <parameter name="fallbackAssigneePartyId"/>
+            <parameter name="templateFormId"/>
             <parameter name="changeReason"/>
             <parameter name="end" type="Boolean"/>
         </in-parameters>
@@ -399,6 +407,211 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
             <set field="partyRelationshipId" from="cases.execute('saveMember', context).partyRelationshipId"/>
+        </actions>
+    </service>
+
+    <!-- ===== case templates (P7, CS-TEMPLATES; CaseTemplates.js): a dated DbForm of the organization with its conditions
+        (DbFormFieldDependency) and an audience per field; a case's values a FormResponse linked from its profile ===== -->
+    <service verb="save" noun="CaseTemplate">
+        <description>A case template (design CaseTemplates TemplateEdit): a new one (a dated DbForm of the organization,
+            purpose DbfpCaseTemplate) or its name and notes; with publish, its drafts start at fromDate (now or later),
+            refused while it has a problem of validate#CaseTemplate (TEMPLATE_INVALID); with requestCategoryId, a service
+            queue of its organization uses it from now (useForQueue, the default) or no longer does: a new ServiceQueue row,
+            the current one ended (QUEUE_UNAVAILABLE; TEMPLATE_NOT_PUBLISHED before it is published). Needs
+            SUPPORT_POLICY_EDIT and the organization (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="formId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="description"/>
+            <parameter name="comments"/>
+            <parameter name="publish" type="Boolean"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="useForQueue" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formId"/>
+            <parameter name="publishedFieldNames" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('saveTemplate', context)"/>
+            <set field="formId" from="out.formId"/>
+            <set field="publishedFieldNames" from="out.publishedFieldNames"/>
+        </actions>
+    </service>
+    <service verb="save" noun="CaseTemplateField">
+        <description>A template field: a new one is a draft (its name from its label unless newFieldName; never one of the
+            case's own fields: FIELD_NAME_INVALID); a draft changes in place; a published field's label, help, required flag,
+            order and options (lines of "value | label") change in place from now, audit-logged; a new type or audience, or a
+            change from a later fromDate, is a successor field (a draft, or started at fromDate with the old one ended), so
+            an answered field keeps its meaning. A typed allowlist: short and long text, a choice list, choice buttons,
+            checkboxes and a date (FIELD_TYPE), a choice with options (OPTIONS_REQUIRED), the audience customer-visible or
+            internal, and no expression in a label, help or option (NO_EXPRESSIONS). Needs SUPPORT_POLICY_EDIT and the
+            template's organization.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="fieldName"/>
+            <parameter name="newFieldName"/>
+            <parameter name="title"/>
+            <parameter name="tooltip"/>
+            <parameter name="fieldTypeEnumId"/>
+            <parameter name="isRequired"/>
+            <parameter name="audienceEnumId"/>
+            <parameter name="layoutSequenceNum"/>
+            <parameter name="optionText"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fieldName"/>
+            <parameter name="successor" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('saveField', context)"/>
+            <set field="fieldName" from="out.fieldName"/>
+            <set field="successor" from="!!out.successor"/>
+        </actions>
+    </service>
+    <service verb="save" noun="CaseTemplateCondition">
+        <description>A condition row of a template (design TemplateEdit's typed condition builder): show or require the target
+            field while the source field is (equals) or is not (not-equals) one of the values, each one of its options, or is
+            empty or filled in (the only conditions on a field that is not a choice: OPERATOR_INVALID, CONDITION_VALUE). A
+            customer-visible field never depends on an internal one (CONDITION_AUDIENCE); a cycle (CONDITION_CYCLE) and a
+            second rule of one effect on a field (CONDITION_DUPLICATE) are refused. Between published fields it starts now,
+            and an edit ends the row and starts its replacement now; otherwise it is a draft. Needs SUPPORT_POLICY_EDIT and the
+            template's organization.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="sourceFieldName" required="true"/>
+            <parameter name="operator"/>
+            <parameter name="value"/>
+            <parameter name="targetFieldName" required="true"/>
+            <parameter name="effect"/>
+        </in-parameters>
+        <out-parameters><parameter name="dependencySeqId"/></out-parameters>
+        <actions>
+            <set field="dependencySeqId" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('saveCondition', context).dependencySeqId"/>
+        </actions>
+    </service>
+    <service verb="end" noun="CaseTemplatePart">
+        <description>Ends a template's field (part field, with its conditions), option (part option) or condition (part
+            condition) at thruDate (now or later); a draft is deleted. Answers stay, and a case's values read the form as it
+            was. Needs SUPPORT_POLICY_EDIT and the template's organization.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="part" required="true"/>
+            <parameter name="fieldName"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('endPart', context)</script>
+        </actions>
+    </service>
+    <service verb="validate" noun="CaseTemplate">
+        <description>A template's checks as of a date, its drafts too unless includeDrafts is false (design TemplatePreview):
+            its problems (no field, a type or text outside the allowlist, a choice with no option, a condition value its source
+            does not offer, a customer field depending on an internal one, a cycle) and, for the sample values, what each
+            audience sees, must fill in and has missing, with the messages (validate#TemplateValues). Needs
+            SUPPORT_POLICY_EDIT or SUPPORT_CASE_EDIT and the template's organization.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeDrafts" type="Boolean" default-value="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="problems" type="List"/>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="agent" type="Map"/>
+            <parameter name="customer" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('validateTemplate', context)"/>
+            <set field="problems" from="out.problems"/>
+            <set field="valid" from="out.valid"/>
+            <set field="agent" from="out.agent"/>
+            <set field="customer" from="out.customer"/>
+        </actions>
+    </service>
+    <service verb="validate" noun="TemplateValues">
+        <description>A case's template values on the server, as NewCase and the Support app submit them (F41), against the
+            template as of asOfDate (now): evaluate#DbFormDependencies re-evaluates which fields show and which are required;
+            a hidden field's value is dropped, a required one must be there (REQUIRED), each value is of its type (a choice
+            one of the field's options then, a date, a text within its length), and for the customer's audience a value for
+            an internal field is refused (FIELD_NOT_OFFERED). Answers the cleaned values and the errors; with refuse, an
+            invalid submit is refused (TEMPLATE_VALUES_INVALID). Either audience needs the template's organization (P15 adds
+            the customer contact's path).</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="audience" default-value="internal"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="refuse" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="values" type="Map"/>
+            <parameter name="visibleFieldNames" type="List"/>
+            <parameter name="hiddenFieldNames" type="List"/>
+            <parameter name="requiredFieldNames" type="List"/>
+            <parameter name="missingFieldNames" type="List"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="valid" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('validateValues', context)"/>
+            <set field="values" from="out.values"/>
+            <set field="visibleFieldNames" from="out.visibleFieldNames"/>
+            <set field="hiddenFieldNames" from="out.hiddenFieldNames"/>
+            <set field="requiredFieldNames" from="out.requiredFieldNames"/>
+            <set field="missingFieldNames" from="out.missingFieldNames"/>
+            <set field="errors" from="out.errors"/>
+            <set field="valid" from="out.valid"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseTemplate">
+        <description>A template as of asOfDate (now) for an audience: the customer's (audience customer) is its
+            customer-visible fields only, with their options and the rules among them, never a draft or an internal field (the
+            Support app's form, P15), and needs the template's organization (P15 adds the customer contact's path); the agent's (internal) has every field and needs
+            SUPPORT_POLICY_EDIT or SUPPORT_CASE_EDIT and the template's organization, and with includeDrafts
+            (SUPPORT_POLICY_EDIT) the editor's rows: every field, option and condition not ended, with its state, and the
+            template's problems.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="audience" default-value="internal"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeDrafts" type="Boolean" default-value="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="template" type="Map"/></out-parameters>
+        <actions>
+            <set field="template" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('getTemplate', context).template"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseTemplateValues">
+        <description>A case's template values as submitted, with the form as it was at the response date (its labels and
+            option texts then); the customer's audience leaves out every internal field. The case must be one of the user's
+            organizations' (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="audience" default-value="internal"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="templateFormId"/>
+            <parameter name="templateName"/>
+            <parameter name="formResponseId"/>
+            <parameter name="responseDate" type="Timestamp"/>
+            <parameter name="responseDateText"/>
+            <parameter name="values" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseTemplates.js').execute('getValues', context)"/>
+            <set field="templateFormId" from="out.templateFormId"/>
+            <set field="templateName" from="out.templateName || null"/>
+            <set field="formResponseId" from="out.formResponseId || null"/>
+            <set field="responseDate" from="out.responseDate || null"/>
+            <set field="responseDateText" from="out.responseDateText || null"/>
+            <set field="values" from="out.values"/>
         </actions>
     </service>
 </services>
