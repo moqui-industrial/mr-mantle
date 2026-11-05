@@ -20,12 +20,16 @@ along with this software (see the LICENSE.md file). If not, see
             a watcher, or a party the event was filed on), newest first unless ordered otherwise. Posts to a mailbox
             (contactListId set) belong to the mailbox's members and are left out unless includeListPosts is true, a
             contactListId is given, or the post was filed on the party (its _NA_ row, link#CommunicationEventRecord).
+            The service audience (Customer Service P6, design ChannelSessions): audience customer keeps what passed between
+            the organization and the party (no note, internal message or status update, and no call logged as internal,
+            CpServiceInternal); empty keeps everything.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEventAndPurpose" include="all"/>
             <parameter name="communicationEventTypeId" default-value="Email,Message,Comment"/>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
+            <parameter name="audience"><description>customer, or empty for every event</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="commEventList" type="List"><parameter name="commEvent" type="Map">
@@ -40,6 +44,19 @@ along with this software (see the LICENSE.md file). If not, see
                 linkedPostIds = includeListPosts || contactListId ? [] : Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndEvent')
                         .condition('partyId', partyId).condition('roleTypeId', '_NA_').condition('contactListId', 'not-equals', null)
                         .selectField('communicationEventId').list()).map((row) => row.communicationEventId)
+                // the service audience: the internal kinds, and the party's calls logged as internal, left out for the customer's
+                const internalTypes = ['Comment', 'Message', 'StatusUpdate']
+                const typeIds = String(communicationEventTypeId || '').split(',').map((id) => id.trim()).filter((id) => id)
+                internalEventIds = []
+                if (audience === 'customer') {
+                    const cf = ec.entity.conditionFactory
+                    internalEventIds = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndPurpose')
+                            .condition(cf.makeCondition([cf.makeCondition('fromPartyId', 'equals', partyId), cf.makeCondition('toPartyId', 'equals', partyId),
+                                cf.makeCondition('recipientPartyId', 'equals', partyId)], 'or'))
+                            .condition('purposeEnumId', 'CpServiceInternal').selectField('communicationEventId').distinct(true).limit(1000).list())
+                            .map((row) => row.communicationEventId)
+                }
+                if (audience === 'customer') communicationEventTypeId = typeIds.filter((id) => !internalTypes.includes(id)).join(',') || '_NONE_'
             ]]></script>
             <!-- a row per party row of the event, so distinct; the select fields are the event's; the type is the in
                 condition below, which a search form equals on the comma-separated default would replace -->
@@ -51,6 +68,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="recipientPartyId" from="partyId"/>
                 </econditions>
                 <econdition field-name="communicationEventTypeId" operator="in"/>
+                <econdition field-name="communicationEventId" operator="not-in" from="internalEventIds" ignore="!internalEventIds.length"/>
                 <econditions combine="or">
                     <econdition field-name="contactListId" operator="is-null" ignore="includeListPosts || contactListId"/>
                     <econdition field-name="communicationEventId" operator="in" from="linkedPostIds"
@@ -4284,6 +4302,8 @@ along with this software (see the LICENSE.md file). If not, see
             or event by link#WorkEffortRecord (the record's own join, such as RequestWorkEffort, else WorkEffortRecord), a
             request to a work effort by RequestWorkEffort; a request has no link to another kind of record
             (roomRecordLinked false). A failure of that link is logged and leaves roomRecordLinked false; the rest stands.
+            A request is on channel Chat (ScChat) and may go into a queue (requestCategoryId) for a customer
+            (customerPartyId), so a customer contact's chat request into a service queue is a case (Customer Service P6).
         </description>
         <in-parameters>
             <parameter name="chatRoomId" required="true"/>
@@ -4300,6 +4320,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="allDayEnd" type="Date"/>
             <parameter name="calendarId"/>
             <parameter name="requestTypeEnumId" default-value="RqtSupport"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="customerPartyId"/>
             <parameter name="linkRoomRecord" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
@@ -4373,7 +4395,8 @@ along with this software (see the LICENSE.md file). If not, see
             } else {
                 requestId = ec.service.sync().name('mantle.request.RequestServices.create#Request').parameters({requestName: title,
                     description: details, statusId: 'ReqSubmitted', requestTypeEnumId: requestTypeEnumId || 'RqtSupport', priority: priority ?? 5,
-                    assignToPartyId: assignToPartyId || null}).call()?.requestId
+                    assignToPartyId: assignToPartyId || null, requestCategoryId: requestCategoryId || null, customerPartyId: customerPartyId || null,
+                    salesChannelEnumId: 'ScChat'}).call()?.requestId
                 recordEntityName = 'mantle.request.Request'; recordId = requestId
             }
             if (ec.message.hasError()) return

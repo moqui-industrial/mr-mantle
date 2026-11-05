@@ -209,9 +209,11 @@ function ensure(p) {
             roleTypeId: "OrgInternal",
             fromDate: now()
         })
-    // the accepted intake time: the received date of the mail it came by, else the request date
+    // the accepted intake time: the received date of the mail it came by (the one given, filed or not yet), else the request
+    // date (F84: the clocks start from it, P6)
     const mail = rows("mantle.request.RequestEmailMessage", {requestId: p.requestId})[0] || null
-    const received = mail ? one("moqui.basic.email.EmailMessage", {emailMessageId: mail.emailMessageId})?.receivedDate : null
+    const intakeMailId = p.emailMessageId || mail?.emailMessageId || null
+    const received = intakeMailId ? one("moqui.basic.email.EmailMessage", {emailMessageId: intakeMailId})?.receivedDate : null
     const event = rows("mantle.request.RequestCommEvent", {requestId: p.requestId})[0] || null
     call("create#" + PROFILE, {
         requestId: p.requestId,
@@ -866,6 +868,13 @@ function customerReply(p) {
     if (!profile) return {}
     const event = one("mantle.party.communication.CommunicationEvent", {communicationEventId: p.communicationEventId})
     if (!event?.fromPartyId || event.communicationEventTypeId === "Comment") return {}
+    // an automatic message (an autoresponder's, filed on its case only: P6) tells no one
+    const purpose = purposeEnumId =>
+        one("mantle.party.communication.CommunicationEventPurpose", {
+            communicationEventId: event.communicationEventId,
+            purposeEnumId
+        })
+    if (purpose("CpAcknowledgement") || purpose("CpServiceInternal")) return {}
     const parties = partiesOf(p.requestId)
     const customerPartyId = roleParty(parties, "Customer")
     const fromCustomer =
@@ -950,6 +959,19 @@ const operations = {
     openStatuses,
     // P12: the dated save of Knowledge.js's sources
     startRow,
+    // P6: Channels.js's intake (the rule's route, the profile, the parties and the checks)
+    route,
+    ensureCase: p => ensure(p),
+    caseOf,
+    policyOf,
+    servedCustomer,
+    customerSidesOf,
+    organizationsOf,
+    isInternal,
+    partyName,
+    requirePermission,
+    requireOrganization,
+    currentRow,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown support case operation " + op)

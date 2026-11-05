@@ -512,18 +512,41 @@
                 )
             if (!p.reason) invalid('A reason is required')
             const body = selectedText(t, p.postIds)
+            // Customer Service's forum route (impl-customer-service P6, F12): the site and category's queue, type and
+            // priority, a Submitted case on channel ScForum; with no route the request is as before.
+            const routed = ec.resource
+                .script(
+                    'component://mr-mantle/service/mantle/request/Channels.js',
+                )
+                .forumIntake({
+                    siteId: p.siteId,
+                    forumContactListId: event.contactListId,
+                    posterPartyId: event.fromPartyId,
+                })
             const created = serviceCall(
                 'mantle.request.RequestServices.create#Request',
-                {
-                    requestTypeEnumId: 'RqtSupport',
-                    requestName: String(event.subject || 'Forum topic').slice(
-                        0,
-                        255,
-                    ),
-                    description: p.reason,
-                    requestCategoryId: p.requestCategoryId || null,
-                    customerPartyId: event.fromPartyId,
-                },
+                Object.assign(
+                    {
+                        requestTypeEnumId: 'RqtSupport',
+                        requestName: String(
+                            event.subject || 'Forum topic',
+                        ).slice(0, 255),
+                        description: p.reason,
+                        requestCategoryId: p.requestCategoryId || null,
+                        customerPartyId: event.fromPartyId,
+                    },
+                    routed.routed
+                        ? {
+                              requestTypeEnumId: routed.requestTypeEnumId,
+                              requestCategoryId: routed.requestCategoryId,
+                              priority: routed.priority,
+                              statusId: routed.statusId,
+                              salesChannelEnumId: routed.salesChannelEnumId,
+                              customerPartyId:
+                                  routed.customerPartyId || event.fromPartyId,
+                          }
+                        : {},
+                ),
             )
             // The selected public posts become one private comment; nothing of the case returns to the forum.
             serviceCall('mantle.request.RequestServices.add#RequestComment', {
