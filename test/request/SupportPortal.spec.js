@@ -587,8 +587,10 @@ feature(
             })
             const authorized = run(state.authorizer, R + "authorize#Return", {operationKey: opId(), returnId: first.returnId})
             const end = Date.now() + 5000
+            // The notice is sent after the authorization commits, on another thread: its message is written first as a
+            // draft without a body, then given its body (ES_READY, or ES_SENT once sent), so wait for that.
             let notices = []
-            while (!notices.length && Date.now() < end)
+            while (!(notices.length && notices.every(row => row.statusId !== "ES_DRAFT")) && Date.now() < end)
                 notices = rows("moqui.basic.email.EmailMessage", {emailTemplateId: "MANTLE_RETURN_DECISION_EMAIL"}).filter(row =>
                     String(row.toAddresses || "").includes("office@portal-customer.example.test")
                 )
