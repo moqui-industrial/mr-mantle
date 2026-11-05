@@ -827,53 +827,70 @@ function mailTarget(requestId, sender, automatic) {
 
 // ===== closing (CS-JOBS) =====
 // close#ResolvedCases: for each organization whose current ServicePolicy has an auto-close delay, its cases resolved longer
-// ago than that and not closed, oldest first, a bounded batch; each closed in its own transaction (close#ResolvedCase), a
-// failing one logged and named and the rest going on.
+// ago than that and not closed (of requestIds when given), oldest first, a bounded batch; each closed in its own transaction
+// (close#ResolvedCase), a failing one logged and named and the rest going on. A case with a clock still running is named
+// without a try and never takes a place in the batch, so such cases cannot hold back the others run after run.
 function closeResolved(p) {
     const limit = Math.max(1, Math.min(2000, Number(p.limit) || 200))
+    const scope = cases.listOf(p.requestIds)
     const at = nowMs()
     const policies = cases.currentRows(POLICY, {}).filter(row => row.autoCloseDays != null && Number(row.autoCloseDays) >= 0)
-    const list = []
-    for (const policy of policies) {
-        if (list.length >= limit) break
-        const days = Number(policy.autoCloseDays)
-        const cutoff = stamp(at - days * dayMs)
-        for (const row of Array.from(
-            find(CASE_ORG, {partyId: policy.organizationPartyId, roleTypeId: "OrgInternal", statusId: "ReqCompleted"})
-                .condition("closedDate", "is-null", null)
-                .condition("thruDate", "is-null", null)
-                .condition("lastUpdatedStamp", "less", cutoff)
-                .orderBy("lastUpdatedStamp")
-                .limit(limit - list.length)
-                .list()
-        ))
-            list.push({requestId: row.requestId, autoCloseDays: days})
-    }
     const failed = []
-    let closed = 0
-    for (const entry of list) {
-        ec.message.pushErrors()
-        try {
-            const out =
-                ec.service
-                    .sync()
-                    .name("mantle.request.SupportCaseServices.close#ResolvedCase")
-                    .parameters(entry)
-                    .requireNewTransaction(true)
-                    .disableAuthz()
-                    .call() || {}
-            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
-            if (out.closed) closed++
-        } catch (error) {
-            const message = error && error.message ? error.message : String(error)
-            ec.logger.error("Case " + entry.requestId + " was not closed: " + message)
-            failed.push({requestId: entry.requestId, message})
-        } finally {
-            ec.message.clearErrors()
-            ec.message.popErrors()
+    const fail = (requestId, message) => {
+        ec.logger.error("Case " + requestId + " was not closed: " + message)
+        failed.push({requestId, message})
+    }
+    let closed = 0,
+        scanned = 0
+    for (const policy of policies) {
+        if (scanned >= limit) break
+        const days = Number(policy.autoCloseDays)
+        let query = find(CASE_ORG, {partyId: policy.organizationPartyId, roleTypeId: "OrgInternal", statusId: "ReqCompleted"})
+            .condition("closedDate", "is-null", null)
+            .condition("thruDate", "is-null", null)
+            .condition("lastUpdatedStamp", "less", stamp(at - days * dayMs))
+        if (scope.length) query = query.condition("requestId", "in", scope)
+        const ids = Array.from(
+            query
+                .orderBy("lastUpdatedStamp")
+                .limit(limit * 5)
+                .list()
+        ).map(row => row.requestId)
+        const running = new Set(
+            ids.length
+                ? Array.from(
+                      find(EPISODE, {}).condition("requestId", "in", ids).condition("stateEnumId", "in", runningStates).list()
+                  ).map(row => row.requestId)
+                : []
+        )
+        for (const requestId of ids) {
+            if (running.has(requestId)) {
+                fail(requestId, "CLOCK_OPEN: Case " + requestId + " is resolved with a clock still running; it is not closed")
+                continue
+            }
+            if (scanned >= limit) break
+            scanned++
+            ec.message.pushErrors()
+            try {
+                const out =
+                    ec.service
+                        .sync()
+                        .name("mantle.request.SupportCaseServices.close#ResolvedCase")
+                        .parameters({requestId, autoCloseDays: days})
+                        .requireNewTransaction(true)
+                        .disableAuthz()
+                        .call() || {}
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                if (out.closed) closed++
+            } catch (error) {
+                fail(requestId, error && error.message ? error.message : String(error))
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
         }
     }
-    return {scannedCount: list.length, closedCount: closed, failedList: failed}
+    return {scannedCount: scanned, closedCount: closed, failedList: failed}
 }
 // close#ResolvedCase: one case, locked: still Completed, not closed and resolved longer ago than the delay; a case with a
 // clock still running is not closed (auto-close never closes an unhandled case) and is named (CLOCK_OPEN).

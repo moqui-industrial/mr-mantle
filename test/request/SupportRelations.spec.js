@@ -519,9 +519,9 @@ feature("auto-close sets the close date and keeps the status, names a case that 
             dueDate: new Date(state.base + 30 * day)
         })
         ahead(8 * day)
-        const first = run("john.doe", S + "close#ResolvedCases", {limit: 2000})
+        const first = run("john.doe", S + "close#ResolvedCases", {limit: 2000, requestIds: [closing, broken]})
         const closedDate = one(PROFILE, {requestId: closing}).closedDate
-        const second = run("john.doe", S + "close#ResolvedCases", {limit: 2000})
+        const second = run("john.doe", S + "close#ResolvedCases", {limit: 2000, requestIds: [closing, broken]})
         // after auto-close, a reply within the fourteen days makes a follow-up, and a reopen is refused
         message(closing, "Email", customer)
         return {
@@ -538,7 +538,7 @@ feature("auto-close sets the close date and keeps the status, names a case that 
         }
     },
     then(r) {
-        r.first.closedCount >= 1
+        r.first.closedCount == 1
         r.closedDate != null
         r.request.statusId == "ReqCompleted"
         r.first.failedList.some(row => row.requestId == r.broken && row.message.includes("CLOCK_OPEN"))
