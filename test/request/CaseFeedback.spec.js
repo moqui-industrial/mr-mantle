@@ -3,9 +3,10 @@
 // (permission, another organization's, no rating) and the delivery policy's (an unpublished form); a resolved case invited once
 // by the rule after the commit, a second try answering ALREADY_INVITED, a case of an organization with no policy invited by
 // nothing; the send job sending it once with its link, and a rerun sending nothing; the Feedback page's read (the form, the
-// customer's label, never the case) and a forged token's NotFound; a submit refused without its rating, then a rating of 2 with
-// a comment kept as one response, a repeat answering the first, the low score's follow-up assigned to the team's manager and
-// told, never naming the comment; a feedback form refused as a queue's case template; the follow-up recorded by the manager and refused an agent of another team; the framework's
+// customer's label, never the case) and a forged token's NotFound, as a good one's on another organization's site; a submit
+// refused without its rating, then a rating of 2 with a comment kept as one response, a repeat answering the first, the low
+// score's follow-up assigned to the team's manager and told, never naming the comment; a feedback form refused as a queue's
+// case template; the follow-up recorded by the manager and refused an agent of another team; the framework's
 // update#FormResponse and delete#FormResponse refused on the invited response and unchanged for a response with no
 // invitation. Standalone: spec-local organizations, customer, team, queue, site, groups and users, artifact authorization
 // disabled (the rules are the services' own checks). Run: ./moq test mr-mantle --spec CaseFeedback
@@ -15,6 +16,7 @@ const org = prefix + "_ORG",
     customer = prefix + "_CUST",
     otherCustomer = prefix + "_CUST2",
     siteId = prefix + "_SITE",
+    otherSiteId = prefix + "_OTHER_SITE",
     since = "2000-01-01T00:00:00Z"
 const S = "mantle.request.SupportCaseServices.",
     F = "mantle.request.CaseFeedbackServices.",
@@ -183,12 +185,31 @@ spec({
             enabled: "Y",
             targetId: org
         })
+        // another organization's site with the Support app: a link of the organization's is not its
+        call("create#mantle.public.PublicSite", {
+            siteId: otherSiteId,
+            name: "Feedback spec other site",
+            state: "published",
+            registrationMode: "invitation",
+            locale: "en",
+            timeZone: "UTC",
+            policyRevision: 1,
+            generation: 1
+        })
+        call("create#mantle.public.PublicSiteApp", {
+            siteId: otherSiteId,
+            appMountId: "support",
+            app: "support",
+            pathPrefix: "/support",
+            enabled: "Y",
+            targetId: otherOrg
+        })
     },
     cleanupSpec() {
         ec.artifactExecution.disableAuthz()
         // the site is listed by PASS's Sites; nothing else of this spec is another's
         for (const entity of ["mantle.public.PublicSiteApp", "mantle.public.PublicSiteHost", "mantle.public.PublicSite"])
-            find(entity, {siteId}).deleteAll()
+            for (const id of [siteId, otherSiteId]) find(entity, {siteId: id}).deleteAll()
         ec.artifactExecution.enableAuthz()
         login("john.doe")
     },
@@ -295,7 +316,12 @@ feature("the Feedback page reads the form and the customer's label, refuses a fo
     when() {
         const token = (state.token = link(state.invitationId, "CfbSpecFeedbackLinkToken" + "0".repeat(24)))
         const read = page(F + "get#Invitation", {siteId, token})
-        const forged = page(F + "get#Invitation", {siteId, token: "x".repeat(48)})
+        // a forged token, and the organization's good one on another organization's site (read and answer)
+        const forged = [
+            page(F + "get#Invitation", {siteId, token: "x".repeat(48)}),
+            page(F + "get#Invitation", {siteId: otherSiteId, token}),
+            page(F + "submit#CaseFeedback", {siteId: otherSiteId, token, values: {rating: "1"}})
+        ].map(out => out.kind)
         const noRating = page(F + "submit#CaseFeedback", {siteId, token, values: {comment: "No stars"}})
         const outOfScale = page(F + "submit#CaseFeedback", {siteId, token, values: {rating: "9"}})
         const submitted = page(F + "submit#CaseFeedback", {
@@ -322,7 +348,7 @@ feature("the Feedback page reads the form and the customer's label, refuses a fo
         read.fields.find(field => field.fieldName == "rating").required == true
         !JSON.stringify(read).includes(state.requestId)
         read.capabilities.canSubmit == true
-        forged.kind == "NotFound"
+        forged.join() == "NotFound,NotFound,NotFound"
         noRating.kind == "Unprocessable"
         outOfScale.kind == "Unprocessable"
         submitted.alreadyApplied == false
