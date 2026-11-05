@@ -687,4 +687,9 @@ along with this software (see the LICENSE.md file). If not, see
             artifactName="mantle\.(work\.CalendarDavServices|party\.ContactDavServices)\.(get#DavCollections|get#DavObjects|put#DavObject|delete#DavObject)"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleDavServicesALL" userGroupId="ALL_USERS" artifactGroupId="MantleDavServices"
             authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- A sales order's confirmation as placed (impl-customer-service P3, F29; mantle.order.OrderConfirmationServices): its
+        PDF stored once as an OrderContent of this type, which each resend attaches -->
+    <moqui.basic.Enumeration enumId="OctOrderConfirmation" description="Order confirmation as placed"
+            enumTypeId="OrderContentType"/>
 </entity-facade-xml>
