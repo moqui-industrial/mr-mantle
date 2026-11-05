@@ -473,7 +473,7 @@ function create(p) {
     if (p.assigneePartyId) checkAssignee(p.assigneePartyId, queue.queue, organizationPartyId)
     // P7: the case's template values, checked before anything is made (CaseTemplates.js)
     const templates = ec.resource.script("component://mr-mantle/service/mantle/request/CaseTemplates.js")
-    const templateFormId = templates.forCase(organizationPartyId, requestCategoryId, p.templateFormId)
+    const templateFormId = templates.forCase(organizationPartyId, requestCategoryId, p.templateFormId, requestTypeEnumId)
     let templateValues = null
     if (templateFormId) {
         const checked = templates.checkValues(templateFormId, p.templateValues, "internal")
@@ -759,7 +759,11 @@ function saveType(p) {
             defaultCategoryId: p.defaultCategoryId || null,
             defaultPriority: blank(p.defaultPriority) ? null : Number(p.defaultPriority),
             caseWorkflowId: p.caseWorkflowId || null,
-            publicAvailable: yn(p.publicAvailable)
+            publicAvailable: yn(p.publicAvailable),
+            // P11: the type's template (the warranty claim's), kept from the row it replaces (as save#ServiceQueue keeps a
+            // queue's, F127)
+            templateFormId:
+                currentRow(TYPE, {organizationPartyId, requestTypeEnumId: p.requestTypeEnumId})?.templateFormId || null
         },
         p
     )

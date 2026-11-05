@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Warranty claims (CS-WARRANTY; design-customer-service §5 WarrantyClaims and WarrantyAssessment, crosscut §3.2
+    DeliveredItems; impl-customer-service §4, P11; Warranty.js, SupportWarrantyEntities.xml, SupportWarranty.eecas.xml). A claim is
+    its RqtWarranty case: the product a RequestItem, the asset, order, invoice and agreement RequestRecord links, and its
+    evidence's revision Request.claimRevision; no WarrantyClaim record. Its coverage is read by the hierarchy of §4: the
+    customer's service agreement first, then the product's warranty at sale (a serial or lot traced through AssetIssuance to its
+    order, customer and ship date, the term from the product's PftWarranty feature), else goodwill. A decision is a
+    WarrantyDecision at the claim's revision. A repair is an AssetMaintenance on the sold serial with a WepMaintenance task
+    (F67); its completion tells the agent and resolves nothing; a replacement goes through a return. Each service checks its
+    permission and the case's organization itself and reads and writes with artifact authorization off. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="WarrantyClaims" allow-remote="false">
+        <description>The warranty claims of the user's organizations (WarrantyFind, WarrantyList), newest first: each with its
+            customer, product, serial, order, coverage end and basis, the current decision and its approver, the linked repairs
+            or return, the next action, the assignee and the state (Needs evidence, Assessment, Approved repair or replacement,
+            Rejected, Customer follow-up, Closed), read, not stored. By customer, product, serial number, order, agreement,
+            state, assignee and claim date; with queueIds, only the claims of those queues and those assigned to
+            visibleAssigneePartyId (an app's own case scope). Requires SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE or WARRANTY_APPROVE
+            (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="productId"/>
+            <parameter name="serialNumber"/>
+            <parameter name="orderId"/>
+            <parameter name="agreementId"/>
+            <parameter name="state"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="queueIds" type="List"/>
+            <parameter name="visibleAssigneePartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="claimList" type="List"/>
+            <parameter name="claimListCount" type="Integer"/>
+            <parameter name="claimListPageIndex" type="Integer"/>
+            <parameter name="claimListPageSize" type="Integer"/>
+            <parameter name="claimListPageMaxIndex" type="Integer"/>
+            <parameter name="claimListPageRangeLow" type="Integer"/>
+            <parameter name="claimListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('find', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="WarrantyClaim" allow-remote="false">
+        <description>One claim for WarrantyAssessment: the case (customer, organization, assignee, claim date, status), its
+            evidence (product, quantity, fault, serial and its owner and status, order, invoice, agreement, prior claims on the
+            serial), its revision and state, the coverage as get#WarrantyCoverage reads it, its decisions (current or not), its
+            repairs with their tasks and its returns, and what the user may do (save, decide, approve, link a repair, with the
+            reason when not). A case of another type is answered with isClaim false, so its evidence can be recorded. Requires
+            SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE or WARRANTY_APPROVE; refuses a missing case and another organization's alike
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="claim" type="Map"/>
+            <parameter name="coverage" type="Map"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="currentDecision" type="Map"/>
+            <parameter name="repairs" type="List"/>
+            <parameter name="returns" type="List"/>
+            <parameter name="actions" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('get', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="save" noun="WarrantyClaim" allow-remote="false">
+        <description>Make a claim, or record its evidence (WarrantyEvidence). With no requestId a new RqtWarranty case is made
+            through SupportCaseServices.create#Case (the organization, customer, subject and the case's other fields, its queue,
+            template and assignment rules); with one, the case becomes a claim when it is of another type. The evidence: the
+            product (a RequestItem, with the quantity and the fault), the serial or lot by assetId or serialNumber (an asset of
+            the case's organization, by its facility's owner or the vendor of the sale it was issued on, and of its customer,
+            by its owner or that sale's customer; ASSET_UNAVAILABLE), the order (a sale of the organization to the customer,
+            from the serial's sale when not given; ORDER_UNAVAILABLE), the invoice (from the order line's billing when not
+            given; INVOICE_UNAVAILABLE) and the agreement (a service agreement with the customer; AGREEMENT_UNAVAILABLE), each a
+            RequestRecord link. A change counts the claim's revision once and supersedes its decisions. Refuses a serial of
+            another product (ASSET_PRODUCT_MISMATCH), a closed or merged case (CASE_CLOSED, CASE_MERGED), a claim revision not the
+            current one (STALE_REVISION naming it) and a quantity not above zero (QUANTITY_INVALID). Requires SUPPORT_CASE_EDIT
+            and a case of the user's organizations. The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="claimRevision" type="Integer"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="priority"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="templateFormId"/>
+            <parameter name="templateValues" type="Map"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="faultText"/>
+            <parameter name="assetId"/>
+            <parameter name="serialNumber"/>
+            <parameter name="orderId"/>
+            <parameter name="invoiceId"/>
+            <parameter name="agreementId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="claimRevision" type="Integer"/>
+            <parameter name="changed" type="Boolean"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('save', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="WarrantyCoverage" allow-remote="false">
+        <description>The coverage lookup, writing nothing: for a claim (requestId) at its date, or a serial (assetId), lot or
+            product of a customer of one of the user's organizations at a date (now when not given). The agreement first (a
+            service agreement, AgrService, of the organization with the customer, active and in effect, with a warranty term,
+            TtWarranty, for the product), then the product's warranty at sale (the serial or lot traced through AssetIssuance
+            to its sales order, customer and ship date; the term from the product's PftWarranty feature, its number and time
+            unit; the coverage end the ship date plus the term), else none (WcbNone: only goodwill covers it). Answers the
+            basis, whether it is covered, the terms and their source, the coverage start and end with the end's source, the
+            sale's order, line, shipment and ship date, and each step in the trace. Requires SUPPORT_CASE_EDIT,
+            SUPPORT_CASE_MANAGE or WARRANTY_APPROVE; refuses another organization's claim or serial (RECORD_UNAVAILABLE,
+            ASSET_UNAVAILABLE) and a customer it does not serve (CUSTOMER_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="lotId"/>
+            <parameter name="productId"/>
+            <parameter name="orderId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="coverage" type="Map"/></out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('coverage', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="WarrantyClaim" allow-remote="false">
+        <description>Record the entitlement result at the claim's revision (WarrantyDecision): covered, partly covered, rejected
+            or goodwill, with the terms (the lookup's when not given) and their source, the coverage basis and end, the reason
+            (required but for covered), the next due date and, for a chargeable repair (partly covered or rejected), the charge
+            estimate in its currency (the organization's when not given) and the customer's consent. A manual coverage end
+            (overrideCoverageEndDate) needs its reason (OVERRIDE_REASON_REQUIRED). Covering a claim the lookup found expired (a
+            rejection override, through a coverage end set with its reason) and goodwill need WARRANTY_APPROVE, whose holder is
+            recorded as the approver; covering a claim not covered is refused (NOT_COVERED). The decision supersedes the
+            claim's earlier ones; the case is not resolved. Requires SUPPORT_CASE_EDIT, the claim's revision (REVISION_REQUIRED;
+            STALE_REVISION naming the current one) and its product or serial (EVIDENCE_REQUIRED). Refuses an unknown decision
+            (DECISION_INVALID), a charge on a covered or goodwill decision (CHARGE_NOT_ALLOWED) or below zero (CHARGE_INVALID),
+            and a closed or merged case. The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="claimRevision" type="Integer"/>
+            <parameter name="decisionEnumId"/>
+            <parameter name="reason"/>
+            <parameter name="termsText"/>
+            <parameter name="overrideCoverageEndDate" type="Timestamp"/>
+            <parameter name="overrideReason"/>
+            <parameter name="chargeEstimate" type="BigDecimal"/>
+            <parameter name="chargeCurrencyUomId"/>
+            <parameter name="customerConsentRef"/>
+            <parameter name="nextDueDate" type="Timestamp"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="warrantyDecisionId"/>
+            <parameter name="decisionEnumId"/>
+            <parameter name="state"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('decide', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="link" noun="WarrantyWork" allow-remote="false">
+        <description>Link a repair to the claim (RepairLinks, F67): a new AssetMaintenance on the claim's serial
+            (mantle.product.EquipmentServices.create#AssetMaintenance, AsMntCreated, MntTpWarranty) with its WepMaintenance task
+            (taskWorkEffortId: the required work, the facility, the due date and the assignee, who works for the organization),
+            or an open AssetMaintenance of that serial; linked to the case by RequestRecord. The asset is checked here, as
+            create#AssetMaintenance checks nothing (F51): of the case's organization and its customer (ASSET_UNAVAILABLE);
+            customer-owned equipment keeps its owner. Needs a current decision (NOT_DECIDED) that covers the claim, or a
+            chargeable repair (NOT_APPROVED) whose customer consent is recorded (CONSENT_REQUIRED), and the serial
+            (ASSET_REQUIRED: a replacement goes through a return). Refuses no required work (WORK_REQUIRED), an assignee who
+            does not work for the organization (ASSIGNEE_UNAVAILABLE), another serial's or a closed maintenance
+            (MAINTENANCE_UNAVAILABLE) and a closed or merged case. Requires SUPPORT_CASE_EDIT. The same operation key answers
+            the first result.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="assetMaintenanceId"/>
+            <parameter name="comments"><description>The required work</description></parameter>
+            <parameter name="facilityId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assetMaintenanceId"/>
+            <parameter name="taskWorkEffortId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('linkWork', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="update" noun="WarrantyWork" allow-remote="false">
+        <description>Move a repair of the claim: in process, completed (with its result in the comments) or cancelled (before it
+            started), through the AssetMaintenance status flow, its task following (In progress, Complete, Cancelled). Its
+            completion tells the claim's agent (the WarrantyWorkFinished rule) and leaves the case as it is. Refuses a
+            maintenance the claim does not link (MAINTENANCE_UNAVAILABLE) and a move its status does not allow
+            (STATUS_INVALID). Requires SUPPORT_CASE_EDIT and a claim of the user's organizations.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="assetMaintenanceId" required="true"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('updateWork', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="notify" noun="WarrantyWorkFinished" allow-remote="false">
+        <description>From the WarrantyWorkFinished rule (an AssetMaintenance completed, by any path): each warranty claim case
+            linked to it tells its assignee, else the agent who linked the repair (WarrantyRepairFinished). Resolves nothing;
+            a maintenance no claim links sends nothing; a failure is logged, never the update's.</description>
+        <in-parameters><parameter name="assetMaintenanceId" required="true"/></in-parameters>
+        <out-parameters><parameter name="sentCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('notifyFinished', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ServiceAgreement" allow-remote="false">
+        <description>A customer's service agreement (AgrService, F50, F101), the coverage lookup's first source: made (Active from
+            its date unless another status is given) or changed, between one of the user's organizations and a customer it
+            serves, with its dates, description and its warranty term (TtWarranty): the terms' text, and the product it covers
+            as an agreement item (none: every product). P4's service level condition reads the same agreement. Requires
+            SUPPORT_POLICY_EDIT. Refuses another organization (RECORD_UNAVAILABLE), a customer not served
+            (CUSTOMER_UNAVAILABLE), another's agreement (AGREEMENT_UNAVAILABLE), no terms (TERMS_REQUIRED), an end before the
+            start (DATES_INVALID) and an unknown status (STATUS_INVALID).</description>
+        <in-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="customerPartyId" required="true"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="statusId"/>
+            <parameter name="warrantyTermsText"/>
+            <parameter name="productId"/>
+        </in-parameters>
+        <out-parameters><parameter name="agreementId"/></out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('storeAgreement', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="DeliveredItems" allow-remote="false">
+        <description>The serials and lots the user's organizations delivered to a customer (crosscut §3.2 DeliveredItems, read
+            over AssetIssuance and the orders' parts), newest first, up to 200: each with its product, serial or lot, order,
+            shipment and ship date, the coverage end and its source and whether it is covered now (get#WarrantyCoverage), and
+            an open claim on it. Requires SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE or WARRANTY_APPROVE.</description>
+        <in-parameters><parameter name="customerPartyId" required="true"/></in-parameters>
+        <out-parameters><parameter name="deliveredList" type="List"/></out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('deliveredItems', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+</services>

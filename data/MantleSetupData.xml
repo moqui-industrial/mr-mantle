@@ -759,4 +759,13 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="ReturnDecision" inboxEnumId="NinNotifications" description="Return decided"
             typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="Return ${returnId} for ${customerName}: ${decisionText} (${decidedByName})"/>
+
+    <!-- A warranty claim's repair finished (impl-customer-service P11, F67; mantle.request.WarrantyServices,
+        SupportWarranty.eecas.xml): AsMntCompleted on the AssetMaintenance linked to an RqtWarranty case, to the case's assignee,
+        else the agent who linked the repair: requestId, requestName, customerName, assetText, the case as the record. It
+        resolves nothing. The app that works cases sets the link (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="WarrantyRepairFinished" inboxEnumId="NinNotifications"
+            description="Warranty repair finished" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="The repair of ${assetText} on claim ${requestId} is finished: ${requestName} (${customerName})"/>
 </entity-facade-xml>
