@@ -28,6 +28,20 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script>ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js')
             .guardResponse(formResponseId)</script></actions>
     </eeca>
+    <!-- An invitation that has its response keeps it: a change of its formResponseId, or a delete of the invitation, is
+        refused (RESPONSE_LOCKED), so the response cannot be unlinked past the rules above. -->
+    <eeca id="AnsweredFormInvitationKeepsResponse" entity="mantle.party.FormInvitation" on-update="true" run-before="true"
+            run-on-error="false" get-entire-entity="true" get-original-value="true">
+        <condition><expression>originalValue != null &amp;&amp; originalValue.formResponseId</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js')
+            .guardInvitation(invitationId, formResponseId, originalValue.formResponseId)</script></actions>
+    </eeca>
+    <eeca id="AnsweredFormInvitationNotDeleted" entity="mantle.party.FormInvitation" on-delete="true" run-before="true"
+            run-on-error="false" get-entire-entity="true">
+        <condition><expression>formResponseId</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js')
+            .guardInvitation(invitationId, null, formResponseId, true)</script></actions>
+    </eeca>
     <!-- IronStone Customer Service (impl-customer-service P13, CS-FEEDBACK): a case resolved (its status set Completed from
         any path) is offered for feedback after the commit (mantle.request.CaseFeedbackServices.queue#Invitation): an
         invitation under its organization's FeedbackDeliveryPolicy, which the send job mails after the policy's delay. A

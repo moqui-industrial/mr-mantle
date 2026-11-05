@@ -7,8 +7,8 @@
 // refused without its rating, then a rating of 2 with a comment kept as one response, a repeat answering the first, the low
 // score's follow-up assigned to the team's manager and told, never naming the comment; a feedback form refused as a queue's
 // case template; the follow-up recorded by the manager and refused an agent of another team; the framework's
-// update#FormResponse and delete#FormResponse refused on the invited response and unchanged for a response with no
-// invitation. Standalone: spec-local organizations, customer, team, queue, site, groups and users, artifact authorization
+// update#FormResponse and delete#FormResponse, and an unlink or delete of its invitation, refused on the invited response;
+// the framework services unchanged for a response with no invitation. Standalone: spec-local organizations, customer, team, queue, site, groups and users, artifact authorization
 // disabled (the rules are the services' own checks). Run: ./moq test mr-mantle --spec CaseFeedback
 const prefix = "CFB"
 const org = prefix + "_ORG",
@@ -382,6 +382,9 @@ feature("the follow-up is the manager's or its team's; the framework services ca
             run("john.doe", D + "update#FormResponse", {formResponseId: state.formResponseId, responseMap: {rating: "5"}})
         )
         const remove = code(run("john.doe", D + "delete#FormResponse", {formResponseId: state.formResponseId}))
+        // nor unlink the response from its invitation, or delete the invitation
+        const unlink = code(run("john.doe", "update#" + INVITATION, {invitationId: state.invitationId, formResponseId: null}))
+        const dropInvitation = code(run("john.doe", "delete#" + INVITATION, {invitationId: state.invitationId}))
         const kept = rows("moqui.screen.form.FormResponseAnswer", {formResponseId: state.formResponseId})
         // a response with no invitation: the framework services work as before
         const plain = run("john.doe", D + "create#FormResponse", {
@@ -397,6 +400,8 @@ feature("the follow-up is the manager's or its team's; the framework services ca
             followUp,
             update,
             remove,
+            unlink,
+            dropInvitation,
             kept,
             plainUpdate,
             plainValue,
@@ -404,7 +409,20 @@ feature("the follow-up is the manager's or its team's; the framework services ca
             plainGone: !one("moqui.screen.form.FormResponse", {formResponseId: plain})
         }
     },
-    then({recorded, refusedAgent, followUp, update, remove, kept, plainUpdate, plainValue, plainDelete, plainGone}) {
+    then({
+        recorded,
+        refusedAgent,
+        followUp,
+        update,
+        remove,
+        unlink,
+        dropInvitation,
+        kept,
+        plainUpdate,
+        plainValue,
+        plainDelete,
+        plainGone
+    }) {
         !recorded.error
         refusedAgent == "RECORD_UNAVAILABLE"
         followUp.statusEnumId == "FfsDone"
@@ -412,6 +430,9 @@ feature("the follow-up is the manager's or its team's; the framework services ca
         String(followUp.note).includes("the replacement ships tomorrow")
         update == "RESPONSE_LOCKED"
         remove == "RESPONSE_LOCKED"
+        unlink == "RESPONSE_LOCKED"
+        dropInvitation == "RESPONSE_LOCKED"
+        one(INVITATION, {invitationId: state.invitationId}).formResponseId == state.formResponseId
         kept.find(row => row.fieldName == "rating").valueText == "2"
         !plainUpdate.error
         plainValue == "3"

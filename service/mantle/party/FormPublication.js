@@ -34,4 +34,13 @@ function guardResponse(formResponseId) {
     if (invitationOf(formResponseId))
         denied("RESPONSE_LOCKED", "Response " + formResponseId + " answers an invitation and is kept as it was submitted")
 }
-;({publicationFor, invitationOf, guardResponse})
+// The invitation's guard (FormPublication.eecas.xml): once an invitation has its response, the link is kept, so unlinking it
+// (a change of formResponseId) or deleting the invitation cannot take its response past guardResponse.
+function guardInvitation(invitationId, formResponseId, originalFormResponseId, deleting = false) {
+    if (originalFormResponseId && (deleting || formResponseId !== originalFormResponseId))
+        denied(
+            "RESPONSE_LOCKED",
+            "Invitation " + invitationId + " has its response " + originalFormResponseId + " and is kept with it"
+        )
+}
+;({publicationFor, invitationOf, guardResponse, guardInvitation})
