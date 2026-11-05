@@ -52,10 +52,15 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="intakeDate" type="date-time"/>
         <field name="communicationEventId" type="id"/>
         <field name="emailMessageId" type="id"/>
-        <field name="templateFormId" type="id"/>
+        <field name="templateFormId" type="id"><description>The case template (a DbForm) its values were taken on (P7)</description></field>
+        <field name="formResponseId" type="id"><description>The case's template values (P7): a FormResponse of templateFormId,
+            read as of its response date (SupportCaseServices.get#CaseTemplateValues)</description></field>
         <field name="closedDate" type="date-time"/>
         <relationship type="one" related="mantle.request.Request" short-alias="request"/>
         <relationship type="one-nofk" related="mantle.request.support.ServicePolicy" short-alias="policy"/>
+        <relationship type="one-nofk" title="Template" related="moqui.screen.form.DbForm" short-alias="template">
+            <key-map field-name="templateFormId" related="formId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="templateResponse"/>
         <relationship type="one-nofk" title="CaseWorkflow" related="moqui.basic.Enumeration" short-alias="workflow">
             <key-map field-name="caseWorkflowId" related="enumId"/></relationship>
         <relationship type="one-nofk" title="Intake" related="mantle.request.RequestCategory" short-alias="intakeCategory">

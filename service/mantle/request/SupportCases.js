@@ -438,6 +438,15 @@ function create(p) {
     const priority = blank(p.priority) ? (type?.defaultPriority ?? 5) : Number(p.priority)
     if (!(priority >= 1 && priority <= 9)) denied("PRIORITY_INVALID", "A priority is 1 (highest) to 9 (lowest)")
     if (p.assigneePartyId) checkAssignee(p.assigneePartyId, queue.queue, organizationPartyId)
+    // P7: the case's template values, checked before anything is made (CaseTemplates.js)
+    const templates = ec.resource.script("component://mr-mantle/service/mantle/request/CaseTemplates.js")
+    const templateFormId = templates.forCase(organizationPartyId, requestCategoryId, p.templateFormId)
+    let templateValues = null
+    if (templateFormId) {
+        const checked = templates.checkValues(templateFormId, p.templateValues, "internal")
+        if (!checked.valid) denied("TEMPLATE_VALUES_INVALID", checked.errors.map(error => error.message).join("; "))
+        templateValues = checked.values
+    }
     const created = call("mantle.request.RequestServices.create#Request", {
         requestName: name.substring(0, 255),
         description: p.description || null,
@@ -465,6 +474,7 @@ function create(p) {
             })
     const made = ensure({requestId, communicationEventId: p.communicationEventId, emailMessageId: p.emailMessageId})
     if (!made.isCase) denied("NOT_A_CASE", "Request " + requestId + " is not a case: " + (made.reason || ""))
+    if (templateFormId) templates.record(requestId, templateFormId, templateValues)
     if (p.assigneePartyId) {
         const theCase = caseOf(requestId)
         assign(theCase, p.assigneePartyId)
@@ -657,6 +667,14 @@ function saveQueue(p) {
             denied("TYPE_UNKNOWN", enumId + " is not a request type")
     if (p.fallbackAssigneePartyId)
         checkAssignee(p.fallbackAssigneePartyId, {responsibleTeamPartyId: p.responsibleTeamPartyId}, organizationPartyId)
+    // P7: the queue keeps its template unless one is given (empty: none), an organization's case template
+    const templateFormId =
+        p.templateFormId == null ? currentRow(QUEUE, {requestCategoryId})?.templateFormId || null : text(p.templateFormId)
+    if (templateFormId) {
+        const template = one("moqui.screen.form.DbForm", {formId: templateFormId})
+        if (template?.purposeEnumId !== "DbfpCaseTemplate" || template.ownerPartyId !== organizationPartyId)
+            denied("TEMPLATE_UNAVAILABLE", "Template " + templateFormId + " is not one of the organization's")
+    }
     const serviceQueueId = startRow(
         QUEUE,
         "serviceQueueId",
@@ -666,6 +684,7 @@ function saveQueue(p) {
             visibilityEnumId,
             responsibleTeamPartyId: p.responsibleTeamPartyId || null,
             fallbackAssigneePartyId: p.fallbackAssigneePartyId || null,
+            templateFormId,
             changeReason: text(p.changeReason)
         },
         p
