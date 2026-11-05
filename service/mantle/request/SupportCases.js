@@ -77,10 +77,11 @@ function startRow(entity, idField, conditions, values, p) {
 const isInternal = partyId => !!partyId && !!one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
 const partiesOf = requestId => currentRows(PARTY, {requestId})
 const roleParty = (parties, roleTypeId) => parties.find(row => row.roleTypeId === roleTypeId)?.partyId || null
-// A customer the organization serves: a Customer-role party, not internal, owned by the organization or shared (_NA_).
+// A customer the organization serves: a Customer-role party, not internal (an internal organization, or a person who works
+// for one), owned by the organization or shared (_NA_).
 function servedCustomer(partyId, organizationPartyId) {
     const party = partyId ? one("mantle.party.Party", {partyId}) : null
-    if (!party || party.disabled === "Y" || isInternal(partyId)) return false
+    if (!party || party.disabled === "Y" || isInternal(partyId) || organizationsOf(partyId).length) return false
     if (!one("mantle.party.PartyRole", {partyId, roleTypeId: "Customer"})) return false
     return party.ownerPartyId === "_NA_" || !party.ownerPartyId || party.ownerPartyId === organizationPartyId
 }
@@ -122,11 +123,17 @@ function candidateOrganizations(request, parties) {
         ids.push(one("mantle.work.effort.WorkEffort", {workEffortId: request.rootWorkEffortId})?.ownerPartyId)
     return Array.from(new Set(ids.filter(id => id && id !== "_NA_" && isInternal(id))))
 }
-// The customers a filer stands for: itself when it is a customer, and the customers it is a current contact of (a
-// relationship from the filer to a Customer-role party); never an internal party.
+// The customers a filer stands for: itself when it is a customer, and the customers it is a current contact or employee of
+// (PrtContact, PrtEmployee to a Customer-role party); never an internal party, nor anyone who works for an internal
+// organization (an employee's or agent's own request is never a case by inference, even when they are a customer too or an
+// account's representative; Nov 5 decision).
 function customerSidesOf(partyId) {
-    if (!partyId || isInternal(partyId)) return []
-    const ids = [partyId].concat(currentRows(RELATIONSHIP, {fromPartyId: partyId}).map(row => row.toPartyId))
+    if (!partyId || isInternal(partyId) || organizationsOf(partyId).length) return []
+    const ids = [partyId].concat(
+        currentRows(RELATIONSHIP, {fromPartyId: partyId})
+            .filter(row => ["PrtContact", "PrtEmployee"].includes(row.relationshipTypeEnumId))
+            .map(row => row.toPartyId)
+    )
     return Array.from(new Set(ids)).filter(
         id => !isInternal(id) && !!one("mantle.party.PartyRole", {partyId: id, roleTypeId: "Customer"})
     )
@@ -136,6 +143,9 @@ function customerSidesOf(partyId) {
 function route(request, parties = partiesOf(request.requestId)) {
     if (!request) return {reason: "NO_REQUEST"}
     if (request.statusId === "ReqDraft" || closedStatuses.includes(request.statusId)) return {reason: "NOT_SUBMITTED"}
+    // a request becomes a case when it is Submitted (Nov 5 decision); one already in progress becomes one only by a move into a
+    // service queue, so a policy set up later, or a Customer party added to a request in progress, converts no open request
+    if (request.statusId !== "ReqSubmitted" && !queueOf(request.requestCategoryId)) return {reason: "NOT_SUBMITTED"}
     let customers = parties.filter(row => row.roleTypeId === "Customer").map(row => row.partyId)
     // a customer contact's own request (Chat, Commons, the forum: no Customer party): its filer when the filer is a customer,
     // else the customer organizations the filer is a contact of; ensure adds the Customer party (F-P2-1)

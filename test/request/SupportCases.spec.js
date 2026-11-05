@@ -58,13 +58,15 @@ function user(kind, permissions, organizationPartyId = org) {
         call("create#moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId: permission, fromDate: since})
     call("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
     call("create#mantle.party.Person", {partyId: id, firstName: "Case", lastName: kind})
-    call("create#mantle.party.PartyRelationship", {
-        relationshipTypeEnumId: "PrtAgent",
-        fromPartyId: id,
-        toPartyId: organizationPartyId,
-        toRoleTypeId: "OrgInternal",
-        fromDate: since
-    })
+    // a staff user works for the organization; a customer's own user (organizationPartyId null) does not
+    if (organizationPartyId)
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtAgent",
+            fromPartyId: id,
+            toPartyId: organizationPartyId,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
     call("create#moqui.security.UserAccount", {
         userId: id,
         username: id,
@@ -297,11 +299,23 @@ feature("on every path: a draft submitted, a Customer party added, a move into a
         const sharedCase = request(state.agent, {customerPartyId: shared})
         const employeeRequest = request(state.agent, {customerPartyId: employee})
         // a customer contact's own request with no Customer party (as Chat files one): the contact is the customer
-        const contact = user("CONTACT", [])
+        const contact = user("CONTACT", [], null)
         call("create#mantle.party.PartyRole", {partyId: contact, roleTypeId: "Customer"})
         call("update#mantle.party.Party", {partyId: contact, ownerPartyId: org})
         const contactRequest = request(contact, {})
         const otherRequest = request(state.agent, {customerPartyId: otherCustomer})
+        // staff who are customers too, and a customer's contacts, file their own requests as staff: never a case (Nov 5)
+        call("create#mantle.party.PartyRole", {partyId: state.reader, roleTypeId: "Customer"})
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtContact",
+            fromPartyId: state.reader,
+            toPartyId: customer,
+            fromDate: since
+        })
+        const staffRequest = request(state.reader, {})
+        // a request already in progress given a Customer party is not made a case (only a Submitted one, or a move into a queue)
+        const inProgress = request(state.agent, {statusId: "ReqInProgress"})
+        run(state.agent, R + "update#Request", {requestId: inProgress, customerPartyId: customer})
         return {
             draftProfile,
             draftCase: profileOf(draft),
@@ -314,7 +328,9 @@ feature("on every path: a draft submitted, a Customer party added, a move into a
             projectCase: profileOf(state.projectCase),
             sharedCase: profileOf(sharedCase),
             employee: call(S + "ensure#CaseProfile", {requestId: employeeRequest}),
-            other: call(S + "ensure#CaseProfile", {requestId: otherRequest})
+            other: call(S + "ensure#CaseProfile", {requestId: otherRequest}),
+            staff: call(S + "ensure#CaseProfile", {requestId: staffRequest}),
+            inProgress: call(S + "ensure#CaseProfile", {requestId: inProgress})
         }
     },
     then(r) {
@@ -330,6 +346,8 @@ feature("on every path: a draft submitted, a Customer party added, a move into a
         r.sharedCase != null
         r.employee.isCase == false
         r.other.isCase == false
+        r.staff.isCase == false
+        r.inProgress.isCase == false
     }
 })
 
@@ -501,7 +519,10 @@ feature("update#Request refuses a case's close and due date from any other path 
                 requestResolutionEnumId: "RrRejected"
             }),
             due: run(state.admin, R + "update#Request", {requestId: state.case, responseRequiredDate: ec.user.nowTimestamp}),
-            name: run(state.admin, R + "update#Request", {requestId: state.case, requestName: "Broken thermostat, again"}),
+            // another change of a case with a due date (its service level's) is not refused
+            name:
+                (call("update#" + REQUEST, {requestId: state.case, responseRequiredDate: new Date(Date.now() + 7200000)}),
+                run(state.admin, R + "update#Request", {requestId: state.case, requestName: "Broken thermostat, again"})),
             plainClose: run(state.admin, R + "update#Request", {
                 requestId: plain,
                 statusId: "ReqCompleted",
