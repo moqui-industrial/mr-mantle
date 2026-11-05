@@ -1,6 +1,6 @@
 // A Purchase hold reason (OrderHoldType OhtPurchase) is placed and released with PURCHASE_HOLD_RELEASE, Purchasing's
-// approver's permission (impl-purchasing P1, X4), not the sales order approver's ORDER_APPROVE; a Change hold keeps
-// ORDER_APPROVE. hold#Order checks the permission its type names before it reads the order, so a missing order shows that a
+// approver's permission (impl-purchasing P1, X4), not the sales order approver's ORDER_APPROVE; a Change hold takes
+// ORDER_CHANGE_HOLD_RELEASE, the order change groups' (impl-customer-service P1, X4), and no longer ORDER_APPROVE. hold#Order checks the permission its type names before it reads the order, so a missing order shows that a
 // call got past the check. The service runs without artifact authorization: the rule is its own permission check.
 // Standalone: spec-local groups and users.
 const prefix = "PUR_HOLD_SPEC"
@@ -42,30 +42,35 @@ function hold(username, holdTypeEnumId) {
         login("john.doe")
     }
 }
-let purchasing, sales
+let purchasing, sales, change
 
 spec({
     setupSpec() {
         purchasing = user("PURCHASING", "PURCHASE_HOLD_RELEASE")
         sales = user("SALES", "ORDER_APPROVE")
+        change = user("CHANGE", "ORDER_CHANGE_HOLD_RELEASE")
     }
 })
 
-feature("a Purchase hold takes PURCHASE_HOLD_RELEASE, and a Change hold still takes ORDER_APPROVE", {
+feature("a Purchase hold takes PURCHASE_HOLD_RELEASE, and a Change hold ORDER_CHANGE_HOLD_RELEASE, not ORDER_APPROVE", {
     when() {
         return {
             code: ec.entity.find("moqui.basic.Enumeration").condition("enumId", "OhtPurchase").disableAuthz().one().enumCode,
+            changeCode: ec.entity.find("moqui.basic.Enumeration").condition("enumId", "OhtChange").disableAuthz().one().enumCode,
             purchasingPurchase: hold(purchasing, "OhtPurchase"),
             salesPurchase: hold(sales, "OhtPurchase"),
             purchasingChange: hold(purchasing, "OhtChange"),
-            salesChange: hold(sales, "OhtChange")
+            salesChange: hold(sales, "OhtChange"),
+            changeChange: hold(change, "OhtChange")
         }
     },
-    then({code, purchasingPurchase, salesPurchase, purchasingChange, salesChange}) {
+    then({code, changeCode, purchasingPurchase, salesPurchase, purchasingChange, salesChange, changeChange}) {
         code == "PURCHASE_HOLD_RELEASE"
+        changeCode == "ORDER_CHANGE_HOLD_RELEASE"
         purchasingPurchase.includes("ORDER_UNAVAILABLE")
         salesPurchase.includes("PERMISSION_DENIED: PURCHASE_HOLD_RELEASE")
-        purchasingChange.includes("PERMISSION_DENIED: ORDER_APPROVE")
-        salesChange.includes("ORDER_UNAVAILABLE")
+        purchasingChange.includes("PERMISSION_DENIED: ORDER_CHANGE_HOLD_RELEASE")
+        salesChange.includes("PERMISSION_DENIED: ORDER_CHANGE_HOLD_RELEASE")
+        changeChange.includes("ORDER_UNAVAILABLE")
     }
 })

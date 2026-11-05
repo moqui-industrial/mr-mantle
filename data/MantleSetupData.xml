@@ -51,6 +51,40 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_POLICY_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="SUPPLIER_SCORECARD_EDIT" description="Supplier Scorecard Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_SCORECARD_EDIT" fromDate="0"/>
+    <!-- Customer Service's cases, order changes, returns and warranty (impl-customer-service P1, §2, §4; crosscut X4):
+        SUPPORT_CASE_EDIT works a support case (mantle.request.SupportCaseServices), SUPPORT_CASE_MANAGE manages queues,
+        teams, merges and assignment, SUPPORT_POLICY_EDIT keeps the service policies, levels and routes, SUPPORT_KNOWLEDGE_EDIT
+        publishes service knowledge (KnowledgeServices), SUPPORT_CONTACT_INVITE invites a customer contact to the Support app;
+        ORDER_CHANGE_REQUEST proposes a change of a placed sales order, ORDER_CHANGE_APPROVE decides it, ORDER_CHANGE_APPLY
+        applies it (and places a Change hold on a sales order, hold#Order), ORDER_CHANGE_HOLD_RELEASE releases a Change hold
+        (OrderHoldType OhtChange's enumCode, X4); RETURN_EXCEPTION_APPROVE decides a return outside its policy,
+        RETURN_POLICY_EDIT keeps the return policies (ReturnPolicyServices), WARRANTY_APPROVE decides a warranty claim
+        (WarrantyServices). RETURN_AUTHORIZE is below and CUSTOMER_CREDIT_VIEW in AccountingAccessData.xml. Granted to the
+        Customer Service groups by the app's setup data. -->
+    <userPermissions userPermissionId="SUPPORT_CASE_EDIT" description="Support Case Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CASE_MANAGE" description="Support Case Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_POLICY_EDIT" description="Support Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_KNOWLEDGE_EDIT" description="Support Knowledge Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_KNOWLEDGE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CONTACT_INVITE" description="Support Contact Invite"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CONTACT_INVITE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_REQUEST" description="Order Change Request"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_REQUEST" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPROVE" description="Order Change Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPLY" description="Order Change Apply"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPLY" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_HOLD_RELEASE" description="Order Change Hold Release"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_HOLD_RELEASE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_EXCEPTION_APPROVE" description="Return Exception Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_EXCEPTION_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_POLICY_EDIT" description="Return Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="WARRANTY_APPROVE" description="Warranty Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WARRANTY_APPROVE" fromDate="0"/>
     <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
         WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
         receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
