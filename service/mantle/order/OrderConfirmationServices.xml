@@ -23,9 +23,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="OrderConfirmationPrint" allow-remote="false">
         <description>A placed sales order's confirmation as placed (HTML for html-print or a PDF): its lines as of the placed
             time from the audit log (product, quantity, unit price, required date), the customer, seller, reference and
-            ship-to, and the total. Stores nothing. Requires SUPPORT_CASE_EDIT or ORDER_APPROVE (PERMISSION_DENIED); refuses an
-            order that is missing, not a sales order or not of the user's organizations (RECORD_UNAVAILABLE), and one not
-            placed (ORDER_NOT_PLACED).</description>
+            ship-to, and the total. Stores nothing. Requires SUPPORT_CASE_EDIT or ORDER_APPROVE, and PRICE_VIEW, ACCOUNTING_VIEW or
+            ORDER_APPROVE for its amounts (PERMISSION_DENIED); refuses an order that is missing, not a sales order or not of the
+            user's organizations (RECORD_UNAVAILABLE), one not placed (ORDER_NOT_PLACED), and one whose lines may have been
+            deleted since it was placed (ORDER_CHANGED_SINCE_PLACED: a store order with a line created after placement, or a
+            line number created again), which the audit log cannot rebuild.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
         </in-parameters>
@@ -48,8 +50,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="OrderConfirmation" allow-remote="false">
         <description>The order's stored confirmation: the OctOrderConfirmation OrderContent when it has one (stored false),
-            else the confirmation as placed (get#OrderConfirmationPrint) rendered to a PDF and stored once under the order's
-            lock (stored true). Refuses as get#OrderConfirmationPrint does.</description>
+            else the confirmation as placed (get#OrderConfirmationPrint's print) rendered to a PDF and stored once under the
+            order's lock (stored true). Refuses as get#OrderConfirmationPrint does, but for the amount permission: the PDF is
+            stored and sent, not shown.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
         </in-parameters>

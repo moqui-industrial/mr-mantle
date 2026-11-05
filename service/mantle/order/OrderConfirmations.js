@@ -19,6 +19,8 @@ const ORDER = "mantle.order.OrderHeader",
     EMAIL = "mantle.order.OrderEmailMessage"
 const contentType = "OctOrderConfirmation"
 const permissions = ["SUPPORT_CASE_EDIT", "ORDER_APPROVE"]
+// who reads the print's prices and total (§2: an amount the user may not read is not in the answer)
+const amountPermissions = ["PRICE_VIEW", "ACCOUNTING_VIEW", "ORDER_APPROVE"]
 const contactRelationships = ["PrtContact", "PrtEmployee", "PrtRepresentative"]
 const emailPattern = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/
 
@@ -53,15 +55,20 @@ function salesOrder(orderId, lock = false) {
 }
 
 // ===== the order as placed =====
-// A field's value at a time: the old value of its first change after the time, else the value now.
+// A field's value at a time: the new value of its last logged change at or before the time (a field logged on create has
+// one from the line's create), else the old value of its first change after the time, else the value now.
 function valueAt(logs, field, secondary, at, current) {
-    const change = logs.find(
-        row => row.changedFieldName === field && row.pkSecondaryValue === secondary && ms(row.changedDate) > at
-    )
+    const ofField = logs.filter(row => row.changedFieldName === field && row.pkSecondaryValue === secondary)
+    const before = ofField.filter(row => ms(row.changedDate) <= at).pop()
+    if (before) return before.newValueText
+    const change = ofField.find(row => ms(row.changedDate) > at)
     return change ? change.oldValueText : current
 }
 // The order's lines as they were when it was placed: a line logged as created after the placed time is left out, and each
-// logged field takes its value then.
+// logged field takes its value then. A deleted line is not in the audit log, so an order whose lines may have been deleted
+// since it was placed is refused (ORDER_CHANGED_SINCE_PLACED) rather than printed without them: a store order with a line
+// created after placement (Mantle's handle#OrderMajorChange deletes and recreates a placed store order's promotion,
+// shipping and tax lines on any change), or a line number created again after placement.
 function linesAsPlaced(so) {
     const placedAt = ms(so.order.placedDate)
     const fields = ["productId", "quantity", "unitAmount", "requiredByDate"]
@@ -73,14 +80,22 @@ function linesAsPlaced(so) {
             .orderBy("changedDate")
             .list()
     )
+    const creates = logs.filter(row => row.changedFieldName === "quantity" && row.oldValueText == null)
+    const createdAfter = creates.filter(row => ms(row.changedDate) > placedAt)
+    if (
+        createdAfter.length &&
+        (so.order.productStoreId ||
+            createdAfter.some(late => creates.some(row => row.pkSecondaryValue === late.pkSecondaryValue && row !== late)))
+    )
+        denied(
+            "ORDER_CHANGED_SINCE_PLACED",
+            "Order " + so.orderId + "'s lines were changed after it was placed, so its confirmation as placed cannot be rebuilt"
+        )
     const lines = []
     for (const item of rows(ITEM, {orderId: so.orderId}).sort((a, b) =>
         String(a.orderItemSeqId).localeCompare(String(b.orderItemSeqId))
     )) {
-        const created = logs.find(
-            row => row.changedFieldName === "quantity" && row.pkSecondaryValue === item.orderItemSeqId && row.oldValueText == null
-        )
-        if (created && ms(created.changedDate) > placedAt) continue
+        if (createdAfter.some(row => row.pkSecondaryValue === item.orderItemSeqId)) continue
         const at = field => valueAt(logs, field, item.orderItemSeqId, placedAt, item[field])
         const decimal = value => (value == null || value === "" ? toDecimal(0) : toDecimal(value))
         lines.push({
@@ -232,6 +247,8 @@ function senderAccount(emailAccountId, organizationPartyId) {
 // get#OrderConfirmationPrint: the confirmation as placed, rendered (not stored).
 function print(p) {
     requirePermission()
+    if (!amountPermissions.some(permission => access.has(permission)))
+        denied("PERMISSION_DENIED", amountPermissions.join(" or ") + " is required to read the confirmation's amounts")
     const so = salesOrder(p.orderId)
     return Object.assign({orderId: so.orderId}, printOf(so))
 }

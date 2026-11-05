@@ -1,9 +1,9 @@
 // A sales order's confirmation as placed (impl-customer-service P3, F29, F55; mantle.order.OrderConfirmationServices,
 // OrderConfirmations.js): the first resend renders the order as of its placed time (a line changed after placement prints
-// its placed quantity), stores the PDF once and sends it to a checked recipient through the mail client
+// its placed quantity, a line added after it is left out), stores the PDF once and sends it to a checked recipient through the mail client
 // (send#EmailDraft), recording the recipient's party and the content sent; the same operation key answers the first
 // result; a second resend is a second message of the same stored content, not a new render. The refusals: no permission,
-// another organization's order and a missing one alike, a recipient that is not the customer's or its contact's, an order
+// the print's amounts without price read, a store order whose lines changed after placement, another organization's order and a missing one alike, a recipient that is not the customer's or its contact's, an order
 // not placed, no account to send from. Standalone: spec-local organizations, customer, contact, users, mail server and
 // account; the mail capture keeps the sends. Run: ./moq test mr-mantle --spec OrderConfirmations
 const prefix = "OCF"
@@ -82,9 +82,15 @@ function user(kind, permissions, organizationPartyId) {
     return id
 }
 // a sales order of the organization to the customer, its lines made at one time and placed at a later one
-function salesOrder(orderId, placed) {
+function salesOrder(orderId, placed, productStoreId = null) {
     const now = Number(ec.user.nowTimestamp)
-    call("create#mantle.order.OrderHeader", {orderId, statusId: "OrderOpen", currencyUomId: "USD", entryDate: now - 7200000})
+    call("create#mantle.order.OrderHeader", {
+        orderId,
+        statusId: "OrderOpen",
+        currencyUomId: "USD",
+        entryDate: now - 7200000,
+        productStoreId
+    })
     call("create#mantle.order.OrderPart", {
         orderId,
         orderPartSeqId: "01",
@@ -140,7 +146,7 @@ spec({
             toPartyId: customer,
             fromDate: since
         })
-        state.agent = user("AGENT", ["SUPPORT_CASE_EDIT"], org)
+        state.agent = user("AGENT", ["SUPPORT_CASE_EDIT", "PRICE_VIEW"], org)
         state.reader = user("READER", [], org)
         state.outsider = user("OUTSIDER", ["SUPPORT_CASE_EDIT"], otherOrg)
         state.noAccount = user("NOACCOUNT", ["SUPPORT_CASE_EDIT"], org)
@@ -170,8 +176,25 @@ spec({
             })
         salesOrder(prefix + "_SO", true)
         salesOrder(prefix + "_SO_OPEN", false)
-        // after placement the customer's change of line 01 (2 to 5): the confirmation as placed still says 2
+        // after placement the customer's change of line 01 (2 to 5) and a line 03 added: the confirmation as placed still
+        // says 2 and has no line 03
         call("update#mantle.order.OrderItem", {orderId: prefix + "_SO", orderItemSeqId: "01", quantity: 5})
+        const added = {orderPartSeqId: "01", itemTypeEnumId: "ItemProduct", quantity: 1, unitAmount: 7}
+        call(
+            "create#mantle.order.OrderItem",
+            Object.assign({orderId: prefix + "_SO", orderItemSeqId: "03"}, added, {
+                itemDescription: "Confirmation spec item added later"
+            })
+        )
+        // a store order with a line added after placement: Mantle recalculates its promotion, shipping and tax lines, deleting
+        // the placed ones, which the audit log cannot bring back
+        call("create#mantle.product.store.ProductStore", {
+            productStoreId: prefix + "_STORE",
+            storeName: "Confirmation spec store",
+            organizationPartyId: org
+        })
+        salesOrder(prefix + "_SO_STORE", true, prefix + "_STORE")
+        call("create#mantle.order.OrderItem", Object.assign({orderId: prefix + "_SO_STORE", orderItemSeqId: "03"}, added))
     },
     cleanupSpec() {
         capture.reset()
@@ -200,7 +223,10 @@ feature("the first resend renders the order as placed, stores it once and sends 
         })
         // line 01 as placed: 2, not the 5 it was changed to after
         const html = String(printed.printHtml || "")
-        const asPlaced = html.includes('<td class="amount">2 ') && !html.includes('<td class="amount">5 ')
+        const asPlaced =
+            html.includes('<td class="amount">2 ') &&
+            !html.includes('<td class="amount">5 ') &&
+            !html.includes("Confirmation spec item added later")
         return {printed, html, asPlaced, first, message, sent, record, contents}
     },
     then({printed, html, asPlaced, first, message, sent, record, contents}) {
@@ -256,7 +282,7 @@ feature("a retry answers the first send; a second resend to a contact is a secon
 })
 
 feature(
-    "a resend is refused without permission, for another organization's or a missing order, an unchecked recipient, an open order and no account",
+    "a resend is refused without permission, for another organization's or a missing order, an unchecked recipient, an open order, no account and a store order changed since placement; the print without price read",
     {
         when() {
             const resend = (username, orderId, toAddress, key) =>
@@ -269,10 +295,12 @@ feature(
                 invalid: resend(state.agent, prefix + "_SO", "not an address", "invalid"),
                 open: resend(state.agent, prefix + "_SO_OPEN", "orders@confirmation-customer.example", "open"),
                 noAccount: resend(state.noAccount, prefix + "_SO", "orders@confirmation-customer.example", "noaccount"),
+                changed: resend(state.agent, prefix + "_SO_STORE", "orders@confirmation-customer.example", "changed"),
+                noPriceRead: code(run(state.noAccount, S + "get#OrderConfirmationPrint", {orderId: prefix + "_SO"})),
                 openStored: rows("mantle.order.OrderContent", {orderId: prefix + "_SO_OPEN"}).length
             }
         },
-        then({reader, outsider, missing, stranger, invalid, open, noAccount, openStored}) {
+        then({reader, outsider, missing, stranger, invalid, open, noAccount, changed, noPriceRead, openStored}) {
             reader == "PERMISSION_DENIED"
             outsider == "RECORD_UNAVAILABLE"
             missing == "RECORD_UNAVAILABLE"
@@ -280,6 +308,8 @@ feature(
             invalid == "RECIPIENT_INVALID"
             open == "ORDER_NOT_PLACED"
             noAccount == "SEND_ACCOUNT_REQUIRED"
+            changed == "ORDER_CHANGED_SINCE_PLACED"
+            noPriceRead == "PERMISSION_DENIED"
             openStored == 0
         }
     }
