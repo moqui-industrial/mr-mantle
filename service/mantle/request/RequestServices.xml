@@ -161,6 +161,19 @@ along with this software (see the LICENSE.md file). If not, see
                     </script>
                 </if>
             </if>
+            <!-- a support case (impl-customer-service P2, F64): its due date, resolution and close are Customer Service's
+                (mantle.request.SupportCaseServices.transition#Case, SlaServices), so this path, mr-marble's EditRequest among
+                its callers, refuses them on a case (CASE_MANAGED); a request that is not a case is unchanged -->
+            <if condition="'responseRequiredDate' in context || requestResolutionEnumId || statusId == 'ReqCompleted' || statusId == 'ReqCancelled'">
+                <script><![CDATA[
+                    const caseFields = {}
+                    if ('responseRequiredDate' in context) caseFields.responseRequiredDate = responseRequiredDate
+                    if (requestResolutionEnumId) caseFields.requestResolutionEnumId = requestResolutionEnumId
+                    if (statusId) caseFields.statusId = statusId
+                    ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js').execute('guardUpdate',
+                            {requestId: requestId, fields: caseFields})
+                ]]></script>
+            </if>
             <service-call name="update#mantle.request.Request" out-map="context" in-map="context"/>
             <if condition="assignToPartyId"><service-call name="mantle.request.RequestServices.replace#RequestParty"
                     in-map="{requestId:requestId, roleTypeId:'Assignee', newPartyId:assignToPartyId}"/></if>
@@ -295,7 +308,8 @@ along with this software (see the LICENSE.md file). If not, see
             cancelled) of which the party (the user's, the current user's by default) is the Assignee, with a response due
             (responseRequiredDate) before thruDate, the soonest first; one due before fromDate is overdue. fromDate and
             thruDate default to the start of today and of tomorrow. Each item has the Today item's shape: kind request,
-            requestId, title, dueDate, overdue, priority, statusId and record (the request).
+            requestId, title, dueDate, overdue, priority, statusId and record (the request). A support case (one with a
+            CaseProfile) is left out: Customer Service's Today source lists it (impl-customer-service P2, F63).
         </description>
         <in-parameters>
             <parameter name="userId"/>
@@ -333,6 +347,11 @@ along with this software (see the LICENSE.md file). If not, see
                     .selectField('requestId').selectField('requestName').selectField('responseRequiredDate').selectField('priority')
                     .selectField('statusId').orderBy('responseRequiredDate').list()
             const seen = new Set()
+            // a support case is Customer Service's Today source's, not here (impl-customer-service P2, F63); with no cases
+            // (no ServicePolicy) nothing is left out
+            const foundIds = Array.from(new Set(Array.from(found).map((request) => request.requestId)))
+            if (foundIds.length) for (const profile of ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', 'in', foundIds)
+                    .selectField('requestId').disableAuthz().list()) seen.add(profile.requestId)
             for (const request of found) {
                 if (seen.has(request.requestId)) continue
                 seen.add(request.requestId)
@@ -1366,7 +1385,9 @@ along with this software (see the LICENSE.md file). If not, see
             each request on its own, a failure logged. A purchase request (RqtPurchase with its organization as an OrgInternal
             RequestParty, as Purchasing's are), purchase RFQ (RqtPurchaseRfq) or stock request (RqtInventory) is left alone: its
             progress is its sourcing or movements (CX-REQUEST, R-XC-40); a Purchase-type request of Commons or Projects with no
-            organization follows its work as before.
+            organization follows its work as before. A support case (one with a CaseProfile, impl-customer-service P2), a
+            project's among them, is never moved by its work: a linked item done or cancelled tells only its assignee (the
+            message's isCase is true).
         </description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="changedList" type="List"/></out-parameters>
@@ -1390,6 +1411,25 @@ along with this software (see the LICENSE.md file). If not, see
                         // a Commons or Projects request of the Purchase type, with none, follows its work as before
                         if (request.requestTypeEnumId === 'RqtPurchase' && ec.entity.find('mantle.request.RequestParty')
                                 .condition({requestId: request.requestId, roleTypeId: 'OrgInternal'}).count() > 0) continue
+                        // a support case (impl-customer-service P2, F48, design CaseDetail): its work never resolves it, a
+                        // project's case among them; a linked item done or cancelled tells only the case's assignee
+                        if (ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', request.requestId).count() > 0) {
+                            if (!DONE.includes(item.statusId) && item.statusId !== 'WeCancelled') continue
+                            const assigneeIds = Array.from(ec.entity.find('mantle.request.RequestParty').condition({requestId: request.requestId,
+                                    roleTypeId: 'Assignee'}).conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.partyId)
+                            const caseUserIds = assigneeIds.length ? Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', 'in', assigneeIds)
+                                    .selectField('userId').list()).map((account) => account.userId).filter((userId) => userId && userId !== ec.user.userId) : []
+                            if (caseUserIds.length) {
+                                const workLabel = ec.resource.expand(item.statusId === 'WeCancelled' ? 'work item ${id} cancelled' : 'work item ${id} done', '',
+                                        {id: workEffortId})
+                                const nm = ec.makeNotificationMessage().topic('RequestUpdate').userIds(caseUserIds).message({requestId: request.requestId,
+                                    requestName: request.requestName || request.requestId, statusId: request.statusId, statusLabel: workLabel,
+                                    workEffortId: workEffortId, isCase: true, recordEntityName: 'mantle.request.Request', recordId: request.requestId})
+                                if (typeof nm.record === 'function') nm.record('mantle.request.Request', request.requestId)
+                                nm.send()
+                            }
+                            continue
+                        }
                         // a project's requests and work only (a personal task on a Commons request moves nothing)
                         const projectId = request.rootWorkEffortId || item.rootWorkEffortId
                         if (!projectId || !item.rootWorkEffortId) continue
@@ -1424,7 +1464,7 @@ along with this software (see the LICENSE.md file). If not, see
                         if (userIds.size) {
                             const nm = ec.makeNotificationMessage().topic('RequestUpdate').userIds(Array.from(userIds)).message({requestId: request.requestId,
                                 requestName: request.requestName || request.requestId, statusId: toStatusId, statusLabel: label, workEffortId: workEffortId,
-                                recordEntityName: 'mantle.request.Request', recordId: request.requestId})
+                                isCase: false, recordEntityName: 'mantle.request.Request', recordId: request.requestId})
                             if (typeof nm.record === 'function') nm.record('mantle.request.Request', request.requestId)
                             nm.send()
                         }

@@ -22,4 +22,23 @@ along with this software (see the LICENSE.md file). If not, see
             &amp;&amp; requestTypeEnumId != 'RqtPurchaseRfq'</expression></condition>
         <actions><service-call name="mantle.request.RequestServices.queue#RequestTriage" in-map="{requestId:requestId}"/></actions>
     </eeca>
+    <!-- IronStone Customer Service (impl-customer-service P2, D23, F62): a request that may have become a support case (made,
+        or its status, type or category changed, while open and not a draft; or given a Customer party) runs the case rule
+        after the commit (mantle.request.SupportCaseServices.queue#CaseProfile, ensure#CaseProfile), so every entry point
+        makes its case; an organization with no ServicePolicy has no cases, and the rule does nothing. -->
+    <eeca id="SupportCaseRule" entity="mantle.request.Request" on-create="true" on-update="true" get-entire-entity="true" get-original-value="true">
+        <condition><expression>statusId &amp;&amp; statusId != 'ReqDraft' &amp;&amp; statusId != 'ReqCompleted' &amp;&amp; statusId != 'ReqCancelled'
+            &amp;&amp; (eecaOperation == 'create' || originalValue == null || originalValue.statusId != statusId
+                || originalValue.requestTypeEnumId != requestTypeEnumId || originalValue.requestCategoryId != requestCategoryId)</expression></condition>
+        <actions><service-call name="mantle.request.SupportCaseServices.queue#CaseProfile" in-map="{requestId:requestId}"/></actions>
+    </eeca>
+    <eeca id="SupportCaseCustomerRule" entity="mantle.request.RequestParty" on-create="true">
+        <condition><expression>roleTypeId == 'Customer'</expression></condition>
+        <actions><service-call name="mantle.request.SupportCaseServices.queue#CaseProfile" in-map="{requestId:requestId}"/></actions>
+    </eeca>
+    <!-- a message filed on a case from its customer tells its assignee (SupportCaseCustomerReply) -->
+    <eeca id="SupportCaseCustomerReply" entity="mantle.request.RequestCommEvent" on-create="true">
+        <actions><service-call name="mantle.request.SupportCaseServices.notify#CaseCustomerReply"
+                in-map="{requestId:requestId, communicationEventId:communicationEventId}"/></actions>
+    </eeca>
 </eecas>
