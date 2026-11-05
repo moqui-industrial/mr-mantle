@@ -30,9 +30,11 @@
         <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/></relationship>
     </entity>
     <entity entity-name="ProductVariantIdentity" package="mantle.product">
-        <description>A variant's canonical identity, not a revision. Serialized feature IDs are sorted, unique, and limited to 32.</description>
+        <description>A variant's canonical identity, not a revision. Serialized feature IDs are sorted, unique, and limited to 32.
+            The key is the SHA-256 hex of that list (featureHash), as the list itself is too long for a key on MySQL.</description>
         <field name="baseProductId" type="id" is-pk="true"/>
-        <field name="featureKey" type="text-long" is-pk="true"/>
+        <field name="featureHash" type="id-long" is-pk="true"><description>ec.resource.digestText(featureKey)</description></field>
+        <field name="featureKey" type="text-long"/>
         <field name="productId" type="id"/>
         <relationship type="one" title="Base" related="mantle.product.Product"><key-map field-name="baseProductId" related="productId"/></relationship>
         <relationship type="one" related="mantle.product.Product"/>

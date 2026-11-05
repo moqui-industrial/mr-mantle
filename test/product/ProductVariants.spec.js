@@ -193,6 +193,9 @@ feature("legacy exact identity ignores expired features and standard supersets, 
         all.createdCount == 3
         all.existingCount == 1
         identity.productId == "V4_LEGACY"
+        // keyed on the hash of the feature list, which is too long for a key on MySQL
+        identity.featureHash == ec.resource.digestText(identity.featureKey)
+        identity.featureHash.length == 64
     }
 })
 feature("concurrent submissions serialize on the virtual product and create one canonical identity", {

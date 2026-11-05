@@ -46,6 +46,8 @@ const ids = v => [
     )
 ]
 const key = v => JSON.stringify(ids(v).sort())
+// The identity's key: a feature key of 32 ids is too long for a key column on MySQL.
+const featureHash = featureKey => ec.resource.digestText(featureKey)
 function base(p) {
     const row = one(P + "Product", {productId: p.productId})
     if (!row) throw new Error("Virtual product is not available")
@@ -170,7 +172,7 @@ function combination(s, index) {
 }
 function existing(s, selected) {
     const featureKey = key(selected),
-        identity = one(P + "ProductVariantIdentity", {baseProductId: s.b.productId, featureKey})
+        identity = one(P + "ProductVariantIdentity", {baseProductId: s.b.productId, featureHash: featureHash(featureKey)})
     if (identity) return identity.productId
     // Adopt compatible legacy variants, using exact effective distinguishing features, never a historical or standard superset.
     for (const assoc of rows(P + "ProductAssocAndToFeatureAppl", {
@@ -292,9 +294,10 @@ function createOne(p) {
             one(P + "Product", {productId: r.existingProductId})?.ownerPartyId !== p.requiredOwnerPartyId
         )
             throw new Error("Existing combination is not available")
-        if (!one(P + "ProductVariantIdentity", {baseProductId: productId, featureKey: r.featureKey}))
+        if (!one(P + "ProductVariantIdentity", {baseProductId: productId, featureHash: featureHash(r.featureKey)}))
             call("create#" + P + "ProductVariantIdentity", {
                 baseProductId: productId,
+                featureHash: featureHash(r.featureKey),
                 featureKey: r.featureKey,
                 productId: r.existingProductId
             })
@@ -347,6 +350,7 @@ function createOne(p) {
         })
     call("create#" + P + "ProductVariantIdentity", {
         baseProductId: productId,
+        featureHash: featureHash(r.featureKey),
         featureKey: r.featureKey,
         productId: data.productId
     })
