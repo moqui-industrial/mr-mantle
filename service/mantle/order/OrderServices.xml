@@ -2891,7 +2891,9 @@ General Order Placement and eCommerce Usage
         <description>Add one to the order's revision (OrderHeader.orderRevision, audit-logged). The commercial revision
             (crosscut CX-ORDER-AUTHORITY, X2; impl-purchasing P3): for an order with a purchase part whose buying
             organization's policy sets commercialRevisionOnly, a stored file, a note and a status-only part update no longer
-            count, and a line's quantity or price does; every other order counts as before.</description>
+            count, and a line's quantity or price does; so too for a sales order whose selling organization sets
+            PartyAcctgPreference.salesCommercialRevisionOnly (impl-customer-service P10, F55: an order-change proposal binds
+            this revision); every other order counts as before.</description>
         <in-parameters>
             <parameter name="orderId"/>
             <parameter name="revisionKind"><description>Empty or commercial: counts. content, note or status: not counted
@@ -2913,7 +2915,15 @@ General Order Placement and eCommerce Usage
                     <entity-find-count entity-name="mantle.party.PartyRole" count-field="customerInternal" disable-authz="true">
                         <econdition field-name="partyId" from="revisionPart.customerPartyId"/>
                         <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find-count>
-                    <if condition="customerInternal == 0"><continue/></if>
+                    <!-- a sales part (an outside customer of an internal seller): the seller's salesCommercialRevisionOnly
+                        (impl-customer-service P10, F55; off by default) -->
+                    <if condition="customerInternal == 0">
+                        <entity-find-one entity-name="mantle.ledger.config.PartyAcctgPreference" value-field="sellerPreference"
+                                disable-authz="true">
+                            <field-map field-name="organizationPartyId" from="revisionPart.vendorPartyId"/></entity-find-one>
+                        <set field="commercialOnly" from="sellerPreference?.salesCommercialRevisionOnly == 'Y'"/>
+                        <continue/>
+                    </if>
                     <entity-find-count entity-name="mantle.party.PartyRole" count-field="vendorInternal" disable-authz="true">
                         <econdition field-name="partyId" from="revisionPart.vendorPartyId"/>
                         <econdition field-name="roleTypeId" value="OrgInternal"/></entity-find-count>

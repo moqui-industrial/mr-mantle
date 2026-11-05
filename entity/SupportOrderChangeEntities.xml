@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Order changes (design-customer-service §4 OrderChanges and OrderChangeDetail, crosscut CX-ORDER-CHANGE; impl-customer-service
+    §4, P10; mantle.order.OrderChangeServices, OrderChanges.js). A proposed change of a sales order is its Request of type
+    RqtOrderChange (the order, the kind, the order revision it was made against, the customer's consent), its lines
+    RequestItems linked to the order's lines by RequestItemOrder (product, quantity, unit, ship date as requiredByDate, and
+    here the line action and the proposed unit price); the key fields are audit-logged on create and update, so the
+    proposal's revision is the time of the last change to them. A decision on it is an OrderChangeDecision of its own, as
+    Purchasing's PurchaseApprovalDecision is. There is no OrderChange, OrderChangeLine or application record: an applied
+    change is the Request completed with its PDF stored as the order's OrderContent (OctOrderChangeApplied). Also: the
+    organization's flag that narrows a sales order's revision to commercial changes (X2, F55), and ServicePolicy's
+    separation and expiry of an order-change approval. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="orderId" type="id" enable-audit-log="true"><description>An order change (RqtOrderChange): the sales
+            order it changes.</description></field>
+        <field name="orderChangeKindEnumId" type="id" enable-audit-log="true"><description>An order change: what it changes
+            (OrderChangeKind). Cancel and substitute are applied by OrderChangeServices; the commercial kinds are filed and
+            routed to the order's owner.</description></field>
+        <field name="expectedOrderRevision" type="number-integer" enable-audit-log="true"><description>An order change: the
+            order's revision (OrderHeader.orderRevision) the proposal was made against; apply refuses another
+            (STALE_ORDER).</description></field>
+        <field name="customerConsentRef" type="text-medium" enable-audit-log="true"><description>An order change: the
+            customer's consent (a message, a call, a reference), required for a substitute.</description></field>
+        <field name="cancellationReason" type="text-medium" enable-audit-log="true"/>
+        <field name="addressContactMechId" type="id" enable-audit-log="true"><description>An address change: the proposed
+            ship-to address.</description></field>
+        <field name="shipmentMethodEnumId" type="id" enable-audit-log="true"/>
+        <field name="carrierPartyId" type="id" enable-audit-log="true"/>
+        <field name="caseRequestId" type="id"><description>An order change: the case it was asked for from, when
+            any.</description></field>
+        <field name="changeAppliedDate" type="date-time"/>
+        <relationship type="one-nofk" title="OrderChange" related="mantle.order.OrderHeader" short-alias="changeOrder">
+            <key-map field-name="orderId"/></relationship>
+        <relationship type="one-nofk" title="OrderChangeKind" related="moqui.basic.Enumeration" short-alias="orderChangeKind">
+            <key-map field-name="orderChangeKindEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Case" related="mantle.request.Request" short-alias="caseRequest">
+            <key-map field-name="caseRequestId" related="requestId"/></relationship>
+        <index name="REQUEST_CHANGE_ORDER"><index-field name="orderId"/></index>
+        <index name="REQUEST_CHANGE_CASE"><index-field name="caseRequestId"/></index>
+    </extend-entity>
+    <extend-entity entity-name="RequestItem" package="mantle.request">
+        <field name="changeActionEnumId" type="id" enable-audit-log="true"><description>An order change's line: what it does
+            to the order line its RequestItemOrder names (OrderChangeAction).</description></field>
+        <field name="proposedUnitAmount" type="currency-precise" enable-audit-log="true"><description>An order change's line:
+            the proposed unit price (a price change), in the request's currency.</description></field>
+        <field name="pickExceptionId" type="id"><description>A substitute line: the short pick it answers
+            (ShipmentPickException).</description></field>
+        <relationship type="one-nofk" title="OrderChangeAction" related="moqui.basic.Enumeration" short-alias="changeAction">
+            <key-map field-name="changeActionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.shipment.ShipmentPickException" short-alias="pickException">
+            <key-map field-name="pickExceptionId" related="exceptionId"/></relationship>
+    </extend-entity>
+
+    <entity entity-name="OrderChangeDecision" package="mantle.request.support" cache="never">
+        <description>One decision on an order change at its revision (as mantle.order.purchase.PurchaseApprovalDecision): who
+            decided, what, when, why and until when an approval holds, the order revision it saw and the ServicePolicy row it
+            was decided under (a customer's immediate cancel under customerImmediateCancel names the policy and no user).
+            Written only by mantle.order.OrderChangeServices. An approval is current while the proposal's revision is the one
+            it names, it is not superseded and its expiry has not passed.</description>
+        <field name="orderChangeDecisionId" type="id" is-pk="true"/>
+        <field name="requestId" type="id" not-null="true"/>
+        <field name="sourceRevision" type="number-integer"><description>The proposal's revision decided (the time of its
+            last key-field change, in milliseconds)</description></field>
+        <field name="orderId" type="id"/>
+        <field name="orderRevision" type="number-integer"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="expireDate" type="date-time"/>
+        <field name="servicePolicyId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="supersededDate" type="date-time"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one" title="OrderChangeDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.support.ServicePolicy" short-alias="servicePolicy"/>
+        <index name="ORD_CHG_DEC_REQUEST"><index-field name="requestId"/><index-field name="sourceRevision"/></index>
+        <!-- the seeds of the proposal (extend-entity loads no seed-data) -->
+        <seed-data>
+            <moqui.basic.Enumeration enumId="RqtOrderChange" description="Order change" enumTypeId="RequestType"/>
+            <moqui.basic.EnumerationType enumTypeId="OrderChangeKind" description="Order change kind"/>
+            <!-- enumCode: applied (by OrderChangeServices, ORDER_CHANGE_APPROVE and ORDER_CHANGE_APPLY) or owner (filed and
+                routed to the order's owner, decided under SALES_APPROVE and applied by Sales under SALES_ORDER_CHANGE) -->
+            <moqui.basic.Enumeration enumId="OckCancel" enumTypeId="OrderChangeKind" enumCode="applied" sequenceNum="1"
+                    description="Cancel the open remainder"/>
+            <moqui.basic.Enumeration enumId="OckSubstitute" enumTypeId="OrderChangeKind" enumCode="applied" sequenceNum="2"
+                    description="Substitute a short pick"/>
+            <moqui.basic.Enumeration enumId="OckPrice" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="3"
+                    description="Price"/>
+            <moqui.basic.Enumeration enumId="OckQuantity" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="4"
+                    description="Quantity increase"/>
+            <moqui.basic.Enumeration enumId="OckShipDate" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="5"
+                    description="Ship date"/>
+            <moqui.basic.Enumeration enumId="OckAddress" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="6"
+                    description="Address"/>
+            <moqui.basic.Enumeration enumId="OckShipMethod" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="7"
+                    description="Ship method"/>
+            <moqui.basic.Enumeration enumId="OckCarrier" enumTypeId="OrderChangeKind" enumCode="owner" sequenceNum="8"
+                    description="Carrier"/>
+            <!-- the stored PDF of an applied order change (apply#OrderChange) -->
+            <moqui.basic.Enumeration enumId="OctOrderChangeApplied" description="Applied order change"
+                    enumTypeId="OrderContentType"/>
+            <moqui.basic.EnumerationType enumTypeId="OrderChangeAction" description="Order change line action"/>
+            <moqui.basic.Enumeration enumId="OclCancel" enumTypeId="OrderChangeAction" sequenceNum="1" description="Cancel"/>
+            <moqui.basic.Enumeration enumId="OclSubstitute" enumTypeId="OrderChangeAction" sequenceNum="2"
+                    description="Substitute"/>
+            <moqui.basic.Enumeration enumId="OclPrice" enumTypeId="OrderChangeAction" sequenceNum="3" description="New price"/>
+            <moqui.basic.Enumeration enumId="OclQuantity" enumTypeId="OrderChangeAction" sequenceNum="4"
+                    description="New quantity"/>
+            <moqui.basic.Enumeration enumId="OclShipDate" enumTypeId="OrderChangeAction" sequenceNum="5"
+                    description="New ship date"/>
+            <moqui.basic.EnumerationType enumTypeId="OrderChangeDecision" description="Order change decision"/>
+            <moqui.basic.Enumeration enumId="OcdApproved" enumTypeId="OrderChangeDecision" sequenceNum="1"
+                    description="Approved"/>
+            <moqui.basic.Enumeration enumId="OcdRefused" enumTypeId="OrderChangeDecision" sequenceNum="2"
+                    description="Refused"/>
+        </seed-data>
+    </entity>
+
+    <!-- the separation and the expiry of an order-change approval, by the organization's ServicePolicy row (P2) -->
+    <extend-entity entity-name="ServicePolicy" package="mantle.request.support">
+        <field name="orderChangeSelfApproval" type="text-indicator" enable-audit-log="true"><description>Y: the person who
+            proposed an order change may also approve it. Empty or N (the default): another approver decides
+            (SELF_APPROVAL).</description></field>
+        <field name="orderChangeApprovalDays" type="number-integer" enable-audit-log="true"><description>How many days an
+            order-change approval holds before apply refuses it (APPROVAL_EXPIRED); empty is 7.</description></field>
+    </extend-entity>
+
+    <!-- The commercial revision of a sales order (crosscut CX-ORDER-AUTHORITY, X2, F55): beside Purchasing's
+        commercialRevisionOnly for purchase parts, the selling organization's flag, off by default, so Mantle's counting is
+        unchanged without it (mantle.order.OrderServices.increment#OrderRevision). -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="salesCommercialRevisionOnly" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: a sales order this organization sells counts only commercial changes in its revision (a line's
+                quantity or price, the part's address, carrier or method, its parties and terms), not a stored file, a note or
+                a status-only part update (a hold, an approval), so an order-change proposal or a quote approval stays bound
+                to the order it saw. N (the default): every change counts, as before.</description></field>
+    </extend-entity>
+</entities>
