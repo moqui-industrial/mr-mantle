@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A sales order's confirmation as placed (design-customer-service §4 OrderDetail; impl-customer-service §4, P3, F29, F55;
+    OrderConfirmations.js): the order as placed, read back from the audit log, rendered to a PDF and stored once as an
+    OrderContent (OctOrderConfirmation); each resend attaches the stored PDF to a mail client draft sent through
+    mantle.party.CommunicationServices.send#EmailDraft to a checked recipient and is recorded as an OrderEmailMessage with
+    the content it sent. An organization with PartyAcctgPreference.orderConfirmationOnPlace Y has it stored when an order is
+    placed (store#PlacedOrderConfirmation, OrderReturn.secas.xml); the flag is off by default, so Mantle's placement path is
+    unchanged, and an order with none is rendered as of its placed time by the first store or resend (F55). A resend whose
+    send fails is cancelled (cancel#FailedConfirmationSend, entity/OrderConfirmation.eecas.xml). Each service requires SUPPORT_CASE_EDIT or ORDER_APPROVE and an
+    order of the user's organizations. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="OrderConfirmationPrint" allow-remote="false">
+        <description>A placed sales order's confirmation as placed (HTML for html-print or a PDF): its lines as of the placed
+            time from the audit log (product, quantity, unit price, required date), the customer, seller, reference and
+            ship-to, and the total. Stores nothing. Requires SUPPORT_CASE_EDIT or ORDER_APPROVE, and PRICE_VIEW, ACCOUNTING_VIEW or
+            ORDER_APPROVE for its amounts (PERMISSION_DENIED); refuses an order that is missing, not a sales order or not of the
+            user's organizations (RECORD_UNAVAILABLE), one not placed (ORDER_NOT_PLACED), and one whose lines may have been
+            deleted since it was placed (ORDER_CHANGED_SINCE_PLACED: a store order with a line created after placement, or a
+            line number created again), which the audit log cannot rebuild.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="printHtml"/>
+            <parameter name="placedDate" type="Timestamp"/>
+            <parameter name="contentHash"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="printed" from="ec.resource.script(module).execute('print', context)"/>
+            <set field="orderId" from="printed.orderId"/>
+            <set field="printHtml" from="printed.printHtml"/>
+            <set field="placedDate" from="printed.placedDate"/>
+            <set field="contentHash" from="printed.contentHash"/>
+            <set field="fileName" from="printed.fileName"/>
+        </actions>
+    </service>
+    <service verb="store" noun="OrderConfirmation" allow-remote="false">
+        <description>The order's stored confirmation: the OctOrderConfirmation OrderContent when it has one (stored false),
+            else the confirmation as placed (get#OrderConfirmationPrint's print) rendered to a PDF and stored once under the
+            order's lock (stored true). Refuses as get#OrderConfirmationPrint does, but for the amount permission: the PDF is
+            stored and sent, not shown.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderContentId"/>
+            <parameter name="contentLocation"/>
+            <parameter name="stored" type="Boolean"/>
+            <parameter name="placedDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="out" from="ec.resource.script(module).execute('store', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderContentId" from="out.orderContentId"/>
+            <set field="contentLocation" from="out.contentLocation"/>
+            <set field="stored" from="out.stored"/>
+            <set field="placedDate" from="out.placedDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PlacedOrderConfirmation" allow-remote="false">
+        <description>Internal, for the OrderPlacedStoreConfirmation rule: when the selling organization's
+            PartyAcctgPreference.orderConfirmationOnPlace is Y, store the placed sales order's confirmation as
+            store#OrderConfirmation does, without the user's permission or organization checks (the placing user may be a
+            store customer); else nothing. Stores nothing for a purchase order or an order not placed. Never fails: a failure
+            is logged with the order and answered as stored false.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderContentId"/>
+            <parameter name="stored" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="out" from="ec.resource.script(module).execute('storeOnPlace', context)"/>
+            <set field="orderContentId" from="out.orderContentId"/>
+            <set field="stored" from="out.stored"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="FailedConfirmationSend" allow-remote="false">
+        <description>Internal, for the OrderConfirmationSendFailed rule: a resend's message (an OrderEmailMessage with an
+            orderContentId) whose send failed and waits in the Outbox is cancelled (ES_CANCELLED, its sendError kept), so
+            the stored PDF is not left where a mailbox user could change the recipient. Any other message is left as it
+            is.</description>
+        <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
+        <out-parameters><parameter name="cancelled" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="cancelled" from="ec.resource.script(module).execute('cancelFailed', context).cancelled"/>
+        </actions>
+    </service>
+    <service verb="resend" noun="OrderConfirmation" allow-remote="false">
+        <description>Send the order's stored confirmation again (store#OrderConfirmation; never a new render once stored) to
+            one checked recipient: an email address of the order's customer or of a current contact, employee or
+            representative of it. A mail client draft in the account the user sends from (emailAccountId, else their account
+            of the selling organization, else their first they may send from) with the PDF attached, sent through
+            send#EmailDraft and filed on the order once it is sent; recorded as an OrderEmailMessage with the recipient's
+            party and the content sent (orderContentId, the version). The answer's status is queued until the send commits
+            (the message's statusId has the result after). The same operation key and request answers the first result;
+            a second resend is a new message of the same content. Refuses as store#OrderConfirmation does, and no recipient
+            (RECIPIENT_REQUIRED), an invalid address (RECIPIENT_INVALID), an address that is not the customer's or its
+            contacts' (RECIPIENT_UNCHECKED), no account to send from (SEND_ACCOUNT_REQUIRED) and a reused operation key
+            (OPERATION_KEY_CONFLICT).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="toAddress" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="note"/>
+            <parameter name="subject"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderContentId"/>
+            <parameter name="stored" type="Boolean"/>
+            <parameter name="placedDate"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="recipient"/>
+            <parameter name="recipientPartyId"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="statusId"/>
+            <parameter name="status"><description>queued, sent or failed</description></parameter>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/order/OrderConfirmations.js"/>
+            <set field="out" from="ec.resource.script(module).execute('resend', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderContentId" from="out.orderContentId"/>
+            <set field="stored" from="out.stored"/>
+            <set field="placedDate" from="out.placedDate"/>
+            <set field="emailMessageId" from="out.emailMessageId"/>
+            <set field="recipient" from="out.recipient"/>
+            <set field="recipientPartyId" from="out.recipientPartyId"/>
+            <set field="emailAccountId" from="out.emailAccountId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="status" from="out.status"/>
+            <set field="alreadyApplied" from="out.alreadyApplied"/>
+        </actions>
+    </service>
+</services>

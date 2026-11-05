@@ -19,6 +19,16 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><service-call name="mantle.order.OrderInfoServices.send#OrderStoreEmail"
                 in-map="{orderId:orderId, emailTypeEnumId:'PsetOrderPlaced'}"/></actions>
     </seca>
+    <!-- the confirmation as placed stored at placement, for an organization whose orderConfirmationOnPlace is Y (off by
+        default; impl-customer-service P3, F55): after the placement commits, in a transaction of its own, so a render failure
+        never fails the place (store#PlacedOrderConfirmation logs it). Not async: an async call runs as the placing user and
+        updates their UserAccount when it ends, which deadlocks against a caller still holding that row (a data load placing
+        many orders), until the statement timeout. -->
+    <seca id="OrderPlacedStoreConfirmation" service="update#mantle.order.OrderHeader" when="tx-commit">
+        <condition><expression>statusChanged &amp;&amp; statusId == 'OrderPlaced'</expression></condition>
+        <actions><service-call name="mantle.order.OrderConfirmationServices.store#PlacedOrderConfirmation"
+                in-map="{orderId:orderId}" transaction="force-new" ignore-error="true"/></actions>
+    </seca>
     <seca id="OrderApprovedSendEmail" service="update#mantle.order.OrderHeader" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
         <actions><service-call name="mantle.order.OrderInfoServices.send#OrderStoreEmail"
