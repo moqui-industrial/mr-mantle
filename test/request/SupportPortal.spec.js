@@ -428,6 +428,37 @@ feature("a case shows outward messages and shared files only, takes a reply, and
     }
 })
 
+// P16: the case summary print (CaseSummary.js) holds what the page above shows in its customer-visible variant, and the note
+// and internal file in its internal one, each labeled
+feature("the case summary's customer copy holds the outward messages and shared files only; the internal one all, labeled", {
+    when() {
+        const print = (username, audience) => run(username, S + "get#CaseSummaryPrint", {requestId: state.filed, audience})
+        return {
+            customer: print(state.agent, "customer"),
+            internal: print(state.agent, "internal"),
+            invalid: print(state.agent, "partner"),
+            refused: print(state.authorizer, "customer")
+        }
+    },
+    then({customer, internal, invalid, refused}) {
+        customer.error === "" && customer.audience === "customer"
+        customer.printHtml.includes("Customer copy")
+        customer.printHtml.includes("It is 2 mm too wide")
+        customer.printHtml.includes("size-chart.pdf")
+        customer.printHtml.includes("Withdrawn by the customer")
+        !customer.printHtml.includes("refund risk")
+        !customer.printHtml.includes("internal.pdf")
+        !customer.printHtml.includes("Internal")
+        internal.error === "" && internal.fileName.includes("-internal")
+        internal.printHtml.includes("Internal: not for the customer")
+        internal.printHtml.includes("refund risk")
+        internal.printHtml.includes("internal.pdf")
+        internal.printHtml.includes("It is 2 mm too wide")
+        invalid.error.includes("AUDIENCE_INVALID")
+        refused.error.includes("PERMISSION_DENIED")
+    }
+})
+
 feature("a queue's form token files a request that reads no case; a forged token finds nothing", {
     when() {
         const intake = token("Intake")

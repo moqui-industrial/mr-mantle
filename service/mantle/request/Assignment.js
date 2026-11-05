@@ -12,7 +12,8 @@
 // take two slots. assign#Case runs from ensure#CaseProfile (a new case) and update#Case (a move to another queue); preview
 // runs the same evaluator without writing. Reassignment never touches the case's clocks. A queue with no rule keeps P2's
 // behaviour. A team's user group (SVT_<team>, the audience of its saved replies) follows its members, and its organization's
-// (SVO_<organization>, the audience of its service-wide replies) the members of all its teams.
+// (SVO_<organization>, the audience of its service-wide replies) the members of all its teams and its service managers and
+// administrators (F131).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const time = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
 const {find, one, rows, call, denied, access, ms} = lib
@@ -94,6 +95,36 @@ const membersOf = teamPartyId =>
     cases()
         .currentRows(RELATIONSHIP, {toPartyId: teamPartyId, relationshipTypeEnumId: "PrtServiceTeam"})
         .map(row => row.fromPartyId)
+// The parties of the users who hold a service-wide permission (SUPPORT_CASE_MANAGE, SUPPORT_POLICY_EDIT: a service manager or
+// administrator, on no team perhaps) through a current group, and who work for the organization (F131): they share the
+// organization's service-wide replies.
+const MANAGING = ["SUPPORT_CASE_MANAGE", "SUPPORT_POLICY_EDIT"]
+function managersOf(organizationPartyId) {
+    const groupIds = new Set(
+        Array.from(
+            find("moqui.security.UserGroupPermission")
+                .condition("userPermissionId", "in", MANAGING)
+                .conditionDate("fromDate", "thruDate", now())
+                .list()
+        ).map(row => row.userGroupId)
+    )
+    if (!groupIds.size) return []
+    const userIds = new Set(
+        Array.from(
+            find("moqui.security.UserGroupMember")
+                .condition("userGroupId", "in", Array.from(groupIds))
+                .conditionDate("fromDate", "thruDate", now())
+                .list()
+        ).map(row => row.userId)
+    )
+    if (!userIds.size) return []
+    const partyIds = new Set(
+        Array.from(find("moqui.security.UserAccount").condition("userId", "in", Array.from(userIds)).list())
+            .filter(row => row.partyId && row.disabled !== "Y")
+            .map(row => row.partyId)
+    )
+    return Array.from(partyIds).filter(partyId => cases().organizationsOf(partyId).includes(organizationPartyId))
+}
 // The team's group and its organization's.
 function syncTeamGroup(teamPartyId) {
     if (!teamPartyId) return {userGroupId: null}
@@ -109,7 +140,7 @@ function syncTeamGroup(teamPartyId) {
             organizationGroupId(organizationPartyId),
             "Service agents of " + nameOf(organizationPartyId),
             "UgtServiceOrganization",
-            Array.from(new Set(teamIds.flatMap(membersOf)))
+            Array.from(new Set(teamIds.flatMap(membersOf).concat(managersOf(organizationPartyId))))
         )
     }
     return {userGroupId, userIds}

@@ -1,0 +1,74 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A case summary (mantle.request.SupportCaseServices get#CaseSummaryPrint; send#CaseSummary stores the customer-visible one
+     as the case's RequestContent and mails it): customer (true: the customer-visible variant), audienceText, requestId, title,
+     description, organizationName, printedText, facts (label, value), values (title, valueText), messages (fromText, kindText
+     in the internal variant, dateText, subject, body), files (filename, description, dateText) and links (text). CaseSummary.js
+     chooses what each variant holds. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Case summary')} ${requestId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+h2 { font-size: 12pt; margin: 6mm 0 2mm; }
+.sub { color: #59606b; margin: 0 0 6mm; }
+.audience { font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 2mm; }
+.internal { color: #a3241b; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+.facts th { width: 42mm; font-weight: bold; }
+.message { border-top: 1px solid #ddd; padding: 3mm 0; break-inside: avoid; }
+.meta { color: #59606b; font-size: 9pt; margin: 0 0 1mm; }
+.body { white-space: pre-wrap; margin: 0; }
+ul { margin: 0; padding-left: 5mm; }
+</style></head>
+<body>
+<p class="audience<#if !customer> internal</#if>">${audienceText}</p>
+<h1>${ec.l10n.localize('Case')} ${requestId}: ${title}</h1>
+<p class="sub">${organizationName} · ${ec.l10n.localize('as of')} ${printedText}</p>
+<table class="facts"><tbody>
+<#list facts as fact>
+    <tr><th>${fact.label}</th><td>${fact.value}</td></tr>
+</#list>
+<#list values as value>
+    <tr><th>${value.title}</th><td>${value.valueText}</td></tr>
+</#list>
+</tbody></table>
+<#if description><h2>${ec.l10n.localize('Description')}</h2><p class="body">${description}</p></#if>
+<h2>${ec.l10n.localize('Conversation')}</h2>
+<#if !messages.length><p class="meta">${ec.l10n.localize('No messages')}</p></#if>
+<#list messages as message>
+    <div class="message">
+        <p class="meta">${message.dateText} · ${message.fromText}<#if message.kindText> · ${message.kindText}</#if></p>
+        <#if message.subject><p class="meta">${message.subject}</p></#if>
+        <p class="body">${message.body}</p>
+    </div>
+</#list>
+<#if files.length>
+<h2>${ec.l10n.localize('Files')}</h2>
+<ul>
+<#list files as file>
+    <li>${file.filename}<#if file.description> · ${file.description}</#if> · ${file.dateText}</li>
+</#list>
+</ul>
+</#if>
+<#if links.length>
+<h2>${ec.l10n.localize('Linked records')}</h2>
+<ul>
+<#list links as link>
+    <li>${link.text}</li>
+</#list>
+</ul>
+</#if>
+</body></html>

@@ -622,3 +622,57 @@ feature("a repair is an AssetMaintenance with its task; finishing it tells the a
         plainNotices == 0
     }
 })
+
+// F185 (P16): a claim's evidence linked or taken off on its own (RequestDetail's record links) moves its revision and
+// supersedes its decisions, as save does; checked as save checks it
+feature("evidence linked or unlinked on its own moves the claim's revision; a second order, another's and a stale one refused", {
+    when() {
+        const made = claim(state.agent, {assetId: state.plain.assetId, faultText: "F185 spec"})
+        const requestId = made.requestId
+        const evidence = (service, fields) => run(state.agent, W + service + "#ClaimEvidence", Object.assign({requestId}, fields))
+        const order = {recordEntityName: "mantle.order.OrderHeader", recordId: state.plain.orderId}
+        const decided = decide(state.agent, requestId, {decisionEnumId: "WdRejected", reason: "F185 spec"})
+        const start = revisionOf(requestId)
+        const second = evidence("link", {recordEntityName: "mantle.order.OrderHeader", recordId: state.recent.orderId})
+        const unlinked = evidence("unlink", order)
+        const afterUnlink = revisionOf(requestId)
+        const superseded = rows("mantle.request.support.WarrantyDecision", {requestId}).every(row => !!row.supersededDate)
+        const again = evidence("unlink", order)
+        const theirs = evidence("link", {recordEntityName: "mantle.order.OrderHeader", recordId: state.theirs.orderId})
+        const notEvidence = evidence("link", {recordEntityName: "mantle.work.effort.WorkEffort", recordId: "X"})
+        const stale = evidence("link", Object.assign({claimRevision: start}, order))
+        const relinked = evidence("link", Object.assign({claimRevision: afterUnlink}, order))
+        const other = run(state.otherAgent, W + "unlink#ClaimEvidence", Object.assign({requestId}, order))
+        return {
+            made,
+            decided,
+            start,
+            second,
+            unlinked,
+            afterUnlink,
+            superseded,
+            again,
+            theirs,
+            notEvidence,
+            stale,
+            relinked,
+            other,
+            end: revisionOf(requestId)
+        }
+    },
+    then(r) {
+        r.made.error == ""
+        r.decided.error == ""
+        code(r.second) == "EVIDENCE_LINKED"
+        r.unlinked.changed == true
+        r.afterUnlink == r.start + 1
+        r.superseded == true
+        r.again.changed == false
+        code(r.theirs) == "ORDER_UNAVAILABLE"
+        code(r.notEvidence) == "NOT_EVIDENCE"
+        code(r.stale) == "STALE_REVISION"
+        r.relinked.changed == true
+        r.end == r.start + 2
+        code(r.other) == "RECORD_UNAVAILABLE"
+    }
+})

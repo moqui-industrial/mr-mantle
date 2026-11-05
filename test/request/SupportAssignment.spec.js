@@ -479,6 +479,10 @@ feature("participation refusals; hours that start later are out of hours; the te
             later: later.candidates?.find(row => row.partyId == state.agent2)?.reason,
             joined,
             left: members(),
+            // the organization's group: its teams' members and its service administrator, on no team (F131)
+            organization: rows("moqui.security.UserGroupMember", {userGroupId: "SVO_" + org})
+                .filter(row => !row.thruDate)
+                .map(row => row.userId),
             group: one("moqui.security.UserGroup", {userGroupId: groupId}),
             participation: rows("mantle.request.support.ServiceTeamParticipation", {
                 teamPartyId: state.team,
@@ -494,6 +498,9 @@ feature("participation refusals; hours that start later are out of hours; the te
         r.later == "OUTSIDE_HOURS"
         r.joined.includes(state.agent3)
         !r.left.includes(state.agent3)
+        r.organization.includes(state.admin)
+        r.organization.includes(state.agent1)
+        !r.organization.includes(state.otherAdmin)
         r.group.groupTypeEnumId == "UgtServiceTeam"
         r.participation.length == 1
         r.participation[0].maxActiveCases == 3

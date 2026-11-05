@@ -487,6 +487,62 @@ function unlinkRecord(requestId, recordEntityName, recordId) {
     if (one(RECORD, {requestId, recordEntityName, recordId})) call("delete#" + RECORD, {requestId, recordEntityName, recordId})
 }
 
+// The claim's evidence changed: its revision counts once more and the decisions made before no longer count.
+function moveRevision(theCase) {
+    const claimRevision = theCase.claimRevision + 1
+    call("update#" + REQUEST, {requestId: theCase.requestId, claimRevision})
+    for (const row of rows(DECISION, {requestId: theCase.requestId}).filter(row => !row.supersededDate))
+        call("update#" + DECISION, {warrantyDecisionId: row.warrantyDecisionId, supersededDate: now()})
+    return claimRevision
+}
+
+// ===== link#ClaimEvidence and unlink#ClaimEvidence (F185) =====
+// A claim's asset, order, invoice or agreement linked or unlinked on its own (RequestDetail's record links), checked as save
+// checks them and moving the claim's revision, so a decision never stands on evidence changed outside save#WarrantyClaim.
+function evidenceCase(p) {
+    requirePermission("SUPPORT_CASE_EDIT")
+    const theCase = claimOf(p.requestId, {lock: true})
+    cases().refuseMerged(theCase)
+    if (closedStatuses.includes(theCase.request.statusId)) denied("CASE_CLOSED", "Case " + theCase.requestId + " is closed")
+    if (!Object.values(evidenceKinds).includes(p.recordEntityName))
+        denied("NOT_EVIDENCE", "A " + (p.recordEntityName || "record") + " is not a warranty claim's evidence")
+    if (blank(p.recordId)) denied("RECORD_REQUIRED", "Name the record")
+    if (!blank(p.claimRevision) && number(p.claimRevision) !== theCase.claimRevision)
+        denied(
+            "STALE_REVISION",
+            "Claim " + theCase.requestId + " is at revision " + theCase.claimRevision + " now; review it again"
+        )
+    return theCase
+}
+function linkEvidence(p) {
+    const theCase = evidenceCase(p)
+    const recordId = text(p.recordId)
+    if (one(RECORD, {requestId: theCase.requestId, recordEntityName: p.recordEntityName, recordId}))
+        return {requestId: theCase.requestId, claimRevision: theCase.claimRevision, changed: false}
+    const field = Object.keys(evidenceKinds).find(key => evidenceKinds[key] === p.recordEntityName)
+    const present = evidenceOf(theCase.requestId)[field]
+    if (present)
+        denied(
+            "EVIDENCE_LINKED",
+            "Claim " + theCase.requestId + " already links " + present + "; take it off first, or change it on the assessment"
+        )
+    let linkedId = recordId
+    if (field === "assetId") linkedId = assetOf(theCase, recordId).asset.assetId
+    else if (field === "orderId") checkOrder(theCase, recordId)
+    else if (field === "invoiceId") checkInvoice(theCase, recordId)
+    else checkAgreement(theCase, recordId)
+    linkRecord(theCase.requestId, p.recordEntityName, linkedId)
+    return {requestId: theCase.requestId, claimRevision: moveRevision(theCase), changed: true}
+}
+function unlinkEvidence(p) {
+    const theCase = evidenceCase(p)
+    const recordId = text(p.recordId)
+    if (!one(RECORD, {requestId: theCase.requestId, recordEntityName: p.recordEntityName, recordId}))
+        return {requestId: theCase.requestId, claimRevision: theCase.claimRevision, changed: false}
+    unlinkRecord(theCase.requestId, p.recordEntityName, recordId)
+    return {requestId: theCase.requestId, claimRevision: moveRevision(theCase), changed: true}
+}
+
 // ===== save#WarrantyClaim =====
 function save(p) {
     requirePermission("SUPPORT_CASE_EDIT")
@@ -593,14 +649,7 @@ function save(p) {
         if (next[field]) linkRecord(theCase.requestId, entity, next[field])
         changed = true
     }
-    let claimRevision = theCase.claimRevision
-    if (changed) {
-        claimRevision = theCase.claimRevision + 1
-        call("update#" + REQUEST, {requestId: theCase.requestId, claimRevision})
-        // the decisions made before no longer count
-        for (const row of rows(DECISION, {requestId: theCase.requestId}).filter(row => !row.supersededDate))
-            call("update#" + DECISION, {warrantyDecisionId: row.warrantyDecisionId, supersededDate: now()})
-    }
+    const claimRevision = changed ? moveRevision(theCase) : theCase.claimRevision
     const result = {requestId: theCase.requestId, claimRevision, changed, created}
     if (operation) lib.complete(operation, REQUEST, theCase.requestId, result)
     return result
@@ -1338,6 +1387,8 @@ function deliveredItems(p) {
 
 const operations = {
     save,
+    linkEvidence,
+    unlinkEvidence,
     coverage,
     decide,
     linkWork,

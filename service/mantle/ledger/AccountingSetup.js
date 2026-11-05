@@ -29,6 +29,7 @@ const preferenceFields = [
     "inventoryRevaluationEnabled",
     "receiptInvoiceSelfBilledOnly",
     "returnSettlementRequired",
+    "orderConfirmationOnPlace",
     "salesInvoiceFinalizedAtShip",
     "kitCostFromComponents",
     "projectCostPostingEnabled",
