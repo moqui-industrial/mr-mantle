@@ -14,6 +14,8 @@ const TOKEN_WRITES = [
     'submitQuoteResponse',
     'acknowledgePurchaseOrder',
     'reportDropShipDelivery',
+    // Customer Service P13: a feedback invitation's link
+    'submitCaseFeedback',
 ]
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {

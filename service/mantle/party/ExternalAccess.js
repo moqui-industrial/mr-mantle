@@ -107,6 +107,22 @@ const records = {
             if (!internal(header.vendorPartyId) || !header.customerPartyId || internal(header.customerPartyId)) return null
             return {organizationPartyId: header.vendorPartyId, partyId: header.customerPartyId}
         }
+    },
+    // a Commons form invitation (FormInvitation, crosscut X16; Customer Service P13, F61): the link mailed with it, which the
+    // Support app's Feedback page takes for case feedback (CaseFeedback scope); an invitation of an internal organization to
+    // an outside party while it is not withdrawn, expired or undeliverable (an answered one stays reachable, to show its
+    // receipt). The links are made by the invitation's send job (CaseFeedback.js), never by a user.
+    FormInvitation: {
+        permissions: ["SUPPORT_CASE_MANAGE"],
+        scopes: ["CaseFeedback"],
+        page: {app: "support", path: "/Feedback?token="},
+        resolve(recordId) {
+            const invitation = one("mantle.party.FormInvitation", {invitationId: recordId})
+            if (!invitation || ["FinRevoked", "FinSuppressed", "FinFailed", "FinExpired"].includes(invitation.statusEnumId))
+                return null
+            if (!internal(invitation.organizationPartyId) || !invitation.partyId || internal(invitation.partyId)) return null
+            return {organizationPartyId: invitation.organizationPartyId, partyId: invitation.partyId}
+        }
     }
 }
 // The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
@@ -299,7 +315,13 @@ function list(p) {
 // gives the account's party a contact grant for that app, organization and party.
 // A supplier contact is invited by AP (PAYABLE_EDIT, Accounting P18) or by a buyer from Supplier360 (PURCHASE_ORDER_EDIT,
 // Purchasing P16).
-const appKinds = {billing: {permissions: ["RECEIVABLE_EDIT"]}, supplier: {permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"]}}
+// A customer contact is invited to the Support app by a Customer Service user holding SUPPORT_CONTACT_INVITE (Customer
+// Service P13 registers the app, F57; P15 invites from ContactDetail).
+const appKinds = {
+    billing: {permissions: ["RECEIVABLE_EDIT"]},
+    supplier: {permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"]},
+    support: {permissions: ["SUPPORT_CONTACT_INVITE"]}
+}
 function invite(p) {
     const app = appKinds[p.app]
     if (!app) denied("APP_INVALID", "Choose the app to invite the contact to")

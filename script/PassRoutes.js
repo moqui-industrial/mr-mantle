@@ -181,4 +181,7 @@
         'acknowledgePurchaseOrder',
     ],
     ['POST', 'supplier/purchase-order/delivery', 'reportDropShipDelivery'],
+    // Customer Service P13
+    ['GET', 'support/feedback', 'getCaseFeedbackInvitation'],
+    ['POST', 'support/feedback/response', 'submitCaseFeedback'],
 ]

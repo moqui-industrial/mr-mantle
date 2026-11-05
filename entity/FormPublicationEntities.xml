@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Form publication and invitations (design-drawers-commons §19, crosscut X16; Commons owns them, built by Customer Service
+    P13 under the owner-contract rule): one publication and invitation model for every app's forms over the framework's
+    DbForm and FormResponse, Marketing's surveys, Sales' lead forms and People's scorecards after Customer Service's case
+    feedback. A FormPublication is a dated DbForm offered to an audience for a purpose; a FormInvitation is one recipient's
+    invitation to answer it once, with its context record (for case feedback the case's resolution episode), its delivery
+    state and the response it got; its link is an ExternalAccessCapability of the FormInvitation record kind
+    (ExternalAccess.js), so the token is a digest there and never kept here. A response that answers an invitation is kept
+    as submitted: the framework's update#FormResponse and delete#FormResponse refuse it (FormPublication.eecas.xml,
+    mantle.party.FormPublicationServices.guard#FormResponse). Case feedback's delivery policy and follow-up are
+    Customer Service's (SupportFeedbackEntities.xml). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="FormPublication" package="mantle.party" cache="never">
+        <description>A DbForm offered for a purpose by an organization: its context record when the publication is of one
+            (a campaign, an event; empty for case feedback, whose invitations carry their own), the PASS site it is answered
+            on when it is fixed (empty: the organization's site of the app), open from fromDate to thruDate, its access
+            (invited recipients, anyone, or signed-in accounts) and its repeat policy (once per invitation, or more).</description>
+        <field name="publicationId" type="id" is-pk="true"/>
+        <field name="formId" type="id"/>
+        <field name="purposeEnumId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="contextEntityName" type="text-medium"/>
+        <field name="contextId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="accessEnumId" type="id"/>
+        <field name="repeatEnumId" type="id"/>
+        <field name="description" type="text-medium"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one" title="FormPublicationPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="FormPublicationAccess" related="moqui.basic.Enumeration" short-alias="access">
+            <key-map field-name="accessEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="FormPublicationRepeat" related="moqui.basic.Enumeration" short-alias="repeat">
+            <key-map field-name="repeatEnumId" related="enumId"/></relationship>
+        <index name="FORM_PUB_ORG"><index-field name="organizationPartyId"/><index-field name="purposeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Publication Purpose" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppCaseFeedback" description="Case feedback" sequenceNum="1" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppSurvey" description="Survey" sequenceNum="2" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.EnumerationType description="Form Publication Access" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaInvited" description="Invited recipients" sequenceNum="1" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaAnonymous" description="Anyone with the page" sequenceNum="2" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.Enumeration enumId="FpaAccount" description="Signed-in accounts" sequenceNum="3" enumTypeId="FormPublicationAccess"/>
+            <moqui.basic.EnumerationType description="Form Publication Repeat" enumTypeId="FormPublicationRepeat"/>
+            <moqui.basic.Enumeration enumId="FprOnce" description="One response per invitation" sequenceNum="1" enumTypeId="FormPublicationRepeat"/>
+            <moqui.basic.Enumeration enumId="FprMany" description="Several responses" sequenceNum="2" enumTypeId="FormPublicationRepeat"/>
+            <!-- the framework DbForm purpose of a case feedback form (Customer Service's CSAT survey; the survey builder) -->
+            <moqui.basic.Enumeration enumId="DbfpCaseFeedback" description="Case feedback" enumTypeId="DbFormPurpose"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="FormInvitation" package="mantle.party" cache="never">
+        <description>One recipient's invitation to answer a publication once: the recipient (partyId, the party the answer is
+            of: a case's customer) and who it is sent to (contactPartyId, emailAddress), its context record (contextEntityName
+            and contextId: for case feedback the case's resolution CaseSlaEpisode, else the Request) and the record that holds
+            it (recordEntityName and recordId: the Request), the app's policy row it was made under (policyId) and the key
+            that makes it once (invitationKey: one per case, or per resolution); when it is sent (scheduledDate), until when
+            its link works (expireDate), its delivery (statusEnumId, the sends, reminders and the last error) and its one
+            response (formResponseId, responseDate and the score when the form has a rating). The links are
+            ExternalAccessCapability rows of record type FormInvitation; each send makes one that ends at expireDate.</description>
+        <field name="invitationId" type="id" is-pk="true"/>
+        <field name="publicationId" type="id"/>
+        <field name="formId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="contactPartyId" type="id"/>
+        <field name="emailAddress" type="text-medium"/>
+        <field name="contextEntityName" type="text-medium"/>
+        <field name="contextId" type="id"/>
+        <field name="recordEntityName" type="text-medium"/>
+        <field name="recordId" type="id"/>
+        <field name="policyId" type="id"><description>The app's delivery policy row (case feedback:
+            FeedbackDeliveryPolicy) the invitation was made under</description></field>
+        <field name="invitationKey" type="text-medium"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="scheduledDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <field name="sentDate" type="date-time"/>
+        <field name="lastSentDate" type="date-time"/>
+        <field name="nextReminderDate" type="date-time"/>
+        <field name="reminderCount" type="number-integer"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="lastError" type="text-medium"/>
+        <field name="formResponseId" type="id"/>
+        <field name="responseDate" type="date-time"/>
+        <field name="score" type="number-integer"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.FormPublication" short-alias="publication"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" title="Contact" related="mantle.party.Party" short-alias="contact">
+            <key-map field-name="contactPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="FormInvitationStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="response"/>
+        <index name="FORM_INV_KEY" unique="true"><index-field name="invitationKey"/></index>
+        <index name="FORM_INV_RECORD"><index-field name="recordEntityName"/><index-field name="recordId"/></index>
+        <index name="FORM_INV_RESPONSE"><index-field name="formResponseId"/></index>
+        <index name="FORM_INV_DUE"><index-field name="statusEnumId"/><index-field name="scheduledDate"/></index>
+        <index name="FORM_INV_ORG"><index-field name="organizationPartyId"/><index-field name="formId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Invitation Status" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinScheduled" description="Scheduled" sequenceNum="1" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinSent" description="Sent" sequenceNum="2" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinResponded" description="Answered" sequenceNum="3" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinExpired" description="Expired unanswered" sequenceNum="4" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinFailed" description="Not delivered" sequenceNum="5" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinSuppressed" description="Not sent" sequenceNum="6" enumTypeId="FormInvitationStatus"/>
+            <moqui.basic.Enumeration enumId="FinRevoked" description="Withdrawn" sequenceNum="7" enumTypeId="FormInvitationStatus"/>
+        </seed-data>
+    </entity>
+</entities>
