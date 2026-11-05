@@ -271,4 +271,22 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="removedList" from="out.removedList || []"/>
         </actions>
     </service>
+
+    <!-- ===== the Support app's help (impl-customer-service P15, F59, F109; SupportPortal.js): PASS operations ===== -->
+    <service verb="get" noun="CustomerArticle" authenticate="anonymous-all" allow-remote="false">
+        <description>getCustomerArticle: a published article of the Support mount's customer and public knowledge sources (get#PublishedArticle's exact published version, cleaned; an anonymous reader a public source's only), its link on the site (PublicApps.pageUrl, F105), the view's rating nonce and whether a case may cite it. A draft, an internal or unsourced page is NotFound alike.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getCustomerArticle', input)"/>
+        </actions>
+    </service>
+    <service verb="rate" noun="Article" authenticate="anonymous-all" allow-remote="false">
+        <description>rateArticle (TOKEN_WRITES, the view's nonce as its token): helpful or not with an optional plain comment, once per page view (a repeat answers the first) and 30 in ten minutes per requester, kept as the customer's ArticleFeedback (AfsCustomer) for the source's organization, which ArticleFeedback reviews.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('rateArticle', input)"/>
+        </actions>
+    </service>
 </services>

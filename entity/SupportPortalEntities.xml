@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The PASS Support app's customer pages (design-customer-service §8; impl-customer-service P15, CS-PORTAL): what the
+    service organization offers on its Support mount (SupportAppSetting: the queues and case types a customer may file into,
+    the knowledge spaces its help reads), a contact grant's customer administrator flag (organization-wide visibility of the
+    customer's cases), the content types a customer sees and adds, the customer's own withdrawal as a resolution, and the
+    nonce of a help page's rating. The rules are mantle.request.SupportCaseServices' customer services (SupportPortal.js),
+    mantle.order.ReturnPolicyServices' (CustomerReturns.js) and OrderChangeServices' (CustomerOrders.js). After
+    RequestEntities, ReturnStockEntities and SupportKnowledgeEntities, whose types the seeds use (F150). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="SupportAppSetting" package="mantle.request.support" cache="never">
+        <description>What an organization's Support app offers its customers (design ServiceDefaults, the Support mount's
+            settings), effective-dated with its key fields audit-logged: the service queues a signed-in customer may file a case
+            into (comma separated requestCategoryIds; empty: the organization's default queue), the case types offered there
+            (empty: each queue's own), and the wiki spaces whose customer and public knowledge sources the help pages read
+            (empty: every customer and public source). Saved by mantle.request.SupportCaseServices.save#SupportAppSetting.</description>
+        <field name="supportAppSettingId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="queueIds" type="text-medium" enable-audit-log="true"/>
+        <field name="typeEnumIds" type="text-medium" enable-audit-log="true"/>
+        <field name="wikiSpaceIds" type="text-medium" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="SUPPORT_APP_SETTING_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <!-- seeds here, not in an extend-entity, which loads none (F150) -->
+            <moqui.basic.Enumeration description="Shared with the customer" enumId="RqCntCustomerShared"
+                    enumTypeId="RequestContentType" sequenceNum="20"/>
+            <moqui.basic.Enumeration description="Customer evidence" enumId="RtcntCustomerEvidence" enumTypeId="ReturnContentType"
+                    sequenceNum="5"/>
+            <moqui.basic.Enumeration description="Return label" enumId="RtcntReturnLabel" enumTypeId="ReturnContentType"
+                    sequenceNum="6"/>
+            <moqui.basic.Enumeration description="Withdrawn by the customer" enumId="RrWithdrawn" enumTypeId="RequestResolution"/>
+        </seed-data>
+    </entity>
+    <extend-entity entity-name="ExternalAccessContact" package="mantle.party">
+        <field name="administrator" type="text-indicator" enable-audit-log="true">
+            <description>Y: the contact is a customer administrator of the outside party on this app, and sees the
+                organization's cases, not only their own (the Support app; impl-customer-service P15). Set from the
+                invitation.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="ArticleFeedback" package="mantle.request.support">
+        <field name="nonceDigest" type="text-medium">
+            <description>The digest of the help page's rating nonce (a customer's rating, AfsCustomer): one rating per page
+                view, a repeat answering the first.</description></field>
+        <index name="ARTICLE_FEEDBACK_NONCE" unique="true"><index-field name="nonceDigest"/></index>
+    </extend-entity>
+</entities>

@@ -1125,4 +1125,130 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="closed" from="!!relations.execute('closeOne', context).closed"/>
         </actions>
     </service>
+
+    <!-- ===== the Support app's customer services (impl-customer-service P15, CS-PORTAL; SupportPortal.js): PASS operations
+        taking PASS's input map, each checking the support mount's organization and the asker (a bearer link through
+        ExternalAccess.check, or a signed-in account acting for a customer of the organization: an invited contact, a case only
+        their own unless a customer administrator, or the customer's own account through the self relationship), answering
+        allow-listed projections; refusals are PASS error kinds (NotFound, AuthenticationRequired, Unprocessable, Conflict,
+        Tarpit) ===== -->
+    <service verb="get" noun="SupportHome" authenticate="anonymous-all" allow-remote="false">
+        <description>getSupportHome: the organization, the customers the signed-in account acts for, the published help a query finds (else the help sources' first pages; an anonymous reader public sources only), the outside-working-hours notice of the first offered queue, and what the page may offer (cases, a new case, returns).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getSupportHome', input)"/>
+        </actions>
+    </service>
+    <service verb="find" noun="CustomerCases" authenticate="anonymous-all" allow-remote="false">
+        <description>findCustomerCases: the signed-in account's cases with the organization (a contact's own, every case of the customer for a customer administrator or the customer's own account), newest change first, each with its customer label, created and updated dates and whether it waits for the customer; search, open or resolved, and the customer when the account acts for several. AuthenticationRequired for a visitor.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('findCustomerCases', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseIntake" authenticate="anonymous-all" allow-remote="false">
+        <description>getCaseIntake: NewCustomerCase's offer: through a queue's CaseIntake token, that queue's types (the sender names themselves; nothing of a customer); signed in, the customers, the Support mount's queues and types with their template's customer-visible fields and rules, the selected order's OrderCancelRequest (CustomerOrders.js), the article cited, the help a subject finds and each queue's outside-working-hours notice.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getCaseIntake', input)"/>
+        </actions>
+    </service>
+    <service verb="create" noun="CustomerCase" authenticate="anonymous-all" allow-remote="false">
+        <description>createCustomerCase (TOKEN_WRITES for a queue's form token): a case in one of the mount's queues and types for a customer the account acts for, its priority, assignment and service level the queue's, its template values checked for the customer audience (validate#TemplateValues' rule: an internal field refused), the order and article linked, a file staged, scanned and kept as RequestContent of the customer-shared type; through a queue's token create#IntakeRequest's public form with its limits, the answer reading no case. Nothing internal is accepted. The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('createCustomerCase', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CustomerCase" authenticate="anonymous-all" allow-remote="false">
+        <description>getCustomerCase: the case (a CaseView link, or the signed-in account for its customer): its customer status label, subject and description, outward messages only, files of the customer-shared type only, the customer's template values, the customer's own order and return links, its revision, the outside-working-hours notice and what the page may do (reply, add a file, reopen, cancel).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getCustomerCase', input)"/>
+        </actions>
+    </service>
+    <service verb="reply" noun="CustomerCase" authenticate="anonymous-all" allow-remote="false">
+        <description>replyCustomerCase (TOKEN_WRITES for a CaseView link): the customer's message filed on the case as a web message from the customer's side, which the case rules record (the assignee told, the clocks, a reopen within the window or a follow-up case), with a file while the case is open. The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('replyCustomerCase', input)"/>
+        </actions>
+    </service>
+    <service verb="request" noun="CaseReopen" authenticate="anonymous-all" allow-remote="false">
+        <description>requestCaseReopen: a resolved case within its reopen window reopened by the customer's message with the reason (P8's reply rule); after the window or once closed, refused with the advice to open a new request.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('requestCaseReopen', input)"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="CustomerCase" authenticate="anonymous-all" allow-remote="false">
+        <description>cancelCustomerCase: an open case withdrawn by its customer at the revision shown (Conflict otherwise), by its workflow's move to Cancelled resolved as RrWithdrawn, the reason on the case as the customer's message.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('cancelCustomerCase', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseFile" authenticate="anonymous-all" allow-remote="false">
+        <description>getCaseFile: a customer-shared file of a case the asker reaches, for the download (its location stays with the transport).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getCaseFile', input)"/>
+        </actions>
+    </service>
+    <service verb="save" noun="SupportAppSetting" allow-remote="false">
+        <description>The Support mount's settings of an organization (design ServiceDefaults) from its date: the service queues a
+            signed-in customer may file into (QUEUE_UNAVAILABLE), the case types offered (TYPE_INVALID) and the wiki spaces its
+            help reads (SPACE_UNAVAILABLE); comma separated, empty for the defaults. Needs SUPPORT_POLICY_EDIT and the
+            organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="queueIds"/>
+            <parameter name="typeEnumIds"/>
+            <parameter name="wikiSpaceIds"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="supportAppSettingId"/></out-parameters>
+        <actions>
+            <set field="supportAppSettingId" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('saveSetting', context).supportAppSettingId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SupportAppSetting" allow-remote="false">
+        <description>The current Support mount's settings of an organization and its published sites with the Support app.
+            Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="setting" type="Map"/>
+            <parameter name="sites" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getSetting', context)"/>
+            <set field="setting" from="found.setting"/>
+            <set field="sites" from="found.sites"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseCustomerLink" allow-remote="false">
+        <description>A case's page for its customer to put in a notice (F60): a CaseView link on the organization's first
+            published site with the Support app (CustomerCase), valid validDays (60); url null with no site. Needs
+            SUPPORT_CASE_EDIT and the case's organization.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="validDays" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="url"/><parameter name="thruDate" type="Timestamp"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('caseLink', context)"/>
+            <set field="url" from="out.url"/>
+            <set field="thruDate" from="out.thruDate"/>
+        </actions>
+    </service>
 </services>

@@ -13,6 +13,14 @@ const TOKEN_WRITES = [
     'reportDropShipDelivery',
     // Customer Service P13: a feedback invitation's link
     'submitCaseFeedback',
+    // Customer Service P15: a queue's form token, a case's CaseView link, an article view's rating nonce and an RMA link
+    'createCustomerCase',
+    'replyCustomerCase',
+    'requestCaseReopen',
+    'cancelCustomerCase',
+    'rateArticle',
+    'addReturnEvidence',
+    'withdrawCustomerReturn',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

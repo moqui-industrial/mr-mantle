@@ -136,8 +136,16 @@ function orderOf(orderId, options = {}) {
         revision: number(order.orderRevision || 1)
     }
 }
-// Whether the user is on the customer's side of the order: its customer, or a current contact or employee of it.
+// Customer Service P15: the Support app's claim (CustomerOrders.js asCustomer) that the signed-in account acts for a customer of
+// the organization (an invited contact, or the customer's own account), checked there by ExternalAccess, never a request's input.
+const SUPPORT_CLAIM = "SupportCustomerClaim"
+const supportClaim = () => ec.context.sharedMap[SUPPORT_CLAIM] || null
+// Whether the user is on the customer's side of the order: its customer, or a current contact or employee of it, or the
+// Support app's claim for its customer.
 function customerSide(so) {
+    const claim = supportClaim()
+    if (claim && claim.organizationPartyId === so.organizationPartyId && so.customerPartyIds.includes(claim.customerPartyId))
+        return true
     const partyId = ec.user.userAccount?.partyId || null
     if (!partyId) return false
     const sides = cases().customerSidesOf(partyId)
@@ -729,7 +737,11 @@ function immediateCancelAllowed(ch) {
 
 // ===== withdraw =====
 function withdraw(p) {
-    const ch = changeOf(p.requestId, {lock: true})
+    // P15 (F162): the filer may withdraw their own, unscoped as save is
+    const ch = changeOf(p.requestId, {
+        lock: true,
+        scoped: hasAny(readPermissions) || hasAny(["ORDER_CHANGE_APPROVE", "SALES_APPROVE"])
+    })
     if (!ch.own && !has(approvePermission(ch.kind)))
         denied("PERMISSION_DENIED", "Only who filed it or " + approvePermission(ch.kind) + " may withdraw it")
     if (!openStatuses.includes(ch.request.statusId))
@@ -1390,6 +1402,11 @@ const operations = {
 ;({
     revisionOf,
     stateTexts,
+    // P15: the Support app's customer read of its cancel request (CustomerOrders.js)
+    lineFacts,
+    linesOf,
+    stateOf,
+    changeOf,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown order change operation " + op)

@@ -123,12 +123,16 @@ along with this software (see the LICENSE.md file). If not, see
             site whose billing or supplier mount targets it): a PASS invitation for the email address, bound to the app and
             the party. Needs RECEIVABLE_EDIT for billing, and PAYABLE_EDIT or PURCHASE_ORDER_EDIT (a buyer, from
             Supplier360) for supplier, in the organization. Redeeming it
-            makes the account's party a contact (PrtContact) of the party; it gives no user group.</description>
+            makes the account's party a contact (PrtContact) of the party; it gives no user group.
+            For support (Customer Service P15) SUPPORT_CONTACT_INVITE, the party a customer of the organization, a person
+            (a consumer) or an organization; administrator Y makes the contact a customer administrator, who sees the
+            customer's cases, not only their own.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="app" required="true"/>
             <parameter name="partyId" required="true"/>
             <parameter name="emailAddress" required="true"/>
+            <parameter name="administrator"/>
         </in-parameters>
         <out-parameters>
             <parameter name="invitationId"/>
@@ -140,7 +144,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="access" from="ec.resource.script('component://mr-mantle/service/mantle/party/ExternalAccess.js')"/>
             <set field="invited" from="access.invite({organizationPartyId:organizationPartyId, app:app, partyId:partyId,
-                emailAddress:emailAddress})"/>
+                emailAddress:emailAddress, administrator:administrator})"/>
             <set field="invitationId" from="invited.invitationId"/>
             <set field="siteId" from="invited.siteId"/>
             <set field="token" from="invited.token"/>

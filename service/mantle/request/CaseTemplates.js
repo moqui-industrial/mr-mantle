@@ -983,6 +983,8 @@ const operations = {saveTemplate, saveField, saveCondition, endPart, validateTem
     checkValues,
     record,
     templatesOf,
+    // P15: the customer projection, for the Support app's contact path (SupportPortal.js)
+    customerProjection,
     // P13: the feedback forms' reads and checks (CaseFeedback.js)
     formAt,
     problemsOf,
