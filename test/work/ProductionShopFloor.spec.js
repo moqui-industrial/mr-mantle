@@ -774,7 +774,10 @@ feature(
             const afterApproval = rows(EVENT, {sourceEntityName: TIME, sourceId: entry.timeEntryId})
             const time = run("psf_super", P + "get#ProductionTime", {workEffortId: r.workEffortId}).productionTime
             const reopened = run("psf_super", T + "reopen#Timesheet", {timesheetId, reason: "Wrong week"})
-            const afterReopen = rows(EVENT, {sourceEntityName: TIME, sourceId: entry.timeEntryId})
+            // in id order: the recording, then its reversal
+            const afterReopen = Array.from(
+                find(EVENT, {sourceEntityName: TIME, sourceId: entry.timeEntryId}).orderBy("productionCostEventId").list()
+            )
             state.off = off
             return {
                 r,
