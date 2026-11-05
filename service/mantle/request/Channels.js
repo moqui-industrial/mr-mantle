@@ -715,27 +715,35 @@ function formRequest(p) {
 }
 
 // ===== the forum (F12) =====
-// What create#CaseFromTopic files: with a route for the topic's site and category, a Submitted case in the route's queue on
-// channel ScForum, its type the route's, the poster its customer (given the Customer role when it has none; an internal
-// poster stays a plain request); with none, the request as before (a draft in the category PASS passes).
+// What create#CaseFromTopic files: with a route for the topic's site and category, a Submitted request in the route's queue on
+// channel ScForum with the route's type and priority. It is a case only under the case rule (F62, F79): the poster's customer
+// side, the poster when it is a customer the organization serves, else the served customer it is a contact of. Any other
+// poster (a public forum member who is no customer, or staff) is held for review like mail from an unknown sender: the poster
+// stays the request's Customer party as with no route, the rule makes no case, and review#HeldRequest's Accept gives the
+// poster the Customer role by an agent's decision. With no route, the request as before (a draft in the category PASS passes).
 function forumIntake(p) {
     const route = forumRoute(p.siteId, p.forumContactListId)
     if (!route) return {routed: false}
     const queue = cases.queueOf(route.requestCategoryId)
     const posterPartyId = p.posterPartyId
-    let customerPartyId = null
-    if (posterPartyId && !cases.isInternal(posterPartyId) && !cases.organizationsOf(posterPartyId).length) {
-        if (!one("mantle.party.PartyRole", {partyId: posterPartyId, roleTypeId: "Customer"}))
-            call("create#mantle.party.PartyRole", {partyId: posterPartyId, roleTypeId: "Customer"})
-        customerPartyId = posterPartyId
-    }
+    const served = posterPartyId
+        ? cases.customerSidesOf(posterPartyId).filter(id => cases.servedCustomer(id, queue.organizationPartyId))
+        : []
+    const customerPartyId = served.includes(posterPartyId) ? posterPartyId : served[0] || null
+    const staff = !!posterPartyId && (cases.isInternal(posterPartyId) || cases.organizationsOf(posterPartyId).length > 0)
     return {
         routed: true,
         serviceRouteId: route.serviceRouteId,
         requestCategoryId: route.requestCategoryId,
         requestTypeEnumId: route.requestTypeEnumId || listOf(queue?.queue?.offeredTypeEnumIds)[0] || "RqtSupport",
         priority: route.defaultPriority ?? 5,
-        customerPartyId,
+        customerPartyId: customerPartyId || posterPartyId || null,
+        held: !customerPartyId,
+        heldReason: customerPartyId
+            ? null
+            : staff
+              ? "From staff: held for review, not a case"
+              : "A forum poster who is no customer: held for review",
         statusId: "ReqSubmitted",
         salesChannelEnumId: "ScForum"
     }
@@ -849,20 +857,27 @@ function reviewHeld(p) {
         return {requestId: request.requestId, isCase: false, statusId: "ReqCancelled"}
     }
     if (p.decision !== "accept") denied("DECISION_INVALID", "Accept or dismiss the request")
-    const reporterPartyId = cases
-        .currentRows(PARTY, {requestId: request.requestId})
-        .find(row => row.roleTypeId === "Reporter")?.partyId
+    const parties = cases.currentRows(PARTY, {requestId: request.requestId})
+    // the sender: a held forum request's poster (its Customer party, not yet a customer), else the request's reporter
+    const senderPartyId =
+        parties.find(row => row.roleTypeId === "Customer")?.partyId || parties.find(row => row.roleTypeId === "Reporter")?.partyId
     let customerPartyId = text(p.customerPartyId)
     if (!customerPartyId) {
-        if (!reporterPartyId || cases.isInternal(reporterPartyId) || cases.organizationsOf(reporterPartyId).length)
+        if (!senderPartyId || cases.isInternal(senderPartyId) || cases.organizationsOf(senderPartyId).length)
             denied("CUSTOMER_REQUIRED", "Choose the customer this request is from")
-        if (!one("mantle.party.PartyRole", {partyId: reporterPartyId, roleTypeId: "Customer"}))
-            call("create#mantle.party.PartyRole", {partyId: reporterPartyId, roleTypeId: "Customer"})
-        customerPartyId = reporterPartyId
+        if (!one("mantle.party.PartyRole", {partyId: senderPartyId, roleTypeId: "Customer"}))
+            call("create#mantle.party.PartyRole", {partyId: senderPartyId, roleTypeId: "Customer"})
+        customerPartyId = senderPartyId
     }
     if (!cases.servedCustomer(customerPartyId, organizationPartyId))
         denied("CUSTOMER_UNAVAILABLE", "Customer " + customerPartyId + " is not available")
-    call("create#" + PARTY, {requestId: request.requestId, partyId: customerPartyId, roleTypeId: "Customer", fromDate: now()})
+    // the chosen customer is the request's only Customer party
+    for (const row of parties.filter(row => row.roleTypeId === "Customer" && row.partyId !== customerPartyId)) {
+        row.set("thruDate", now())
+        row.update()
+    }
+    if (!parties.some(row => row.roleTypeId === "Customer" && row.partyId === customerPartyId))
+        call("create#" + PARTY, {requestId: request.requestId, partyId: customerPartyId, roleTypeId: "Customer", fromDate: now()})
     const made = cases.ensureCase({requestId: request.requestId})
     if (!made.isCase) denied("NOT_A_CASE", "Request " + request.requestId + " is not a case: " + (made.reason || ""))
     return {requestId: request.requestId, isCase: true, statusId: request.statusId}
@@ -885,6 +900,7 @@ const operations = {saveRoute, previewRoute, mailIntake, createToken, removeToke
     formTarget,
     formRequest: p => runInternal(() => formRequest(p)),
     forumIntake: p => runInternal(() => forumIntake(p)),
+    noteHeld: (requestId, reason) => runInternal(() => noteHeld(requestId, reason)),
     currentRoutes,
     routeFor,
     routeText,

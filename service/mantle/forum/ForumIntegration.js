@@ -513,7 +513,8 @@
             if (!p.reason) invalid('A reason is required')
             const body = selectedText(t, p.postIds)
             // Customer Service's forum route (impl-customer-service P6, F12): the site and category's queue, type and
-            // priority, a Submitted case on channel ScForum; with no route the request is as before.
+            // priority, a Submitted request on channel ScForum, a case when the poster is a customer it serves (or its
+            // contact), else held for review; with no route the request is as before.
             const routed = ec.resource
                 .script(
                     'component://mr-mantle/service/mantle/request/Channels.js',
@@ -542,12 +543,18 @@
                               priority: routed.priority,
                               statusId: routed.statusId,
                               salesChannelEnumId: routed.salesChannelEnumId,
-                              customerPartyId:
-                                  routed.customerPartyId || event.fromPartyId,
+                              customerPartyId: routed.customerPartyId,
                           }
                         : {},
                 ),
             )
+            // a poster who is no customer the queue's organization serves: held for review, not a case (F62)
+            if (routed.held)
+                ec.resource
+                    .script(
+                        'component://mr-mantle/service/mantle/request/Channels.js',
+                    )
+                    .noteHeld(created.requestId, routed.heldReason)
             // The selected public posts become one private comment; nothing of the case returns to the forum.
             serviceCall('mantle.request.RequestServices.add#RequestComment', {
                 requestId: created.requestId,

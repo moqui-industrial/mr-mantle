@@ -3,12 +3,13 @@
 // paths of create#RequestFromEmail, create#IntakeToken and create#IntakeRequest, and of the forum's create#CaseFromTopic): a
 // route's save and its refusals; mail to a queue from a customer's contact a case timed by its received date, acknowledged
 // once with the route's text and the acknowledgement no response; a reply joining by its references, a verified token
-// joining and a stranger's token not; an automatic reply attached, no reply to the case, nothing sent, and an automatic
-// message on no case making nothing; an unknown sender and staff held for review, accepted or dismissed; the dry run; the
-// queue's intake token (the party-less RequestCategory kind) issued, used with the queue's limit and revoked; a logged call
-// meeting first response and an internal one not; a forum topic escalated through a route a Submitted case on channel
-// ScForum. Standalone: spec-local organizations, customers, groups and users, artifact authorization disabled (the rules
-// are the services' own checks). Run: ./moq test mr-mantle --spec SupportChannels
+// joining and a stranger's token or forged references not; an automatic reply attached, no reply to the case, nothing
+// sent, and an automatic message on no case making nothing; an unknown sender and staff held for review, accepted or
+// dismissed; the dry run; the queue's intake token (the party-less RequestCategory kind) issued, used with the queue's
+// limit and revoked; a logged call meeting first response and an internal one not; a forum topic escalated through a
+// route a Submitted request on channel ScForum, held for a poster who is no customer until accepted; at most three
+// acknowledgements an hour to an address. Standalone: spec-local organizations, customers, groups and users, artifact
+// authorization disabled (the rules are the services' own checks). Run: ./moq test mr-mantle --spec SupportChannels
 const prefix = "SCH"
 const org = prefix + "_ORG",
     otherOrg = prefix + "_OTHER_ORG",
@@ -675,7 +676,7 @@ feature("a logged call: one that reached the customer meets first response, an i
     }
 })
 
-feature("a forum topic escalated through a route is a Submitted case in the queue on channel ScForum, its poster the customer", {
+feature("a forum topic escalated through a route: in the queue on ScForum, held for a poster who is no customer", {
     when() {
         // the forum's writes that take an operation id (as mr-pass's Integrations spec)
         const forum = (name, input) =>
@@ -768,23 +769,53 @@ feature("a forum topic escalated through a route is a Submitted case in the queu
             postIds: [rootId],
             reason: "Heater fault"
         })
+        const requestId = created.requestId
+        // a public member who is no customer: held for review (the Nov 5 rule), until an agent accepts the poster as customer
+        const heldRole = one("mantle.party.PartyRole", {partyId: poster, roleTypeId: "Customer"})
+        const note = rows("mantle.request.RequestNote", {requestId})[0]
+        const accepted = run(state.agent, S + "review#HeldRequest", {requestId, decision: "accept"})
         return {
             route,
             clash,
-            request: one(REQUEST, {requestId: created.requestId}),
-            profile: profileOf(created.requestId),
-            customerRow: current("mantle.request.RequestParty", {requestId: created.requestId, roleTypeId: "Customer"})[0],
+            request: one(REQUEST, {requestId}),
+            heldRole,
+            note,
+            accepted,
+            profile: profileOf(requestId),
+            customerRows: current("mantle.request.RequestParty", {requestId, roleTypeId: "Customer"}),
             poster
         }
     },
-    then({route, clash, request, profile, customerRow, poster}) {
+    then({route, clash, request, heldRole, note, accepted, profile, customerRows, poster}) {
         route.error == ""
         code(clash) == "ROUTE_EXISTS"
         request.statusId == "ReqSubmitted"
         request.requestCategoryId == state.queue
         request.salesChannelEnumId == "ScForum"
         request.priority == 4
-        customerRow.partyId == poster
+        heldRole == null
+        String(note?.noteText).includes("Held for review")
+        accepted.error == ""
+        accepted.isCase == true
+        customerRows.length == 1
+        customerRows[0].partyId == poster
         profile != null
+    }
+})
+
+feature("an address gets at most three acknowledgements an hour, so two systems cannot mail each other forever", {
+    when() {
+        // the first feature acknowledged Dana once; two more new cases are acknowledged, the next is not
+        const made = [1, 2, 3].map(n => {
+            const id = receive({fromAddress: "dana.sch@example.com", subject: "SCH loop " + n, bodyText: "Ticket " + n})
+            const out = mail(id)
+            return acksOf(out.requestId).length
+        })
+        return {made}
+    },
+    then({made}) {
+        made[0] == 1
+        made[1] == 1
+        made[2] == 0
     }
 })
