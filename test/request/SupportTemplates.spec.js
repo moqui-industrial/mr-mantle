@@ -264,6 +264,7 @@ feature("validate#TemplateValues re-evaluates hidden and required fields, a choi
             complete: values(formId, {productKind: "equipment", serialNumber: " CS-1001 ", agentAssessment: "Bad sensor"}),
             hidden: values(formId, {productKind: "other", serialNumber: "CS-1001"}),
             unknown: values(formId, {productKind: "laptop"}),
+            expression: values(formId, {productKind: "equipment", serialNumber: "${ec.user.userId}"}),
             internalFromCustomer: values(formId, {productKind: "supply", agentAssessment: "x"}, "customer"),
             customer: values(formId, {productKind: "supply", extra: "ignored"}, "customer"),
             refused: code(
@@ -281,6 +282,7 @@ feature("validate#TemplateValues re-evaluates hidden and required fields, a choi
         r.hidden.hiddenFieldNames == ["serialNumber"]
         r.hidden.values == {productKind: "other"}
         r.unknown.errors[0].code == "CHOICE_UNKNOWN"
+        r.expression.errors[0].code == "NO_EXPRESSIONS"
         r.internalFromCustomer.errors[0].code == "FIELD_NOT_OFFERED"
         r.customer.valid == true
         r.customer.visibleFieldNames == ["productKind"]
@@ -346,6 +348,34 @@ feature("a change from a date leaves an earlier case's values readable as submit
         const response = one("moqui.screen.form.FormResponse", {formResponseId: profile.formResponseId})
         response.set("responseDate", new Date(Date.now() - 60000))
         response.update()
+        // a published change that would break a condition is refused with nothing changed: the option a condition compares
+        // with, and an internal successor of the field a customer field depends on (its conditions copied)
+        const fieldCount = rows(FIELD, {formId}).length
+        const equipment = rows(OPTION, {formId, fieldName: state.kind}).find(row => row.keyValue == "equipment")
+        const keepRefused = {
+            option: code(
+                run(state.admin, S + "end#CaseTemplatePart", {
+                    formId,
+                    part: "option",
+                    fieldName: state.kind,
+                    sequenceNum: equipment.sequenceNum
+                })
+            ),
+            audience: code(
+                field(formId, {
+                    fieldName: state.kind,
+                    title: "Product kind",
+                    fieldTypeEnumId: "DBFFT_radio",
+                    audienceEnumId: "CfaInternal",
+                    optionText: "equipment | Equipment\nsupply | Supply",
+                    fromDate: ec.user.nowTimestamp
+                })
+            )
+        }
+        const keptRows = {
+            fields: rows(FIELD, {formId}).length - fieldCount,
+            optionEnded: one(OPTION, {formId, fieldName: state.kind, sequenceNum: equipment.sequenceNum}).thruDate == null
+        }
         const relabelled = field(formId, {
             fieldName: state.kind,
             title: "What kind of product",
@@ -359,9 +389,11 @@ feature("a change from a date leaves an earlier case's values readable as submit
         const earlier = run(state.agent, S + "get#CaseTemplateValues", {requestId: state.caseId})
         const nowForm = run(state.agent, S + "get#CaseTemplate", {formId}).template
         const later = values(formId, {[relabelled.fieldName]: "equipment"})
-        return {relabelled, ended, earlier, nowForm, later}
+        return {keepRefused, keptRows, relabelled, ended, earlier, nowForm, later}
     },
     then(r) {
+        r.keepRefused == {option: "TEMPLATE_INVALID", audience: "TEMPLATE_INVALID"}
+        r.keptRows == {fields: 0, optionEnded: true}
         r.relabelled.successor == true
         r.relabelled.fieldName == "productKind_2"
         r.ended.error == ""

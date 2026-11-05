@@ -74,8 +74,15 @@ const now = () => ec.user.nowTimestamp
 const nowMs = () => Number(ms(now()))
 const L = message => ec.l10n.localize(message)
 const dateText = value => (value == null ? "" : ec.l10n.format(new Date(ms(value)), "d MMM yyyy HH:mm"))
+// a submitted value as an array: a JS array or a host List (a multiple select's), else a comma-separated text
+const asArray = value =>
+    Array.isArray(value)
+        ? value
+        : value != null && typeof value === "object" && typeof value[Symbol.iterator] === "function"
+          ? Array.from(value)
+          : null
 const valueList = value =>
-    (Array.isArray(value) ? value : value == null ? [] : String(value).split(","))
+    (asArray(value) ?? (value == null ? [] : String(value).split(",")))
         .map(part => String(part).trim())
         .filter(part => part !== "")
 const hasExpression = value => String(value ?? "").includes("${")
@@ -208,7 +215,7 @@ function checkValues(formId, values, audience = "internal", asOfDate = null, dra
                 })
             continue
         }
-        submitted[field.fieldName] = Array.isArray(raw) ? raw.map(String) : raw == null ? null : String(raw)
+        submitted[field.fieldName] = asArray(raw) ? asArray(raw).map(String) : raw == null ? null : String(raw)
     }
     const evaluated = call(S + "evaluate#DbFormDependencies", {
         formId,
@@ -249,6 +256,7 @@ function checkValues(formId, values, audience = "internal", asOfDate = null, dra
         } else {
             const value = String(submitted[field.fieldName]).trim()
             if (value.length > type.maxLength) fail("TOO_LONG", "at most " + type.maxLength + " characters")
+            else if (hasExpression(value)) fail("NO_EXPRESSIONS", "the text holds ${, which a value may not")
             else cleaned[field.fieldName] = value
         }
     }
@@ -302,7 +310,13 @@ function problemsOf(formId, asOfDate = null, drafts = true) {
                     field.title + " is customer-visible, so it cannot depend on the internal field " + source.title,
                     field.fieldName
                 )
-            if ((rule.operator === "equals" || rule.operator === "not-equals") && TYPES[source.fieldTypeEnumId]?.choice) {
+            if ((rule.operator === "equals" || rule.operator === "not-equals") && !TYPES[source.fieldTypeEnumId]?.choice)
+                problem(
+                    "CONDITION_OPERATOR",
+                    field.title + ": its condition compares " + source.title + ", which is not a choice, with a value",
+                    field.fieldName
+                )
+            else if ((rule.operator === "equals" || rule.operator === "not-equals") && TYPES[source.fieldTypeEnumId]?.choice) {
                 const keys = source.options.map(option => option.key)
                 if (valueList(rule.value).some(part => !keys.includes(part)))
                     problem(
@@ -324,6 +338,18 @@ function problemsOf(formId, asOfDate = null, drafts = true) {
     }
     if (Array.from(edges.keys()).some(visit)) problem("CONDITION_CYCLE", "The conditions make a cycle")
     return problems
+}
+// A change of published rows (in place from now, or a successor from a date) leaves the form as of then with no problem it
+// did not have, else nothing is changed (TEMPLATE_INVALID): create#DbFormFieldSuccessor copies the old field's conditions, and
+// an ended option can leave a condition naming it, so a customer field could come to depend on an internal one, or a condition
+// compare a value its source no longer offers or a field that is no longer a choice.
+function keepValid(formId, at, change) {
+    const key = problem => problem.code + "|" + (problem.fieldName || "")
+    const before = new Set(problemsOf(formId, at, false).map(key))
+    const out = change()
+    const added = problemsOf(formId, at, false).filter(problem => !before.has(key(problem)))
+    if (added.length) denied("TEMPLATE_INVALID", Array.from(new Set(added.map(problem => problem.message))).join("; "))
+    return out
 }
 function validateTemplate(p) {
     requirePermission("SUPPORT_POLICY_EDIT", "SUPPORT_CASE_EDIT")
@@ -741,38 +767,43 @@ function saveField(p) {
     if (redefines || fromDate != null) {
         // a new meaning, or a change from a later date: a successor field, the old one's answers keeping its name
         if (isDraft(row)) denied("FIELD_DRAFT", "Publish " + (row.title || row.fieldName) + " first, or change the draft itself")
-        // with no date a draft that Publish starts; with one (now or later) it starts then and the old field ends then
-        const out = call(S + "create#DbFormFieldSuccessor", {
-            formId,
-            fieldName: row.fieldName,
-            fromDate,
-            copyOptions: false,
-            title: fields.title,
-            tooltip: fields.tooltip,
-            fieldTypeEnumId,
-            isRequired: fields.isRequired,
-            layoutSequenceNum: fields.layoutSequenceNum ?? row.layoutSequenceNum
-        })
-        const successor = out.newFieldName
-        call("update#" + FIELD, {formId, fieldName: successor, audienceEnumId})
-        for (const attribute of rows(ATTRIBUTE, {formId, fieldName: successor})) attribute.delete()
-        dateAttribute(successor)
-        for (const option of options)
-            call("create#" + OPTION, {
+        // with no date a draft that Publish starts (and checks); with one (now or later) it starts then and the old field
+        // ends then, its conditions copied to the successor
+        const makeSuccessor = () => {
+            const out = call(S + "create#DbFormFieldSuccessor", {
                 formId,
-                fieldName: successor,
-                sequenceNum: options.indexOf(option) + 1,
-                keyValue: option.keyValue,
-                text: option.text,
-                fromDate
+                fieldName: row.fieldName,
+                fromDate,
+                copyOptions: false,
+                title: fields.title,
+                tooltip: fields.tooltip,
+                fieldTypeEnumId,
+                isRequired: fields.isRequired,
+                layoutSequenceNum: fields.layoutSequenceNum ?? row.layoutSequenceNum
             })
-        return {fieldName: successor, successor: true}
+            const successor = out.newFieldName
+            call("update#" + FIELD, {formId, fieldName: successor, audienceEnumId})
+            for (const attribute of rows(ATTRIBUTE, {formId, fieldName: successor})) attribute.delete()
+            dateAttribute(successor)
+            for (const option of options)
+                call("create#" + OPTION, {
+                    formId,
+                    fieldName: successor,
+                    sequenceNum: options.indexOf(option) + 1,
+                    keyValue: option.keyValue,
+                    text: option.text,
+                    fromDate
+                })
+            return {fieldName: successor, successor: true}
+        }
+        return fromDate == null ? makeSuccessor() : keepValid(formId, fromDate, makeSuccessor)
     }
-    // in place from now (title and required audit-logged); the framework's update#DbFormField would clear the fields it is
-    // not given, the audience among them
-    call("update#" + FIELD, Object.assign({formId, fieldName: row.fieldName}, fields))
-    storeOptions(formId, row.fieldName, options, true)
-    return {fieldName: row.fieldName}
+    // in place from now (title and required audit-logged), through the entity: a published field's dates and audience stay
+    return keepValid(formId, null, () => {
+        call("update#" + FIELD, Object.assign({formId, fieldName: row.fieldName}, fields))
+        storeOptions(formId, row.fieldName, options, true)
+        return {fieldName: row.fieldName}
+    })
 }
 // save#CaseTemplateCondition: a condition row (design TemplateEdit's typed condition builder, F71): show or require the
 // target field while the source field is (not) one of its options, or is empty or filled in. A choice field compares by its
@@ -864,7 +895,10 @@ function endPart(p) {
         if (!option || ended(option)) denied("OPTION_UNAVAILABLE", "The field has no option " + (p.sequenceNum ?? ""))
         if (isDraft(option))
             call(S + "delete#DbFormFieldOption", {formId, fieldName: field.fieldName, sequenceNum: option.sequenceNum})
-        else call(S + "end#DbFormFieldOption", {formId, fieldName: field.fieldName, sequenceNum: option.sequenceNum, thruDate})
+        else
+            keepValid(formId, thruDate, () =>
+                call(S + "end#DbFormFieldOption", {formId, fieldName: field.fieldName, sequenceNum: option.sequenceNum, thruDate})
+            )
         return {}
     }
     if (isDraft(field)) {
