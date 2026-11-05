@@ -622,6 +622,84 @@ function cancel(p) {
     return {requestId: pr.requestId, statusId: "ReqCancelled", releasedCount: released.releasedCount || 0, orderIds}
 }
 
+// complete#PurchaseRequest (impl-purchasing P17, F127; design RequestDetail "fulfilled or explicitly closed with a reason"):
+// an approved request with something sourced is completed: with no reason once every line is received in full, else closed
+// with a reason (kept on the status change). A line sourced below its approved quantity gives up the rest: its requirement
+// is cut to what is covered (Ordered), a line with nothing covered is Rejected, the request's commitments still reserved
+// (the unsourced remainder at the request stage) are released and its plan supply ends, as a cancel does. The purchase
+// orders made from it stay.
+function complete(p) {
+    const pr = purchaseRequest(p.requestId, true)
+    requireEdit(pr)
+    if (closedStatuses.includes(pr.request.statusId))
+        denied("REQUEST_CLOSED", "Purchase request " + pr.requestId + " is " + statusText(pr.request.statusId))
+    if (pr.request.statusId !== "ReqInProgress")
+        denied(
+            "REQUEST_NOT_APPROVED",
+            "Purchase request " +
+                pr.requestId +
+                " is " +
+                statusText(pr.request.statusId) +
+                "; only an approved request is completed"
+        )
+    const covered = planning().coveredOf
+    const lines = []
+    for (const link of rows(REQUIREMENT_ITEM, {requestId: pr.requestId})) {
+        const requirement = find(REQUIREMENT, {requirementId: link.requirementId}).forUpdate(true).one()
+        if (!requirement || !liveRequirementStatuses.includes(requirement.statusId)) continue
+        const sourced = covered(requirement.requirementId)
+        const approved = dec(requirement.quantity)
+        const received = orderLinesOf(pr.requestId, link.requestItemSeqId).reduce((total, row) => total.add(row.received), zero())
+        lines.push({
+            requestItemSeqId: link.requestItemSeqId,
+            requirement,
+            sourced,
+            short: approved.subtract(sourced).compare(0) > 0,
+            open: approved.subtract(received).compare(0) > 0
+        })
+    }
+    if (!lines.some(line => line.sourced.compare(0) > 0))
+        denied("NOTHING_SOURCED", "Nothing of purchase request " + pr.requestId + " is sourced; cancel it instead")
+    const shortLines = lines.filter(line => line.short).map(line => line.requestItemSeqId)
+    // design RequestDetail: completed means fulfilled (received in full) or explicitly closed with a reason
+    const openLines = lines.filter(line => line.open).map(line => line.requestItemSeqId)
+    const reason = text(p.reason)
+    if (openLines.length && !reason)
+        denied(
+            "REASON_REQUIRED",
+            "Give a reason for completing purchase request " +
+                pr.requestId +
+                " with " +
+                (openLines.length === 1 ? "line " : "lines ") +
+                openLines.join(", ") +
+                " not received in full"
+        )
+    ec.context.putAll({statusId_changeReason: reason || "Received in full"})
+    call("update#" + REQUEST, {requestId: pr.requestId, statusId: "ReqCompleted"})
+    for (const line of lines.filter(each => each.short)) {
+        if (line.sourced.compare(0) <= 0)
+            call("update#" + REQUIREMENT, {requirementId: line.requirement.requirementId, statusId: "RqmtStRejected", reason})
+        else
+            call("update#" + REQUIREMENT, {
+                requirementId: line.requirement.requirementId,
+                quantity: line.sourced,
+                statusId: "RqmtStOrdered"
+            })
+    }
+    const released = call("mantle.other.BudgetServices.release#ClosedSourceCommitments", {
+        sourceEntityName: REQUEST,
+        sourceId: pr.requestId
+    })
+    approvals().clearNotices(requestSource(purchaseRequest(pr.requestId)))
+    ec.resource.script("component://mr-mantle/service/mantle/product/SupplyPlanningRoutes.js").releaseRequestSupply(pr.requestId)
+    return {
+        requestId: pr.requestId,
+        statusId: "ReqCompleted",
+        releasedCount: released.releasedCount || 0,
+        shortItemSeqIds: shortLines
+    }
+}
+
 // ===== progress =====
 // Whether an order part is a purchase part (the organization buys) or a sales part (it sells).
 const isPurchasePart = part => isInternal(part.customerPartyId) && !!part.vendorPartyId && !isInternal(part.vendorPartyId)
@@ -794,6 +872,11 @@ function progress(p) {
         canChooseSupplier: open && canBuy && request.statusId === "ReqInProgress",
         canSubmit: editable && request.statusId === "ReqDraft" && itemRows.length > 0,
         canCancel: editable,
+        // F127: an approved request with something sourced may be completed, its unsourced rest released
+        canComplete:
+            editable &&
+            request.statusId === "ReqInProgress" &&
+            itemRows.some(row => row.sourcedText !== "" && row.sourcedText !== "0"),
         canSource: open && canBuy && itemRows.some(row => row.remaining > 0)
     }
 }
@@ -1347,7 +1430,7 @@ function orderSources(orderId) {
     })
 }
 
-const operations = {create, storeItem, removeItem, submit, decide, cancel, progress, preview, convert, convertGroup}
+const operations = {create, storeItem, removeItem, submit, decide, cancel, complete, progress, preview, convert, convertGroup}
 ;({
     requestSource,
     revisionOf,

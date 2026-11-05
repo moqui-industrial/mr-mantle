@@ -6,7 +6,9 @@
 // releases the lowered line's budget commitment to what it still needs; the approval of the new revision releases the hold to
 // Approved, the resend stores its PDF, and the print as of before it shows the earlier revision's quantity; the supplier's
 // acknowledgement with a later promised date keeps the requested date and moves no revision, and an older revision is refused;
-// reminders to three suppliers with one bad address name it, send the other two, and send no one twice for the occurrence.
+// reminders to three suppliers with one bad address name it, send the other two, and send no one twice for the occurrence;
+// (P17, F118) a currency change with a line's amount is refused, and an applied revision awaiting approval is neither
+// acknowledged nor reminded.
 // Standalone: a spec-local organization, suppliers, product, users and mail templates, with artifact authorization disabled
 // (the rules are the services' own permission checks). Run: ./moq test mr-mantle --spec PurchaseRevisions
 const prefix = "PUR_REV_SPEC"
@@ -284,9 +286,17 @@ feature(
             })
             state.basisKey = lower.basisKey
             const codes = cut.changeRows.map(row => row.refusalCode)
-            return {cut, codes, refused, lower}
+            // F118 (P17): the currency changes in a revision of its own
+            const currency = run(state.buyer, O + "preview#PurchaseRevision", {
+                orderId: state.orderId,
+                itemChanges: [{orderItemSeqId: "01", quantity: 8}],
+                partChanges: {currencyUomId: "EUR"}
+            })
+            return {cut, codes, refused, lower, currency}
         },
-        then({cut, codes, refused, lower}) {
+        then({cut, codes, refused, lower, currency}) {
+            currency.changeRows.find(row => row.field == "currencyUomId").refusalCode == "CURRENCY_CHANGE_WITH_AMOUNTS"
+            currency.canApply == false
             cut.error == ""
             cut.lineRows[0].receivedText == "4"
             cut.revisionState == "started"
@@ -349,9 +359,14 @@ feature(
                 pkPrimaryValue: state.orderId
             }).find(row => row.newValueText != null && Number(row.newValueText) === 8)
             const commitments = rows("mantle.other.budget.BudgetCommitment", {sourceId: state.orderId})
-            return {applied, replay, logged, commitments}
+            // F118 (P17): the new revision waits for its approval, so it is neither acknowledged nor reminded
+            const acknowledged = run(state.buyer, O + "record#Acknowledgement", {orderId: state.orderId})
+            const reminded = run(state.buyer, O + "send#PurchaseReminder", {orderIds: [state.orderId], occurrence: "pending"})
+            return {applied, replay, logged, commitments, acknowledged, reminded}
         },
-        then({applied, replay, logged, commitments}) {
+        then({applied, replay, logged, commitments, acknowledged, reminded}) {
+            acknowledged.error.includes("REVISION_PENDING")
+            reminded.results[0].resultCode == "REVISION_PENDING"
             applied.error == ""
             applied.fromRevision == state.r1
             applied.orderRevision == state.r2
