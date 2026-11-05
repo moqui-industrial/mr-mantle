@@ -1465,6 +1465,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service-include verb="submit" noun="PurchaseRequest" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="decide" noun="PurchaseRequestApproval" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="cancel" noun="PurchaseRequest" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
+    <service-include verb="complete" noun="PurchaseRequest" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="get" noun="PurchaseRequestProgress" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="define" noun="PurchaseSourcingDemand" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="preview" noun="PurchaseSourcing" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>

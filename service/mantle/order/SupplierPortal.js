@@ -528,9 +528,23 @@ function quoteView(checked) {
     const order = one(ORDER, {orderId})
     const part = rows(PART, {orderId, orderPartSeqId: checked.orderPartSeqId})[0]
     const rfq = rfqOfQuote(orderId)
-    const revision = rfq ? Number(sourcing().revisionOf(rfq.requestId)) : 0
+    const current = rfq ? Number(sourcing().revisionOf(rfq.requestId)) : 0
+    // P17 (F176): a quote sent its RFQ before the RFQ's last change shows the RFQ as last sent to this supplier (its header
+    // and lines then, from the audit log as the as-of print reads them), so an edit the buyer has not sent is not shown; the
+    // supplier answers that revision until the buyer sends again
+    const sentAt = rfq ? sourcing().sentAtOf(orderId) : null
+    const published =
+        rfq && sentAt != null && current > sentAt ? sourcing().rfqAt({request: rfq, requestId: rfq.requestId}, sentAt) : null
+    const revision = published ? Number(published.revision) : current
+    const publishedLines = {}
+    if (published) {
+        const bySeq = Object.fromEntries(published.lines.map(line => [String(line.requestItemSeqId), line]))
+        for (const link of rows("mantle.request.RequestItemOrder", {requestId: rfq.requestId, orderId}))
+            if (bySeq[String(link.requestItemSeqId)])
+                publishedLines[String(link.orderItemSeqId)] = bySeq[String(link.requestItemSeqId)]
+    }
     const closed = rfq && ["ReqCompleted", "ReqCancelled"].includes(rfq.statusId)
-    const due = rfq?.responseRequiredDate || null
+    const due = (published ? published.responseRequiredDate : rfq?.responseRequiredDate) || null
     const late = !!due && ms(due) < Date.now()
     const receiptRow = earlierReceipt(orderId, "QuoteResponse", null, revision)
     const draft = receiptRow ? null : draftOf(orderId, revision)
@@ -539,15 +553,16 @@ function quoteView(checked) {
     const currency = order.currencyUomId
     const proposed = order.statusId === "OrderProposed"
     const lines = linesOf(orderId, checked.orderPartSeqId).map(item => {
+        const sent = publishedLines[String(item.orderItemSeqId)] || {}
         const drafted = draftLines[item.orderItemSeqId] || {}
         const offered = proposed && item.unitAmount != null && dec(item.unitAmount).compare(0) > 0 ? item.unitAmount : null
         return {
             orderItemSeqId: item.orderItemSeqId,
             productText: productText(item),
             description: item.productId && item.itemDescription !== productText(item) ? item.itemDescription || "" : "",
-            quantityText: quantityText(item.quantity),
-            unitText: uomText(item.quantityUomId),
-            requiredText: day(item.requiredByDate),
+            quantityText: quantityText(sent.quantity ?? item.quantity),
+            unitText: uomText(sent.quantityUomId ?? item.quantityUomId),
+            requiredText: day(sent.requiredByDate ?? item.requiredByDate),
             unitAmount: drafted.unitAmount ?? (offered == null ? null : String(lib.money(offered, currency))),
             unitAmountText: offered == null ? null : moneyText(offered, currency),
             promisedDate: drafted.promisedDate ?? dayValue(item.promisedDate),
@@ -565,7 +580,7 @@ function quoteView(checked) {
             revisionText: revision ? "Revision of " + dateText(revision) : null,
             dueText: day(due),
             late,
-            specification: rfq?.description || null,
+            specification: (published ? published.description : rfq?.description) || null,
             currencyUomId: currency,
             statusText: proposed ? "Quote sent" : "Quote requested",
             otherPartyOrderId: draftData.otherPartyOrderId ?? part?.otherPartyOrderId ?? null,

@@ -528,3 +528,38 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
         cancelled.errorKind === "NotFound"
     }
 })
+
+// P17 (F176): once the RFQ went to supplier A, an edit the buyer has not sent again is not on A's page: it shows the RFQ as
+// last sent (its specification, due date and revision), and the revision A answers is that one
+feature("The supplier's page shows the RFQ as last sent to it, not the buyer's edit since", {
+    when() {
+        const before = page("getQuoteInvitation", {token: token("QUOTE_A")})
+        // the RFQ's mail to supplier A, sent now
+        const emailMessageId = call("create#moqui.basic.email.EmailMessage", {
+            statusId: "ES_SENT",
+            sentDate: new Date(Date.now() - 100),
+            subject: "RFQ " + state.requestId,
+            toAddresses: "quotes@supplier-a.example.test"
+        }).emailMessageId
+        call("create#mantle.order.OrderEmailMessage", {
+            orderId: state.quoteA,
+            emailMessageId,
+            partyId: supplierA,
+            roleTypeId: "Supplier"
+        })
+        const sent = page("getQuoteInvitation", {token: token("QUOTE_A")})
+        const edited = run(state.buyer, S + "store#QuoteRequest", {
+            requestId: state.requestId,
+            description: "Changed after the send: anodized"
+        })
+        const after = page("getQuoteInvitation", {token: token("QUOTE_A")})
+        return {before, sent, edited, after}
+    },
+    then({before, sent, edited, after}) {
+        edited.error == ""
+        Number(edited.sourceRevision) > after.quote.revision
+        sent.quote.revision == before.quote.revision
+        after.quote.revision == before.quote.revision
+        !JSON.stringify(after).includes("Changed after the send")
+    }
+})

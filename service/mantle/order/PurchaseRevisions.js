@@ -386,7 +386,17 @@ function proposed(po, facts, p) {
                 else if (usable.result === "STOP") refusal = [usable.reasonCode, usable.message]
             }
         } else if (field === "currencyUomId") {
-            if (progressedPart)
+            // F118 (P17): a currency change with a line's price or quantity would have the commitments compared across two
+            // currencies (lower#SourceCommitments); the currency is changed in a revision of its own
+            const amountChanged = changeRows.some(each => each.entity === ITEM && ["quantity", "unitAmount"].includes(each.field))
+            if (amountChanged)
+                refusal = [
+                    "CURRENCY_CHANGE_WITH_AMOUNTS",
+                    "Change the currency of purchase order " +
+                        po.orderId +
+                        " in a revision of its own, without a line's price or quantity"
+                ]
+            else if (progressedPart)
                 refusal = [
                     "CURRENCY_CHANGE_PROGRESSED",
                     "Purchase order " + po.orderId + " was received or billed; its currency stays"
@@ -756,6 +766,12 @@ function acknowledge(p) {
     if (operation?.old) return lib.previous(operation)
     if (!acknowledgeStatuses.includes(po.order.statusId))
         denied("ORDER_NOT_SENT", "Purchase order " + po.orderId + " is acknowledged once it is approved and sent")
+    // F118 (P17): an applied revision waiting for its approval has not gone to the supplier, so nothing acknowledges it
+    if (awaitingApproval(po))
+        denied(
+            "REVISION_PENDING",
+            "Revision " + revision + " of purchase order " + po.orderId + " waits for its approval; it is acknowledged once sent"
+        )
     if (!blank(p.orderRevision) && Number(p.orderRevision) !== revision)
         denied(
             "SUPERSEDED_REVISION",
@@ -864,6 +880,9 @@ function remindOne(orderId, p, occurrence, emailTemplateId) {
     const revision = revisionOf(order)
     if (!acknowledgeStatuses.includes(order.statusId))
         denied("ORDER_NOT_SENT", "Purchase order " + po.orderId + " has not gone to its supplier")
+    // F118 (P17): nor is a revision waiting for its approval reminded
+    if (awaitingApproval(po))
+        denied("REVISION_PENDING", "Revision " + revision + " of purchase order " + po.orderId + " waits for its approval")
     if (Number(po.part.acknowledgedRevision ?? 0) === revision)
         denied("ALREADY_ACKNOWLEDGED", "Purchase order " + po.orderId + " revision " + revision + " is acknowledged")
     const recipients = blank(p.toAddresses)

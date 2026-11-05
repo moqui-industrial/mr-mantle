@@ -1020,6 +1020,8 @@ const operations = {create, update, storeItem, invite, print, send, storeQuote, 
     invitationsOf,
     sentAtOf,
     publishedOf,
+    // P17 (F176): the RFQ as of a time, for the supplier's page of the revision last sent to it
+    rfqAt,
     expired,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sourcing operation " + op)
