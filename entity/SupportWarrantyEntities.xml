@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Warranty claims (CS-WARRANTY; design-customer-service §5 WarrantyClaims and WarrantyAssessment, crosscut §3.2
+    DeliveredItems; impl-customer-service §4, P11; mantle.request.WarrantyServices, Warranty.js). A claim is its case, a Request
+    of type RqtWarranty: its product a RequestItem, its asset (the sold serial), order, invoice and agreement RequestRecord
+    links; there is no WarrantyClaim record. The claim's revision (claimRevision, audit-logged) counts each change of that
+    evidence, so a decision made before it no longer counts. Its coverage is read, never stored: an AgrService agreement of the
+    organization with the customer that has a warranty term (TtWarranty) for the product first, then the product's warranty
+    at sale (the serial or lot traced through AssetIssuance to its order, customer and ship date, the term from the product's
+    PftWarranty feature), else goodwill only. A decision on it is a WarrantyDecision of its own, as Purchasing's
+    PurchaseApprovalDecision is (F45). A repair is one AssetMaintenance on the sold serial's Asset with a WepMaintenance task
+    (F67), linked to the case by RequestRecord; its completion tells the case's agent (WarrantyRepairFinished) and resolves
+    nothing (SupportWarranty.eecas.xml). Named to load after RequestEntities, ProductAssetEntities, PartyEntities and
+    AccountingAccountEntities, whose enumeration types its seeds use (F150). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="claimRevision" type="number-integer" enable-audit-log="true"><description>A warranty claim (RqtWarranty):
+            its evidence's revision, counted once by each change of its product, asset, order, invoice or agreement
+            (WarrantyServices.save#WarrantyClaim). A WarrantyDecision is bound to it.</description></field>
+    </extend-entity>
+
+    <entity entity-name="WarrantyDecision" package="mantle.request.support" cache="never">
+        <description>One decision on a warranty claim at its revision (as mantle.order.purchase.PurchaseApprovalDecision, F45):
+            the coverage it was decided on (the basis, the terms and their source, the coverage end and its source, a manual
+            override of the end with its reason), the outcome (covered, partial, rejected or goodwill), why, who decided and when,
+            who approved a goodwill or an override (WARRANTY_APPROVE), and for a chargeable repair the charge estimate in its
+            currency and the customer's consent; the sales quote of a chargeable repair waits for Sales (impl-customer-service
+            §4, §7). Written only by mantle.request.WarrantyServices. The current decision is the newest one at the claim's
+            revision that is not superseded.</description>
+        <field name="warrantyDecisionId" type="id" is-pk="true"/>
+        <field name="requestId" type="id" not-null="true"/>
+        <field name="sourceRevision" type="number-integer"><description>The claim's revision decided
+            (Request.claimRevision)</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="coverageBasisEnumId" type="id"><description>What the coverage was read from (WarrantyCoverageBasis):
+            an agreement, the product's warranty at sale, or none (goodwill only)</description></field>
+        <field name="termsText" type="text-medium"><description>The terms decided on, as the agent read them</description></field>
+        <field name="termsSourceText" type="text-medium"><description>Where the terms come from: the agreement and its term,
+            or the product's warranty feature</description></field>
+        <field name="agreementId" type="id"/>
+        <field name="coverageEndDate" type="date-time"><description>The coverage end decided on: the lookup's, or the manual
+            override</description></field>
+        <field name="coverageEndSourceText" type="text-medium"/>
+        <field name="overrideReason" type="text-medium"><description>Why the coverage end was overridden (required with an
+            override)</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="approvedByUserId" type="id"><description>A goodwill decision or a coverage override: the holder of
+            WARRANTY_APPROVE who made it</description></field>
+        <field name="chargeEstimate" type="currency-amount"><description>A chargeable repair: what the customer is asked to
+            pay</description></field>
+        <field name="chargeCurrencyUomId" type="id"/>
+        <field name="customerConsentRef" type="text-medium"><description>A chargeable repair: the customer's consent (a
+            message, a call, a reference); a repair is linked only once it is recorded</description></field>
+        <field name="nextDueDate" type="date-time"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="supersededDate" type="date-time"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one" title="WarrantyDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="WarrantyCoverageBasis" related="moqui.basic.Enumeration" short-alias="basis">
+            <key-map field-name="coverageBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.agreement.Agreement" short-alias="agreement"/>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <relationship type="one-nofk" title="ApprovedBy" related="moqui.security.UserAccount" short-alias="approvedBy">
+            <key-map field-name="approvedByUserId" related="userId"/></relationship>
+        <relationship type="one-nofk" title="ChargeCurrency" related="moqui.basic.Uom" short-alias="chargeCurrency">
+            <key-map field-name="chargeCurrencyUomId" related="uomId"/></relationship>
+        <index name="WARRANTY_DEC_REQUEST"><index-field name="requestId"/><index-field name="sourceRevision"/></index>
+        <!-- the seeds of the claim (extend-entity loads no seed-data) -->
+        <seed-data>
+            <moqui.basic.Enumeration enumId="RqtWarranty" description="Warranty claim" enumTypeId="RequestType"/>
+            <moqui.basic.EnumerationType enumTypeId="WarrantyDecision" description="Warranty decision"/>
+            <moqui.basic.Enumeration enumId="WdCovered" enumTypeId="WarrantyDecision" sequenceNum="1" description="Covered"/>
+            <moqui.basic.Enumeration enumId="WdPartial" enumTypeId="WarrantyDecision" sequenceNum="2"
+                    description="Partly covered"/>
+            <moqui.basic.Enumeration enumId="WdRejected" enumTypeId="WarrantyDecision" sequenceNum="3" description="Rejected"/>
+            <moqui.basic.Enumeration enumId="WdGoodwill" enumTypeId="WarrantyDecision" sequenceNum="4"
+                    description="Goodwill"/>
+            <moqui.basic.EnumerationType enumTypeId="WarrantyCoverageBasis" description="Warranty coverage basis"/>
+            <moqui.basic.Enumeration enumId="WcbAgreement" enumTypeId="WarrantyCoverageBasis" sequenceNum="1"
+                    description="Service agreement"/>
+            <moqui.basic.Enumeration enumId="WcbProductWarranty" enumTypeId="WarrantyCoverageBasis" sequenceNum="2"
+                    description="Product warranty at sale"/>
+            <moqui.basic.Enumeration enumId="WcbNone" enumTypeId="WarrantyCoverageBasis" sequenceNum="3"
+                    description="No coverage found"/>
+            <!-- a service agreement's warranty coverage (AgreementTerm.termTypeEnumId; F50): its text the terms, on an item
+                for that item's product, else for every product of the agreement; it covers while the agreement and the term
+                are in effect -->
+            <moqui.basic.Enumeration enumId="TtWarranty" description="Warranty coverage" enumTypeId="TermType"/>
+            <!-- a warranty repair's AssetMaintenance -->
+            <moqui.basic.Enumeration enumId="MntTpWarranty" description="Warranty repair" enumTypeId="MaintenanceType"/>
+        </seed-data>
+    </entity>
+</entities>

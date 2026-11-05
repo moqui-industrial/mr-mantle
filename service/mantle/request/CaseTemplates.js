@@ -907,8 +907,9 @@ function endPart(p) {
 
 // ===== a case's template (create#Case) =====
 // The template a new case of the organization in the queue takes: the one asked for (one of the organization's, in effect),
-// else the queue's current one; null when neither.
-function forCase(organizationPartyId, requestCategoryId, templateFormId) {
+// else its type's (P11: ServiceRequestType.templateFormId, the warranty claim's), else the queue's current one; null when
+// none.
+function forCase(organizationPartyId, requestCategoryId, templateFormId, requestTypeEnumId) {
     if (!blank(templateFormId)) {
         const form = one(FORM, {formId: templateFormId})
         if (
@@ -920,7 +921,21 @@ function forCase(organizationPartyId, requestCategoryId, templateFormId) {
             denied("TEMPLATE_UNAVAILABLE", "Template " + templateFormId + " is not one of the organization's")
         return form.formId
     }
-    return queueTemplate(requestCategoryId)
+    return typeTemplate(organizationPartyId, requestTypeEnumId) || queueTemplate(requestCategoryId)
+}
+// P11: the type's current template for the organization, when it is the organization's and in effect.
+function typeTemplate(organizationPartyId, requestTypeEnumId) {
+    if (blank(organizationPartyId) || blank(requestTypeEnumId)) return null
+    const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
+    const formId = cases.typeOf(organizationPartyId, requestTypeEnumId)?.templateFormId
+    if (!formId) return null
+    const form = one(FORM, {formId})
+    return form &&
+        form.purposeEnumId === PURPOSE &&
+        form.ownerPartyId === organizationPartyId &&
+        formAt(formId, null, false).length
+        ? formId
+        : null
 }
 // The queue's current template, when it is in effect.
 function queueTemplate(requestCategoryId) {

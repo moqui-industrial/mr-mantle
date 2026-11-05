@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- IronStone Customer Service (impl-customer-service P11, F67): a repair finishing, by any path (WarrantyServices'
+    update#WarrantyWork, Manufacturing's equipment screens, a direct update), tells the agent of each warranty claim it is
+    linked to (notify#WarrantyWorkFinished: an RqtWarranty case with a RequestRecord on the AssetMaintenance; any other
+    maintenance does nothing) and resolves nothing: the case stays as it is. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="WarrantyWorkFinished" entity="mantle.product.maintenance.AssetMaintenance" on-update="true"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>statusId == 'AsMntCompleted' &amp;&amp; originalValue != null
+            &amp;&amp; originalValue.statusId != 'AsMntCompleted'</expression></condition>
+        <actions><service-call name="mantle.request.WarrantyServices.notify#WarrantyWorkFinished"
+                in-map="{assetMaintenanceId:assetMaintenanceId}"/></actions>
+    </eeca>
+</eecas>
