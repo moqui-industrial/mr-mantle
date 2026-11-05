@@ -9,7 +9,12 @@ const one = (entity, key) => helper().lib.one(entity, key)
 const rows = (entity, key) => helper().lib.rows(entity, key)
 const capture = ec.factory.getTool("MailCapture")
 const prefix = "NATIVE_COLL"
-const day = offset => ec.l10n.format(new Date(Number(ec.user.nowTimestamp) + offset * 86400000), "yyyy-MM-dd")
+// A calendar day from today in the AR users' time zone (America/Chicago unless the runner's user has one), whoever is
+// logged in: the services age and remind as those users, so a day written as john.doe (UTC) was a day off between
+// midnight UTC and midnight in that zone.
+let arZone
+const day = offset =>
+    ec.l10n.format(new Date(Number(ec.user.nowTimestamp) + offset * 86400000), "yyyy-MM-dd", null, arZone)
 let f, second, overdueId, disputedId, secondId, runId
 // A customer of the organization with a billing address.
 function customer(partyId, email) {
@@ -23,6 +28,7 @@ function customer(partyId, email) {
 // An issued invoice of the organization (the fixture's, by default) to a customer, due a number of days ago.
 function overdue(customerPartyId, amount, daysAgo, fixture = f) {
     login(fixture.users.ar)
+    arZone ??= ec.user.userAccount?.timeZone || null
     const made = svc("mantle.account.InvoiceServices.create#Receivable", {organizationPartyId: fixture.org, customerPartyId})
     svc("mantle.account.InvoiceServices.store#InvoiceDraftItem", {
         invoiceId: made.invoiceId,
