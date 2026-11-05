@@ -42,6 +42,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- seeds here, not in an extend-entity, which loads none (F150) -->
             <moqui.basic.Enumeration description="Shared with the customer" enumId="RqCntCustomerShared"
                     enumTypeId="RequestContentType" sequenceNum="20"/>
+            <!-- P16: a case summary as sent to the customer (CaseSummary.js send#CaseSummary), never itself a shared file -->
+            <moqui.basic.Enumeration description="Case summary sent" enumId="RqCntCaseSummary"
+                    enumTypeId="RequestContentType" sequenceNum="21"/>
             <moqui.basic.Enumeration description="Customer evidence" enumId="RtcntCustomerEvidence" enumTypeId="ReturnContentType"
                     sequenceNum="5"/>
             <moqui.basic.Enumeration description="Return label" enumId="RtcntReturnLabel" enumTypeId="ReturnContentType"

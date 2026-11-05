@@ -1067,6 +1067,12 @@ const operations = {
 }
 const internalOperations = new Set(["saveSetting", "getSetting", "caseLink"])
 ;({
+    // the customer-visible projections of a case, for the customer-visible case summary (CaseSummary.js, P16)
+    statusLabel,
+    outwardMessages,
+    sharedFiles,
+    customerLinks,
+    customerValues,
     served,
     actingFor,
     offeredQueues,

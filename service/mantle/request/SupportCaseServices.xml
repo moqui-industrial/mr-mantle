@@ -1252,4 +1252,59 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="thruDate" from="out.thruDate"/>
         </actions>
     </service>
+
+    <!-- ===== P16: the case summary (design §11; CaseSummary.js) ===== -->
+    <service verb="get" noun="CaseSummaryPrint" allow-remote="false">
+        <description>A case's summary as of now (html-print), labeled for its audience: customer (the default) holds the
+            customer label of the status, the resolution, the customer's template values, the outward messages, the files shared
+            with the customer and the customer's own order and return links, as the Support app shows them; internal adds the
+            queue, type, priority, assignee, due date and status, every message and note with its kind, every file and every
+            linked record. Neither holds a cost or amount. Refuses an audience of another kind (AUDIENCE_INVALID). Needs
+            SUPPORT_CASE_EDIT or SUPPORT_CASE_MANAGE and a case of the user's organizations.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="audience" default-value="customer"><description>customer or internal</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+            <parameter name="audience"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseSummary.js').execute('print', context)"/>
+            <set field="printHtml" from="found.printHtml"/>
+            <set field="fileName" from="found.fileName"/>
+            <set field="audience" from="found.audience"/>
+        </actions>
+    </service>
+    <service verb="send" noun="CaseSummary" allow-remote="false">
+        <description>The customer-visible case summary stored as the case's RequestContent (RqCntCaseSummary, its PDF) and mailed
+            to a checked recipient, an address of the case's customer or of a current contact, employee or representative of it
+            (RECIPIENT_REQUIRED, RECIPIENT_UNCHECKED), with the note when given, as a mail client draft of an account the user
+            sends from (SEND_ACCOUNT_REQUIRED) sent through send#EmailDraft and filed on the case. The same operationKey answers
+            the first result. Needs SUPPORT_CASE_EDIT and a case of the user's organizations.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="requestId" required="true"/>
+            <parameter name="toAddress"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="subject"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestContentId"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="recipient"/>
+            <parameter name="status"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseSummary.js').execute('send', context)"/>
+            <set field="requestContentId" from="found.requestContentId"/>
+            <set field="emailMessageId" from="found.emailMessageId"/>
+            <set field="recipient" from="found.recipient"/>
+            <set field="status" from="found.status"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
 </services>
