@@ -555,6 +555,17 @@ function sendInvitation(p) {
     })
     return {done: reminder ? "reminded" : "sent"}
 }
+// expire#Invitation: one sent, unanswered invitation past its expiry, locked in the job's new transaction, marked expired;
+// anything else is left as it is.
+function expireInvitation(p) {
+    const invitation = find(INVITATION, {invitationId: p.invitationId}).forUpdate(true).one()
+    if (!invitation || invitation.statusEnumId !== "FinSent" || Number(ms(invitation.expireDate)) > nowMs())
+        return {done: "notDue"}
+    invitation.set("statusEnumId", "FinExpired")
+    invitation.set("nextReminderDate", null)
+    invitation.update()
+    return {done: "expired"}
+}
 // send#Invitations (the send_CaseFeedbackInvitations job): a bounded batch of the scheduled invitations due, then of the
 // reminders due, oldest first, each sent in its own transaction; a failing one is logged with its id and the rest go on. The
 // sent ones past their expiry are marked expired.
@@ -598,11 +609,16 @@ function sendInvitations(p) {
     for (const row of Array.from(expiring.limit(limit).list())) {
         ec.message.pushErrors()
         try {
-            row.set("statusEnumId", "FinExpired")
-            row.set("nextReminderDate", null)
-            row.update()
+            const out =
+                ec.service
+                    .sync()
+                    .name("mantle.request.CaseFeedbackServices.expire#Invitation")
+                    .parameters({invitationId: row.invitationId})
+                    .requireNewTransaction(true)
+                    .disableAuthz()
+                    .call() || {}
             if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
-            counts.expired++
+            if (out.done === "expired") counts.expired++
         } catch (error) {
             ec.logger.error("Feedback invitation " + row.invitationId + " was not marked expired: " + error.message)
             counts.failed++
@@ -883,6 +899,7 @@ const operations = {
     queueInvitation,
     createInvitation,
     sendInvitation,
+    expireInvitation,
     sendInvitations,
     getInvitation,
     submitCaseFeedback,

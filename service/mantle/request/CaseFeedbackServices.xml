@@ -191,7 +191,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="send" noun="Invitations" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800">
         <description>The send_CaseFeedbackInvitations job: a bounded batch (limit, 100) of the scheduled invitations due and the
             reminders due, oldest first (of invitationIds when given), each in its own transaction (send#Invitation), a failing
-            one logged by its id and the rest going on; the sent ones past expiry marked expired. A rerun sends nothing twice.</description>
+            one logged by its id and the rest going on; the sent ones past expiry marked expired, each in its own transaction
+            (expire#Invitation). A rerun sends nothing twice.</description>
         <in-parameters>
             <parameter name="limit" type="Integer"/>
             <parameter name="invitationIds"/>
@@ -224,6 +225,15 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="expire" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for send#Invitations' expiry sweep, in its new transaction: one sent, unanswered invitation past
+            its expiry, locked, marked FinExpired; anything else is left alone. done: expired or notDue.</description>
+        <in-parameters><parameter name="invitationId" required="true"/></in-parameters>
+        <out-parameters><parameter name="done"/></out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/request/CaseFeedback.js').execute('expireInvitation', context).done"/>
+        </actions>
+    </service>
     <!-- ===== the Support app's Feedback page (PASS operations: input map in, result map out) ===== -->
     <service verb="get" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
         <description>getCaseFeedbackInvitation: for a token of the Support app's site (the support mount's target), the form as of
