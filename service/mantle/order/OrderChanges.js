@@ -1281,16 +1281,16 @@ function preview(p) {
 function findChanges(p) {
     if (!hasAny(readPermissions)) denied("PERMISSION_DENIED", readPermissions.join(" or ") + " is required to read order changes")
     const userScope = facilityScope.scope()
-    const query = ec.entity
+    let query = ec.entity
         .find(REQUEST)
         .condition("requestTypeEnumId", changeType)
         .condition("orderId", "is-not-null", null)
         .disableAuthz()
-    if (!blank(p.orderId)) query.condition("orderId", p.orderId)
-    if (!blank(p.caseRequestId)) query.condition("caseRequestId", p.caseRequestId)
-    if (!blank(p.requestedByPartyId)) query.condition("filedByPartyId", p.requestedByPartyId)
-    if (p.fromDate) query.condition("requestDate", "greater-equals", p.fromDate)
-    if (p.thruDate) query.condition("requestDate", "less", p.thruDate)
+    if (!blank(p.orderId)) query = query.condition("orderId", p.orderId)
+    if (!blank(p.caseRequestId)) query = query.condition("caseRequestId", p.caseRequestId)
+    if (!blank(p.requestedByPartyId)) query = query.condition("filedByPartyId", p.requestedByPartyId)
+    if (p.fromDate) query = query.condition("requestDate", "greater-equals", p.fromDate)
+    if (p.thruDate) query = query.condition("requestDate", "less", p.thruDate)
     // the user's organizations' orders: their OrgInternal party, read in the query
     const orgIds = userScope.organizationPartyIds
     const partyFilter = (roleTypeId, partyIds) =>
@@ -1310,7 +1310,7 @@ function findChanges(p) {
         )
     if (ids != null) {
         if (!ids.length) return lib.pageList([], p, "changeList")
-        query.condition("requestId", "in", ids.slice(0, 2000))
+        query = query.condition("requestId", "in", ids.slice(0, 2000))
     }
     const all = Array.from(query.orderBy("-requestDate").limit(500).list())
     const rowsOut = []

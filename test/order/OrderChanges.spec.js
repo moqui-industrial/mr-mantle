@@ -620,6 +620,8 @@ feature(
                 operationKey: key()
             })
             const otherRead = run(state.outsider, S + "get#OrderChange", {requestId: price.requestId})
+        const listed = run(state.requester, S + "find#OrderChanges", {orderId, state: "approved"})
+        const otherList = run(state.outsider, S + "find#OrderChanges", {orderId})
             // a stale order: the line changed after the approval
             const stale = approvedCancel(orderId, "01", 1)
             call("mantle.order.OrderServices.update#OrderItem", {orderId, orderItemSeqId: "01", quantity: 3})
@@ -658,6 +660,8 @@ feature(
                 salesDecided,
                 priceApply,
                 otherRead,
+                listed,
+                otherList,
                 staleOrder,
                 expired,
                 selfApproval,
@@ -674,6 +678,8 @@ feature(
             r.salesDecided.error === ""
             code(r.priceApply) === "FORBIDDEN"
             code(r.otherRead) === "RECORD_UNAVAILABLE"
+        r.listed.changeList.some(row => row.requestId === r.price.requestId && row.kindText === "Price")
+        r.otherList.changeList.length === 0
             code(r.staleOrder) === "STALE_ORDER"
             code(r.expired) === "APPROVAL_EXPIRED"
             code(r.selfApproval) === "SELF_APPROVAL"
