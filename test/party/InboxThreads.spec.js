@@ -4,7 +4,7 @@
 // keeps the records with the draft (EmailMessageRecord) until file#SentEmail files the sent email on them, now or after a
 // scheduled send; received mail filed by its account's policy (file#ReceivedEmail from the EmailMessage ECA), personal
 // contacts matching only for their owner; the NewMail alert (notify#NewMail). The Mantle side of IronStone M5. No SMTP
-// server answers in a spec (the framework's mail sink is in its Rust tests only), so a send fails at once on port 1 as in
+// server answers in a spec (the framework's mail sink is in its Rust tests only), so a send fails on port 1 (after the commit of the call in which it was claimed) as in
 // the framework's MailClient.spec.js, and a delivery that works later is record#SendResult, the step after one. The mail
 // capture is off for the spec, so a run with mail_capture_sends=true (the client walks) still sees the send fail. New
 // spec, no Groovy original.
@@ -285,8 +285,11 @@ feature("send#EmailDraft keeps the records with the draft and files the email on
         const refusedSender = as("Ben", () => errorOf(`${COMM}.send#EmailDraft`, { emailMessageId: draftId, recordEntityName: REQUEST, recordId: "IBX-R1" }))
         const out = as("Ada", () => call(`${COMM}.send#EmailDraft`, { emailMessageId: draftId,
                 recordList: [{ recordEntityName: REQUEST, recordId: "IBX-R1" }, { recordEntityName: SHIPMENT, recordId: "IBX-S1" }] }))
+        // the send goes after the commit of send#EmailDraft's transaction, on a service worker, and fails on port 1
         settle()
-        const waiting = { pending: count(EMR, { emailMessageId: draftId }), events: count(CE, { emailMessageId: draftId }) }
+        const failed = ec.entity.find("moqui.basic.email.EmailMessage").condition("emailMessageId", draftId).one()
+        const waiting = { pending: count(EMR, { emailMessageId: draftId }), events: count(CE, { emailMessageId: draftId }),
+            statusId: failed.statusId, sendError: failed.sendError }
         // the retry that goes out: record#SendResult is what the framework does after a delivery
         call(`${MAIL}.record#SendResult`, { emailMessageId: draftId, messageId: "<ibx-quote@ibx.example.com>" })
         settle()
@@ -302,10 +305,13 @@ feature("send#EmailDraft keeps the records with the draft and files the email on
     },
     then({ draftId, refusedSender, out, waiting, event, pending, requestJoin, shipmentLink, doraRow, requestTimeline }) {
         refusedSender.includes(`You may not send from email account ${account.sales}`)
+        // claimed in send#EmailDraft's transaction and sent once it commits: the answer has no result yet
         out.sent == false
         out.statusId == "ES_READY"
-        out.sendError != null
+        out.sendError == null
         out.pendingRecordList == [{ recordEntityName: REQUEST, recordId: "IBX-R1" }, { recordEntityName: SHIPMENT, recordId: "IBX-S1" }]
+        waiting.statusId == "ES_READY"
+        waiting.sendError != null
         waiting.pending == 2
         waiting.events == 0
         event != null

@@ -2945,8 +2945,10 @@ along with this software (see the LICENSE.md file). If not, see
             change that sent the message, whether the send went now (this call) or later (send#DueDrafts for a scheduled
             or held send, a retry from the Outbox), on a service worker in a transaction of its own: a filing failure can
             never roll back a send that went out. A message that waits (scheduled, held, or failed and in the Outbox) keeps
-            its records, and cancel#ScheduledSend takes it back to Drafts with them. pendingRecordList is the records kept
-            for the message: filed once the commit is done when sent is true.
+            its records, and cancel#ScheduledSend takes it back to Drafts with them. A send now is claimed in this
+            service's transaction and goes once it commits (send#Draft, deliver#ClaimedDraft): the answer is ES_READY with
+            sent false and no sendError, and the result (sent, or a sendError in the Outbox) is on the message after.
+            pendingRecordList is the records kept for the message: filed once it is sent.
         </description>
         <in-parameters>
             <parameter name="emailMessageId" required="true"/>
