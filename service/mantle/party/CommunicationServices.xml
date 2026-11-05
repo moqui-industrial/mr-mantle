@@ -1864,7 +1864,9 @@ along with this software (see the LICENSE.md file). If not, see
             - a work effort: a client project; a work item (WetTask) of one shared with the client (visibility All users or
               General); a milestone or release of one. No other kind (sprints, events, activities).
             - a request: one the user filed; or of a client project, filed by one of the user's organization's contacts
-              (clientContactPartyIds) or with one of those or the organization as a current RequestParty.
+              (clientContactPartyIds) or with one of those or the organization as a current RequestParty. Never a support case
+              with no project (a CaseProfile): customers read cases through the Support app (impl-customer-service P2, F68); a
+              project's case stays its client's.
             - a communication event: never a Comment (a note is internal); a status update posted for the client
               (statusUpdateIds); a message the user's party is from, to or a party to; a message one of the organization's
               contacts or the organization is from, to or a party to that is filed (the event, or the root of its thread, by
@@ -1929,8 +1931,12 @@ along with this software (see the LICENSE.md file). If not, see
                         const byParty = new Set(inProject.length && orgSide.size ? Array.from(ec.entity.find('mantle.request.RequestParty')
                                 .condition('requestId', 'in', inProject).condition('partyId', 'in', Array.from(orgSide))
                                 .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('requestId').list()).map((row) => row.requestId) : [])
-                        for (const row of rows) requestSeen.set(row.requestId, row.filedByPartyId === me
-                                || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId))))
+                        // a support case with no project is never a client's here: customers read cases through the Support
+                        // app (impl-customer-service P2, F68); a project's case stays its client's, in Projects (F-P2-3)
+                        const cases = new Set(Array.from(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', 'in', wanted)
+                                .selectField('requestId').list()).map((row) => row.requestId))
+                        for (const row of rows) requestSeen.set(row.requestId, !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
+                                || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId)))))
                     }
                     return ids.filter((id) => requestSeen.get(id))
                 }
@@ -2278,6 +2284,15 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
+                // a support case in a restricted queue (impl-customer-service P2, the Privacy queue): its team only
+                const restricted = request.requestCategoryId ? Array.from(ec.entity.find('mantle.request.support.ServiceQueue')
+                        .condition('requestCategoryId', request.requestCategoryId).condition('visibilityEnumId', 'SqvRestricted')
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).condition(current())
+                        .disableAuthz().list())[0] : null
+                if (restricted && ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', request.requestId).disableAuthz().count() > 0)
+                    return !!s.userPartyId && !!restricted.responsibleTeamPartyId && ec.entity.find('mantle.party.PartyRelationship')
+                            .condition({fromPartyId: s.userPartyId, toPartyId: restricted.responsibleTeamPartyId, relationshipTypeEnumId: 'PrtServiceTeam'})
+                            .condition(current()).disableAuthz().count() > 0
                 if (s.partyIds.length && ec.entity.find('mantle.request.RequestParty').condition('requestId', request.requestId)
                         .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
                 // IronStone Projects: a request of a project the user sees

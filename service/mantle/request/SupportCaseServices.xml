@@ -1,0 +1,404 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Support cases (impl-customer-service P2, §2 "What Mantle runs is Mantle's", F41; SupportCases.js has the rules):
+    the case rule and profile, the case's create, update, transition and tags, and the saves of queues, case types, status
+    mappings, workflows, defaults and teams. Each checks its permission (SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE,
+    SUPPORT_POLICY_EDIT) and the case's or setting's organization; BOSS screens call these after
+    ironstone.customerservice.AccessServices. The rule services (ensure, queue, notify, guard, state) are internal. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== the case rule (D23, F62) ===== -->
+    <service verb="queue" noun="CaseProfile" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the SupportCaseRule rules of entity/Request.eecas.xml: ensure#CaseProfile after the commit
+            of the change (at once when there is no transaction), as queue#RequestTriage. A failure is logged, never the
+            change's.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <actions><script><![CDATA[
+            // nothing to do where Customer Service is not configured (no ServicePolicy) or for a case already
+            const configured = ec.entity.find('mantle.request.support.ServicePolicy').disableAuthz().count() > 0
+            if (!configured || ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', requestId).disableAuthz().count() > 0) return
+            ec.message.pushErrors()
+            try {
+                let queued = false
+                try {
+                    ec.service.special().name('mantle.request.SupportCaseServices.ensure#CaseProfile').parameters({requestId: requestId}).registerOnCommit()
+                    queued = true
+                } catch (err) { queued = false }
+                if (!queued) ec.service.sync().name('mantle.request.SupportCaseServices.ensure#CaseProfile').parameters({requestId: requestId}).disableAuthz().call()
+            } catch (err) {
+                ec.logger.error(`Request ${requestId}: the case rule was not queued: ${err && err.message ? err.message : err}`)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="ensure" noun="CaseProfile" authenticate="anonymous-all" allow-remote="false">
+        <description>Makes a request a support case when the case rule says it is one (SupportCases.js route): submitted, a
+            Customer party of an organization with a current ServicePolicy that serves it, and in one of its service queues
+            or of a type it service-enables (moved into the type's default queue). Makes the CaseProfile (the policy and
+            workflow, the queue, the intake time and the message it came from) and the OrgInternal party. Idempotent: a case
+            stays one. Internal: run by queue#CaseProfile and create#Case; no permission, so every entry point makes its
+            case.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="emailMessageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="isCase" type="Boolean"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('ensure', context)"/>
+            <set field="isCase" from="!!out.isCase"/>
+            <set field="created" from="!!out.created"/>
+            <set field="reason" from="out.reason || null"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseState" allow-remote="false">
+        <description>Whether a request is a support case, with its organization, queue and status category; or, with no
+            requestId, whether a request with the fields given would be one (wouldBeCase), as raise#Request asks before it
+            takes a due date. No permission: it names no customer or record.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="rootWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="isCase" type="Boolean"/>
+            <parameter name="wouldBeCase" type="Boolean"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="statusCategoryEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('state', context)"/>
+            <set field="isCase" from="!!out.isCase"/>
+            <set field="wouldBeCase" from="!!out.wouldBeCase"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="requestCategoryId" from="out.requestCategoryId"/>
+            <set field="statusCategoryEnumId" from="out.statusCategoryEnumId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseStatusMappings" allow-remote="false">
+        <description>A case workflow's current status mappings (agent and customer labels, category, order), the default
+            workflow's for a status it does not map, and its moves (CaseTransition). No permission: workflow
+            labels.</description>
+        <in-parameters><parameter name="caseWorkflowId"/></in-parameters>
+        <out-parameters>
+            <parameter name="mappingList" type="List"/>
+            <parameter name="transitionList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('mappings', context)"/>
+            <set field="mappingList" from="out.mappingList"/>
+            <set field="transitionList" from="out.transitionList"/>
+        </actions>
+    </service>
+    <service verb="notify" noun="CaseCustomerReply" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the SupportCaseCustomerReply rule of entity/Request.eecas.xml: a message filed on a case
+            from its customer, contact or a contact of the customer organization tells the case's assignee on the topic
+            SupportCaseCustomerReply. Not a case, a note or an internal sender: nothing. A failure is logged.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="communicationEventId" required="true"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            if (!(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', requestId).disableAuthz().count() > 0)) return
+            ec.message.pushErrors()
+            try {
+                ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js').execute('customerReply', context)
+            } catch (err) {
+                ec.logger.error(`Case ${requestId}: the customer reply notice was not sent: ${err && err.message ? err.message : err}`)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+
+    <!-- ===== the case (SUPPORT_CASE_EDIT) ===== -->
+    <service verb="create" noun="Case">
+        <description>A case for a customer the organization serves, atomically (design NewCase SubmitCase): the Request
+            (create#Request, Submitted, in a service queue of the organization: the one given, else the type's default, else
+            the policy's), its Customer, Reporter (the contact, when given) and OrgInternal parties, the records it is on
+            (link#RequestRecord), its profile (ensure#CaseProfile) and its assignee. Needs SUPPORT_CASE_EDIT and the
+            organization (RECORD_UNAVAILABLE); refuses a customer it does not serve (CUSTOMER_UNAVAILABLE), a queue not its
+            (QUEUE_UNAVAILABLE) or not taking the type (TYPE_NOT_OFFERED), an assignee outside the queue's team
+            (ASSIGNEE_UNAVAILABLE) and an organization with no service policy (SERVICE_NOT_CONFIGURED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="customerPartyId" required="true"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="requestName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="priority"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="records" type="List"><description>Maps of recordEntityName and recordId</description></parameter>
+            <parameter name="communicationEventId"/>
+            <parameter name="emailMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="requestId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="requestId" from="cases.execute('create', context).requestId"/>
+        </actions>
+    </service>
+    <service verb="update" noun="Case">
+        <description>A case's queue, priority and assignee (an empty assigneePartyId unassigns; an absent one leaves it)
+            under its queue (crosscut CaseServiceFacts): another queue of the case's organization (QUEUE_UNAVAILABLE), a
+            priority of 1 to 9, an assignee of the queue's team (ASSIGNEE_UNAVAILABLE), told on SupportCaseAssigned. Needs
+            SUPPORT_CASE_EDIT, and SUPPORT_CASE_MANAGE for a case assigned to another agent; refuses a closed case
+            (CASE_CLOSED) and, with caseRevision, a case changed since (STALE_CASE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="priority"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="caseRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="changed" type="Boolean"/>
+            <parameter name="revision" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('update', context)"/>
+            <set field="changed" from="!!out.changed"/>
+            <set field="revision" from="out.revision"/>
+        </actions>
+    </service>
+    <service verb="transition" noun="Case">
+        <description>A case's status by its workflow (CaseTransition rows of the profile's workflow, else the default):
+            resolve (Completed or Cancelled) with a resolution when the move needs one (RESOLUTION_REQUIRED), hold, cancel or
+            reopen with a reason (REASON_REQUIRED, written on its conversation), a manager's move (SUPPORT_CASE_MANAGE);
+            reopen within the policy's window (REOPEN_WINDOW_PASSED) and never a closed case (CASE_CLOSED). Any other move is
+            refused (TRANSITION_NOT_ALLOWED). Needs SUPPORT_CASE_EDIT and the case's organization; with caseRevision refuses
+            a case changed since (STALE_CASE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="toStatusId" required="true"/>
+            <parameter name="resolutionEnumId"/>
+            <parameter name="reason"/>
+            <parameter name="caseRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="statusLabel"/>
+            <parameter name="revision" type="Long"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('transition', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="statusLabel" from="out.statusLabel"/>
+            <set field="revision" from="out.revision"/>
+        </actions>
+    </service>
+    <service verb="set" noun="CaseTags">
+        <description>Adds (mode add, the default), removes or replaces a case's tags (RequestTag rows of the RequestTag
+            enumeration; a removed tag is ended). Needs SUPPORT_CASE_EDIT and the case's organization; refuses an unknown tag
+            (TAG_UNKNOWN).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="tagEnumIds" type="List" required="true"/>
+            <parameter name="mode" default-value="add"/>
+        </in-parameters>
+        <out-parameters><parameter name="tagEnumIds" type="List"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="tagEnumIds" from="cases.execute('tags', context).tagEnumIds"/>
+        </actions>
+    </service>
+
+    <!-- ===== settings (CS-SETTINGS): effective-dated rows; a save starts its row (now, a date, or none for a draft) and
+        ends the one it replaces ===== -->
+    <service verb="define" noun="DatedSave" type="interface">
+        <description>The in-parameters of a dated settings save.</description>
+        <in-parameters>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="draft" type="Boolean"/>
+        </in-parameters>
+    </service>
+    <service verb="save" noun="ServiceQueue">
+        <description>A service queue (design Queues QueueEdit): its category (a new one owned by the organization, or one
+            already its: QUEUE_ORGANIZATION) with name, parent and responsible party, and a ServiceQueue row from its date:
+            the offered types, visibility (a restricted queue needs its team: TEAM_REQUIRED), responsible team (one of the
+            organization's: TEAM_UNAVAILABLE) and fallback assignee. With end, ends the queue's row (not a queue new
+            intake goes to: QUEUE_IN_USE); its cases stay. Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="requestCategoryId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="description"/>
+            <parameter name="parentCategoryId"/>
+            <parameter name="responsiblePartyId"/>
+            <parameter name="offeredTypeEnumIds"/>
+            <parameter name="visibilityEnumId"/>
+            <parameter name="responsibleTeamPartyId"/>
+            <parameter name="fallbackAssigneePartyId"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestCategoryId"/>
+            <parameter name="serviceQueueId"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('saveQueue', context)"/>
+            <set field="requestCategoryId" from="out.requestCategoryId"/>
+            <set field="serviceQueueId" from="out.serviceQueueId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="ServiceRequestType">
+        <description>A request type as the organization offers it for cases (design CaseTypes ServiceTypes), from its date:
+            service-enabled (needs its default queue, a service queue of the organization: QUEUE_REQUIRED,
+            QUEUE_UNAVAILABLE), the customer label, default priority and workflow, and whether the customer pages offer
+            it. Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="requestTypeEnumId" required="true"/>
+            <parameter name="serviceEnabled"/>
+            <parameter name="customerLabel"/>
+            <parameter name="defaultCategoryId"/>
+            <parameter name="defaultPriority"/>
+            <parameter name="caseWorkflowId"/>
+            <parameter name="publicAvailable"/>
+        </in-parameters>
+        <out-parameters><parameter name="serviceRequestTypeId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="serviceRequestTypeId" from="cases.execute('saveType', context).serviceRequestTypeId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="CaseStatusMapping">
+        <description>What a request status means on a case of a workflow (design StatusCategories CaseStatusMap), from its
+            date: the agent's and the customer's labels (LABEL_REQUIRED), the category (CATEGORY_UNKNOWN), whether it needs a
+            reason, and its order. Workflows are shared settings, as status flows are. Needs SUPPORT_POLICY_EDIT.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="caseWorkflowId"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="agentLabel"/>
+            <parameter name="customerLabel"/>
+            <parameter name="statusCategoryEnumId"/>
+            <parameter name="reasonRequired"/>
+            <parameter name="sequenceNum"/>
+        </in-parameters>
+        <out-parameters><parameter name="caseStatusMappingId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="caseStatusMappingId" from="cases.execute('saveMapping', context).caseStatusMappingId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="CaseWorkflow">
+        <description>A case workflow (a new one by its description) and, with statusId and toStatusId, one of its moves
+            (design StatusCategories CaseTransitionPolicy) from its date: whether it needs a resolution, a reason or
+            SUPPORT_CASE_MANAGE, and whether the customer is told; with end, ends the move. A move must be one of the
+            Default request flow (STATUS_FLOW_MISSING). Needs SUPPORT_POLICY_EDIT.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="caseWorkflowId"/>
+            <parameter name="description"/>
+            <parameter name="statusId"/>
+            <parameter name="toStatusId"/>
+            <parameter name="resolutionRequired"/>
+            <parameter name="reasonRequired"/>
+            <parameter name="manageRequired"/>
+            <parameter name="notifyCustomer"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="caseWorkflowId"/>
+            <parameter name="caseTransitionId"/>
+        </out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="out" from="cases.execute('saveWorkflow', context)"/>
+            <set field="caseWorkflowId" from="out.caseWorkflowId"/>
+            <set field="caseTransitionId" from="out.caseTransitionId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="ServiceDefaults">
+        <description>An organization's service policy (design ServiceDefaults ServicePolicy) from its date; its first row
+            turns the case rules on for the organization: the default queue (one of its service queues), workflow, what an
+            unknown sender makes, the reopen window (14 days by default, 0 to 365), the auto-close delay, whether resolving
+            needs a resolution, and customerImmediateCancel (off). Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="defaultCategoryId"/>
+            <parameter name="caseWorkflowId"/>
+            <parameter name="unknownSenderEnumId"/>
+            <parameter name="reopenWindowDays"/>
+            <parameter name="autoCloseDays"/>
+            <parameter name="resolutionRequired"/>
+            <parameter name="customerImmediateCancel"/>
+            <parameter name="fallbackOwnerPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="servicePolicyId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="servicePolicyId" from="cases.execute('saveDefaults', context).servicePolicyId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="ServiceTeam">
+        <description>A service team of the organization: a new one (an organization party it owns, in the OrgTeam role) or
+            one of its renamed (TEAM_UNAVAILABLE). Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="teamName" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="teamPartyId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="teamPartyId" from="cases.execute('saveTeam', context).teamPartyId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="ServiceTeamMember">
+        <description>A person joins a service team as an agent (roleTypeId Agent) or its manager (Manager), from a date, by a
+            dated PartyRelationship (PrtServiceTeam); with end, leaves it (the relationship ended, history kept). Needs
+            SUPPORT_CASE_MANAGE and to manage the team, or SUPPORT_POLICY_EDIT; the team must be one of the user's
+            organizations' (TEAM_UNAVAILABLE) and the member a person (MEMBER_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="teamPartyId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" default-value="Agent"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
+        <actions>
+            <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
+            <set field="partyRelationshipId" from="cases.execute('saveMember', context).partyRelationshipId"/>
+        </actions>
+    </service>
+</services>
