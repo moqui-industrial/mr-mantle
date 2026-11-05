@@ -332,9 +332,28 @@ feature("a reply joins its case by its references; the case's token joins for it
             bodyText: "Let me in."
         })
         const guessedOut = mail(guessed)
-        return {replied, tokened, guessedOut, guessedRequest: requestOf(guessed), acks: acksOf(state.mailCase).length}
+        // a stranger naming the case's Message-ID in forged headers joins nothing (not from or to that message)
+        const forged = receive({
+            fromAddress: "sam.sch@example.com",
+            subject: "Re: SCH Thermostat is dark",
+            bodyText: "Me too.",
+            inReplyTo: first.messageId,
+            referencesHeader: first.messageId
+        })
+        const forgedOut = mail(forged)
+        return {
+            replied,
+            tokened,
+            guessedOut,
+            guessedRequest: requestOf(guessed),
+            forgedOut,
+            forgedRequest: requestOf(forged),
+            acks: acksOf(state.mailCase).length
+        }
     },
-    then({replied, tokened, guessedOut, guessedRequest, acks}) {
+    then({replied, tokened, guessedOut, guessedRequest, forgedOut, forgedRequest, acks}) {
+        forgedOut.joined == false
+        forgedRequest != state.mailCase
         replied.joined == true
         replied.requestId == state.mailCase
         tokened.joined == true

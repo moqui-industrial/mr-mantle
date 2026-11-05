@@ -4,7 +4,8 @@
 // the organization serves, or its contact, in one of its queues is a case; F62, F79), with the queue's ServiceRoute saying
 // what arrives (type, priority, the unknown-sender and automatic-mail policies, the acknowledgement and its text).
 // - Mail: the Comms rule ErActCreateRequest's value names the queue (create#RequestFromEmail calls mailIntake). A message
-//   joins the request its verified message references name (In-Reply-To, References, the thread), else the case its
+//   joins the request its verified message references name (In-Reply-To, References, the thread, from an address that
+//   message was from or to, or from the request's customer side or staff), else the case its
 //   subject's token names ([Request 123]) when the sender is that case's customer or contact; never a guessed id for another
 //   sender. An automatic message (Auto-Submitted other than no, Precedence bulk, junk, list or auto_reply, X-Autoreply) is
 //   ignored or attached to its case only, per route, never a case and never acknowledged. A new message from a customer's
@@ -299,8 +300,31 @@ function senderOf(address, organizationPartyId) {
     return Object.assign({kind: "other"}, found)
 }
 // The request a message answers by its verified references: a message its In-Reply-To or References name, its parent or its
-// thread's first message is on a request (as find#EmailRequest).
-function referencedRequest(message) {
+// thread's first message is on a request (as find#EmailRequest), and the sender is verified for it: an address the
+// referenced message was from or to (To, Cc), the request's customer, reporter or a contact of its customer, or staff of the
+// queue's organization. A Message-ID is no secret (every recipient has it), so a stranger naming one in forged headers
+// joins nothing: the message goes on as a new one of its own sender.
+const addressesOf = (...values) =>
+    new Set(
+        values
+            .flatMap(value => String(value || "").match(/[^\s<>,;:"'()]+@[^\s<>,;:"'()]+/g) || [])
+            .map(address => address.toLowerCase())
+    )
+function senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId) {
+    const address = String(message.fromAddress || "")
+        .trim()
+        .toLowerCase()
+    if (address)
+        for (const row of find(MESSAGE).condition("emailMessageId", "in", referencedIds).list())
+            if (addressesOf(row.fromAddress, row.toAddresses, row.ccAddresses).has(address)) return true
+    if (!sender?.partyId) return false
+    if (organizationPartyId && cases.organizationsOf(sender.partyId).includes(organizationPartyId)) return true
+    const parties = cases.currentRows(PARTY, {requestId})
+    if (parties.some(row => ["Customer", "Reporter"].includes(row.roleTypeId) && row.partyId === sender.partyId)) return true
+    const customerPartyId = parties.find(row => row.roleTypeId === "Customer")?.partyId
+    return !!customerPartyId && cases.customerSidesOf(sender.partyId).includes(customerPartyId)
+}
+function referencedRequest(message, sender, organizationPartyId) {
     const ids = new Set(
         [message.parentEmailMessageId, message.rootEmailMessageId].filter(id => id && id !== message.emailMessageId)
     )
@@ -316,8 +340,13 @@ function referencedRequest(message) {
             .list())
             if (row.emailMessageId !== message.emailMessageId) ids.add(row.emailMessageId)
     if (!ids.size) return null
-    const link = Array.from(find(REQUEST_MAIL).condition("emailMessageId", "in", Array.from(ids)).list())[0]
-    return link && one(REQUEST, {requestId: link.requestId}) ? link.requestId : null
+    const byRequest = new Map()
+    for (const link of find(REQUEST_MAIL).condition("emailMessageId", "in", Array.from(ids)).list())
+        byRequest.set(link.requestId, (byRequest.get(link.requestId) || []).concat([link.emailMessageId]))
+    for (const [requestId, referencedIds] of byRequest)
+        if (one(REQUEST, {requestId}) && senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId))
+            return requestId
+    return null
 }
 // The case a subject's token names ([Request 123], [Case 123]), only for a sender who is that case's customer, reporter or a
 // contact of its customer, and only a case of the organization: a guessed id authorizes no one.
@@ -344,7 +373,7 @@ function resolveMail(message, queue, route) {
     const decision = {automatic, autoPolicy, sender, organizationPartyId, requestCategoryId: queue.category.requestCategoryId}
     if (automatic && autoPolicy === "SagIgnore")
         return Object.assign(decision, {action: "ignore", reason: "An automatic message, ignored by the route: " + automatic})
-    const referenced = referencedRequest(message)
+    const referenced = referencedRequest(message, sender, organizationPartyId)
     if (referenced) return Object.assign(decision, {action: "join", requestId: referenced, threadBy: "reference"})
     const token = tokenCase(message.subject, sender, organizationPartyId)
     if (token) return Object.assign(decision, {action: "join", requestId: token, threadBy: "token"})
