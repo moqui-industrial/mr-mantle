@@ -1166,6 +1166,25 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="statusId" value="ReturnCancelled"/>
             <service-call name="update#mantle.order.return.ReturnHeader" out-map="context"
                     in-map="{returnId:returnId, statusId:statusId}"/>
+
+            <!-- F22 (impl-customer-service P9): the return shipment the approval made is cancelled too, when nothing was
+                received on it and it carries only this return's items; one with a receipt, or shared, is left as it is -->
+            <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="returnSourceList">
+                <econdition field-name="returnId"/></entity-find>
+            <set field="returnShipmentIds" from="Array.from(new Set(Array.from(returnSourceList, (sis) =&gt; sis.shipmentId)))"/>
+            <iterate list="returnShipmentIds" entry="returnShipmentId">
+                <entity-find-one entity-name="mantle.shipment.Shipment" value-field="returnShipment">
+                    <field-map field-name="shipmentId" from="returnShipmentId"/></entity-find-one>
+                <if condition="returnShipment == null || !['ShipInput', 'ShipScheduled'].includes(returnShipment.statusId)"><continue/></if>
+                <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentSourceList">
+                    <econdition field-name="shipmentId" from="returnShipmentId"/></entity-find>
+                <if condition="Array.from(shipmentSourceList).some((sis) =&gt; sis.returnId != returnId)"><continue/></if>
+                <entity-find-count entity-name="mantle.product.receipt.AssetReceipt" count-field="returnReceiptCount">
+                    <econdition field-name="shipmentId" from="returnShipmentId"/></entity-find-count>
+                <if condition="returnReceiptCount &gt; 0"><continue/></if>
+                <service-call name="mantle.shipment.ShipmentServices.cancel#Shipment"
+                        in-map="{shipmentId:returnShipmentId, undoIssueReceive:false}"/>
+            </iterate>
         </actions>
     </service>
     <service verb="cancel" noun="ReturnItem">
@@ -1365,19 +1384,8 @@ along with this software (see the LICENSE.md file). If not, see
                                     quantity:quantityToReceive, quantityNotHandled:quantityToReceive,
                                     returnId:returnItem.returnId, returnItemSeqId:returnItem.returnItemSeqId}"/>
 
-                        <!-- for existing ReturnItemBilling set the shipmentId on it -->
-                        <set field="quantityNotBilled" from="quantityToReceive"/>
-                        <entity-find entity-name="mantle.order.return.ReturnItemBilling" list="returnItemBillingList">
-                            <econdition field-name="returnId"/><econdition field-name="returnItemSeqId" from="returnItem.returnItemSeqId"/>
-                        </entity-find>
-                        <iterate list="returnItemBillingList" entry="returnItemBilling">
-                            <if condition="!returnItemBilling.shipmentId &amp;&amp; quantityNotBilled.compare(returnItemBilling.quantity ?? 0) &gt;= 0">
-                                <set field="returnItemBilling.shipmentId" from="shipmentId"/>
-                                <entity-update value-field="returnItemBilling"/>
-                                <set field="quantityNotBilled" from="quantityNotBilled.subtract(returnItemBilling.quantity ?? 0)"/>
-                            </if>
-                        </iterate>
-                        <!-- if quantityNotBilled > 0 do anything here? we don't have another Invoice/Item with quantity to match... -->
+                        <!-- F23 (impl-customer-service P9): this set ReturnItemBilling.shipmentId, which is no field of the
+                            entity; a billing link reaches its receipt by assetReceiptId (settle#Return), so nothing is set -->
                     </if>
                 </if>
             </iterate>

@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Customer return policies (design-customer-service §5 Returns, NewReturn, ReturnDetail, §9 ReturnPolicies; impl-customer-
+    service P9, CS-RETURN-POLICY, CX-RETURNS; F21, F24): an organization's return policies and its return reason rows are
+    effective-dated rows with their key fields audit-logged (a draft has no from date; publishing a row from a date ends the row
+    it replaces); a return keeps the policy row it was evaluated against and the time. ReturnHeader gains the customer's own
+    reference and the authorization's expiry, audit-logged, and the policy evaluation; a return's assignee is a dated
+    ReturnParty row (parties by role). The authorization decision is a record of its own, as Purchasing's
+    PurchaseApprovalDecision: the return and its revision, the policy row, the actor, the time and any exception. Written by
+    mantle.order.ReturnPolicyServices only (ReturnPolicies.js); with no policy a return goes to manual review. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ReturnPolicy" package="mantle.order.return" cache="never">
+        <description>A return policy of an organization (design ReturnPolicies ReturnPolicyEdit), effective-dated: its
+            conditions (a store, a customer group, a product category; none is the organization's default), the window from
+            shipment or delivery, how long an authorization is valid, whether customers may request returns themselves, the
+            reasons and remedies allowed, proof, the destination facility, who approves an exception, whether a credit
+            without receipt may be given, advance replacement or instant credit (each needs the settlement authority at
+            authorization), the restocking fee rule and its cap, and the instructions the customer gets. The most specific
+            policy whose conditions hold applies (category, then customer group, then store, then the default); two published
+            rows with the same conditions over the same dates are refused. A row replacing another names it
+            (previousPolicyId). Saved by mantle.order.ReturnPolicyServices.save#Policy.</description>
+        <field name="returnPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="policyName" type="text-medium" enable-audit-log="true"/>
+        <field name="productStoreId" type="id" enable-audit-log="true"/>
+        <field name="partyClassificationId" type="id" enable-audit-log="true"><description>A customer group: the customer's
+            PartyClassificationAppl</description></field>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="windowDays" type="number-integer" enable-audit-log="true"/>
+        <field name="windowFromEnumId" type="id" enable-audit-log="true"><description>RpwShipped or RpwDelivered</description></field>
+        <field name="authorizationDays" type="number-integer" enable-audit-log="true"><description>How long an RMA stays
+            valid for the goods to arrive</description></field>
+        <field name="selfServiceEnabled" type="text-indicator" enable-audit-log="true"/>
+        <field name="allowedReasonEnumIds" type="text-medium" enable-audit-log="true"><description>Comma-separated
+            ReturnReason enumIds; empty allows every reason</description></field>
+        <field name="allowedResponseEnumIds" type="text-medium" enable-audit-log="true"><description>Comma-separated
+            ReturnResponse enumIds; empty allows credit, refund and replacement</description></field>
+        <field name="proofRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="destinationFacilityId" type="id" enable-audit-log="true"/>
+        <field name="exceptionUserGroupId" type="id" enable-audit-log="true"><description>The group whose holders of
+            RETURN_EXCEPTION_APPROVE approve an exception; empty: every holder in the organization</description></field>
+        <field name="receiptlessEligible" type="text-indicator" enable-audit-log="true"/>
+        <field name="advanceReplacement" type="text-indicator" enable-audit-log="true"/>
+        <field name="instantCredit" type="text-indicator" enable-audit-log="true"/>
+        <field name="restockFeePercent" type="number-decimal" enable-audit-log="true"/>
+        <field name="restockFeeCap" type="currency-amount" enable-audit-log="true"/>
+        <field name="instructions" type="text-long" enable-audit-log="true"/>
+        <field name="previousPolicyId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one-nofk" related="mantle.party.PartyClassification" short-alias="classification"/>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one-nofk" title="ReturnWindowFrom" related="moqui.basic.Enumeration" short-alias="windowFrom">
+            <key-map field-name="windowFromEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Destination" related="mantle.facility.Facility" short-alias="destination">
+            <key-map field-name="destinationFacilityId" related="facilityId"/></relationship>
+        <index name="RETURN_POLICY_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Return Window From" enumTypeId="ReturnWindowFrom"/>
+            <moqui.basic.Enumeration enumId="RpwShipped" description="Shipment" sequenceNum="1" enumTypeId="ReturnWindowFrom"/>
+            <moqui.basic.Enumeration enumId="RpwDelivered" description="Delivery" sequenceNum="2" enumTypeId="ReturnWindowFrom"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ReturnReasonPolicy" package="mantle.order.return" cache="never">
+        <description>A return reason row of an organization over the ReturnReason enumerations (design ReturnPolicies
+            ReturnReasons), effective-dated: the customer's label, whether customers may choose it, whether evidence is
+            required, the suggested response and whether the goods are inspected. A suggestion is no authority to post a
+            scrap or zero value: Quality and Accounting decide. Saved by mantle.order.ReturnPolicyServices.save#ReturnReason.</description>
+        <field name="returnReasonPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="returnReasonEnumId" type="id" enable-audit-log="true"/>
+        <field name="customerLabel" type="text-medium" enable-audit-log="true"/>
+        <field name="customerVisible" type="text-indicator" enable-audit-log="true"/>
+        <field name="evidenceRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="suggestedResponseEnumId" type="id" enable-audit-log="true"/>
+        <field name="inspectionRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ReturnReason" related="moqui.basic.Enumeration" short-alias="reason">
+            <key-map field-name="returnReasonEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SuggestedResponse" related="moqui.basic.Enumeration" short-alias="response">
+            <key-map field-name="suggestedResponseEnumId" related="enumId"/></relationship>
+        <index name="RETURN_REASON_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+
+    <extend-entity entity-name="ReturnHeader" package="mantle.order.return">
+        <field name="customerReference" type="text-medium" enable-audit-log="update"><description>The customer's own reference
+            for the return (their case or order number); externalId and originId stay integration keys</description></field>
+        <field name="authorizationExpireDate" type="date-time" enable-audit-log="update"><description>When the RMA stops
+            being valid for the goods to arrive (the policy's authorization days from authorization)</description></field>
+        <field name="returnPolicyId" type="id" enable-audit-log="update"><description>The policy row the return was evaluated
+            against; empty with manualReview Y when none applied</description></field>
+        <field name="policyEvaluatedDate" type="date-time"/>
+        <field name="manualReview" type="text-indicator" enable-audit-log="update"><description>Y: no policy applied, so a
+            person decides the return (design ReturnPolicies: no policy is manual review, never an unrestricted
+            return)</description></field>
+        <relationship type="one-nofk" related="mantle.order.return.ReturnPolicy" short-alias="policy"/>
+        <relationship type="many" related="mantle.order.return.ReturnParty" short-alias="parties">
+            <key-map field-name="returnId"/></relationship>
+    </extend-entity>
+    <entity entity-name="ReturnParty" package="mantle.order.return" cache="never">
+        <description>A party of a return in a role, dated (parties by role; F24): the assignee (Assignee) who follows the
+            customer's return. ReturnHeader's customer and vendor stay the keys Mantle reads.</description>
+        <field name="returnId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.order.return.ReturnHeader" short-alias="returnHeader"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+    </entity>
+    <entity entity-name="ReturnAuthorizationDecision" package="mantle.order.return" cache="never">
+        <description>A decision on a customer return at a revision (as PurchaseApprovalDecision): an authorization, or an
+            exception approved or refused, with who decided, when and why, the policy row it was evaluated against and the
+            exception it answers. The revision is the return's (ReturnPolicies.js revisionOf: its header's, items' and parties'
+            last change); a decision of an earlier revision no longer counts. Written only by
+            mantle.order.ReturnPolicyServices authorize#Return and decide#ReturnException.</description>
+        <field name="returnAuthorizationDecisionId" type="id" is-pk="true"/>
+        <field name="returnId" type="id"/>
+        <field name="sourceRevision" type="text-short"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="returnPolicyId" type="id"/>
+        <field name="policyFromDate" type="date-time"/>
+        <field name="exceptionText" type="text-long"><description>The exceptions the decision answers (outside the window,
+            a reason or remedy the policy does not allow, goods with no order line, no policy)</description></field>
+        <field name="operationKey" type="text-short"/>
+        <field name="supersededDate" type="date-time"/>
+        <relationship type="one" related="mantle.order.return.ReturnHeader" short-alias="returnHeader"/>
+        <relationship type="one" title="ReturnDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.order.return.ReturnPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="RETURN_DECISION_RETURN"><index-field name="returnId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Return Decision" enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdAuthorized" description="Authorized" sequenceNum="1" enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdExceptionRequested" description="Exception requested" sequenceNum="2"
+                    enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdExceptionApproved" description="Exception approved" sequenceNum="3"
+                    enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdExceptionRefused" description="Exception refused" sequenceNum="4"
+                    enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdCancelled" description="Cancelled" sequenceNum="5" enumTypeId="ReturnDecision"/>
+            <moqui.basic.Enumeration enumId="RdRemainderClosed" description="Remainder closed" sequenceNum="6"
+                    enumTypeId="ReturnDecision"/>
+        </seed-data>
+    </entity>
+</entities>

@@ -718,4 +718,23 @@ along with this software (see the LICENSE.md file). If not, see
         PDF stored once as an OrderContent of this type, which each resend attaches -->
     <moqui.basic.Enumeration enumId="OctOrderConfirmation" description="Order confirmation as placed"
             enumTypeId="OrderContentType"/>
+
+    <!-- Customer returns (impl-customer-service P9, CX-APPROVAL; mantle.order.ReturnPolicyServices): an exception a customer
+        return needs before authorization (outside the window, a reason or remedy the policy does not allow, goods with no order
+        line), to the holders of RETURN_EXCEPTION_APPROVE who work for its organization, on Purchasing's decision pattern
+        (F45, F46): the framework's approve#NotificationMessage and refuse#NotificationMessage call approve#ReturnException and
+        refuse#ReturnException as the user, which decide at the revision in the message (sourceRevision) and refuse a stale
+        one; a refusal needs a reason. The message holds returnId, sourceRevision, organizationPartyId, organizationName,
+        customerName, exceptionText, reason and requestedByName. A decision on a return (authorized, an exception approved or
+        refused) to its assignee (ReturnDecision: returnId, customerName, decisionText, decidedByName). The app that works
+        returns sets the links (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="ReturnExceptionApproval" inboxEnumId="NinNotifications"
+            description="Return exception to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.ReturnPolicyServices.approve#ReturnException"
+            refuseServiceName="mantle.order.ReturnPolicyServices.refuse#ReturnException" refuseReasonRequired="Y"
+            titleTemplate="Approve the exception of return ${returnId} for ${customerName}: ${exceptionText}"/>
+    <moqui.security.user.NotificationTopic topic="ReturnDecision" inboxEnumId="NinNotifications" description="Return decided"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Return ${returnId} for ${customerName}: ${decisionText} (${decidedByName})"/>
 </entity-facade-xml>

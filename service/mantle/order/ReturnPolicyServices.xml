@@ -1,0 +1,511 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Customer return policies and customer returns (impl-customer-service P9, CS-RETURN-POLICY, CX-RETURNS, CX-APPROVAL; design-
+    customer-service §5, §9 ReturnPolicies; entity/ReturnPolicyEntities.xml; ReturnPolicies.js has the rules): the dated
+    policies and reason rows, the eligibility and policy evaluation of a sale's lines (under a lock per source order item:
+    shipped and invoiced less every return not cancelled, drafts included, F21), a customer's return entered by an agent, its
+    authorization over Mantle's approve#Return (no settlement; immediate responses only with the policy and the settlement
+    authority; the RMA stored as ReturnContent), an exception's approval bound to the return's revision on the
+    ReturnExceptionApproval topic (F45, F46), a remainder closed, a cancel before any effect (F22), the reads of Customer
+    Service's Returns and Home, and the RMA print and mail. Each service checks its permission and the return's organization
+    (one of the user's, the vendor; the customer not internal). Mantle's own return services are unchanged for their callers.
+    Settlement is Accounting's (ReturnServices preview#ReturnSettlement, settle#Return), receipt Warehouse's
+    (WarehouseTaskServices receive#ReturnItems, request#ReturnLabel). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== policies (ReturnPolicies settings) ===== -->
+    <service verb="find" noun="Policies" allow-remote="false">
+        <description>An organization's return policies (ReturnPolicyList), the most specific first, each with its conditions,
+            rank, window, authorization days, reasons, remedies, fee and state (Draft, Scheduled, In effect, Ended: with
+            includeEnded only), and its current return reason rows (ReturnReasons). Needs SUPPORT_CASE_EDIT, RETURN_AUTHORIZE,
+            RETURN_EXCEPTION_APPROVE or RETURN_POLICY_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="returnPolicyId"/>
+            <parameter name="includeEnded" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="policies" type="List"/>
+            <parameter name="reasons" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('findPolicies', context)"/>
+            <set field="policies" from="found.policies"/>
+            <set field="reasons" from="found.reasons"/>
+        </actions>
+    </service>
+    <service verb="save" noun="Policy" allow-remote="false">
+        <description>A return policy row (ReturnPolicyEdit): new, from a date (now when not given) or as a draft (no from
+            date); a draft changed or published; a published row replaced from a date (the new row names it, previousPolicyId,
+            and it ends there); or ended (end). Its conditions: a store of the organization (STORE_UNAVAILABLE), a customer
+            group (CLASSIFICATION_UNKNOWN), a product category (CATEGORY_UNKNOWN); its destination one of the organization's
+            facilities (FACILITY_UNAVAILABLE); its reasons, remedies and window start of their types and its days whole numbers
+            above zero (VALUE_INVALID, WINDOW_INVALID). A field not passed keeps the row's. Refuses a published row with the same
+            conditions as another over the same dates (EQUAL_RANK_OVERLAP). A return keeps the row it was evaluated against.
+            Needs RETURN_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="returnPolicyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="policyName"/>
+            <parameter name="productStoreId"/>
+            <parameter name="partyClassificationId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="windowDays"/>
+            <parameter name="windowFromEnumId"/>
+            <parameter name="authorizationDays"/>
+            <parameter name="selfServiceEnabled"/>
+            <parameter name="allowedReasonEnumIds"/>
+            <parameter name="allowedResponseEnumIds"/>
+            <parameter name="proofRequired"/>
+            <parameter name="destinationFacilityId"/>
+            <parameter name="exceptionUserGroupId"/>
+            <parameter name="receiptlessEligible"/>
+            <parameter name="advanceReplacement"/>
+            <parameter name="instantCredit"/>
+            <parameter name="restockFeePercent"/>
+            <parameter name="restockFeeCap"/>
+            <parameter name="instructions"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="returnPolicyId"/></out-parameters>
+        <actions>
+            <set field="returnPolicyId" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('savePolicy', context).returnPolicyId"/>
+        </actions>
+    </service>
+    <service verb="save" noun="ReturnReason" allow-remote="false">
+        <description>An organization's row for a return reason (ReturnReasons): the customer's label, whether customers may
+            choose it, whether evidence is required, the suggested response and whether the goods are inspected, from a date
+            (now), ending the reason's current row; end ends it. Refuses a value not of its type (VALUE_INVALID). Needs
+            RETURN_POLICY_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="returnReasonEnumId" required="true"/>
+            <parameter name="customerLabel"/>
+            <parameter name="customerVisible"/>
+            <parameter name="evidenceRequired"/>
+            <parameter name="suggestedResponseEnumId"/>
+            <parameter name="inspectionRequired"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="returnReasonPolicyId"/></out-parameters>
+        <actions>
+            <set field="returnReasonPolicyId" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('saveReason', context).returnReasonPolicyId"/>
+        </actions>
+    </service>
+    <service verb="evaluate" noun="ReturnPolicy" allow-remote="false">
+        <description>The policy preview of NewReturn and ReturnPolicyPreview, changing nothing: a sale's product lines (or the
+            given lines: orderItemSeqId or, for goods with no order line, productId, with quantity, returnReasonEnumId and
+            returnResponseEnumId), or a return's lines (returnId), each with what was ordered, shipped, invoiced and is on
+            other returns not cancelled (drafts included), what is left (eligibleQuantity), its policy row, the window's end and
+            its exceptions (UNREFERENCED, OUTSIDE_WINDOW, REASON_NOT_ALLOWED, RESPONSE_NOT_ALLOWED); the return's policy, the
+            expiry an authorization now would have, the fee (none without a published rule), the instructions and the outcome:
+            Eligible, ManualReview (no policy: a person decides), ExceptionRequired (a manager approves first) or NotEligible.
+            Needs SUPPORT_CASE_EDIT, RETURN_AUTHORIZE, RETURN_EXCEPTION_APPROVE or RETURN_POLICY_EDIT and the sale's or return's
+            organization (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="returnId"/>
+            <parameter name="lineList" type="List"/>
+            <parameter name="evaluateDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="orderId"/>
+            <parameter name="returnPolicyId"/>
+            <parameter name="policyName"/>
+            <parameter name="outcome"/>
+            <parameter name="outcomeText"/>
+            <parameter name="manualReview" type="Boolean"/>
+            <parameter name="exceptions" type="List"/>
+            <parameter name="exceptionText"/>
+            <parameter name="expireDate" type="Timestamp"/>
+            <parameter name="expireText"/>
+            <parameter name="feeText"/>
+            <parameter name="instructions"/>
+            <parameter name="selfServiceEnabled" type="Boolean"/>
+            <parameter name="approvalText"/>
+            <parameter name="lineRows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('evaluate', context)"/>
+            <script>for (const field of Object.keys(found)) context[field] = found[field]</script>
+        </actions>
+    </service>
+
+    <!-- ===== a customer's return ===== -->
+    <service verb="save" noun="ReturnItem" allow-remote="false">
+        <description>A line of an open customer return (ReturnableLines, F21): a line of the sale added (orderId,
+            orderItemSeqId), changed (returnItemSeqId: its quantity, reason or remedy; a new quantity makes the line again so
+            its adjustments are prorated again) or removed (quantity 0), under a lock on the return and the source order line,
+            within what the line has left (QUANTITY_EXCEEDS_ELIGIBLE: shipped and invoiced less every other return not
+            cancelled, drafts included); goods with no order line need a product, a quantity and a description of the goods and
+            the customer's ownership (PRODUCT_REQUIRED, EVIDENCE_REQUIRED), and a manager's exception before authorization.
+            Refuses a return no longer open (RETURN_NOT_OPEN), a sale of another customer (ORDER_MISMATCH), no reason or remedy
+            (REASON_REQUIRED, RESPONSE_REQUIRED). Customer Service writes return lines only through it. Needs SUPPORT_CASE_EDIT
+            or RETURN_AUTHORIZE and the return's organization.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="returnQuantity" type="BigDecimal"/>
+            <parameter name="returnReasonEnumId"/>
+            <parameter name="returnResponseEnumId"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="removed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('saveItem', context)"/>
+            <set field="returnItemSeqId" from="saved.returnItemSeqId"/>
+            <set field="removed" from="!!saved.removed"/>
+        </actions>
+    </service>
+    <service verb="assign" noun="Return" allow-remote="false">
+        <description>The person who follows a customer return: a dated ReturnParty row in the Assignee role, the current one
+            ended (F24); empty unassigns. The assignee works for the return's organization (ASSIGNEE_UNAVAILABLE). Needs
+            SUPPORT_CASE_EDIT or RETURN_AUTHORIZE and the return's organization.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="assigneePartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="assigneePartyId"/></out-parameters>
+        <actions>
+            <set field="assigneePartyId" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('assign', context).assigneePartyId"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="CustomerReturn" allow-remote="false">
+        <description>A customer's return entered for them (NewReturn's ReturnRequest; design §5): from a sale (orderId, a new
+            return) or an open return (returnId), its lines (lineList: orderItemSeqId or productId, quantity, returnReasonEnumId,
+            returnResponseEnumId, description) saved through save#ReturnItem's check, its policy evaluated and kept on the
+            return (returnPolicyId, policyEvaluatedDate, manualReview) with the customer's reference, the policy's destination
+            facility, the case linked (requestId, link#RequestRecord on ReturnHeader, F47) and the assignee (the user unless
+            given); requested (request#Return) unless draft. An exception the policy needs is sent to the exception approvers
+            (ReturnExceptionApproval). Refuses no lines (RETURN_EMPTY) and more than is left (QUANTITY_EXCEEDS_ELIGIBLE). The
+            same operationKey answers the first result. Needs SUPPORT_CASE_EDIT or RETURN_AUTHORIZE and the
+            organization.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="returnId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="lineList" type="List"/>
+            <parameter name="customerReference"/>
+            <parameter name="requestId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="exceptionReason"/>
+            <parameter name="draft" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnId"/>
+            <parameter name="statusId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="outcome"/>
+            <parameter name="outcomeText"/>
+            <parameter name="manualReview" type="Boolean"/>
+            <parameter name="exceptions" type="List"/>
+            <parameter name="exceptionText"/>
+            <parameter name="exceptionNotified" type="Integer"/>
+            <parameter name="expireText"/>
+            <parameter name="returnPolicyId"/>
+            <parameter name="lineRows" type="List"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('submit', context)"/>
+            <script>for (const field of ['returnId', 'statusId', 'sourceRevision', 'outcome', 'outcomeText', 'manualReview',
+                'exceptions', 'exceptionText', 'exceptionNotified', 'expireText', 'returnPolicyId', 'lineRows', 'alreadyApplied'])
+                context[field] = found[field] ?? null</script>
+        </actions>
+    </service>
+    <service verb="authorize" noun="Return" allow-remote="false">
+        <description>The return authorizer's authorization of an open customer return (D11; design ReturnDetail Authorize), at
+            its revision when one is given (STALE_REVISION naming the current one): its lines checked again under their locks
+            (QUANTITY_EXCEEDS_ELIGIBLE), its exceptions approved at this revision first (EXCEPTION_REQUIRED), with no policy a
+            reason (REASON_REQUIRED: manual review); every item's responseImmediate N, unless immediate is asked for, the
+            policy allows instant credit or advance replacement and the actor holds RECEIVABLE_EDIT for a credit or replacement
+            (and PAYMENT_EDIT for a refund); the authorization's expiry from the policy (30 days without one); then Mantle's
+            approve#Return, whose ReturnApprovedProcess makes the return shipment: no settlement here. The decision is recorded
+            (ReturnAuthorizationDecision), the RMA's PDF stored as ReturnContent (RtcntAuthorization; a render failure is
+            logged and the authorization stands) and the assignee told (ReturnDecision). An authorized return answers
+            ALREADY_AUTHORIZED; a closed one is refused (RETURN_CLOSED), one with no lines too (RETURN_EMPTY). The same
+            operationKey answers the first result. Needs RETURN_AUTHORIZE and the return's organization.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="immediate" type="Boolean"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode AUTHORIZED or ALREADY_AUTHORIZED, returnId, statusId,
+                shipmentId (the return shipment), expireText, immediateItems, returnContentId (the RMA), the decision and the
+                revision decided.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('authorize', context)"/>
+        </actions>
+    </service>
+    <service verb="request" noun="ReturnException" allow-remote="false">
+        <description>An exception asked for on an open customer return (outside the window, a reason or remedy the policy
+            does not allow, goods with no order line), at its current revision: the request recorded and the approvers told
+            (ReturnExceptionApproval: holders of RETURN_EXCEPTION_APPROVE who work for the organization, in the policy's
+            exception group when it names one). Refuses a return needing none (NO_EXCEPTION). Needs SUPPORT_CASE_EDIT or
+            RETURN_AUTHORIZE.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sourceRevision"/>
+            <parameter name="exceptionText"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('requestException', context)"/>
+            <set field="sourceRevision" from="found.sourceRevision"/>
+            <set field="exceptionText" from="found.exceptionText"/>
+            <set field="notifiedCount" from="found.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="ReturnException" allow-remote="false">
+        <description>A manager's decision on an open customer return's exceptions (design Approvals; CX-APPROVAL on Purchasing's
+            decision pattern, F45): approve or refuse (a refusal needs a reason, REASON_REQUIRED) at the return's revision; a
+            stale one is refused naming the current revision (STALE_REVISION); a return needing none is refused (NO_EXCEPTION).
+            The decision is recorded, the approvers' notices read and the assignee told. Needs RETURN_EXCEPTION_APPROVE and the
+            return's organization.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="decision" required="true"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="decision"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="returnAuthorizationDecisionId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('decide', context)"/>
+            <set field="decision" from="found.decision"/>
+            <set field="sourceRevision" from="found.sourceRevision"/>
+            <set field="returnAuthorizationDecisionId" from="found.returnAuthorizationDecisionId"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="ReturnException" allow-remote="false">
+        <description>The approve service of the ReturnExceptionApproval topic, which the framework's
+            approve#NotificationMessage calls as the user: decide#ReturnException at the revision in the message
+            (sourceRevision); a message with none is refused (REVISION_REQUIRED, F46), another record too (SOURCE_INVALID).
+            Requires RETURN_EXCEPTION_APPROVE.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('approveFromTopic', context)</script>
+            <set field="decision" value="approved"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="ReturnException" allow-remote="false">
+        <description>The refuse service of the ReturnExceptionApproval topic, with the reason: decide#ReturnException refused
+            at the revision in the message; refuses as approve#ReturnException does. Requires
+            RETURN_EXCEPTION_APPROVE.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('refuseFromTopic', context)</script>
+            <set field="decision" value="refused"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="CustomerReturn" allow-remote="false">
+        <description>A customer return cancelled before any physical or financial effect (design ReturnDetail): refuses one with
+            goods received, a credit, a refund or a replacement, or past authorization (RETURN_HAS_EFFECT); an authorized one
+            needs a reason (REASON_REQUIRED). Mantle's cancel#Return cancels its items and its return shipment (F22). Needs
+            SUPPORT_CASE_EDIT or RETURN_AUTHORIZE for an open return, RETURN_AUTHORIZE for an authorized one.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="statusId" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('cancelReturn', context).statusId"/>
+        </actions>
+    </service>
+    <service verb="close" noun="ReturnRemainder" allow-remote="false">
+        <description>What will not come back of an authorized customer return (design ReturnDetail Receipt), closed with a reason
+            (REASON_REQUIRED): each waiting item (or the one given) authorizes what was received and is Received, or is cancelled
+            when nothing came; its shipment sources stop waiting, the return is Received when every item is, and a return
+            shipment with nothing left to come is delivered (or cancelled with nothing received). Refuses a return waiting for no
+            goods (RETURN_NOT_AWAITING, NOTHING_TO_CLOSE). The decision is recorded. Needs RETURN_AUTHORIZE.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="returnItemSeqId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="closedItems" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('closeRemainder', context)"/>
+            <set field="statusId" from="found.statusId"/>
+            <set field="closedItems" from="found.closedItems"/>
+        </actions>
+    </service>
+
+    <!-- ===== reads ===== -->
+    <service verb="find" noun="ServiceReturns" allow-remote="false">
+        <description>The customer returns of the user's organizations (design Returns ReturnFind and ReturnList), newest first,
+            by view (requested, awaiting, authorized, received, manual, settlement, expiring, cancelled, closed, all), status,
+            customer (or a list of them), order, assignee, text (the return, its RMA number, the customer's reference) and entry
+            period: each with its RMA number, customer reference, order, assignee, expiry, quantities authorized, received,
+            accepted, rejected and settled, status, policy, manual review and exception waiting; the credited amount only for a
+            holder of PRICE_VIEW, ACCOUNTING_VIEW or RECEIVABLE_VIEW (amountsWithheld otherwise). A page at a time. Needs
+            SUPPORT_CASE_EDIT, RETURN_AUTHORIZE, RETURN_EXCEPTION_APPROVE or RETURN_POLICY_EDIT.</description>
+        <in-parameters>
+            <parameter name="view"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="customerPartyIds" type="List"/>
+            <parameter name="orderId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="text"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnRows" type="List"/>
+            <parameter name="returnRowsCount" type="Integer"/>
+            <parameter name="returnRowsPageIndex" type="Integer"/>
+            <parameter name="returnRowsPageSize" type="Integer"/>
+            <parameter name="amountsWithheld" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('findReturns', context)"/>
+            <script>for (const field of Object.keys(found)) context[field] = found[field]</script>
+        </actions>
+    </service>
+    <service verb="find" noun="ReturnApprovals" allow-remote="false">
+        <description>Home's Returns awaiting approval (design Home AwaitingReturns): the requested customer returns of the user's
+            organizations, the oldest first, each with the expiry an authorization now would have, its policy outcome and the
+            exception waiting. Needs RETURN_AUTHORIZE or RETURN_EXCEPTION_APPROVE.</description>
+        <in-parameters>
+            <parameter name="customerPartyIds" type="List"/>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="approvalRows" type="List"/>
+            <parameter name="approvalCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('findApprovals', context)"/>
+            <set field="approvalRows" from="found.approvalRows"/>
+            <set field="approvalCount" from="found.approvalCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ReturnState" allow-remote="false">
+        <description>ReturnDetail's policy part of a customer return: its row (as find#ServiceReturns), its policy evaluation,
+            its decisions (newest first, each marked current when bound to its revision), its revision, whether an exception is
+            approved at it, its effects (what a cancel can no longer undo) and its stored RMA. Needs SUPPORT_CASE_EDIT,
+            RETURN_AUTHORIZE, RETURN_EXCEPTION_APPROVE or RETURN_POLICY_EDIT and the return's organization.</description>
+        <in-parameters><parameter name="returnId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="returnRow" type="Map"/>
+            <parameter name="evaluation" type="Map"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="exceptionApproved" type="Boolean"/>
+            <parameter name="effects" type="List"/>
+            <parameter name="rmaContentId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('returnState', context)"/>
+            <script>for (const field of Object.keys(found)) context[field] = found[field]</script>
+        </actions>
+    </service>
+
+    <!-- ===== outputs: the RMA ===== -->
+    <service verb="get" noun="ReturnAuthorizationPrint" allow-remote="false">
+        <description>An authorized customer return's RMA as the customer reads it (html-print and the stored PDF): what to send
+            back, why and by when, where to, the label's tracking and the policy's instructions; no amount. Refuses a return not
+            authorized (RETURN_NOT_AUTHORIZED). Needs SUPPORT_CASE_EDIT, RETURN_AUTHORIZE, RETURN_EXCEPTION_APPROVE or
+            RETURN_POLICY_EDIT and the return's organization.</description>
+        <in-parameters><parameter name="returnId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('print', context)"/>
+            <set field="printHtml" from="found.printHtml"/>
+            <set field="fileName" from="found.fileName"/>
+        </actions>
+    </service>
+    <service verb="send" noun="ReturnAuthorization" allow-remote="false">
+        <description>The stored RMA (stored now if it is not) mailed to a checked recipient, an address of the customer or of a
+            current contact, employee or representative of it (RECIPIENT_REQUIRED, RECIPIENT_UNCHECKED), with the expiry, the
+            note and a link when given (the Support app's RMA page), as a mail client draft of an account the user sends from
+            (SEND_ACCOUNT_REQUIRED) sent through send#EmailDraft and filed on the return. Refuses a return not authorized
+            (RETURN_NOT_AUTHORIZED). The same operationKey answers the first result. Needs SUPPORT_CASE_EDIT or
+            RETURN_AUTHORIZE and the return's organization.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="returnId" required="true"/>
+            <parameter name="toAddress"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="subject"/>
+            <parameter name="note"/>
+            <parameter name="linkUrl"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emailMessageId"/>
+            <parameter name="returnContentId"/>
+            <parameter name="recipient"/>
+            <parameter name="status"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/ReturnPolicies.js').execute('send', context)"/>
+            <set field="emailMessageId" from="found.emailMessageId"/>
+            <set field="returnContentId" from="found.returnContentId"/>
+            <set field="recipient" from="found.recipient"/>
+            <set field="status" from="found.status"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+</services>
