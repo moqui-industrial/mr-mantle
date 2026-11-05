@@ -222,6 +222,53 @@ function invoicesOf(shipmentId) {
 }
 
 // ===== reopen =====
+// The checks of a reopen under the shipment's lock, shared by reopen#ShipmentPackage and the order change's
+// reopen#ShipmentPackageForChange (impl-customer-service P10): not shipped (SHIPMENT_SHIPPED), still packable or packed
+// (PACK_CLOSED), the package and what comes out of it, its orders locked (the one lock order, F294), and a finalized pack
+// invoice keeping the package closed (INVOICE_FINALIZED: correct it with a credit memo).
+function reopenCheck(sh, p) {
+    if (shipped.includes(sh.shipment.statusId))
+        denied("SHIPMENT_SHIPPED", "Shipment " + sh.shipmentId + " has shipped; change it with a return")
+    if (!packable.concat(["ShipPacked"]).includes(sh.shipment.statusId))
+        denied("PACK_CLOSED", "Shipment " + sh.shipmentId + " is " + sh.shipment.statusId)
+    const pkg = packageOf(sh, p.shipmentPackageSeqId)
+    const plan = reopenPlan(sh, pkg, p)
+    const ordered = lockOrders(plan)
+    const invoices = invoicesOf(sh.shipmentId).filter(row => row.statusId !== "InvoiceCancelled")
+    const finalized = invoices.find(row => row.statusId !== "InvoiceInProcess")
+    if (finalized)
+        denied(
+            "INVOICE_FINALIZED",
+            "Invoice " +
+                finalized.invoiceId +
+                " of shipment " +
+                sh.shipmentId +
+                " is final, so the package stays closed; correct it with a credit memo"
+        )
+    return {pkg, plan, ordered, invoices}
+}
+// The writes of a reopen once checked: the in-process pack invoice's lines released (release#ShipmentInvoiceLines, F275),
+// the shipment back to Picked, and the unpack. Answers the reopen's result without the operation fields.
+function reopenWork(sh, checked, reason) {
+    const released = checked.invoices.length
+        ? call("mantle.account.InvoiceServices.release#ShipmentInvoiceLines", {shipmentId: sh.shipmentId, reason})
+        : {}
+    if (sh.shipment.statusId === "ShipPacked")
+        call("update#mantle.shipment.Shipment", {shipmentId: sh.shipmentId, statusId: "ShipPicked"})
+    const unpacked = unpack(sh, checked.pkg, checked.plan, checked.ordered)
+    const reopened = one("mantle.shipment.Shipment", {shipmentId: sh.shipmentId})
+    return {
+        resultCode: "REOPENED",
+        shipmentId: sh.shipmentId,
+        shipmentPackageSeqId: checked.pkg.shipmentPackageSeqId,
+        unpacked,
+        releasedInvoiceIds: released.invoiceIdList || [],
+        cancelledInvoiceIds: released.cancelledInvoiceIdList || [],
+        releasedItemCount: released.releasedItemCount || 0,
+        statusId: reopened.statusId,
+        reason
+    }
+}
 // What a reopen takes off the shipment: the package's contents (or, given productId and quantity, that much of one
 // product in it), each from the shipment's issuances of the product, newest first. Refuses a package with nothing in it
 // (NOTHING_TO_REOPEN) and more than it holds (QUANTITY_EXCEEDS_PACKED).
@@ -391,5 +438,7 @@ function requireBoxTypeOwned(shipmentBoxTypeId) {
     completePlan,
     invoicesOf,
     reopenPlan,
+    reopenCheck,
+    reopenWork,
     unpack
 })

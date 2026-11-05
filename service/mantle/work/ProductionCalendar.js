@@ -8,10 +8,13 @@
 // stop or outage takes the whole center for its interval (a line stops with its equipment). The module keeps no state between
 // calls: a caller makes a context (forCall) for its caches. A holiday's day starts in the calendar's time zone (Calendar.timeZone,
 // else the user's) and a recurring shift expands in its recurrence's zone (else the user's), so a plant's calendar with its
-// zone reads alike to users in any zone (F-P12-1).
+// zone reads alike to users in any zone (F-P12-1). The interval functions and a calendar's work hours less holidays are the
+// shared business time module's (BusinessTime.js, impl-customer-service P4, F65), which Customer Service's service levels use.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, ms, dateText} = lib
 const policy = ec.resource.script("component://mr-mantle/service/mantle/product/MethodPolicy.js")
+const businessTime = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
+const {merge, subtract, intersect, length, hoursOf, dayStartIn} = businessTime
 
 const FACILITY = "mantle.facility.Facility"
 const CENTER = "mantle.work.production.WorkCenter"
@@ -31,67 +34,7 @@ const rounded = value => Math.round(value * 100) / 100
 const wall = millis => ec.l10n.format(new Date(Number(millis)), "yyyy-MM-dd HH:mm")
 const dayOf = millis => ec.l10n.format(new Date(Number(millis)), "yyyy-MM-dd")
 const dayStart = day => ms(ec.l10n.parseTimestamp(String(day).slice(0, 10) + " 00:00:00.000", "yyyy-MM-dd HH:mm:ss.SSS"))
-const addDay = day => {
-    const [y, m, d] = String(day).slice(0, 10).split("-").map(Number)
-    return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
-}
 const facilityName = facility => (facility ? facility.facilityName || facility.facilityId : "")
-// The start of a day (yyyy-MM-dd) in a time zone (an IANA name; none is the user's): the zone's offset read from the wall
-// time it formats, twice so a day that starts at a daylight saving change lands on it.
-function dayStartIn(day, zone) {
-    if (!zone) return dayStart(day)
-    const [y, m, d] = String(day).slice(0, 10).split("-").map(Number)
-    const utc = Date.UTC(y, m - 1, d)
-    const offsetAt = millis => {
-        const [date, clock] = ec.l10n.format(new Date(millis), "yyyy-MM-dd HH:mm:ss", null, zone).split(" ")
-        const [wy, wm, wd] = date.split("-").map(Number)
-        const [hh, mm, ss] = clock.split(":").map(Number)
-        return Date.UTC(wy, wm - 1, wd, hh, mm, ss) - millis
-    }
-    const first = utc - offsetAt(utc)
-    return utc - offsetAt(first)
-}
-
-// ===== intervals =====
-// Sorted and merged.
-function merge(list) {
-    const sorted = list.filter(row => row[1] > row[0]).sort((a, b) => a[0] - b[0])
-    const out = []
-    for (const [from, thru] of sorted) {
-        const last = out[out.length - 1]
-        if (last && from <= last[1]) last[1] = Math.max(last[1], thru)
-        else out.push([from, thru])
-    }
-    return out
-}
-// What of a is not in b (both merged).
-function subtract(a, b) {
-    const out = []
-    for (const [from, thru] of a) {
-        let start = from
-        for (const [bFrom, bThru] of b) {
-            if (bThru <= start || bFrom >= thru) continue
-            if (bFrom > start) out.push([start, bFrom])
-            start = Math.max(start, bThru)
-            if (start >= thru) break
-        }
-        if (start < thru) out.push([start, thru])
-    }
-    return out
-}
-// What of a is in b (both merged).
-function intersect(a, b) {
-    const out = []
-    for (const [from, thru] of a)
-        for (const [bFrom, bThru] of b) {
-            const start = Math.max(from, bFrom)
-            const end = Math.min(thru, bThru)
-            if (end > start) out.push([start, end])
-        }
-    return merge(out)
-}
-const length = list => list.reduce((sum, [from, thru]) => sum + (thru - from), 0)
-const hoursOf = list => length(list) / hourMs
 
 // ===== the call's context =====
 function forCall() {
@@ -131,70 +74,20 @@ function centerOf(ctx, facilityId, date = ec.user.nowTimestamp) {
     return center
 }
 
-// The center's work hours from fromMs to thruMs, less holidays: {configured, work, holidays: [{fromMs, thruMs, name}]}.
+// The center's work hours from fromMs to thruMs, less holidays: {configured, work, holidays: [{fromMs, thruMs, name}]}, on its
+// calendar in the plant's zone with its organization's holidays (BusinessTime.calendarOf).
 function calendarOf(ctx, center, fromMs, thruMs) {
-    const key = center.facilityId + "|" + fromMs + "|" + thruMs
-    if (ctx.calendars.has(key)) return ctx.calendars.get(key)
-    const holidays = []
-    let work = []
-    let configured = false
-    const efforts = center.calendarId
-        ? (() => {
-              const ids = rows("mantle.work.calendar.CalendarWorkEffort", {calendarId: center.calendarId}).map(
-                  row => row.workEffortId
-              )
-              if (!ids.length) return []
-              return Array.from(find(WORK).condition("workEffortId", "in", ids).list()).filter(
-                  row =>
-                      row.statusId !== "WeCancelled" &&
-                      (row.workEffortTypeEnumId === "WetAvailable" || row.purposeEnumId === "WepHoliday")
-              )
-          })()
-        : []
-    if (efforts.length) {
-        const out = lib.call("mantle.work.EventServices.get#EventInstances", {
-            workEffortList: efforts.map(row => lib.map(row)),
-            rangeStart: new Date(fromMs - dayMs),
-            rangeEnd: new Date(thruMs + dayMs)
-        })
-        for (const instance of Array.from(out.instanceList || [])) {
-            const holiday = instance.workEffort?.purposeEnumId === "WepHoliday"
-            const span = instance.allDay
-                ? [dayStartIn(instance.startDay, center.timeZone), dayStartIn(instance.endDay, center.timeZone)]
-                : [Number(instance.start), instance.end == null ? Number(instance.start) : Number(instance.end)]
-            if (holiday) holidays.push({fromMs: span[0], thruMs: span[1], name: instance.workEffort?.workEffortName || "Holiday"})
-            else {
-                configured = true
-                work.push(span)
-            }
-        }
-    }
-    // the organization's holidays (an all-day WepHoliday of its own)
-    const firstDay = dayOf(fromMs - dayMs)
-    const lastDay = dayOf(thruMs + dayMs)
-    for (const holiday of Array.from(
-        find(WORK)
-            .condition("purposeEnumId", "WepHoliday")
-            .condition("ownerPartyId", center.organizationPartyId || "_NA_")
-            .condition("allDayStart", "greater-equals", firstDay)
-            .condition("allDayStart", "less-equals", lastDay)
-            .list()
-    )) {
-        const day = lib.calendarDateText(holiday.allDayStart)
-        holidays.push({
-            fromMs: dayStartIn(day, center.timeZone),
-            thruMs: dayStartIn(addDay(day), center.timeZone),
-            name: holiday.workEffortName || "Holiday"
-        })
-    }
-    if (!configured) work = [[fromMs, thruMs]]
-    const result = {
-        configured,
-        work: subtract(merge(work), merge(holidays.map(row => [row.fromMs, row.thruMs]))),
-        holidays: holidays.sort((a, b) => a.fromMs - b.fromMs)
-    }
-    ctx.calendars.set(key, result)
-    return result
+    return businessTime.calendarOf(
+        ctx,
+        {
+            key: center.facilityId,
+            calendarId: center.calendarId,
+            timeZone: center.timeZone,
+            organizationPartyId: center.organizationPartyId
+        },
+        fromMs,
+        thruMs
+    )
 }
 
 // The center's offline intervals overlapping fromMs to thruMs: its production stops (not corrected) and the outages of the

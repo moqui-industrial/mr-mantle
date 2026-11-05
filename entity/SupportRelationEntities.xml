@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The lineage of support cases (design-customer-service §3 MergeCases, SplitCase, §9 StatusCategories, ServiceDefaults;
+    impl-customer-service P8, CS-MERGE, CS-JOBS): a case relation is a record of its own because it is lineage, as a posting
+    is a measurement: a merge (a source case into the case kept), a split (a new case from some of a case's evidence) or a
+    follow-up (a new case for a reply after the reopen window, after auto-close or to a cancelled case), with who made it,
+    when, why and under which operation key, and its items: the messages, files, linked records and work it referenced and
+    the service level clocks it carried, each with its audience. Nothing is moved or copied across audiences: a message stays
+    one CommunicationEvent with its own type, purpose and time, referenced by the other case (RequestCommEvent), a file stays
+    on its case, a linked record or work item keeps its identity and is linked to the other case too. A merge carries each
+    open clock of the source as an obligation on the case kept (CaseSlaEpisode.carriedFromEpisodeId), its due time and breach
+    kept, and leaves the source's own clock Merged with its figures. Written by mantle.request.SupportCaseServices
+    (CaseRelations.js) only; nothing here exists until an organization has a ServicePolicy. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="CaseRelation" package="mantle.request.support" cache="never">
+        <description>One link of a case's lineage: from the source case (fromRequestId) to the other (toRequestId), a merge
+            (the source merged into the case kept), a split (the new case split from the source) or a follow-up (the new case
+            following up the closed or cancelled one). Who made it (userId; empty for a customer's reply), when, the reason,
+            the operation key and the source's revision it was made against.</description>
+        <field name="caseRelationId" type="id" is-pk="true"/>
+        <field name="fromRequestId" type="id"/>
+        <field name="toRequestId" type="id"/>
+        <field name="relationTypeEnumId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="userId" type="id"/>
+        <field name="relationDate" type="date-time"/>
+        <field name="reason" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="fromRevision" type="text-short"><description>The source case's revision the relation was made against
+            (SupportCases.js revisionOf)</description></field>
+        <relationship type="one" title="From" related="mantle.request.Request" short-alias="fromRequest">
+            <key-map field-name="fromRequestId" related="requestId"/></relationship>
+        <relationship type="one" title="To" related="mantle.request.Request" short-alias="toRequest">
+            <key-map field-name="toRequestId" related="requestId"/></relationship>
+        <relationship type="one" title="CaseRelationType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="relationTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="CASE_REL_FROM"><index-field name="fromRequestId"/></index>
+        <index name="CASE_REL_TO"><index-field name="toRequestId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Case Relation Type" enumTypeId="CaseRelationType"/>
+            <moqui.basic.Enumeration enumId="CrtMerge" description="Merged into" sequenceNum="1" enumTypeId="CaseRelationType"/>
+            <moqui.basic.Enumeration enumId="CrtSplit" description="Split into" sequenceNum="2" enumTypeId="CaseRelationType"/>
+            <moqui.basic.Enumeration enumId="CrtFollowUp" description="Followed up by" sequenceNum="3" enumTypeId="CaseRelationType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="CaseRelationItem" package="mantle.request.support" cache="never">
+        <description>What a case relation referenced or carried (its evidence): a message (a CommunicationEvent, and the mail
+            of a follow-up), a file (a RequestContent of the source, which stays there), a linked record or a work item (linked
+            to the other case too) or a service level clock carried by a merge (the source's episode and its carried copy),
+            each with its audience (CaseFieldAudience: CfaCustomer or CfaInternal) as it was on the source. toRequestId is the
+            case the item was referenced on, so the rules on that case know a referenced message is no new reply or
+            response.</description>
+        <field name="caseRelationId" type="id" is-pk="true"/>
+        <field name="itemSeqId" type="id" is-pk="true"/>
+        <field name="toRequestId" type="id"/>
+        <field name="itemTypeEnumId" type="id"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="requestContentId" type="id"/>
+        <field name="recordEntityName" type="text-medium"/>
+        <field name="recordId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="caseSlaEpisodeId" type="id"><description>The source's clock (CriClock)</description></field>
+        <field name="carriedEpisodeId" type="id"><description>Its carried copy on the case kept, when it was open</description></field>
+        <field name="audienceEnumId" type="id"/>
+        <relationship type="one" related="mantle.request.support.CaseRelation" short-alias="relation"/>
+        <relationship type="one" title="CaseRelationItemType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="itemTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.communication.CommunicationEvent" short-alias="communicationEvent"/>
+        <relationship type="one-nofk" title="CaseFieldAudience" related="moqui.basic.Enumeration" short-alias="audience">
+            <key-map field-name="audienceEnumId" related="enumId"/></relationship>
+        <index name="CASE_REL_ITEM_TO"><index-field name="toRequestId"/><index-field name="communicationEventId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Case Relation Item Type" enumTypeId="CaseRelationItemType"/>
+            <moqui.basic.Enumeration enumId="CriMessage" description="Message" sequenceNum="1" enumTypeId="CaseRelationItemType"/>
+            <moqui.basic.Enumeration enumId="CriFile" description="File" sequenceNum="2" enumTypeId="CaseRelationItemType"/>
+            <moqui.basic.Enumeration enumId="CriRecord" description="Linked record" sequenceNum="3" enumTypeId="CaseRelationItemType"/>
+            <moqui.basic.Enumeration enumId="CriWork" description="Work item" sequenceNum="4" enumTypeId="CaseRelationItemType"/>
+            <moqui.basic.Enumeration enumId="CriClock" description="Service level clock" sequenceNum="5" enumTypeId="CaseRelationItemType"/>
+        </seed-data>
+    </entity>
+
+    <!-- a clock a merge carried onto the case kept: the source's episode it copies and the merge's relation; a case's own
+        clocks have neither -->
+    <extend-entity entity-name="CaseSlaEpisode" package="mantle.request.support">
+        <field name="carriedFromEpisodeId" type="id"><description>The source case's clock this obligation was carried from
+            by a merge (empty for the case's own clocks)</description></field>
+        <field name="caseRelationId" type="id"/>
+        <relationship type="one-nofk" title="CarriedFrom" related="mantle.request.support.CaseSlaEpisode" short-alias="carriedFrom">
+            <key-map field-name="carriedFromEpisodeId" related="caseSlaEpisodeId"/></relationship>
+    </extend-entity>
+
+    <!-- the cases of an organization by status and close date (close#ResolvedCases' batch) -->
+    <view-entity entity-name="CaseRequestOrganization" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias entity-alias="CP" name="requestId"/>
+        <alias entity-alias="CP" name="closedDate"/>
+        <alias entity-alias="REQ" name="statusId"/>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+        <alias entity-alias="RQP" name="partyId"/>
+        <alias entity-alias="RQP" name="roleTypeId"/>
+        <alias entity-alias="RQP" name="thruDate"/>
+    </view-entity>
+</entities>

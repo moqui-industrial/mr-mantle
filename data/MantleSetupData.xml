@@ -51,6 +51,44 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PURCHASE_POLICY_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="SUPPLIER_SCORECARD_EDIT" description="Supplier Scorecard Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPLIER_SCORECARD_EDIT" fromDate="0"/>
+    <!-- Customer Service's cases, order changes, returns and warranty (impl-customer-service P1, §2, §4; crosscut X4):
+        SUPPORT_CASE_EDIT works a support case (mantle.request.SupportCaseServices), SUPPORT_CASE_MANAGE manages queues,
+        teams, merges and assignment, SUPPORT_POLICY_EDIT keeps the service policies, levels and routes, SUPPORT_KNOWLEDGE_EDIT
+        publishes service knowledge (KnowledgeServices), SUPPORT_CONTACT_INVITE invites a customer contact to the Support app;
+        ORDER_CHANGE_REQUEST proposes a change of a placed sales order, ORDER_CHANGE_APPROVE decides it, ORDER_CHANGE_APPLY
+        applies it (and places a Change hold on a sales order, hold#Order), ORDER_CHANGE_HOLD_RELEASE releases a Change hold
+        (OrderHoldType OhtChange's enumCode, X4); RETURN_EXCEPTION_APPROVE decides a return outside its policy,
+        RETURN_POLICY_EDIT keeps the return policies (ReturnPolicyServices), WARRANTY_APPROVE decides a warranty claim
+        (WarrantyServices). RETURN_AUTHORIZE is below and CUSTOMER_CREDIT_VIEW in AccountingAccessData.xml. Granted to the
+        Customer Service groups by the app's setup data. -->
+    <userPermissions userPermissionId="SUPPORT_CASE_EDIT" description="Support Case Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CASE_MANAGE" description="Support Case Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CASE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_POLICY_EDIT" description="Support Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_KNOWLEDGE_EDIT" description="Support Knowledge Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_KNOWLEDGE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SUPPORT_CONTACT_INVITE" description="Support Contact Invite"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SUPPORT_CONTACT_INVITE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_REQUEST" description="Order Change Request"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_REQUEST" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPROVE" description="Order Change Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_APPLY" description="Order Change Apply"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_APPLY" fromDate="0"/>
+    <userPermissions userPermissionId="ORDER_CHANGE_HOLD_RELEASE" description="Order Change Hold Release"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="ORDER_CHANGE_HOLD_RELEASE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_EXCEPTION_APPROVE" description="Return Exception Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_EXCEPTION_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="RETURN_POLICY_EDIT" description="Return Policy Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_POLICY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="WARRANTY_APPROVE" description="Warranty Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WARRANTY_APPROVE" fromDate="0"/>
+    <!-- the working hours of another party (a service team's, mantle.work.CalendarServices.store#WorkingHours) for a party of the
+        user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
+    <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="WORKING_HOURS_EDIT" fromDate="0"/>
     <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
         WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
         receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
@@ -572,8 +610,153 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- The CalDAV and CardDAV adapters (MoquiConf.xml dav-server), called as a user who logged in with an app password;
         each checks the calendar's or the contact book's access itself, as the screens do. -->
     <moqui.security.ArtifactGroup artifactGroupId="MantleDavServices" description="CalDAV and CardDAV adapters"/>
+    <!-- Support cases (impl-customer-service P2; design-customer-service StatusCategories, CS-QUEUE): the default case
+        workflow, CwfDefault. Each status's labels for the agent and the customer and its category (Draft, Submitted, Reviewed,
+        In progress and On hold open; Waiting for customer paused; Completed resolved; Cancelled cancelled; Closed is
+        Completed with a close date, P8), and the moves transition#Case allows (each a StatusFlowTransition of the Default
+        flow): a resolution to complete or cancel, a reason to hold, cancel or reopen. An organization's own rows replace
+        these by date (save#CaseStatusMapping, save#CaseWorkflow). -->
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_DRAFT" caseWorkflowId="CwfDefault" statusId="ReqDraft"
+            agentLabel="Draft" customerLabel="Draft" statusCategoryEnumId="CscOpen" reasonRequired="N" sequenceNum="1" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_SUBMITTED" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            agentLabel="New" customerLabel="Received" statusCategoryEnumId="CscOpen" reasonRequired="N" sequenceNum="2" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_REVIEWED" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            agentLabel="Accepted" customerLabel="Received" statusCategoryEnumId="CscOpen" reasonRequired="N" sequenceNum="3" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqInProgress"
+            agentLabel="In progress" customerLabel="In progress" statusCategoryEnumId="CscOpen" reasonRequired="N" sequenceNum="4" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_WAITINGCUSTOMER" caseWorkflowId="CwfDefault" statusId="ReqWaitingCustomer"
+            agentLabel="Waiting for customer" customerLabel="Waiting for your reply" statusCategoryEnumId="CscPaused" reasonRequired="N" sequenceNum="5" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_ONHOLD" caseWorkflowId="CwfDefault" statusId="ReqOnHold"
+            agentLabel="On hold" customerLabel="In progress" statusCategoryEnumId="CscOpen" reasonRequired="Y" sequenceNum="6" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqCompleted"
+            agentLabel="Resolved" customerLabel="Resolved" statusCategoryEnumId="CscResolved" reasonRequired="N" sequenceNum="7" fromDate="0"/>
+    <mantle.request.support.CaseStatusMapping caseStatusMappingId="CSM_DEF_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqCancelled"
+            agentLabel="Cancelled" customerLabel="Closed" statusCategoryEnumId="CscCancelled" reasonRequired="N" sequenceNum="8" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_REVIEWED" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqReviewed" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqInProgress" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_WAITINGCUSTOMER" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqWaitingCustomer" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_ONHOLD" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqOnHold" resolutionRequired="N" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqCompleted" resolutionRequired="Y" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_SUBMITTED_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqSubmitted"
+            toStatusId="ReqCancelled" resolutionRequired="Y" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_REVIEWED_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            toStatusId="ReqInProgress" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_REVIEWED_WAITINGCUSTOMER" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            toStatusId="ReqWaitingCustomer" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_REVIEWED_ONHOLD" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            toStatusId="ReqOnHold" resolutionRequired="N" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_REVIEWED_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            toStatusId="ReqCompleted" resolutionRequired="Y" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_REVIEWED_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqReviewed"
+            toStatusId="ReqCancelled" resolutionRequired="Y" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_INPROGRESS_WAITINGCUSTOMER" caseWorkflowId="CwfDefault" statusId="ReqInProgress"
+            toStatusId="ReqWaitingCustomer" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_INPROGRESS_ONHOLD" caseWorkflowId="CwfDefault" statusId="ReqInProgress"
+            toStatusId="ReqOnHold" resolutionRequired="N" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_INPROGRESS_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqInProgress"
+            toStatusId="ReqCompleted" resolutionRequired="Y" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_INPROGRESS_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqInProgress"
+            toStatusId="ReqCancelled" resolutionRequired="Y" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_WAITINGCUSTOMER_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqWaitingCustomer"
+            toStatusId="ReqInProgress" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_WAITINGCUSTOMER_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqWaitingCustomer"
+            toStatusId="ReqCompleted" resolutionRequired="Y" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_WAITINGCUSTOMER_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqWaitingCustomer"
+            toStatusId="ReqCancelled" resolutionRequired="Y" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_ONHOLD_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqOnHold"
+            toStatusId="ReqInProgress" resolutionRequired="N" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_ONHOLD_COMPLETED" caseWorkflowId="CwfDefault" statusId="ReqOnHold"
+            toStatusId="ReqCompleted" resolutionRequired="Y" reasonRequired="N" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_ONHOLD_CANCELLED" caseWorkflowId="CwfDefault" statusId="ReqOnHold"
+            toStatusId="ReqCancelled" resolutionRequired="Y" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <mantle.request.support.CaseTransition caseTransitionId="CTR_DEF_COMPLETED_INPROGRESS" caseWorkflowId="CwfDefault" statusId="ReqCompleted"
+            toStatusId="ReqInProgress" resolutionRequired="N" reasonRequired="Y" manageRequired="N" notifyCustomer="N" fromDate="0"/>
+    <!-- the support case topics (mantle.request.SupportCaseServices; F44): a case assigned to the user by someone else
+        (SupportCaseAssigned: requestId, requestName, customerName, assignedByName, the case as the record) and a customer's
+        reply on a case the user is assigned (SupportCaseCustomerReply: requestId, requestName, customerName, fromName, the
+        case as the record), both in the Notifications inbox. The app that works cases sets the links (IronStone Customer
+        Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SupportCaseAssigned" inboxEnumId="NinNotifications" description="Case Assigned to You" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${assignedByName} assigned you case ${requestId}: ${requestName} (${customerName})"/>
+    <moqui.security.user.NotificationTopic topic="SupportCaseCustomerReply" inboxEnumId="NinNotifications" description="Customer Replied on a Case" typeString="info"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${fromName} replied on case ${requestId}: ${requestName}"/>
+    <!-- the service level topics (mantle.request.SlaServices.scan#CaseSla; impl-customer-service P4, CS-JOBS): a case's clock near
+        its due time (SupportCaseSlaWarning) and past it (SupportCaseSlaBreach), each once per episode, to the case's assignee, else
+        the managers of the queue's team: requestId, requestName, customerName, clockLabel (First response or Resolution),
+        dueText, the case as the record. The app that works cases sets the links (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SupportCaseSlaWarning" inboxEnumId="NinNotifications" description="Case Due Soon" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${clockLabel} of case ${requestId} is due ${dueText}: ${requestName}"/>
+    <moqui.security.user.NotificationTopic topic="SupportCaseSlaBreach" inboxEnumId="NinNotifications" description="Case Past Its Due Time" typeString="danger"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${clockLabel} of case ${requestId} was due ${dueText}: ${requestName}"/>
+    <!-- the assignment topic (mantle.request.SupportCaseServices.assign#Case; impl-customer-service P5, CS-ASSIGNMENT): a case
+        no eligible agent could take, left unassigned, to the managers of its queue's team: requestId, requestName,
+        customerName, queueName, reason, the case as the record. The app that works cases sets the link (IronStone Customer
+        Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SupportCaseUnassigned" inboxEnumId="NinNotifications" description="Case Left Unassigned" typeString="warning"
+            showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="No agent could take case ${requestId} in ${queueName}: ${requestName}"/>
+    <!-- the warning and breach scan of case clocks (CS-JOBS): every five minutes, a bounded batch, a failing case logged by its
+        id and the rest going on, idempotent by episode -->
+    <moqui.service.job.ServiceJob jobName="scan_CaseSla" description="Warn of and record case service level breaches"
+            serviceName="mantle.request.SlaServices.scan#CaseSla" cronExpression="0 0/5 * * * ?" paused="N" errorHistoryOnly="Y"
+            transactionTimeout="1800"/>
+    <!-- auto-close of resolved cases (impl-customer-service P8, CS-JOBS; mantle.request.SupportCaseServices.close#ResolvedCases): each
+        hour, a bounded batch of the cases resolved longer ago than their organization's ServicePolicy autoCloseDays, each closed
+        in its own transaction (CaseProfile.closedDate, the status kept ReqCompleted), a failing case logged by its id and the rest
+        going on; a rerun changes nothing -->
+    <!-- a case's clock a merge ended (its figures kept; SupportRelationEntities.xml), and the events of a merge on both cases -->
+    <moqui.basic.Enumeration enumId="SlsMerged" description="Merged into another case" sequenceNum="7" enumTypeId="CaseSlaState"/>
+    <moqui.basic.Enumeration enumId="SetMerged" description="Merged into another case" sequenceNum="20" enumTypeId="CaseSlaEventType"/>
+    <moqui.basic.Enumeration enumId="SetCarried" description="Carried from a merged case" sequenceNum="21" enumTypeId="CaseSlaEventType"/>
+    <moqui.service.job.ServiceJob jobName="close_ResolvedCases" description="Close resolved support cases after their auto-close delay"
+            serviceName="mantle.request.SupportCaseServices.close#ResolvedCases" cronExpression="0 20 * * * ?" paused="N" errorHistoryOnly="Y"
+            transactionTimeout="1800"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="MantleDavServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y" nameIsPattern="Y"
             artifactName="mantle\.(work\.CalendarDavServices|party\.ContactDavServices)\.(get#DavCollections|get#DavObjects|put#DavObject|delete#DavObject)"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleDavServicesALL" userGroupId="ALL_USERS" artifactGroupId="MantleDavServices"
             authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- A sales order's confirmation as placed (impl-customer-service P3, F29; mantle.order.OrderConfirmationServices): its
+        PDF stored once as an OrderContent of this type, which each resend attaches -->
+    <moqui.basic.Enumeration enumId="OctOrderConfirmation" description="Order confirmation as placed"
+            enumTypeId="OrderContentType"/>
+    <!-- An order change to decide (impl-customer-service P10, F44, F45, F46; mantle.order.OrderChangeServices): sent to the
+        approvers of its kind with requestId, orderId, sourceRevision (the proposal's revision), kindText, customerName,
+        organizationName and requestedByName, the change Request as the record; approve and refuse decide it at the message's
+        revision (decide#OrderChange), so a superseded proposal is refused naming the current one. The app that decides it
+        sets the link (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="OrderChangeApproval" inboxEnumId="NinNotifications"
+            description="Order change to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.OrderChangeServices.approve#OrderChangeMessage"
+            refuseServiceName="mantle.order.OrderChangeServices.refuse#OrderChangeMessage" refuseReasonRequired="Y"
+            titleTemplate="Approve ${kindText} of order ${orderId} for ${customerName} (${requestedByName})"/>
+
+    <!-- Customer returns (impl-customer-service P9, CX-APPROVAL; mantle.order.ReturnPolicyServices): an exception a customer
+        return needs before authorization (outside the window, a reason or remedy the policy does not allow, goods with no order
+        line), to the holders of RETURN_EXCEPTION_APPROVE who work for its organization, on Purchasing's decision pattern
+        (F45, F46): the framework's approve#NotificationMessage and refuse#NotificationMessage call approve#ReturnException and
+        refuse#ReturnException as the user, which decide at the revision in the message (sourceRevision) and refuse a stale
+        one; a refusal needs a reason. The message holds returnId, sourceRevision, organizationPartyId, organizationName,
+        customerName, exceptionText, reason and requestedByName. A decision on a return (authorized, an exception approved or
+        refused) to its assignee (ReturnDecision: returnId, customerName, decisionText, decidedByName). The app that works
+        returns sets the links (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="ReturnExceptionApproval" inboxEnumId="NinNotifications"
+            description="Return exception to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.ReturnPolicyServices.approve#ReturnException"
+            refuseServiceName="mantle.order.ReturnPolicyServices.refuse#ReturnException" refuseReasonRequired="Y"
+            titleTemplate="Approve the exception of return ${returnId} for ${customerName}: ${exceptionText}"/>
+    <moqui.security.user.NotificationTopic topic="ReturnDecision" inboxEnumId="NinNotifications" description="Return decided"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Return ${returnId} for ${customerName}: ${decisionText} (${decidedByName})"/>
 </entity-facade-xml>

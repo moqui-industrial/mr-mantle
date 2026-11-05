@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Order changes (CS-ORDER-CHANGE, CX-ORDER-CHANGE; design-customer-service §4 OrderChanges and OrderChangeDetail, D9, D7;
+    impl-customer-service §4, P10; OrderChanges.js, SupportOrderChangeEntities.xml). A proposal is its RqtOrderChange Request with
+    RequestItem lines linked to the order's lines (RequestItemOrder); its revision is the time of the last change to its
+    audit-logged key fields, and it binds the order's revision (expectedOrderRevision, the commercial revision under
+    PartyAcctgPreference.salesCommercialRevisionOnly). Two kinds are applied here: cancel (the open remainder of a line) and
+    substitute (a short pick's remainder, on Warehouse's ShipmentPickException); the commercial kinds (price, quantity
+    increase, ship date, address, ship method, carrier) are filed and routed to the order's owner, decided under SALES_APPROVE
+    and never applied here. Each service checks its permission and the order's selling organization itself and reads and
+    writes with artifact authorization off. Sales (design-sales §6) mounts the same services. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="save" noun="OrderChange" allow-remote="false">
+        <description>File or change a proposed change of a sales order (ChangeProposal): its kind, reason, the order revision
+            it is made against (the current one when empty; another is refused, STALE_ORDER naming it), the customer's
+            consent, the commercial kinds' address, ship method or carrier, the case it came from, and its lines, each naming
+            an order line (orderItemSeqId) with its action (OclCancel, OclSubstitute, OclPrice, OclQuantity, OclShipDate), the
+            product, quantity and unit, the ship date (requiredByDate) and the proposed unit price. A cancel line cancels at
+            most the line's open remainder, never what shipped (ALREADY_SHIPPED); a substitute line names a short pick of the
+            line (pickExceptionId) and a product that is a current PatEquivalent or PatReplacement of the line's product and
+            usable for sale (check#ProductUsable; SUBSTITUTE_INVALID, PRODUCT_NOT_USABLE), at most the short quantity, with
+            the customer's consent (CONSENT_REQUIRED). Saving an existing proposal (requestId) replaces its lines and moves its
+            revision, so earlier decisions no longer count; an applied, withdrawn or rejected one is refused (CHANGE_CLOSED).
+            The proposal goes to its approvers (OrderChangeApproval): ORDER_CHANGE_APPROVE holders for cancel and substitute,
+            SALES_APPROVE holders for the commercial kinds. Requires ORDER_CHANGE_REQUEST and an order of the user's
+            organizations; without it a customer contact (the customer's own party, or a current contact or employee of it)
+            may file a cancel of their own order, which under the organization's ServicePolicy.customerImmediateCancel (off by
+            default) is applied at once, with the policy as its decision, while nothing on its lines is reserved, picked,
+            shipped or invoiced and the order is not approved (immediate); otherwise it waits for an agent ("Cancellation
+            requested"). Refuses a missing or another organization's order alike (RECORD_UNAVAILABLE), an order that is not
+            open, placed, approved or held (ORDER_STATE), an unknown kind or action (KIND_INVALID, ACTION_INVALID), a line of
+            another order (LINE_UNAVAILABLE), no lines for a line kind (LINES_REQUIRED) and a quantity not above zero
+            (QUANTITY_INVALID). The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderChangeKindEnumId"/>
+            <parameter name="expectedOrderRevision" type="Integer"/>
+            <parameter name="reason"><description>Why the change is asked for (the request's description)</description></parameter>
+            <parameter name="cancellationReason"/>
+            <parameter name="customerConsentRef"/>
+            <parameter name="addressContactMechId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="caseRequestId"/>
+            <parameter name="lines" type="List"><description>Each a map: orderItemSeqId, changeActionEnumId, productId,
+                quantity, quantityUomId, requiredByDate, proposedUnitAmount, pickExceptionId</description></parameter>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="statusId"/>
+            <parameter name="stateText"/>
+            <parameter name="immediate" type="Boolean"/>
+            <parameter name="notifiedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('save', context)"/>
+            <script>ec.context.putAll(saved)</script>
+        </actions>
+    </service>
+    <service verb="withdraw" noun="OrderChange" allow-remote="false">
+        <description>Withdraw a proposal not applied yet (OrderChanges' withdraw): the request Cancelled with its reason, kept
+            with its history, and its approvers' notices read. The person who filed it, or an approver of its kind
+            (ORDER_CHANGE_APPROVE, SALES_APPROVE). Refuses an applied or closed one (CHANGE_CLOSED), no reason (REASON_REQUIRED)
+            and as get#OrderChange does.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="statusId" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('withdraw', context).statusId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="OrderChange" allow-remote="false">
+        <description>One proposal for OrderChangeDetail: the request (kind, state, reason, consent, the case, who asked and
+            when), its revision and the order's, its lines with their order lines, its decisions (current or not, expiry), the
+            applied change's stored PDF, and what the user may do (save, decide, apply, withdraw), each false with the reason
+            when not. Prices and amounts only for a price or finance reader (PRICE_VIEW, ACCOUNTING_VIEW, RECEIVABLE_VIEW,
+            ORDER_APPROVE), else withheld. Requires ORDER_CHANGE_REQUEST, ORDER_CHANGE_APPROVE, ORDER_CHANGE_APPLY,
+            SALES_APPROVE or SALES_ORDER_CHANGE (PERMISSION_DENIED), or the filer; refuses a missing proposal, another type and
+            another organization's alike (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="change" type="Map"/></out-parameters>
+        <actions>
+            <set field="change" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('get', context).change"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="OrderChange" allow-remote="false">
+        <description>ChangeImpact, writing nothing: for each line the order line before and after, its reserved, picked,
+            issued (packed), shipped and billed quantities, a substitute's evidence (the association, usability, the price the
+            order's resolver gives, get#OrderProductPrice, and the stock available to promise at the order's facility), the
+            order's paid amount for a finance reader, and the conflicts apply would refuse (STALE_ORDER, ALREADY_SHIPPED,
+            BILLING_CONFLICT, the packed quantity a reopen takes back, a finalized pack invoice), with previewVersion, the
+            fingerprint of the fulfillment facts apply compares (STOCK_CHANGED). Prices as get#OrderChange. Requires the read
+            permissions of get#OrderChange.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('preview', context).preview"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="OrderChange" allow-remote="false">
+        <description>Approve or refuse a proposal at its revision (ChangeDecision): an OrderChangeDecision bound to the
+            revision and the order's revision, with the reason and, for an approval, its expiry (ServicePolicy
+            orderChangeApprovalDays, else 7 days); the approvers' notices read. A refusal also closes the proposal (Cancelled,
+            RrRejected). Requires ORDER_CHANGE_APPROVE for cancel and substitute, SALES_APPROVE for the commercial kinds
+            (PERMISSION_DENIED); refuses the revision missing (REVISION_REQUIRED) or not the current one, naming it
+            (STALE_REVISION), an order that changed since the proposal (STALE_ORDER), the person who proposed it unless the
+            policy's orderChangeSelfApproval is Y (SELF_APPROVAL), a closed proposal (CHANGE_CLOSED), a refusal without a reason
+            (REASON_REQUIRED), a decision other than approve or refuse (DECISION_INVALID) and as get#OrderChange does. The same
+            operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderChangeDecisionId"/>
+            <parameter name="decisionEnumId"/>
+            <parameter name="expireDate" type="Timestamp"/>
+            <parameter name="statusId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('decide', context)"/>
+            <script>ec.context.putAll(decided)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="OrderChangeMessage" allow-remote="false">
+        <description>The approve service of the OrderChangeApproval topic (F45, F46), which the framework's
+            decide#NotificationMessage calls as the user: decide#OrderChange at the revision in the message (sourceRevision),
+            so a superseded proposal is refused naming the current revision and a message with none is refused
+            (REVISION_REQUIRED); another record is SOURCE_INVALID.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('approveMessage', context)</script>
+            <set field="decision" value="approved"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="OrderChangeMessage" allow-remote="false">
+        <description>The refuse service of the OrderChangeApproval topic, with the reason: decide#OrderChange's refusal at the
+            message's revision; refuses as approve#OrderChangeMessage does.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('refuseMessage', context)</script>
+            <set field="decision" value="refused"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="OrderChange" allow-remote="false">
+        <description>Apply an approved cancel or substitute proposal (ApplyChange; D9, D7) once confirmed
+            (CONFIRMATION_REQUIRED), every check repeated under the order's lock. The order is held through hold#Order with
+            the Change reason (OhtChange) and released through release#OrderHold, which leaves any other open hold (a Credit
+            hold of Accounting) in place. A cancel line is cancel#OrderItem of its quantity (the line's remainder re-reserved
+            on its picked stock, F262; picked stock above the line flagged ShipmentItemSource.putBackQuantity for Warehouse's
+            reverse#Pick; no reduce#AssetReservation, F66). Between pack and ship the packed quantity first comes off the
+            package through reopen#ShipmentPackageForChange (the in-process pack invoice's lines released). A substitute line
+            adds the substitute (create#OrderItem: priced by the order's resolver, checked usable, reserved), cancels the short
+            remainder of the line, marks the short pick SpresSubstitute and, once the hold is released, adds the substitute to
+            the short pick's shipment for Warehouse to pick (add#OrderPartToShipment). The proposal is then Completed and the
+            applied change's PDF stored as OrderContent (OctOrderChangeApplied; a render that fails is logged and the change
+            stays). The named failures, each leaving the order unchanged: STALE_ORDER (StaleOrder: the order's revision is not
+            the proposal's, naming it), STOCK_CHANGED (StockChanged: what is reserved, picked, packed or shipped differs from
+            the preview's previewVersion), ALREADY_SHIPPED (AlreadyShipped: a return handles it), BILLING_CONFLICT
+            (BillingConflict: a finalized invoice bills the quantity), APPROVAL_EXPIRED (ApprovalExpired), FORBIDDEN
+            (Forbidden: a commercial kind, applied by the order's owner) and CLOSED_PERIOD (ClosedPeriod: the organization's
+            fiscal period of today is closed); also STALE_REVISION (the proposal changed since its approval, naming the
+            current revision), NOT_APPROVED, CHANGE_CLOSED and PREVIEW_REQUIRED. Requires ORDER_CHANGE_APPLY
+            (PERMISSION_DENIED) and an order of the user's organizations; it never calls release#ShipmentDraftInvoice or
+            refund#OrderPayment. The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="sourceRevision" type="Long"/>
+            <parameter name="expectedOrderRevision" type="Integer"/>
+            <parameter name="previewVersion"/>
+            <parameter name="confirmed"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>requestId, orderId, statusId (the order's), orderRevision,
+                cancelled (orderItemSeqId, quantity), added (orderItemSeqId, productId, quantity), reopened (shipmentId,
+                shipmentPackageSeqId, productId, quantity), stillHeld, orderContentId, alreadyApplied</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('apply', context)"/>
+        </actions>
+    </service>
+    <service verb="send" noun="OrderChangeConfirmation" allow-remote="false">
+        <description>The order-change confirmation email: the applied change's stored PDF to a checked recipient (an address
+            of the customer or of a current contact, employee or representative of it) as a mail client draft of an account the
+            user sends from, through send#EmailDraft filed on the order, recorded as an OrderEmailMessage naming the content it
+            sent. A send that fails leaves the change applied, its delivery pending; it is never applied again. Requires
+            ORDER_CHANGE_APPLY or SUPPORT_CASE_EDIT; refuses a proposal not applied (NOT_APPLIED), no stored PDF
+            (NOT_STORED), RECIPIENT_REQUIRED, RECIPIENT_INVALID, RECIPIENT_UNCHECKED and SEND_ACCOUNT_REQUIRED. The same
+            operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="toAddress"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="note"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('confirm', context)"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OrderChanges" allow-remote="false">
+        <description>OrderChanges' and Sales' ChangeList: the proposals of the user's organizations' sales orders, newest
+            first, by order, customer, organization, the person who asked, the approver, the state (requested, needsInfo,
+            approved, applied, rejected, cancelled, stale) and the period asked in, a page at a time; each row with its order
+            and the order's current revision, the kind, the requested lines in words, the reason, who asked and when, the
+            decision and the approver, a hold or conflict, and the state. Requires the read permissions of get#OrderChange.</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestedByPartyId"/>
+            <parameter name="approverUserId"/>
+            <parameter name="caseRequestId"/>
+            <parameter name="state"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="changeList" type="List"/>
+            <parameter name="changeListCount" type="Integer"/>
+            <parameter name="changeListPageIndex" type="Integer"/>
+            <parameter name="changeListPageSize" type="Integer"/>
+            <parameter name="changeListPageMaxIndex" type="Integer"/>
+            <parameter name="changeListPageRangeLow" type="Integer"/>
+            <parameter name="changeListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('find', context))</script>
+        </actions>
+    </service>
+</services>

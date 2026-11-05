@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Support cases (design-customer-service §3, §9; impl-customer-service P2, CS-QUEUE, CS-SETTINGS, CX-REQUEST, F5, F6, F62):
+    a case is a Request in a service queue, made so by mantle.request.SupportCaseServices.ensure#CaseProfile (the
+    SupportCaseRule rules of entity/Request.eecas.xml, after the commit) or by create#Case. The queue is a RequestCategory
+    with an owner organization and a current ServiceQueue row; the case's organization, customer, contact and assignee are
+    RequestParty rows (OrgInternal, Customer, Reporter, Assignee); a team member is a dated PartyRelationship
+    (PrtServiceTeam) from the agent (Agent, or Manager for one who manages the team) to the team (an OrgTeam party owned by
+    the organization). Policies and settings are effective-dated rows with their key fields audit-logged: a draft has no
+    from date, a save starts a row from its date and ends the row it replaces; a case keeps the policy and workflow it was
+    opened under (CaseProfile). Nothing here exists until an organization has a ServicePolicy, so no Mantle default
+    changes without Customer Service configured. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- the audit log on a request's type, category, priority, due date and resolution (status is logged already, §2) -->
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="requestTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="requestCategoryId" type="id" enable-audit-log="update"/>
+        <field name="priority" type="number-integer" enable-audit-log="update"/>
+        <field name="responseRequiredDate" type="date-time" enable-audit-log="update"/>
+        <field name="requestResolutionEnumId" type="id" enable-audit-log="update"/>
+    </extend-entity>
+    <!-- a queue's organization (F6), as Products P3 gave feature groups one -->
+    <extend-entity entity-name="RequestCategory" package="mantle.request">
+        <field name="ownerPartyId" type="id"><description>The organization whose queue this category is (an internal
+            organization); a category with no owner is no organization's queue</description></field>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+    </extend-entity>
+
+    <entity entity-name="CaseProfile" package="mantle.request.support" cache="never">
+        <description>A request that is a support case: the service policy and case workflow it was opened under, the queue it
+            entered, the accepted intake time (the received date of the mail it came by, else the request date), the
+            message it came from, the template (P7) and the close date (P8). Written by
+            mantle.request.SupportCaseServices.ensure#CaseProfile and create#Case only.</description>
+        <field name="requestId" type="id" is-pk="true"/>
+        <field name="servicePolicyId" type="id"/>
+        <field name="caseWorkflowId" type="id"/>
+        <field name="intakeCategoryId" type="id"><description>The queue the case entered</description></field>
+        <field name="intakeDate" type="date-time"/>
+        <field name="communicationEventId" type="id"/>
+        <field name="emailMessageId" type="id"/>
+        <field name="templateFormId" type="id"><description>The case template (a DbForm) its values were taken on (P7)</description></field>
+        <field name="formResponseId" type="id"><description>The case's template values (P7): a FormResponse of templateFormId,
+            read as of its response date (SupportCaseServices.get#CaseTemplateValues)</description></field>
+        <field name="closedDate" type="date-time"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one-nofk" related="mantle.request.support.ServicePolicy" short-alias="policy"/>
+        <relationship type="one-nofk" title="Template" related="moqui.screen.form.DbForm" short-alias="template">
+            <key-map field-name="templateFormId" related="formId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="templateResponse"/>
+        <relationship type="one-nofk" title="CaseWorkflow" related="moqui.basic.Enumeration" short-alias="workflow">
+            <key-map field-name="caseWorkflowId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Intake" related="mantle.request.RequestCategory" short-alias="intakeCategory">
+            <key-map field-name="intakeCategoryId" related="requestCategoryId"/></relationship>
+        <seed-data>
+            <!-- the statuses a case adds (F4): waiting for the customer (a pause) and on hold, each back to in progress or
+                closed -->
+            <moqui.basic.StatusItem description="Waiting for customer" sequenceNum="6" statusId="ReqWaitingCustomer" statusTypeId="Request"/>
+            <moqui.basic.StatusItem description="On hold" sequenceNum="7" statusId="ReqOnHold" statusTypeId="Request"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqSubmitted" toStatusId="ReqWaitingCustomer" transitionName="Wait for customer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqReviewed" toStatusId="ReqWaitingCustomer" transitionName="Wait for customer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqInProgress" toStatusId="ReqWaitingCustomer" transitionName="Wait for customer"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqSubmitted" toStatusId="ReqOnHold" transitionName="Hold"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqReviewed" toStatusId="ReqOnHold" transitionName="Hold"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqInProgress" toStatusId="ReqOnHold" transitionName="Hold"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqWaitingCustomer" toStatusId="ReqInProgress" transitionName="Resume"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqWaitingCustomer" toStatusId="ReqCompleted" transitionName="Complete"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqWaitingCustomer" toStatusId="ReqCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqOnHold" toStatusId="ReqInProgress" transitionName="Resume"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqOnHold" toStatusId="ReqCompleted" transitionName="Complete"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ReqOnHold" toStatusId="ReqCancelled" transitionName="Cancel"/>
+
+            <!-- the privacy request (design §8, Admin Open 5): a case type offered only in a restricted Privacy queue -->
+            <moqui.basic.Enumeration enumId="RqtPrivacy" description="Privacy" enumTypeId="RequestType"/>
+
+            <!-- the case workflows (CaseStatusMapping, CaseTransition); the default one's rows are seeded in
+                MantleSetupData.xml -->
+            <moqui.basic.EnumerationType description="Case Workflow" enumTypeId="CaseWorkflow"/>
+            <moqui.basic.Enumeration enumId="CwfDefault" description="Default case workflow" enumTypeId="CaseWorkflow"/>
+            <!-- the status categories a mapping gives a status (design StatusCategories) -->
+            <moqui.basic.EnumerationType description="Case Status Category" enumTypeId="CaseStatusCategory"/>
+            <moqui.basic.Enumeration enumId="CscOpen" description="Open" sequenceNum="1" enumTypeId="CaseStatusCategory"/>
+            <moqui.basic.Enumeration enumId="CscPaused" description="Paused" sequenceNum="2" enumTypeId="CaseStatusCategory"/>
+            <moqui.basic.Enumeration enumId="CscResolved" description="Resolved" sequenceNum="3" enumTypeId="CaseStatusCategory"/>
+            <moqui.basic.Enumeration enumId="CscClosed" description="Closed" sequenceNum="4" enumTypeId="CaseStatusCategory"/>
+            <moqui.basic.Enumeration enumId="CscCancelled" description="Cancelled" sequenceNum="5" enumTypeId="CaseStatusCategory"/>
+            <!-- the priority bands over Request.priority (1-9; design ServiceDefaults): enumCode the band's first priority,
+                optionValue its last -->
+            <moqui.basic.EnumerationType description="Case Priority Band" enumTypeId="CasePriorityBand"/>
+            <moqui.basic.Enumeration enumId="CpbUrgent" description="Urgent" sequenceNum="1" enumCode="1" optionValue="2" enumTypeId="CasePriorityBand"/>
+            <moqui.basic.Enumeration enumId="CpbHigh" description="High" sequenceNum="2" enumCode="3" optionValue="4" enumTypeId="CasePriorityBand"/>
+            <moqui.basic.Enumeration enumId="CpbNormal" description="Normal" sequenceNum="3" enumCode="5" optionValue="6" enumTypeId="CasePriorityBand"/>
+            <moqui.basic.Enumeration enumId="CpbLow" description="Low" sequenceNum="4" enumCode="7" optionValue="9" enumTypeId="CasePriorityBand"/>
+            <!-- who sees a queue's cases besides the agents assigned them -->
+            <moqui.basic.EnumerationType description="Service Queue Visibility" enumTypeId="ServiceQueueVisibility"/>
+            <moqui.basic.Enumeration enumId="SqvOrganization" description="The organization's service users" sequenceNum="1" enumTypeId="ServiceQueueVisibility"/>
+            <moqui.basic.Enumeration enumId="SqvTeam" description="Its team and the service managers" sequenceNum="2" enumTypeId="ServiceQueueVisibility"/>
+            <moqui.basic.Enumeration enumId="SqvRestricted" description="Its team only" sequenceNum="3" enumTypeId="ServiceQueueVisibility"/>
+            <!-- what a message from an unknown sender makes (ServicePolicy) -->
+            <moqui.basic.EnumerationType description="Service Unknown Sender" enumTypeId="ServiceUnknownSender"/>
+            <moqui.basic.Enumeration enumId="SusReview" description="A request to review, not a case" sequenceNum="1" enumTypeId="ServiceUnknownSender"/>
+            <moqui.basic.Enumeration enumId="SusIgnore" description="Nothing" sequenceNum="2" enumTypeId="ServiceUnknownSender"/>
+            <!-- a service team member (PartyRelationship from the agent to the team) -->
+            <moqui.basic.Enumeration enumId="PrtServiceTeam" description="Service Team Member" enumTypeId="PartyRelationshipType"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ServiceQueue" package="mantle.request.support" cache="never">
+        <description>The service settings of a queue (a RequestCategory with an owner organization), effective-dated: the
+            types it offers, who sees its cases, its responsible team, its default assignment rule (P5), service level
+            policy (P4) and template (P7), and the fallback assignee. A category with a current row is a service queue, and
+            a request in it is a case. Saved by mantle.request.SupportCaseServices.save#ServiceQueue.</description>
+        <field name="serviceQueueId" type="id" is-pk="true"/>
+        <field name="requestCategoryId" type="id" enable-audit-log="true"/>
+        <field name="offeredTypeEnumIds" type="text-medium" enable-audit-log="true"><description>The RequestType ids the
+            queue offers, comma separated; empty offers the organization's service-enabled types</description></field>
+        <field name="visibilityEnumId" type="id" enable-audit-log="true"/>
+        <field name="responsibleTeamPartyId" type="id" enable-audit-log="true"/>
+        <field name="assignmentRuleId" type="id"/>
+        <field name="serviceLevelPolicyId" type="id"/>
+        <field name="templateFormId" type="id"/>
+        <field name="fallbackAssigneePartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" related="mantle.request.RequestCategory" short-alias="category"/>
+        <relationship type="one" title="ServiceQueueVisibility" related="moqui.basic.Enumeration" short-alias="visibility">
+            <key-map field-name="visibilityEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="responsibleTeamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="FallbackAssignee" related="mantle.party.Party" short-alias="fallbackAssignee">
+            <key-map field-name="fallbackAssigneePartyId" related="partyId"/></relationship>
+        <index name="SERVICE_QUEUE_CAT"><index-field name="requestCategoryId"/></index>
+    </entity>
+
+    <entity entity-name="ServiceRequestType" package="mantle.request.support" cache="never">
+        <description>A request type as an organization offers it for cases (design CaseTypes), effective-dated: whether it
+            is service-enabled (a request of this type with a Customer party of the organization and no category goes into
+            its default queue and is a case), its customer label, default queue, priority and workflow, and whether the
+            customer pages offer it. Saved by mantle.request.SupportCaseServices.save#ServiceRequestType.</description>
+        <field name="serviceRequestTypeId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="requestTypeEnumId" type="id"/>
+        <field name="serviceEnabled" type="text-indicator" enable-audit-log="true"/>
+        <field name="customerLabel" type="text-medium"/>
+        <field name="defaultCategoryId" type="id" enable-audit-log="true"/>
+        <field name="defaultPriority" type="number-integer" enable-audit-log="true"/>
+        <field name="caseWorkflowId" type="id"/>
+        <field name="templateFormId" type="id"/>
+        <field name="publicAvailable" type="text-indicator"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="RequestType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="requestTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Default" related="mantle.request.RequestCategory" short-alias="defaultCategory">
+            <key-map field-name="defaultCategoryId" related="requestCategoryId"/></relationship>
+        <index name="SERVICE_REQ_TYPE_ORG"><index-field name="organizationPartyId"/><index-field name="requestTypeEnumId"/></index>
+    </entity>
+
+    <entity entity-name="ServicePolicy" package="mantle.request.support" cache="never">
+        <description>An organization's service defaults (design ServiceDefaults), effective-dated; an organization with a
+            current row has Customer Service configured and its requests may be cases. The default queue and workflow, what
+            an unknown sender makes, the reopen window, the auto-close delay (P8), whether resolving needs a resolution, and
+            customerImmediateCancel (P10, off). Saved by mantle.request.SupportCaseServices.save#ServiceDefaults.</description>
+        <field name="servicePolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="defaultCategoryId" type="id" enable-audit-log="true"/>
+        <field name="caseWorkflowId" type="id" enable-audit-log="true"/>
+        <field name="unknownSenderEnumId" type="id"/>
+        <field name="reopenWindowDays" type="number-integer" enable-audit-log="true"/>
+        <field name="autoCloseDays" type="number-integer" enable-audit-log="true"/>
+        <field name="resolutionRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="customerImmediateCancel" type="text-indicator" enable-audit-log="true"/>
+        <field name="fallbackOwnerPartyId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Default" related="mantle.request.RequestCategory" short-alias="defaultCategory">
+            <key-map field-name="defaultCategoryId" related="requestCategoryId"/></relationship>
+        <relationship type="one-nofk" title="ServiceUnknownSender" related="moqui.basic.Enumeration" short-alias="unknownSender">
+            <key-map field-name="unknownSenderEnumId" related="enumId"/></relationship>
+        <index name="SERVICE_POLICY_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+
+    <entity entity-name="CaseStatusMapping" package="mantle.request.support" cache="never">
+        <description>What a request status means on a case of a workflow (design StatusCategories), effective-dated: the
+            agent's and the customer's labels, the category (Open, Paused, Resolved, Closed, Cancelled), whether a pause
+            needs a reason, and the order on the board. Saved by save#CaseStatusMapping.</description>
+        <field name="caseStatusMappingId" type="id" is-pk="true"/>
+        <field name="caseWorkflowId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="agentLabel" type="text-medium" enable-audit-log="true"/>
+        <field name="customerLabel" type="text-medium" enable-audit-log="true"/>
+        <field name="statusCategoryEnumId" type="id" enable-audit-log="true"/>
+        <field name="reasonRequired" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="CaseWorkflow" related="moqui.basic.Enumeration" short-alias="workflow">
+            <key-map field-name="caseWorkflowId" related="enumId"/></relationship>
+        <relationship type="one" title="Request" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="CaseStatusCategory" related="moqui.basic.Enumeration" short-alias="category">
+            <key-map field-name="statusCategoryEnumId" related="enumId"/></relationship>
+    </entity>
+
+    <entity entity-name="CaseTransition" package="mantle.request.support" cache="never">
+        <description>A move a case of a workflow may make (design CaseTransitionPolicy), effective-dated: from and to status,
+            whether it needs a resolution or a reason, whether it needs SUPPORT_CASE_MANAGE, and whether the customer is
+            told. transition#Case allows only a current row's move (each also a StatusFlowTransition of the Default flow).
+            Saved by save#CaseWorkflow.</description>
+        <field name="caseTransitionId" type="id" is-pk="true"/>
+        <field name="caseWorkflowId" type="id"/>
+        <field name="statusId" type="id"/>
+        <field name="toStatusId" type="id"/>
+        <field name="resolutionRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="reasonRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="manageRequired" type="text-indicator" enable-audit-log="true"/>
+        <field name="notifyCustomer" type="text-indicator"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="CaseWorkflow" related="moqui.basic.Enumeration" short-alias="workflow">
+            <key-map field-name="caseWorkflowId" related="enumId"/></relationship>
+        <relationship type="one" title="From" related="moqui.basic.StatusItem" short-alias="fromStatus">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one" title="To" related="moqui.basic.StatusItem" short-alias="toStatus">
+            <key-map field-name="toStatusId" related="statusId"/></relationship>
+    </entity>
+
+    <entity entity-name="RequestTag" package="mantle.request" cache="never">
+        <description>A tag on a request (design Cases: set by the bulk action and by a saved reply's tag action), dated:
+            ended, never deleted.</description>
+        <field name="requestId" type="id" is-pk="true"/>
+        <field name="tagEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one" title="RequestTag" related="moqui.basic.Enumeration" short-alias="tag">
+            <key-map field-name="tagEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Request Tag" enumTypeId="RequestTag"/>
+            <moqui.basic.Enumeration enumId="RtgBilling" description="Billing" sequenceNum="1" enumTypeId="RequestTag"/>
+            <moqui.basic.Enumeration enumId="RtgShipping" description="Shipping" sequenceNum="2" enumTypeId="RequestTag"/>
+            <moqui.basic.Enumeration enumId="RtgProduct" description="Product issue" sequenceNum="3" enumTypeId="RequestTag"/>
+            <moqui.basic.Enumeration enumId="RtgVip" description="Key customer" sequenceNum="4" enumTypeId="RequestTag"/>
+            <moqui.basic.Enumeration enumId="RtgFollowUp" description="Follow up" sequenceNum="5" enumTypeId="RequestTag"/>
+        </seed-data>
+    </entity>
+
+    <!-- the reads of a case list (Customer Service's find#Cases, Today, counts): a case with its request, and with each of its
+        parties -->
+    <view-entity entity-name="CaseRequest" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias-all entity-alias="CP"><exclude field="requestId"/></alias-all>
+        <alias entity-alias="REQ" name="lastUpdatedStamp"/>
+    </view-entity>
+    <view-entity entity-name="CaseRequestParty" package="mantle.request.support">
+        <member-entity entity-alias="CP" entity-name="mantle.request.support.CaseProfile"/>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <member-entity entity-alias="RQP" entity-name="mantle.request.RequestParty" join-from-alias="CP">
+            <key-map field-name="requestId"/></member-entity>
+        <alias entity-alias="CP" name="requestId"/>
+        <alias entity-alias="REQ" name="requestCategoryId"/>
+        <alias entity-alias="REQ" name="statusId"/>
+        <alias entity-alias="RQP" name="partyId"/>
+        <alias entity-alias="RQP" name="roleTypeId"/>
+        <alias entity-alias="RQP" name="fromDate"/>
+        <alias entity-alias="RQP" name="thruDate"/>
+    </view-entity>
+</entities>

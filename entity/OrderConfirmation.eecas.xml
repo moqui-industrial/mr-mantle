@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A confirmation resend whose send fails (mantle.order.OrderConfirmationServices.cancel#FailedConfirmationSend,
+    impl-customer-service P3): the mail client keeps a failed send in the Outbox, where a mailbox user could edit its
+    recipient and send the stored PDF outside the resend's recipient check; it is cancelled instead (ES_CANCELLED keeps its
+    sendError, and OrderDetail shows the result). Acts only on a message an OrderEmailMessage names with its orderContentId. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="OrderConfirmationSendFailed" entity="moqui.basic.email.EmailMessage" on-update="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>statusId == 'ES_READY' &amp;&amp; sendError &amp;&amp; !originalValue?.sendError</expression></condition>
+        <actions><service-call name="mantle.order.OrderConfirmationServices.cancel#FailedConfirmationSend"
+                in-map="{emailMessageId:emailMessageId}"/></actions>
+    </eeca>
+</eecas>

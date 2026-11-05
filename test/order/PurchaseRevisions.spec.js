@@ -559,7 +559,7 @@ feature(
 )
 
 feature(
-    "with the approval gate on, an ORDER_APPROVE holder's release#OrderHold of an applied revision's Change hold returns the order to Placed for its approval, not to Approved",
+    "with the approval gate on, an ORDER_CHANGE_HOLD_RELEASE holder's release#OrderHold of an applied revision's Change hold returns the order to Placed for its approval, not to Approved",
     {
         when() {
             const orderId = sentOrder(supplier, 2)
@@ -578,7 +578,7 @@ feature(
             })
             call("create#moqui.security.UserGroupPermission", {
                 userGroupId: state.approver,
-                userPermissionId: "ORDER_APPROVE",
+                userPermissionId: "ORDER_CHANGE_HOLD_RELEASE",
                 fromDate: since
             })
             const hold = rows("mantle.order.OrderHoldReason", {orderId}).find(row => !row.releasedDate)

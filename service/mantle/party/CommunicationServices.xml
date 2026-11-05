@@ -20,12 +20,16 @@ along with this software (see the LICENSE.md file). If not, see
             a watcher, or a party the event was filed on), newest first unless ordered otherwise. Posts to a mailbox
             (contactListId set) belong to the mailbox's members and are left out unless includeListPosts is true, a
             contactListId is given, or the post was filed on the party (its _NA_ row, link#CommunicationEventRecord).
+            The service audience (Customer Service P6, design ChannelSessions): audience customer keeps what passed between
+            the organization and the party (no note, internal message or status update, and no call logged as internal,
+            CpServiceInternal); empty keeps everything.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEventAndPurpose" include="all"/>
             <parameter name="communicationEventTypeId" default-value="Email,Message,Comment"/>
             <parameter name="includeListPosts" type="Boolean" default="false"/>
+            <parameter name="audience"><description>customer, or empty for every event</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="commEventList" type="List"><parameter name="commEvent" type="Map">
@@ -40,6 +44,19 @@ along with this software (see the LICENSE.md file). If not, see
                 linkedPostIds = includeListPosts || contactListId ? [] : Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndEvent')
                         .condition('partyId', partyId).condition('roleTypeId', '_NA_').condition('contactListId', 'not-equals', null)
                         .selectField('communicationEventId').list()).map((row) => row.communicationEventId)
+                // the service audience: the internal kinds, and the party's calls logged as internal, left out for the customer's
+                const internalTypes = ['Comment', 'Message', 'StatusUpdate']
+                const typeIds = String(communicationEventTypeId || '').split(',').map((id) => id.trim()).filter((id) => id)
+                internalEventIds = []
+                if (audience === 'customer') {
+                    const cf = ec.entity.conditionFactory
+                    internalEventIds = Array.from(ec.entity.find('mantle.party.communication.CommunicationEventPartyAndPurpose')
+                            .condition(cf.makeCondition([cf.makeCondition('fromPartyId', 'equals', partyId), cf.makeCondition('toPartyId', 'equals', partyId),
+                                cf.makeCondition('recipientPartyId', 'equals', partyId)], 'or'))
+                            .condition('purposeEnumId', 'CpServiceInternal').selectField('communicationEventId').distinct(true).limit(1000).list())
+                            .map((row) => row.communicationEventId)
+                }
+                if (audience === 'customer') communicationEventTypeId = typeIds.filter((id) => !internalTypes.includes(id)).join(',') || '_NONE_'
             ]]></script>
             <!-- a row per party row of the event, so distinct; the select fields are the event's; the type is the in
                 condition below, which a search form equals on the comma-separated default would replace -->
@@ -51,6 +68,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <econdition field-name="recipientPartyId" from="partyId"/>
                 </econditions>
                 <econdition field-name="communicationEventTypeId" operator="in"/>
+                <econdition field-name="communicationEventId" operator="not-in" from="internalEventIds" ignore="!internalEventIds.length"/>
                 <econditions combine="or">
                     <econdition field-name="contactListId" operator="is-null" ignore="includeListPosts || contactListId"/>
                     <econdition field-name="communicationEventId" operator="in" from="linkedPostIds"
@@ -1864,7 +1882,9 @@ along with this software (see the LICENSE.md file). If not, see
             - a work effort: a client project; a work item (WetTask) of one shared with the client (visibility All users or
               General); a milestone or release of one. No other kind (sprints, events, activities).
             - a request: one the user filed; or of a client project, filed by one of the user's organization's contacts
-              (clientContactPartyIds) or with one of those or the organization as a current RequestParty.
+              (clientContactPartyIds) or with one of those or the organization as a current RequestParty. Never a support case
+              with no project (a CaseProfile): customers read cases through the Support app (impl-customer-service P2, F68); a
+              project's case stays its client's.
             - a communication event: never a Comment (a note is internal); a status update posted for the client
               (statusUpdateIds); a message the user's party is from, to or a party to; a message one of the organization's
               contacts or the organization is from, to or a party to that is filed (the event, or the root of its thread, by
@@ -1929,8 +1949,12 @@ along with this software (see the LICENSE.md file). If not, see
                         const byParty = new Set(inProject.length && orgSide.size ? Array.from(ec.entity.find('mantle.request.RequestParty')
                                 .condition('requestId', 'in', inProject).condition('partyId', 'in', Array.from(orgSide))
                                 .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('requestId').list()).map((row) => row.requestId) : [])
-                        for (const row of rows) requestSeen.set(row.requestId, row.filedByPartyId === me
-                                || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId))))
+                        // a support case with no project is never a client's here: customers read cases through the Support
+                        // app (impl-customer-service P2, F68); a project's case stays its client's, in Projects (F-P2-3)
+                        const cases = new Set(Array.from(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', 'in', wanted)
+                                .selectField('requestId').list()).map((row) => row.requestId))
+                        for (const row of rows) requestSeen.set(row.requestId, !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
+                                || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId)))))
                     }
                     return ids.filter((id) => requestSeen.get(id))
                 }
@@ -2278,6 +2302,16 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
+                // a support case in a restricted queue (impl-customer-service P2, the Privacy queue), or a request held for
+                // review there (P6): its team only
+                const restricted = request.requestCategoryId ? Array.from(ec.entity.find('mantle.request.support.ServiceQueue')
+                        .condition('requestCategoryId', request.requestCategoryId).condition('visibilityEnumId', 'SqvRestricted')
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).condition(current())
+                        .disableAuthz().list())[0] : null
+                if (restricted)
+                    return !!s.userPartyId && !!restricted.responsibleTeamPartyId && ec.entity.find('mantle.party.PartyRelationship')
+                            .condition({fromPartyId: s.userPartyId, toPartyId: restricted.responsibleTeamPartyId, relationshipTypeEnumId: 'PrtServiceTeam'})
+                            .condition(current()).disableAuthz().count() > 0
                 if (s.partyIds.length && ec.entity.find('mantle.request.RequestParty').condition('requestId', request.requestId)
                         .condition('partyId', 'in', s.partyIds).condition(current()).disableAuthz().count() > 0) return true
                 // IronStone Projects: a request of a project the user sees
@@ -2292,8 +2326,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const facility = request.facilityId ? ec.entity.find('mantle.facility.Facility')
                         .condition('facilityId', request.facilityId).disableAuthz().one() : null
                 if (facility?.ownerPartyId && s.orgIds.includes(facility.ownerPartyId)) return true
-                // IronStone Projects: one with no project, of a type the user's organization triages in Projects (its ProjIntake)
+                // IronStone Projects: one with no project, of a type the user's organization triages in Projects (its ProjIntake);
+                // not one in a service queue (a case or a request held for review there is Customer Service's: P6)
                 if (request.rootWorkEffortId || !request.requestTypeEnumId) return false
+                if (request.requestCategoryId && ec.entity.find('mantle.request.support.ServiceQueue').condition('requestCategoryId', request.requestCategoryId)
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).condition(current()).disableAuthz().count() > 0) return false
                 for (const setting of ec.entity.find('mantle.party.PartySetting').condition('partyId', 'in', s.orgIds)
                         .condition('partySettingTypeId', 'ProjIntake').disableAuthz().list()) {
                     const triaged = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings')
@@ -4269,6 +4306,8 @@ along with this software (see the LICENSE.md file). If not, see
             or event by link#WorkEffortRecord (the record's own join, such as RequestWorkEffort, else WorkEffortRecord), a
             request to a work effort by RequestWorkEffort; a request has no link to another kind of record
             (roomRecordLinked false). A failure of that link is logged and leaves roomRecordLinked false; the rest stands.
+            A request is on channel Chat (ScChat) and may go into a queue (requestCategoryId) for a customer
+            (customerPartyId), so a customer contact's chat request into a service queue is a case (Customer Service P6).
         </description>
         <in-parameters>
             <parameter name="chatRoomId" required="true"/>
@@ -4285,6 +4324,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="allDayEnd" type="Date"/>
             <parameter name="calendarId"/>
             <parameter name="requestTypeEnumId" default-value="RqtSupport"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="customerPartyId"/>
             <parameter name="linkRoomRecord" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
@@ -4358,7 +4399,8 @@ along with this software (see the LICENSE.md file). If not, see
             } else {
                 requestId = ec.service.sync().name('mantle.request.RequestServices.create#Request').parameters({requestName: title,
                     description: details, statusId: 'ReqSubmitted', requestTypeEnumId: requestTypeEnumId || 'RqtSupport', priority: priority ?? 5,
-                    assignToPartyId: assignToPartyId || null}).call()?.requestId
+                    assignToPartyId: assignToPartyId || null, requestCategoryId: requestCategoryId || null, customerPartyId: customerPartyId || null,
+                    salesChannelEnumId: 'ScChat'}).call()?.requestId
                 recordEntityName = 'mantle.request.Request'; recordId = requestId
             }
             if (ec.message.hasError()) return

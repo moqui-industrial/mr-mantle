@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A sales order's confirmation as placed (design-customer-service §4 OrderDetail, impl-customer-service §4, P3, F29, F55;
+    mantle.order.OrderConfirmationServices): its PDF, rendered as of the order's placed time, is an OrderContent of type
+    OctOrderConfirmation (seeded in data/MantleSetupData.xml) stored once; each resend is an OrderEmailMessage naming the
+    content it sent (orderContentId, the version) with its recipient party, the message holding the address and its
+    result. An organization's orderConfirmationOnPlace (off by default) stores it at
+    placement. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- The organization's flag, beside its other order and invoice flags (invoiceApprovalRequired, returnSettlementRequired):
+        off by default, so Mantle's placement path is unchanged; on, a sales order the organization places has its
+        confirmation stored after the placement commits (OrderReturn.secas.xml OrderPlacedStoreConfirmation). -->
+    <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
+        <field name="orderConfirmationOnPlace" type="text-indicator" default="'N'" enable-audit-log="update">
+            <description>Y: store each placed sales order's confirmation PDF as OrderContent (OctOrderConfirmation) after
+                the placement commits, in a transaction of its own; a failure is logged and never fails the placement. N (the default):
+                the first store or resend renders it as of the placed time.</description></field>
+    </extend-entity>
+    <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
+        <field name="orderContentId" type="id">
+            <description>The stored document the message sent (a confirmation resend: the OctOrderConfirmation content); empty
+                for a message that carried none.</description></field>
+        <relationship type="one" related="mantle.order.OrderContent" short-alias="orderContent"/>
+    </extend-entity>
+</entities>
