@@ -169,4 +169,16 @@
     ['GET', 'billing/payments/{attemptId}', 'getPaymentResult'],
     ['GET', 'supplier/order', 'getSubmission'],
     ['POST', 'supplier/bills', 'submitSupplierBill'],
+    // Purchasing P16
+    ['GET', 'supplier/home', 'getSupplierHome'],
+    ['GET', 'supplier/quote', 'getQuoteInvitation'],
+    ['POST', 'supplier/quote/draft', 'saveQuoteResponse'],
+    ['POST', 'supplier/quote/response', 'submitQuoteResponse'],
+    ['GET', 'supplier/purchase-order', 'getPublishedPurchaseOrder'],
+    [
+        'POST',
+        'supplier/purchase-order/acknowledgement',
+        'acknowledgePurchaseOrder',
+    ],
+    ['POST', 'supplier/purchase-order/delivery', 'reportDropShipDelivery'],
 ]

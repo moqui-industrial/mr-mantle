@@ -5,7 +5,8 @@
 // stage, a refusal leaving it submitted; sourcing to one draft purchase order per supplier with the line's cost centre, the
 // line with no supplier failing by name, the retry after its supplier is chosen making only its order, another conversion
 // refused as already sourced and placeAndApproveOrders refused; the purchase order's approval converting the request's
-// commitment (nothing counted twice); a cancel releasing the unsourced demand and its commitment; and a project's work item
+// commitment (nothing counted twice); completing a partly sourced request with a reason, giving up the rest (P17, F127); a
+// cancel releasing the unsourced demand and its commitment; and a project's work item
 // completing leaving a purchase request in progress (CX-REQUEST). Standalone: a spec-local organization with its
 // accounting configuration and budget, two suppliers, a product, groups and users, with artifact authorization disabled
 // (the rules are the services' own permission checks). Run: ./moq test mr-mantle --spec PurchaseRequests
@@ -443,6 +444,56 @@ feature("approving a sourced purchase order converts the request's commitment, s
                 row.convertedFromId == r.before[0].budgetCommitmentId
         )
         r.opened == 40
+    }
+})
+
+// F127 (P17): a request sourced below its maximum completes with a reason, giving up the rest of its line and the request
+// stage's commitment; one with nothing sourced is refused (cancel it), and a completed request is closed
+feature("completing a partly sourced request needs a reason and releases the unsourced rest and its commitment", {
+    when() {
+        const requestId = submittedRequest("Completed supplies", [[supplierA, 5, 50]])
+        approve(requestId)
+        const nothing = run(state.buyer, R + "complete#PurchaseRequest", {requestId, reason: "Spec"})
+        const sourced = run(state.buyer, R + "convert#PurchaseSourcing", {
+            lines: [{requestId, requestItemSeqId: "01", quantity: 3}],
+            operationKey: "spec-complete-1"
+        })
+        const canComplete = run(state.buyer, R + "get#PurchaseRequestProgress", {requestId}).progress?.canComplete
+        const noReason = run(state.buyer, R + "complete#PurchaseRequest", {requestId})
+        const completed = run(state.requester, R + "complete#PurchaseRequest", {requestId, reason: "Two are enough"})
+        const again = run(state.buyer, R + "complete#PurchaseRequest", {requestId, reason: "Spec"})
+        const requirementId = rows("mantle.request.requirement.RequirementRequestItem", {requestId})[0].requirementId
+        return {
+            nothing,
+            sourced,
+            canComplete,
+            noReason,
+            completed,
+            again,
+            status: statusOf(requestId),
+            requirement: one("mantle.request.requirement.Requirement", {requirementId}),
+            commitments: rows("mantle.other.budget.BudgetCommitment", {sourceId: requestId, stageEnumId: "BcsRequest"}),
+            orders: rows("mantle.request.RequestItemOrder", {requestId}).map(
+                row => one("mantle.order.OrderHeader", {orderId: row.orderId}).statusId
+            )
+        }
+    },
+    then(r) {
+        r.nothing.error.includes("NOTHING_SOURCED")
+        r.sourced.createdCount == 1
+        r.canComplete == true
+        r.noReason.error.includes("REASON_REQUIRED")
+        r.noReason.error.includes("line 01")
+        r.completed.error == ""
+        r.completed.shortItemSeqIds == ["01"]
+        r.status == "ReqCompleted"
+        r.requirement.statusId == "RqmtStOrdered"
+        r.requirement.quantity.toNumber() == 3
+        r.commitments.length == 1
+        r.commitments.every(row => row.statusId == "BcReleased")
+        r.completed.releasedCount == 1
+        r.again.error.includes("REQUEST_CLOSED")
+        r.orders == ["OrderOpen"]
     }
 })
 

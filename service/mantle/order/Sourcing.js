@@ -20,6 +20,8 @@ const policyModule = ec.resource.script("component://mr-mantle/service/mantle/or
 const orders = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseOrders.js")
 const documents = () => ec.resource.script("component://mr-mantle/service/mantle/order/PurchaseOrderDocuments.js")
 const planning = () => ec.resource.script("component://mr-mantle/service/mantle/product/SupplyPlanning.js")
+// P16: each invited supplier's link to its quote's QuoteResponse page (SupplierPortal.js)
+const portal = () => ec.resource.script("component://mr-mantle/service/mantle/order/SupplierPortal.js")
 const {find, one, rows, call, denied, access, ms, dateText} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -53,6 +55,8 @@ const reasonsOf = (values, reason) =>
     reason ? Object.fromEntries(Object.keys(values).map(field => [field + "_changeReason", String(reason)])) : {}
 
 function requirePermission(...permissions) {
+    // P16: a supplier's response from its PASS page answers its own quote (PurchaseOrders.js asSupplier)
+    if (orders().claimed(permissions)) return
     if (!permissions.some(permission => access.has(permission)))
         denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
@@ -377,9 +381,12 @@ function followItem(rfq, requestItemSeqId) {
             })
             if (removed) continue
         } else if (line) {
+            // the line's price given (unpriced until the supplier answers): without one update#OrderItem prices it by the
+            // resolver (F-P12-4)
             call("mantle.order.OrderServices.update#OrderItem", {
                 orderId: invitation.orderId,
                 orderItemSeqId: line.orderItemSeqId,
+                unitAmount: line.unitAmount ?? 0,
                 quantity: item.quantity,
                 quantityUomId: item.quantityUomId,
                 requiredByDate: item.requiredByDate,
@@ -432,6 +439,8 @@ function quoteOrder(rfqOrNull, organizationPartyId, supplierPartyId, statusId, c
         orderName: rfqOrNull ? "RFQ " + rfqOrNull.requestId + " · " + (rfqOrNull.request.requestName || "") : null,
         statusId
     })
+    // P12: marked a supplier quote, so the purchase order lists leave out the quotes never placed (F-P12-1)
+    call("update#" + ORDER, {orderId: created.orderId, supplierQuote: "Y"})
     return {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, supplierResult: checked.result}
 }
 // store#QuoteInvitation: a supplier invited to an RFQ (its quote order in OrderRequested, a line per item), or a requested
@@ -653,10 +662,13 @@ function send(p) {
 
     const fromName = partyName(rfq.organizationPartyId)
     const fromAddress = documents().recipientsOf(rfq.organizationPartyId)[0] || null
-    const body = ec.resource.template("component://mr-mantle/template/order/QuoteRequestEmail.html.fancy", {
-        note: p.note || null,
-        printHtml: printed.printHtml
-    })
+    // P16: each supplier's copy carries its own quote's link (QuoteResponse), when the organization has a Supplier site
+    const bodyFor = linkUrl =>
+        ec.resource.template("component://mr-mantle/template/order/QuoteRequestEmail.html.fancy", {
+            note: p.note || null,
+            printHtml: printed.printHtml,
+            linkUrl: linkUrl || null
+        })
     const supplierResults = []
     for (const invitation of targets) {
         const result = {
@@ -671,6 +683,7 @@ function send(p) {
         try {
             const recipients = documents().recipientsOf(invitation.supplierPartyId)
             if (!recipients.length) denied("RECIPIENT_REQUIRED", result.supplierName + " has no order or primary email address")
+            const body = bodyFor(portal().quoteLink(invitation.orderId))
             let sentCount = 0
             const failures = []
             for (const recipient of recipients) {
@@ -781,6 +794,8 @@ const expired = part => !!part.validThruDate && ms(part.validThruDate) <= Number
 // new quote is entered straight in OrderProposed, for an RFQ's items when the RFQ is given (an unsolicited quote otherwise).
 function storeQuote(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim answers its one quote, never a new one
+    if (orders().portalClaim() && blank(p.orderId)) denied("RECORD_UNAVAILABLE", "This quote is not available")
     let po
     let created = false
     if (blank(p.orderId)) {
@@ -869,6 +884,12 @@ function storeQuote(p) {
 // (each change in the line's history), or a new line on a proposed quote with no RFQ item.
 function storeQuoteItem(p) {
     requirePermission("PURCHASE_ORDER_EDIT")
+    // P16: a supplier's claim prices, dates and codes the quote's own lines; it adds no line and changes no quantity, unit or text
+    if (
+        orders().portalClaim() &&
+        (blank(p.orderItemSeqId) || ["quantity", "quantityUomId", "itemDescription"].some(field => !blank(p[field])))
+    )
+        denied("RECORD_UNAVAILABLE", "This quote line is not available")
     const po = quoteOf(p.orderId, true)
     const values = {}
     if (given(p, "unitAmount") && !blank(p.unitAmount)) values.unitAmount = decimal(p.unitAmount, "price", true)
@@ -900,6 +921,9 @@ function storeQuoteItem(p) {
     const line = one(ORDER_ITEM, {orderId: po.orderId, orderItemSeqId: p.orderItemSeqId})
     if (!line) denied("ITEM_UNAVAILABLE", "Line " + p.orderItemSeqId + " is not on quote " + po.orderId)
     if (values.unitAmount != null) values.isModifiedPrice = "Y"
+    // P12: any change without a price keeps the quoted one (update#OrderItem without a unitAmount prices a product line again
+    // by the resolver, whatever field changed; F-P12-4)
+    else if (Object.keys(values).length) Object.assign(values, {unitAmount: dec(line.unitAmount), isModifiedPrice: "Y"})
     if (Object.keys(values).length)
         call(
             "mantle.order.OrderServices.update#OrderItem",
@@ -996,6 +1020,8 @@ const operations = {create, update, storeItem, invite, print, send, storeQuote, 
     invitationsOf,
     sentAtOf,
     publishedOf,
+    // P17 (F176): the RFQ as of a time, for the supplier's page of the revision last sent to it
+    rfqAt,
     expired,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sourcing operation " + op)

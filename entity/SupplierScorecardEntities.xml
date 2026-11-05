@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Supplier performance (design-purchasing §11 Scorecards, ScorecardDetail, §12 ScorecardPolicies; impl-purchasing P15, §4).
+    The scorecard policy, its criteria and its actions are effective-dated rows with their key fields audit-logged (the shared
+    effective-date rule, impl-drawers-commons §4): a change ends the row in effect and starts the next. An evaluation is a fact
+    of its own: SupplierScorecard with a SupplierScorecardMeasure per criterion and the SupplierScorecardEvidence it counted or
+    left out, keeping the policy row and the time it was evaluated; a recalculation is a new evaluation and the earlier one
+    stays. SupplierRisk is a dated, audit-logged risk an organization keeps about a supplier with its response.
+    SupplierScorecards.js reads and writes them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="SupplierScorecardPolicy" package="mantle.party.supplier" cache="never">
+        <description>Dated scorecard basis of an organization: the evaluation period, the minimum sample before a score drives a
+            response, and the date basis of on-time delivery. An empty field takes the built-in default (90 days, five eligible
+            receipts, the first acknowledged line date else the line's required date). Written by
+            mantle.party.SupplierServices.store#ScorecardPolicy.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="periodDays" type="number-integer" enable-audit-log="true"><description>Days an evaluation covers, ending
+            when it is evaluated unless a period is given (90 with no row)</description></field>
+        <field name="minimumSample" type="number-integer" enable-audit-log="true"><description>Eligible receipts an evaluation
+            needs before its score is more than Insufficient data (5 with no row)</description></field>
+        <field name="dueDateBasisEnumId" type="id" enable-audit-log="true"><description>ScorecardDueDateBasis: the date a
+            receipt is on time against (SddbAcknowledged, the default: the line's first acknowledged date, else its required
+            date; SddbRequired: the required date only)</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" title="ScorecardDueDateBasis" related="moqui.basic.Enumeration"
+                short-alias="dueDateBasisEnum"><key-map field-name="dueDateBasisEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Scorecard Due Date Basis" enumTypeId="ScorecardDueDateBasis"/>
+            <moqui.basic.Enumeration enumId="SddbAcknowledged" description="First acknowledged date, else required date"
+                    sequenceNum="1" enumTypeId="ScorecardDueDateBasis"/>
+            <moqui.basic.Enumeration enumId="SddbRequired" description="Required date" sequenceNum="2"
+                    enumTypeId="ScorecardDueDateBasis"/>
+            <moqui.basic.EnumerationType description="Scorecard Metric" enumTypeId="ScorecardMetric"/>
+            <moqui.basic.Enumeration enumId="SsmOnTime" description="On-time delivery" sequenceNum="1"
+                    enumTypeId="ScorecardMetric"/>
+            <moqui.basic.Enumeration enumId="SsmQuality" description="Quality acceptance" sequenceNum="2"
+                    enumTypeId="ScorecardMetric"/>
+            <moqui.basic.Enumeration enumId="SsmPriceVariance" description="Price variance" sequenceNum="3"
+                    enumTypeId="ScorecardMetric"/>
+            <moqui.basic.Enumeration enumId="SsmResponse" description="RFQ response" sequenceNum="4"
+                    enumTypeId="ScorecardMetric"/>
+            <moqui.basic.EnumerationType description="Scorecard Effect" enumTypeId="ScorecardEffect"/>
+            <moqui.basic.Enumeration enumId="SseWarn" description="Warn" sequenceNum="1" enumTypeId="ScorecardEffect"/>
+            <moqui.basic.Enumeration enumId="SseReview" description="Warn and review" sequenceNum="2"
+                    enumTypeId="ScorecardEffect"/>
+            <moqui.basic.Enumeration enumId="SseBlock" description="Block new RFQs and orders" sequenceNum="3"
+                    enumTypeId="ScorecardEffect"/>
+            <moqui.basic.EnumerationType description="Scorecard Result" enumTypeId="ScorecardResult"/>
+            <moqui.basic.Enumeration enumId="SsrScored" description="Scored" sequenceNum="1" enumTypeId="ScorecardResult"/>
+            <moqui.basic.Enumeration enumId="SsrInsufficient" description="Insufficient data" sequenceNum="2"
+                    enumTypeId="ScorecardResult"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="SupplierScorecardCriterion" package="mantle.party.supplier" cache="never">
+        <description>Dated weight and range of one supported measure (ScorecardMetric) for an organization: the score is 100 at
+            the target and 0 at the floor, straight between them, with no formula of its own. A rate (on-time, quality,
+            response) is a percentage, higher better; price variance is the absolute billed-to-ordered difference in percent,
+            lower better. With no row a measure takes its built-in weight and range. Written by
+            mantle.party.SupplierServices.store#ScorecardCriterion.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="metricEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="weight" type="number-decimal" enable-audit-log="true"><description>The measure's share of the score; 0
+            leaves it out</description></field>
+        <field name="targetValue" type="number-decimal" enable-audit-log="true"/>
+        <field name="floorValue" type="number-decimal" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one" title="ScorecardMetric" related="moqui.basic.Enumeration" short-alias="metricEnum">
+            <key-map field-name="metricEnumId" related="enumId"/></relationship>
+    </entity>
+    <entity entity-name="SupplierScorecardAction" package="mantle.party.supplier" cache="never">
+        <description>Dated response of an organization to a supplier's performance: a scored evaluation below scoreBelow, or an
+            active SupplierRisk at or above riskSeverityEnumId, gets the effect (ScorecardEffect): a warning on its new RFQs and
+            purchase orders, a warning with review, or a block of them. An evaluation with Insufficient data gets no response.
+            No row: nothing responds. Written by mantle.party.SupplierServices.store#ScorecardAction; read by the buying
+            policy's supplier check.</description>
+        <field name="scorecardActionId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="scoreBelow" type="number-decimal" enable-audit-log="true"/>
+        <field name="riskSeverityEnumId" type="id" enable-audit-log="true"/>
+        <field name="effectEnumId" type="id" enable-audit-log="true"/>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.party.Party"><key-map field-name="organizationPartyId" related="partyId"/>
+        </relationship>
+        <relationship type="one-nofk" title="SupplierRiskSeverity" related="moqui.basic.Enumeration"
+                short-alias="riskSeverityEnum"><key-map field-name="riskSeverityEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ScorecardEffect" related="moqui.basic.Enumeration" short-alias="effectEnum">
+            <key-map field-name="effectEnumId" related="enumId"/></relationship>
+        <index name="SCORE_ACTION_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+    <entity entity-name="SupplierScorecard" package="mantle.party.supplier" cache="never">
+        <description>One evaluation of a supplier's performance for an organization over a period: the policy row it applied
+            (policyFromDate, null for the built-in defaults), the time and user, the weighted score or Insufficient data, the
+            eligible receipts against the minimum sample, what evidence was missing, and the response it drew (the action and
+            its effect). A recalculation is a new evaluation naming the one it follows (previousScorecardId); the earlier one
+            stays.</description>
+        <field name="supplierScorecardId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="supplierPartyId" type="id"/>
+        <field name="periodFromDate" type="date-time"/>
+        <field name="periodThruDate" type="date-time"/>
+        <field name="policyFromDate" type="date-time"/>
+        <field name="dueDateBasisEnumId" type="id"/>
+        <field name="minimumSample" type="number-integer"/>
+        <field name="eligibleCount" type="number-integer"><description>Receipts with a due date, the sample the minimum is
+            checked against</description></field>
+        <field name="resultEnumId" type="id"/>
+        <field name="score" type="number-decimal"><description>The weighted score of the measures with evidence, 0 to 100;
+            kept with Insufficient data too, which no response reads</description></field>
+        <field name="missingDataText" type="text-long"/>
+        <field name="scorecardActionId" type="id"/>
+        <field name="effectEnumId" type="id"/>
+        <field name="previousScorecardId" type="id"/>
+        <field name="operationKey" type="id"/>
+        <field name="evaluatedDate" type="date-time"/>
+        <field name="evaluatedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Supplier" related="mantle.party.Party">
+            <key-map field-name="supplierPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="ScorecardResult" related="moqui.basic.Enumeration" short-alias="resultEnum">
+            <key-map field-name="resultEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="ScorecardEffect" related="moqui.basic.Enumeration" short-alias="effectEnum">
+            <key-map field-name="effectEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.supplier.SupplierScorecardAction"/>
+        <relationship type="one-nofk" title="Previous" related="mantle.party.supplier.SupplierScorecard">
+            <key-map field-name="previousScorecardId" related="supplierScorecardId"/></relationship>
+        <relationship type="many" related="mantle.party.supplier.SupplierScorecardMeasure" short-alias="measures">
+            <key-map field-name="supplierScorecardId"/></relationship>
+        <index name="SCORECARD_SUPPLIER"><index-field name="organizationPartyId"/><index-field name="supplierPartyId"/>
+            <index-field name="evaluatedDate"/></index>
+    </entity>
+    <entity entity-name="SupplierScorecardMeasure" package="mantle.party.supplier" cache="never">
+        <description>A measure of an evaluation: its numerator and denominator (quantities for on-time and quality, amounts
+            for price variance, invitations for response), the eligible and excluded evidence, its value and score, and the
+            criterion row (weight, target and floor) it applied. With no evidence the value and score are empty and missingText
+            says why.</description>
+        <field name="supplierScorecardId" type="id" is-pk="true"/>
+        <field name="metricEnumId" type="id" is-pk="true"/>
+        <field name="numerator" type="number-decimal"/>
+        <field name="denominator" type="number-decimal"/>
+        <field name="eligibleCount" type="number-integer"/>
+        <field name="excludedCount" type="number-integer"/>
+        <field name="measureValue" type="number-decimal"/>
+        <field name="score" type="number-decimal"/>
+        <field name="weight" type="number-decimal"/>
+        <field name="targetValue" type="number-decimal"/>
+        <field name="floorValue" type="number-decimal"/>
+        <field name="criterionFromDate" type="date-time"/>
+        <field name="missingText" type="text-medium"/>
+        <relationship type="one" related="mantle.party.supplier.SupplierScorecard"/>
+        <relationship type="one" title="ScorecardMetric" related="moqui.basic.Enumeration" short-alias="metricEnum">
+            <key-map field-name="metricEnumId" related="enumId"/></relationship>
+    </entity>
+    <entity entity-name="SupplierScorecardEvidence" package="mantle.party.supplier" cache="never">
+        <description>A source event an evaluation counted or left out, with its share of a measure: a receipt of an order
+            line (on-time against its due date, quality from its rejected quantity and its inspections' dispositions), a billed
+            order line (price variance) or an RFQ invitation (response). excludedReason says why it is not counted.</description>
+        <field name="supplierScorecardId" type="id" is-pk="true"/>
+        <field name="evidenceSeqId" type="id" is-pk="true"/>
+        <field name="metricEnumId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="orderItemSeqId" type="id"/>
+        <field name="assetReceiptId" type="id"/>
+        <field name="qualityInspectionId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="requestId" type="id"/>
+        <field name="dueDate" type="date-time"/>
+        <field name="dueBasisText" type="text-short"/>
+        <field name="promisedDate" type="date-time"><description>The supplier's latest promise of the line, shown beside the
+            due date it is measured against</description></field>
+        <field name="eventDate" type="date-time"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="numerator" type="number-decimal"/>
+        <field name="denominator" type="number-decimal"/>
+        <field name="exceptionText" type="text-medium"/>
+        <field name="excludedReason" type="text-medium"/>
+        <relationship type="one" related="mantle.party.supplier.SupplierScorecard"/>
+    </entity>
+    <entity entity-name="SupplierRisk" package="mantle.party.supplier" cache="never">
+        <description>A risk an organization records about a supplier, in effect from fromDate to thruDate: its severity and
+            category, owner, evidence (description), the response taken and the evaluation it came from. A change is
+            audit-logged with its reason; ending it sets thruDate. Written by mantle.party.SupplierServices.store#SupplierRisk;
+            an active risk at or above an action's severity draws that action's effect.</description>
+        <field name="supplierRiskId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="supplierPartyId" type="id" enable-audit-log="true"/>
+        <field name="severityEnumId" type="id" enable-audit-log="true"/>
+        <field name="categoryEnumId" type="id" enable-audit-log="true"/>
+        <field name="ownerPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-long" enable-audit-log="true"/>
+        <field name="responseText" type="text-long" enable-audit-log="true"/>
+        <field name="supplierScorecardId" type="id"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Supplier" related="mantle.party.Party">
+            <key-map field-name="supplierPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SupplierRiskSeverity" related="moqui.basic.Enumeration" short-alias="severityEnum">
+            <key-map field-name="severityEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SupplierRiskCategory" related="moqui.basic.Enumeration" short-alias="categoryEnum">
+            <key-map field-name="categoryEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.supplier.SupplierScorecard"/>
+        <index name="SUPPLIER_RISK_ORG"><index-field name="organizationPartyId"/><index-field name="supplierPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Supplier Risk Severity" enumTypeId="SupplierRiskSeverity"/>
+            <moqui.basic.Enumeration enumId="SrsLow" description="Low" sequenceNum="1" enumTypeId="SupplierRiskSeverity"/>
+            <moqui.basic.Enumeration enumId="SrsMedium" description="Medium" sequenceNum="2" enumTypeId="SupplierRiskSeverity"/>
+            <moqui.basic.Enumeration enumId="SrsHigh" description="High" sequenceNum="3" enumTypeId="SupplierRiskSeverity"/>
+            <moqui.basic.Enumeration enumId="SrsCritical" description="Critical" sequenceNum="4"
+                    enumTypeId="SupplierRiskSeverity"/>
+            <moqui.basic.EnumerationType description="Supplier Risk Category" enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcDelivery" description="Delivery" sequenceNum="1"
+                    enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcQuality" description="Quality" sequenceNum="2"
+                    enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcPrice" description="Price" sequenceNum="3" enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcFinancial" description="Financial" sequenceNum="4"
+                    enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcCompliance" description="Compliance" sequenceNum="5"
+                    enumTypeId="SupplierRiskCategory"/>
+            <moqui.basic.Enumeration enumId="SrcOther" description="Other" sequenceNum="6" enumTypeId="SupplierRiskCategory"/>
+        </seed-data>
+    </entity>
+</entities>

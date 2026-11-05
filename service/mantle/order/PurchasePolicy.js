@@ -10,6 +10,7 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, rows, call, denied, access, ms, map} = lib
 
+const scorecards = () => ec.resource.script("component://mr-mantle/service/mantle/party/SupplierScorecards.js")
 const POLICY = "mantle.order.purchase.PurchasePolicy",
     PROFILE = "mantle.party.supplier.SupplierProfile"
 // the permissions that read the policy: whoever buys, approves or keeps a supplier profile in the organization
@@ -279,7 +280,8 @@ function profileAt(organizationPartyId, supplierPartyId, at) {
 // Whether the organization may send the supplier an RFQ or a purchase order at a time (now by default): a purchase block in
 // effect or a Suspended profile stops (SUPPLIER_BLOCKED, SUPPLIER_SUSPENDED); a supplier that is not Approved (Pending,
 // Rejected, or no status where the policy requires approval) gets the policy's result, a warning by default or a stop
-// (SUPPLIER_UNAPPROVED). result is OK, WARN or STOP; the policy row and the profile row are the ones the check read, for the
+// (SUPPLIER_UNAPPROVED); the response its performance draws under the organization's scorecard rules warns
+// (SUPPLIER_SCORE_WARNING) or stops (SUPPLIER_SCORE_BLOCKED), and with no rule draws nothing. result is OK, WARN or STOP; the policy row and the profile row are the ones the check read, for the
 // document to keep. Internal: it checks no permission.
 function supplierUsable(organizationPartyId, supplierPartyId, at) {
     const when = at == null || at === "" ? ms(ec.user.nowTimestamp) : ms(at)
@@ -313,14 +315,21 @@ function supplierUsable(organizationPartyId, supplierPartyId, at) {
             partyName(supplierPartyId) + " is suspended" + (profile.changeReason ? ": " + profile.changeReason : "")
         )
     const unapproved = status ? status !== "SupaApproved" : policy.supplierApprovalRequired === "Y"
+    // P15: the response the supplier's performance draws (SupplierScorecards.js responseOf: an evaluation's score band or an
+    // active risk's severity under the organization's response rules); none without a rule, Mantle's behavior
+    const response = scorecards().responseOf(organizationPartyId, supplierPartyId, when)
+    base.scorecardResponse = response
+    if (response?.result === "STOP") return answer("STOP", "SUPPLIER_SCORE_BLOCKED", response.message)
     if (unapproved) {
         const statusText = status ? one("moqui.basic.StatusItem", {statusId: status})?.description || status : "Not approved"
+        const message = partyName(supplierPartyId) + " is not an approved supplier (" + statusText + ")"
         return answer(
             policy.unapprovedSupplierEnumId === "PusStop" ? "STOP" : "WARN",
             "SUPPLIER_UNAPPROVED",
-            partyName(supplierPartyId) + " is not an approved supplier (" + statusText + ")"
+            response ? message + "; " + response.message : message
         )
     }
+    if (response) return answer("WARN", "SUPPLIER_SCORE_WARNING", response.message)
     return answer("OK", null, null)
 }
 // check#SupplierUsable: the supplier check for a user who buys, approves or keeps profiles in the organization.

@@ -18,8 +18,9 @@ along with this software (see the LICENSE.md file). If not, see
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="create" noun="AccessCapability" allow-remote="false">
         <description>A capability over one record for its outside party: an issued customer invoice (Invoice, scope
-            InvoicePay; RECEIVABLE_EDIT) or a purchase order (Order, scopes BillUpload and OrderAcknowledgement;
-            PAYABLE_EDIT), in the record's organization. The token is answered once and only its digest kept; it expires
+            InvoicePay; RECEIVABLE_EDIT), a purchase order (Order, scopes BillUpload and OrderAcknowledgement;
+            PAYABLE_EDIT or PURCHASE_ORDER_EDIT) or a supplier's quote order while requested or proposed (Quote, scope
+            QuoteResponse; PURCHASE_ORDER_EDIT), in the record's organization. The token is answered once and only its digest kept; it expires
             after validDays (60 by default, at most 366) or at thruDate.</description>
         <in-parameters>
             <parameter name="recordType" required="true"/>
@@ -32,7 +33,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="capabilityId"/>
             <parameter name="token"/>
             <parameter name="url"><description>The record's page with the token on the organization's first published
-                site with its app (Billing's InvoicePay, Supplier's BillUpload); empty without one.</description></parameter>
+                site with its app (Billing's InvoicePay; Supplier's OrderAcknowledgement for a link with that scope, else
+                BillUpload; QuoteResponse); empty without one.</description></parameter>
             <parameter name="thruDate" type="Timestamp"/>
         </out-parameters>
         <actions>
@@ -119,7 +121,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="invite" noun="Contact" allow-remote="false">
         <description>Invite an outside organization's contact to an app's pages on the organization's published site (the
             site whose billing or supplier mount targets it): a PASS invitation for the email address, bound to the app and
-            the party. Needs RECEIVABLE_EDIT for billing and PAYABLE_EDIT for supplier in the organization. Redeeming it
+            the party. Needs RECEIVABLE_EDIT for billing, and PAYABLE_EDIT or PURCHASE_ORDER_EDIT (a buyer, from
+            Supplier360) for supplier, in the organization. Redeeming it
             makes the account's party a contact (PrtContact) of the party; it gives no user group.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>

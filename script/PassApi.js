@@ -3,7 +3,15 @@
    redirects, the route to its operation, then PassAuthority.js, which the host's gRPC transport calls too. */
 const routes = ec.resource.script('component://mr-mantle/script/PassRoutes.js')
 /* Operations a bearer link's token authorizes without a signed-in session; their services check the token. */
-const TOKEN_WRITES = ['startInvoicePayment', 'submitSupplierBill']
+const TOKEN_WRITES = [
+    'startInvoicePayment',
+    'submitSupplierBill',
+    // Purchasing P16: a quote's and a purchase order's link
+    'saveQuoteResponse',
+    'submitQuoteResponse',
+    'acknowledgePurchaseOrder',
+    'reportDropShipDelivery',
+]
 const fail = (kind, message) => {
     const e = new Error(message)
     e.moquiErrorKind = kind

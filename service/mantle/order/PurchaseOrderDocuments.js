@@ -339,9 +339,15 @@ function sendOf(po, p) {
         fromAddress: from,
         fromName
     }
+    // P16: the order's link for this revision (OrderAcknowledgement, with BillUpload beside it), when the organization has a
+    // Supplier site (SupplierPortal.js)
+    const linkUrl = ec.resource
+        .script("component://mr-mantle/service/mantle/order/SupplierPortal.js")
+        .orderLink(po.orderId, revision)
     const body = ec.resource.template("component://mr-mantle/template/order/PurchaseOrderEmail.html.fancy", {
         note: p.note || null,
-        printHtml: printed.printHtml
+        printHtml: printed.printHtml,
+        linkUrl
     })
     const already = sentTo(po.orderId, revision)
     const recipientResults = []
@@ -432,6 +438,8 @@ function recipientsOfOrganization(organizationPartyId) {
 const operations = {print, send}
 ;({
     issue,
+    // P17 review: the order as of a time, for the Supplier app's page of the revision last sent (SupplierPortal.js)
+    orderAt,
     // P9: the reminders' recipients (PurchaseRevisions.js), as the send's
     recipientsOf,
     execute: (op, parameters) => {

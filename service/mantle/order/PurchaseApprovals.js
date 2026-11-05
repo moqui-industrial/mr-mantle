@@ -20,7 +20,8 @@ const POLICY = "mantle.order.purchase.PurchaseApprovalPolicy",
     PARTY = "mantle.party.Party",
     PROFILE = "mantle.party.supplier.SupplierProfile",
     REQUEST = "mantle.request.Request"
-// each source's topic and policy source type; P10 adds requests (PurchaseRequests.js requestSource) and P12 awards
+// each source's topic and policy source type; P10 adds requests (PurchaseRequests.js requestSource); P12's award is the RFQ
+// (a Request) with its own topic and type (Awards.js awardSource: source.topic, PasAward)
 const topics = {[ORDER]: "PurchaseOrderApproval", [PARTY]: "PurchaseSupplierApproval", [REQUEST]: "PurchaseRequestApproval"}
 // P13: a purchase agreement is approved as a purchase order is, on its topic (§4; PurchaseAgreements.js)
 const AGREEMENT = "mantle.party.agreement.Agreement"
@@ -316,7 +317,7 @@ function messageOf(source, state) {
 function clearNotices(source) {
     let cleared = 0
     const messageIds = rows("moqui.security.user.NotificationMessage", {
-        topic: topics[source.sourceEntityName],
+        topic: source.topic || topics[source.sourceEntityName],
         recordEntityName: source.sourceEntityName,
         recordId: source.sourceId
     }).map(row => row.notificationMessageId)
@@ -354,7 +355,7 @@ function notify(source, state = null) {
         for (const batch of batches) {
             const notice = ec
                 .makeNotificationMessage()
-                .topic(topics[source.sourceEntityName])
+                .topic(source.topic || topics[source.sourceEntityName])
                 .message(message)
                 .record(source.sourceEntityName, source.sourceId)
                 .actorUserId(ec.user.userId)
@@ -872,6 +873,15 @@ function decideSource(p, decision) {
         return call("mantle.order.PurchaseServices.decide#SupplierApproval", {
             organizationPartyId: message.organizationPartyId,
             supplierPartyId: p.recordId,
+            sourceRevision: message.sourceRevision ?? null,
+            decision,
+            reason: text(p.reason)
+        })
+    // P12: an award of an RFQ's quotes (PurchaseAwardApproval, its message naming the award) at the revision in the message
+    if (p.recordEntityName === REQUEST && message.awardKey)
+        return call("mantle.order.SourcingServices.decide#AwardApproval", {
+            requestId: p.recordId,
+            awardKey: message.awardKey,
             sourceRevision: message.sourceRevision ?? null,
             decision,
             reason: text(p.reason)

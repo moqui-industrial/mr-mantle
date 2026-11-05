@@ -1,3 +1,5 @@
 # The regression budget in seconds of feature time (docs/Build-Test.md, "The regression budget"), set from
 # the measured ./moq test-all of Nov 4, 2026 (on 4 workers). Raise it only with the user's agreement.
-server = 300
+# Nov 4, 2026: raised by Purchasing's measured share (the user's agreement, impl-purchasing): its seventeen
+# regression specs' feature time in the final ./moq test-apps, 32.5 s, rounded up.
+server = 335

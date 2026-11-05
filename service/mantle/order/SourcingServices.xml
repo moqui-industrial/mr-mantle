@@ -283,4 +283,13 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('publish', context))</script>
         </actions>
     </service>
+    <!-- P12: the comparison and award of supplier quotes (impl-purchasing P12): SourcingAwardServices.xml, included by name -->
+    <service-include verb="compare" noun="SupplierQuotes" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="preview" noun="Award" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="commit" noun="Award" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="commit" noun="AwardGroup" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="decide" noun="AwardApproval" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="record" noun="AwardDecision" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="close" noun="QuoteRequest" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
+    <service-include verb="store" noun="SupplierQuoteFreight" location="component://mr-mantle/service/mantle/order/SourcingAwardServices.xml"/>
 </services>
