@@ -199,7 +199,8 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ===== the scan (CS-JOBS) ===== -->
     <service verb="scan" noun="CaseSla" authenticate="anonymous-all" allow-remote="false">
         <description>The warning and breach scan (the scan_CaseSla ServiceJob): a bounded batch (limit, 200) of running clocks
-            past their warning or due time not yet recorded, and paused ones, oldest due first; each in its own transaction
+            past their warning or due time not yet recorded, oldest due first, then in the rest of the batch the paused ones
+            past their policy's longest pause not yet recorded; each in its own transaction
             (mark#CaseSlaEpisode): its breach or warning recorded once per episode and told on SupportCaseSlaBreach or
             SupportCaseSlaWarning, a pause past the policy's longest recorded. A clock that fails is logged with its case and
             named in failedList, and the rest go on.</description>

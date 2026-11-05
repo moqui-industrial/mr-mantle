@@ -1130,14 +1130,36 @@ function scan(p) {
         ],
         "and"
     )
-    const paused = cf.makeCondition("stateEnumId", "equals", PAUSED)
     const list = Array.from(
         find(EPISODE)
-            .condition(cf.makeCondition([due, warn, paused], "or"))
+            .condition(cf.makeCondition([due, warn], "or"))
             .orderBy("dueDate")
             .limit(limit)
             .list()
     )
+    // then, in the rest of the batch, the paused clocks whose policy has a longest pause, paused at least that long by the
+    // wall clock and not yet recorded for this pause (every paused clock would otherwise take the batch on each run)
+    if (list.length < limit) {
+        const policies = new Map()
+        const longest = id => {
+            if (!policies.has(id)) policies.set(id, Number(one(POLICY, {serviceLevelPolicyId: id})?.maxPauseMinutes) || 0)
+            return policies.get(id)
+        }
+        const nowValue = nowMs()
+        for (const episode of Array.from(
+            find(EPISODE, {stateEnumId: PAUSED})
+                .condition("pausedDate", "is-not-null", null)
+                .orderBy("pausedDate")
+                .limit(10000)
+                .list()
+        )) {
+            if (list.length >= limit) break
+            const max = episode.serviceLevelPolicyId ? longest(episode.serviceLevelPolicyId) : 0
+            if (!max || nowValue - msOf(episode.pausedDate) < max * minuteMs) continue
+            if (one(EVENT, {eventKey: "pauselimit:" + episode.caseSlaEpisodeId + ":" + msOf(episode.pausedDate)})) continue
+            list.push(episode)
+        }
+    }
     const failed = []
     let marked = 0
     for (const episode of list) {
