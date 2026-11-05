@@ -3062,6 +3062,12 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
 
+            // Customer Service P15 (F60): a reply on a case to the case's customer side carries the case's Support link
+            // (SupportNotices.js addCaseLink: only a draft to the customer's side, never throws)
+            for (const record of checked) {
+                if (record.recordEntityName === 'mantle.request.Request')
+                    ec.resource.script('component://mr-mantle/service/mantle/request/SupportNotices.js').addCaseLink(emailMessageId, record.recordId)
+            }
             const out = ec.service.sync().name('org.moqui.impl.EmailClientServices.send#Draft').parameters({emailMessageId: emailMessageId,
                 scheduledSendDate: scheduleAt, holdSeconds: holdSeconds}).call()
             if (ec.message.hasError()) return

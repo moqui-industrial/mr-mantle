@@ -570,4 +570,27 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/CustomerReturns.js').execute('getReturnLabel', input)"/>
         </actions>
     </service>
+    <service verb="send" noun="ReturnDecisionNotice" authenticate="anonymous-all" allow-remote="false">
+        <description>The customer told of a return decision (decision: authorized, exceptionApproved or exceptionRefused) by mail
+            from the organization (MANTLE_RETURN_DECISION_EMAIL) with the return's CustomerReturn link (a ReturnRma capability on
+            its first published site with the Support app; none, and logged, without one); never the decision's reason. Only
+            where Customer Service is set up for the organization (a service policy) and for a return the customer sees.
+            authorize#Return and decide#ReturnException queue it for their commit (impl-customer-service P15, F60;
+            SupportNotices.js); a failure is logged, never thrown.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+            <parameter name="decision" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sent" type="Boolean"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportNotices.js').sendReturnDecision(context)"/>
+            <set field="sent" from="!!out.sent"/>
+            <set field="emailMessageId" from="out.emailMessageId"/>
+            <set field="reason" from="out.reason"/>
+        </actions>
+    </service>
 </services>

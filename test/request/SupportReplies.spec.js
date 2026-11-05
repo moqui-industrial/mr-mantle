@@ -125,6 +125,35 @@ const filed = (requestId, emailMessageId) => {
     return found
 }
 
+// a published site of the organization with the Support app (P15), made or removed
+function supportSite(on) {
+    const siteId = prefix + "_SITE"
+    if (!on) {
+        for (const entity of ["mantle.public.PublicSiteApp", "mantle.public.PublicSiteHost", "mantle.public.PublicSite"])
+            find(entity, {siteId}).deleteAll()
+        return
+    }
+    call("create#mantle.public.PublicSite", {
+        siteId,
+        name: "Reply spec site",
+        state: "published",
+        registrationMode: "invitation",
+        locale: "en",
+        timeZone: "UTC",
+        policyRevision: 1,
+        generation: 1
+    })
+    call("create#mantle.public.PublicSiteHost", {hostname: "srp.example.test", siteId, canonical: "Y"})
+    call("create#mantle.public.PublicSiteApp", {
+        siteId,
+        appMountId: "support",
+        app: "support",
+        pathPrefix: "/support",
+        enabled: "Y",
+        targetId: org
+    })
+}
+
 spec({
     setupSpec() {
         login("john.doe")
@@ -283,12 +312,19 @@ feature("the apply runs the actions and sends the reply on the case's thread, fi
     when() {
         capture.clear()
         const before = revision(state.caseA)
-        const applied = run(state.agent, S + "apply#SavedReply", {
-            requestId: state.caseA,
-            emailTextBlockId: state.teamReply,
-            caseRevision: before,
-            operationKey: prefix + "-apply"
-        })
+        // P15 (F60): with a published site with the Support app the reply to the case's contact carries the case's link
+        supportSite(true)
+        let applied
+        try {
+            applied = run(state.agent, S + "apply#SavedReply", {
+                requestId: state.caseA,
+                emailTextBlockId: state.teamReply,
+                caseRevision: before,
+                operationKey: prefix + "-apply"
+            })
+        } finally {
+            supportSite(false)
+        }
         const message = messageOf(applied.emailMessageId)
         const retry = run(state.agent, S + "apply#SavedReply", {
             requestId: state.caseA,
@@ -320,6 +356,8 @@ feature("the apply runs the actions and sends the reply on the case's thread, fi
         r.retry.emailMessageId == r.applied.emailMessageId
         r.sent.length == 1
         r.sent[0].subject.includes(state.caseA)
+        r.message.body.includes("https://srp.example.test/support/CustomerCase?token=")
+        rows("mantle.party.ExternalAccessCapability", {recordType: "Request", recordId: state.caseA}).length == 1
         r.request.statusId == "ReqWaitingCustomer"
         r.tags.includes("RtgFollowUp")
         r.filed == 1
@@ -368,6 +406,8 @@ feature("a failed delivery keeps its failed state and is retried by its message 
         r.retried.result.retried == true
         r.retried.emailMessageId == r.failed.emailMessageId
         r.message.statusId == "ES_SENT"
+        // no Support site now: the reply goes without the link (logged)
+        !String(r.message.body).includes("CustomerCase?token=")
         r.sent == 1
         r.drafts == 1
     }

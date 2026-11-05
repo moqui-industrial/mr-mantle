@@ -47,6 +47,10 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Return label" enumId="RtcntReturnLabel" enumTypeId="ReturnContentType"
                     sequenceNum="6"/>
             <moqui.basic.Enumeration description="Withdrawn by the customer" enumId="RrWithdrawn" enumTypeId="RequestResolution"/>
+            <!-- a return decision's notice to the customer (SupportNotices.js): its subject and body made by the service -->
+            <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RETURN_DECISION_EMAIL" description="Return decision notice"
+                    emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+                    subject="${subject}"/>
         </seed-data>
     </entity>
     <extend-entity entity-name="ExternalAccessContact" package="mantle.party">

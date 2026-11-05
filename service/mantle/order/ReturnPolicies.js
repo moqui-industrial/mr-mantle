@@ -991,6 +991,10 @@ function notifyDecision(header, decisionText) {
         return 0
     }
 }
+// Customer Service P15 (F60): a decision's notice to the customer, queued for the commit (SupportNotices.js: only where Customer
+// Service is set up for the organization, never the decision's reason).
+const customerNotice = (returnId, decision) =>
+    ec.resource.script("component://mr-mantle/service/mantle/request/SupportNotices.js").queueReturnDecision(returnId, decision)
 // An exception asked for at the return's current revision: the request recorded, the approvers told (ReturnExceptionApproval,
 // its message naming the revision). A failure to notify is logged and the request stays.
 function requestExceptionCore(returnId, reason) {
@@ -1075,6 +1079,7 @@ function decide(p, fromTopic = false) {
         header,
         decision === "approve" ? "Exception approved: " + exceptionText : "Exception refused: " + text(p.reason)
     )
+    customerNotice(header.returnId, decision === "approve" ? "exceptionApproved" : "exceptionRefused")
     return {
         returnId: header.returnId,
         decision,
@@ -1217,6 +1222,8 @@ function authorize(p) {
         ec.logger.error("RMA of return " + header.returnId + " was not stored: " + error.message)
     }
     notifyDecision(header, "Authorized until " + lib.dateText(stamp(core.expireMs)))
+    // P15 (F60): the customer told, with the return's Support link, once this commits
+    customerNotice(header.returnId, "authorized")
     const shipmentId = rows("mantle.shipment.ShipmentItemSource", {returnId: header.returnId})[0]?.shipmentId || null
     const result = {
         resultCode: "AUTHORIZED",
