@@ -2302,12 +2302,13 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true
-                // a support case in a restricted queue (impl-customer-service P2, the Privacy queue): its team only
+                // a support case in a restricted queue (impl-customer-service P2, the Privacy queue), or a request held for
+                // review there (P6): its team only
                 const restricted = request.requestCategoryId ? Array.from(ec.entity.find('mantle.request.support.ServiceQueue')
                         .condition('requestCategoryId', request.requestCategoryId).condition('visibilityEnumId', 'SqvRestricted')
                         .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).condition(current())
                         .disableAuthz().list())[0] : null
-                if (restricted && ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', request.requestId).disableAuthz().count() > 0)
+                if (restricted)
                     return !!s.userPartyId && !!restricted.responsibleTeamPartyId && ec.entity.find('mantle.party.PartyRelationship')
                             .condition({fromPartyId: s.userPartyId, toPartyId: restricted.responsibleTeamPartyId, relationshipTypeEnumId: 'PrtServiceTeam'})
                             .condition(current()).disableAuthz().count() > 0
@@ -2325,8 +2326,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const facility = request.facilityId ? ec.entity.find('mantle.facility.Facility')
                         .condition('facilityId', request.facilityId).disableAuthz().one() : null
                 if (facility?.ownerPartyId && s.orgIds.includes(facility.ownerPartyId)) return true
-                // IronStone Projects: one with no project, of a type the user's organization triages in Projects (its ProjIntake)
+                // IronStone Projects: one with no project, of a type the user's organization triages in Projects (its ProjIntake);
+                // not one in a service queue (a case or a request held for review there is Customer Service's: P6)
                 if (request.rootWorkEffortId || !request.requestTypeEnumId) return false
+                if (request.requestCategoryId && ec.entity.find('mantle.request.support.ServiceQueue').condition('requestCategoryId', request.requestCategoryId)
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).condition(current()).disableAuthz().count() > 0) return false
                 for (const setting of ec.entity.find('mantle.party.PartySetting').condition('partyId', 'in', s.orgIds)
                         .condition('partySettingTypeId', 'ProjIntake').disableAuthz().list()) {
                     const triaged = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings')

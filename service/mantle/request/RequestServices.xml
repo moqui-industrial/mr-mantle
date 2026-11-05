@@ -1419,7 +1419,9 @@ along with this software (see the LICENSE.md file). If not, see
                     if (settings.triagePartyId) partyIds.add(settings.triagePartyId)
                     else for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', request.rootWorkEffortId)
                             .condition('roleTypeId', 'in', ['ProjectManager', 'Manager']).conditionDate('fromDate', 'thruDate', null).list()) partyIds.add(row.partyId)
-                } else {
+                } else if (!(request.requestCategoryId && ec.entity.find('mantle.request.support.ServiceQueue').condition('requestCategoryId', request.requestCategoryId)
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).conditionDate('fromDate', 'thruDate', ec.user.nowTimestamp).count() > 0)) {
+                    // a request in a service queue (a case, or one held for review: Customer Service P6) is the queue's, never Projects' triage
                     for (const row of ec.entity.find('mantle.party.PartySetting').condition('partySettingTypeId', 'ProjIntake').list()) {
                         const settings = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings').parameters({organizationPartyId: row.partyId}).call()?.settings || {}
                         if (settings.triagePartyId && Array.from(settings.triagedTypes || []).includes(request.requestTypeEnumId)) partyIds.add(settings.triagePartyId)
