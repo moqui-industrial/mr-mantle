@@ -386,9 +386,11 @@ function assignCase(p) {
         return {outcome: null, assigneePartyId: facts.assigneePartyId, reason: "Already assigned"}
     const queueRules = rulesOf(facts.organizationPartyId, facts.requestCategoryId)
     if (!queueRules.length) return {outcome: null, assigneePartyId: facts.assigneePartyId, reason: "No rule"}
-    // lock every cursor of the queue's rules in order, so the evaluation reads the turn it will move
+    // lock every cursor of the queue's rules, in the order of their ids (the same for every intake, whatever the rules'
+    // order), so the evaluation reads the turn it will move
     const cursors = new Map()
-    for (const rule of queueRules) cursors.set(rule.assignmentRuleId, lockedCursor(rule))
+    for (const rule of queueRules.slice().sort((a, b) => String(rootOf(a)).localeCompare(String(rootOf(b)))))
+        cursors.set(rule.assignmentRuleId, lockedCursor(rule))
     const result = evaluate(facts)
     // the case as the rule sees it (no user scope: a rule run after an intake's commit has no user)
     const parties = cases().partiesOf(p.requestId)
