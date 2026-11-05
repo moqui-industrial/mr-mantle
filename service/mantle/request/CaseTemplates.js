@@ -659,6 +659,8 @@ function saveTemplate(p) {
 // current one ended, so a case keeps the row it was opened under.
 function useForQueue(form, requestCategoryId, use) {
     const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
+    // P13: a feedback form (templateOf takes it for its edits) is never a queue's case template
+    if (form.purposeEnumId !== PURPOSE) denied("TEMPLATE_UNAVAILABLE", "Template " + form.formId + " is not a case template")
     const queue = cases.queueOf(requestCategoryId)
     if (!queue || queue.organizationPartyId !== form.ownerPartyId)
         denied("QUEUE_UNAVAILABLE", "Choose a service queue of the template's organization")

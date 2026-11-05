@@ -5,7 +5,7 @@
 // nothing; the send job sending it once with its link, and a rerun sending nothing; the Feedback page's read (the form, the
 // customer's label, never the case) and a forged token's NotFound; a submit refused without its rating, then a rating of 2 with
 // a comment kept as one response, a repeat answering the first, the low score's follow-up assigned to the team's manager and
-// told, never naming the comment; the follow-up recorded by the manager and refused an agent of another team; the framework's
+// told, never naming the comment; a feedback form refused as a queue's case template; the follow-up recorded by the manager and refused an agent of another team; the framework's
 // update#FormResponse and delete#FormResponse refused on the invited response and unchanged for a response with no
 // invitation. Standalone: spec-local organizations, customer, team, queue, site, groups and users, artifact authorization
 // disabled (the rules are the services' own checks). Run: ./moq test mr-mantle --spec CaseFeedback
@@ -225,6 +225,8 @@ feature("a feedback form is made and published by the administrator, and the pol
             followUpTeamPartyId: state.team
         })
         state.policyId = policy.feedbackPolicyId
+        // a feedback form is edited by the case template rules but is never a queue's case template
+        refused.asQueueTemplate = code(run(state.admin, S + "save#CaseTemplate", {formId, requestCategoryId: state.queue}))
         const form = run(state.admin, F + "get#FeedbackForm", {formId}).form
         return {created, refused, published, policy, form}
     },
@@ -234,6 +236,7 @@ feature("a feedback form is made and published by the administrator, and the pol
         refused.otherOrganization == "RECORD_UNAVAILABLE"
         refused.unpublished == "FORM_NOT_PUBLISHED"
         refused.noRating == "FORM_INVALID"
+        refused.asQueueTemplate == "TEMPLATE_UNAVAILABLE"
         published.publishedFieldNames.includes("rating")
         !policy.error
         form.rating.fieldName == "rating"
