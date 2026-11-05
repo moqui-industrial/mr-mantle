@@ -25,11 +25,15 @@ const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
 const state = {}
 const dayMs = 86400000
 const nowMs = () => Number(ec.user.nowTimestamp.getTime ? ec.user.nowTimestamp.getTime() : Date.now())
-const dayText = millis => ec.l10n.format(new Date(millis), "yyyy-MM-dd")
+// the organization's time zone (its working-hours calendar's), far from the user's so a day in the wrong zone shows
+const zone = "Pacific/Kiritimati"
+const time = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
+const dayText = millis => ec.l10n.format(new Date(millis), "yyyy-MM-dd", null, zone)
+// the day a number of calendar months after a time's day in the zone (the month's last day when it is shorter)
 const plusMonths = (millis, months) => {
-    const date = new Date(millis)
-    date.setUTCMonth(date.getUTCMonth() + months)
-    return date.getTime()
+    const [y, m, d] = dayText(millis).split("-").map(Number)
+    const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate()
+    return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10)
 }
 
 // a call as a user: its result with its error text ("" when it succeeds), in its own transaction
@@ -80,10 +84,12 @@ function user(kind, permissions, organizationPartyId = org) {
     call("create#moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: since})
     return id
 }
-// a serial of a product sold by the organization to a customer and shipped some days ago (its AssetIssuance)
-function soldSerial(key, productId, customerPartyId, daysAgo) {
+// a serial of a product sold by the organization (or another vendor) to a customer and shipped some days ago (its
+// AssetIssuance), or at a given time; a serial number of an earlier asset is that serial sold again
+function soldSerial(key, productId, customerPartyId, daysAgo, options = {}) {
     const assetId = prefix + "_ASSET_" + key,
-        orderId = prefix + "_SO_" + key
+        orderId = prefix + "_SO_" + key,
+        serialNumber = options.serialNumber || prefix + "-" + key
     call("create#mantle.order.OrderHeader", {
         orderId,
         statusId: "OrderCompleted",
@@ -93,7 +99,7 @@ function soldSerial(key, productId, customerPartyId, daysAgo) {
     call("create#mantle.order.OrderPart", {
         orderId,
         orderPartSeqId: "01",
-        vendorPartyId: org,
+        vendorPartyId: options.vendorPartyId || org,
         customerPartyId,
         statusId: "OrderCompleted"
     })
@@ -110,12 +116,12 @@ function soldSerial(key, productId, customerPartyId, daysAgo) {
         assetId,
         productId,
         assetTypeEnumId: "AstTpInventory",
-        serialNumber: prefix + "-" + key,
+        serialNumber,
         statusId: "AstDelivered",
-        facilityId: facility,
-        ownerPartyId: customerPartyId
+        facilityId: options.facilityId === undefined ? facility : options.facilityId,
+        ownerPartyId: options.ownerPartyId || customerPartyId
     })
-    const shipMs = nowMs() - daysAgo * dayMs
+    const shipMs = options.shipMs ?? nowMs() - daysAgo * dayMs
     call("create#mantle.product.issuance.AssetIssuance", {
         assetId,
         orderId,
@@ -124,7 +130,7 @@ function soldSerial(key, productId, customerPartyId, daysAgo) {
         issuedDate: new Date(shipMs),
         quantity: 1
     })
-    return {assetId, orderId, serialNumber: prefix + "-" + key, shipMs}
+    return {assetId, orderId, serialNumber, shipMs}
 }
 const claim = (username, fields) =>
     run(
@@ -148,6 +154,12 @@ spec({
         party(customer, "Warranty Spec Customer", "Customer", org)
         party(otherCustomer, "Warranty Spec Other Customer", "Customer", org)
         call("create#mantle.facility.Facility", {facilityId: facility, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.work.calendar.Calendar", {
+            calendarId: prefix + "_HOURS",
+            ownerPartyId: org,
+            calendarKindEnumId: "CalkResource",
+            timeZone: zone
+        })
         state.admin = user("ADMIN", ["SUPPORT_POLICY_EDIT", "SUPPORT_CASE_EDIT"])
         state.agent = user("AGENT", ["SUPPORT_CASE_EDIT"])
         state.manager = user("MANAGER", ["SUPPORT_CASE_EDIT", "WARRANTY_APPROVE"])
@@ -202,10 +214,20 @@ spec({
             applTypeEnumId: "PfatStandard",
             fromDate: since
         })
-        state.recent = soldSerial("1001", product, customer, 10)
+        // shipped half an hour into a day in the organization's zone (the day before in the user's)
+        const shipDay = dayText(nowMs() - 10 * dayMs)
+        state.recent = soldSerial("1001", product, customer, 10, {shipMs: time.dayStartIn(shipDay, zone) + 30 * 60000})
         state.old = soldSerial("1002", product, customer, 730)
         state.plain = soldSerial("1003", plainProduct, customer, 30)
         state.theirs = soldSerial("9001", product, otherCustomer, 10)
+        // another organization's sale of a serial to the customer
+        state.otherSale = soldSerial("9002", product, customer, 10, {vendorPartyId: otherOrg, facilityId: null})
+        // a serial sold to the customer, returned (received as a new asset) and sold again to the other customer
+        state.resold = soldSerial("1004", product, customer, 200, {ownerPartyId: org})
+        state.resoldAgain = soldSerial("1005", product, otherCustomer, 5, {
+            serialNumber: state.resold.serialNumber,
+            ownerPartyId: org
+        })
     },
     setup() {
         ec.artifactExecution.disableAuthz()
@@ -242,6 +264,9 @@ feature(
             })?.templateFormId
             const refused = {
                 theirSerial: code(claim(state.agent, {requestId: made.requestId, assetId: state.theirs.assetId})),
+                otherOrganizationSerial: code(claim(state.agent, {requestId: made.requestId, assetId: state.otherSale.assetId})),
+                resoldSerial: code(claim(state.agent, {requestId: made.requestId, serialNumber: state.resold.serialNumber})),
+                resoldAsset: code(claim(state.agent, {requestId: made.requestId, assetId: state.resold.assetId})),
                 otherProduct: code(
                     claim(state.agent, {requestId: made.requestId, assetId: state.recent.assetId, productId: plainProduct})
                 ),
@@ -270,6 +295,13 @@ feature(
             })
             const after = coverage(state.agent, plainClaim)
             const thermostatAfter = coverage(state.agent, made.requestId)
+            // the serial sold again is the other customer's, covered from its own sale on its own asset
+            const resoldClaim = claim(state.agent, {
+                customerPartyId: otherCustomer,
+                requestName: "Resold thermostat",
+                assetId: state.resold.assetId
+            })
+            const resold = coverage(state.agent, resoldClaim.requestId)
             const delivered = run(state.agent, W + "find#DeliveredItems", {customerPartyId: customer}).deliveredList || []
             const listed = run(state.agent, W + "find#WarrantyClaims", {customerPartyId: customer}).claimList || []
             return {
@@ -286,7 +318,8 @@ feature(
                 after,
                 thermostatAfter,
                 delivered,
-                listed
+                listed,
+                resold
             }
         },
         then({
@@ -303,7 +336,8 @@ feature(
             after,
             thermostatAfter,
             delivered,
-            listed
+            listed,
+            resold
         }) {
             made.error == ""
             profile.templateFormId == prefix + "_TPL"
@@ -318,10 +352,17 @@ feature(
             recent.covered == true
             recent.saleOrderId == state.recent.orderId
             recent.shipText == dayText(state.recent.shipMs)
-            recent.coverageEndText == dayText(plusMonths(state.recent.shipMs, 12))
+            recent.shipText != ec.l10n.format(new Date(state.recent.shipMs), "yyyy-MM-dd")
+            recent.coverageEndText == plusMonths(state.recent.shipMs, 12)
             recent.coverageEndSourceText.includes("plus 12 months of 12-month warranty")
             recent.termsSourceText.includes(prefix + "_WARRANTY_12")
             refused.theirSerial == "ASSET_UNAVAILABLE"
+            refused.otherOrganizationSerial == "ASSET_UNAVAILABLE"
+            refused.resoldSerial == "ASSET_UNAVAILABLE"
+            refused.resoldAsset == "ASSET_UNAVAILABLE"
+            resold.assetId == state.resoldAgain.assetId
+            resold.saleOrderId == state.resoldAgain.orderId
+            resold.covered == true
             refused.otherProduct == "ASSET_PRODUCT_MISMATCH"
             refused.otherOrganization == "RECORD_UNAVAILABLE"
             refused.reader == "PERMISSION_DENIED"
@@ -338,6 +379,7 @@ feature(
             delivered.some(row => row.assetId === state.recent.assetId && row.covered && row.claimRequestId === made.requestId)
             delivered.some(row => row.assetId === state.old.assetId && !row.covered)
             !delivered.some(row => row.assetId === state.theirs.assetId)
+            !delivered.some(row => row.assetId === state.resold.assetId || row.assetId === state.otherSale.assetId)
             listed.some(row => row.requestId === made.requestId && row.state === "assessment")
         }
     }
@@ -388,6 +430,12 @@ feature("an expired claim is rejected or approved as goodwill with its approver;
         // a change of evidence moves the revision: the goodwill no longer counts
         const changed = claim(state.agent, {requestId, faultText: "Display blank after a power cut"})
         const afterChange = run(state.agent, W + "get#WarrantyClaim", {requestId})
+        // a decision at the earlier revision is refused; one after the evidence changed (a serial still covered) sees it
+        const staleAfterChange = code(
+            decide(state.agent, requestId, {claimRevision: 1, decisionEnumId: "WdRejected", reason: "x"})
+        )
+        const switched = claim(state.agent, {requestId, assetId: state.recent.assetId})
+        const coveredNow = decide(state.agent, requestId, {decisionEnumId: "WdCovered"})
         // a chargeable repair: the estimate, then the consent before the repair
         const charged = decide(state.agent, requestId, {
             decisionEnumId: "WdRejected",
@@ -407,6 +455,9 @@ feature("an expired claim is rejected or approved as goodwill with its approver;
             decisions,
             changed,
             afterChange,
+            staleAfterChange,
+            switched,
+            coveredNow,
             charged,
             noConsent
         }
@@ -422,12 +473,15 @@ feature("an expired claim is rejected or approved as goodwill with its approver;
         decisions,
         changed,
         afterChange,
+        staleAfterChange,
+        switched,
+        coveredNow,
         charged,
         noConsent
     }) {
         found.basisEnumId == "WcbProductWarranty"
         found.covered == false
-        found.coverageEndText == dayText(plusMonths(state.old.shipMs, 12))
+        found.coverageEndText == plusMonths(state.old.shipMs, 12)
         refused.noRevision == "REVISION_REQUIRED"
         refused.stale == "STALE_REVISION"
         refused.covered == "NOT_COVERED"
@@ -447,6 +501,9 @@ feature("an expired claim is rejected or approved as goodwill with its approver;
         changed.claimRevision == 2
         afterChange.currentDecision == null
         afterChange.claim.state == "assessment"
+        staleAfterChange == "STALE_REVISION"
+        switched.claimRevision == 3
+        coveredNow.error == ""
         charged.error == ""
         noConsent == "CONSENT_REQUIRED"
     }

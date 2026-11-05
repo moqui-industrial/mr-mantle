@@ -15,6 +15,7 @@
 // writes with artifact authorization off. Refusals carry reason codes (EntityLib.denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
+const time = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
 const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
@@ -61,7 +62,12 @@ const hasAny = permissions => permissions.some(has)
 const now = () => ec.user.nowTimestamp
 const nowMs = () => Number(ms(ec.user.nowTimestamp))
 const stamp = millis => (millis == null ? null : new Date(Number(millis)))
-const dayText = millis => (millis == null ? "" : ec.l10n.format(new Date(Number(millis)), "yyyy-MM-dd"))
+// a day (yyyy-MM-dd) in a time zone (none: the user's)
+const dayText = (millis, zone) => (millis == null ? "" : time.dayIn(millis, zone || null))
+// The organization's time zone: its working-hours calendar's (BusinessTime.scheduleOf), else the user's. A warranty's dates
+// are its days: the ship day, and the end day the term after it.
+const zoneOf = organizationPartyId =>
+    organizationPartyId ? time.scheduleOf({partyId: organizationPartyId}).timeZone || null : null
 const partyName = partyId => (partyId ? lib.partyNames([partyId])[partyId] || partyId : "")
 const enumText = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.description || enumId : "")
 const statusText = statusId => (statusId ? one("moqui.basic.StatusItem", {statusId})?.description || statusId : "")
@@ -81,14 +87,23 @@ function requireRead() {
 function requirePermission(permission) {
     if (!has(permission)) denied("PERMISSION_DENIED", permission + " is required")
 }
-// a time a term after another: whole days or calendar months (kept on the same day of the month, in UTC)
-function addTerm(startMs, quantity, uomId) {
+// The end of a term from a time, in the organization's time zone: the start of the day the term after the start's day (whole
+// days, or calendar months kept on the same day, the month's last when it is shorter), so the term covers whole days.
+function addTerm(startMs, quantity, uomId, zone) {
     const unit = termUnits[uomId]
     if (startMs == null || !unit || !(quantity > 0)) return null
-    const date = new Date(Number(startMs))
-    if (unit[0] === "day") return Number(startMs) + quantity * unit[1] * 86400000
-    date.setUTCMonth(date.getUTCMonth() + Math.round(quantity * unit[1]))
-    return date.getTime()
+    const [y, m, d] = time
+        .dayIn(startMs, zone || null)
+        .split("-")
+        .map(Number)
+    const steps = Math.round(quantity * unit[1])
+    let end
+    if (unit[0] === "day") end = new Date(Date.UTC(y, m - 1, d + steps))
+    else {
+        const lastDay = new Date(Date.UTC(y, m - 1 + steps + 1, 0)).getUTCDate()
+        end = new Date(Date.UTC(y, m - 1 + steps, Math.min(d, lastDay)))
+    }
+    return time.dayStartIn(end.toISOString().slice(0, 10), zone || null)
 }
 const termText = (quantity, uomId) =>
     quantity > 0 && uomId
@@ -164,10 +179,17 @@ function salePartOf(orderId, orderItemSeqId) {
 }
 // The sale of a serial, a lot or an order's product, traced through AssetIssuance: the latest issuance to a sales order (of
 // the organization, to the customer, when given), with its order, line, shipment, customer and ship date (the issue date: a
-// sales order's stock is issued when it ships). Null when none is found.
+// sales order's stock is issued when it ships). Null when none is found. A serial is one unit: its latest sale of the
+// organization, over every asset of its product with that serial number (a return is received as a new asset), is its
+// holder's, so a serial returned and sold again to another customer is no longer the first customer's.
 function traceSale(facts) {
     let issuances = []
-    if (facts.assetId) issuances = rows(ISSUANCE, {assetId: facts.assetId})
+    const asset = facts.assetId ? one(ASSET, {assetId: facts.assetId}) : null
+    const serial = !!asset?.serialNumber
+    if (serial) {
+        const assetIds = rows(ASSET, {serialNumber: asset.serialNumber, productId: asset.productId}).map(row => row.assetId)
+        issuances = Array.from(find(ISSUANCE).condition("assetId", "in", assetIds.slice(0, 500)).list())
+    } else if (facts.assetId) issuances = rows(ISSUANCE, {assetId: facts.assetId})
     else if (facts.lotId) {
         const assetIds = rows(ASSET, {lotId: facts.lotId})
             .filter(row => !facts.productId || row.productId === facts.productId)
@@ -179,7 +201,10 @@ function traceSale(facts) {
         const sale = salePartOf(issuance.orderId, issuance.orderItemSeqId)
         if (!sale) continue
         if (facts.organizationPartyId && sale.part.vendorPartyId !== facts.organizationPartyId) continue
-        if (facts.customerPartyId && sale.part.customerPartyId !== facts.customerPartyId) continue
+        if (facts.customerPartyId && sale.part.customerPartyId !== facts.customerPartyId) {
+            if (serial) return null
+            continue
+        }
         return {
             issuance,
             assetId: issuance.assetId || null,
@@ -247,6 +272,8 @@ const agreementLabel = agreement =>
 // agreement first, then the product's warranty at sale, else none (goodwill only). Each step is in the trace.
 function coverageOf(facts) {
     const asOfMs = facts.asOfMs ?? nowMs()
+    const zone = zoneOf(facts.organizationPartyId)
+    const day = millis => dayText(millis, zone)
     const asset = facts.assetId ? one(ASSET, {assetId: facts.assetId}) : null
     const sale = traceSale({
         assetId: facts.assetId,
@@ -260,7 +287,7 @@ function coverageOf(facts) {
     const trace = []
     const result = {
         asOfDate: stamp(asOfMs),
-        asOfText: dayText(asOfMs),
+        asOfText: day(asOfMs),
         productId,
         productText: productText(productId),
         assetId: asset?.assetId || null,
@@ -271,7 +298,7 @@ function coverageOf(facts) {
         saleOrderItemSeqId: sale?.orderItemSeqId || null,
         shipmentId: sale?.shipmentId || null,
         shipDate: sale ? stamp(sale.shipMs) : null,
-        shipText: sale ? dayText(sale.shipMs) : "",
+        shipText: sale ? day(sale.shipMs) : "",
         customerPartyId: sale?.customerPartyId || facts.customerPartyId || null,
         agreementId: null,
         agreementText: "",
@@ -296,9 +323,9 @@ function coverageOf(facts) {
             termText: inEffect.term.termText || "Warranty coverage",
             termsSourceText: agreementLabel(inEffect.agreement) + ", its warranty term",
             coverageStartDate: Number.isFinite(inEffect.fromMs) ? stamp(inEffect.fromMs) : null,
-            coverageStartText: Number.isFinite(inEffect.fromMs) ? dayText(inEffect.fromMs) : "",
+            coverageStartText: Number.isFinite(inEffect.fromMs) ? day(inEffect.fromMs) : "",
             coverageEndDate: stamp(inEffect.thruMs),
-            coverageEndText: inEffect.thruMs == null ? "While the agreement is in effect" : dayText(inEffect.thruMs),
+            coverageEndText: inEffect.thruMs == null ? "While the agreement is in effect" : day(inEffect.thruMs),
             coverageEndSourceText:
                 inEffect.thruMs == null
                     ? agreementLabel(inEffect.agreement) + " has no end"
@@ -311,9 +338,7 @@ function coverageOf(facts) {
             step: "agreement",
             text:
                 agreementLabel(terms[0].agreement) +
-                (terms[0].thruMs != null && terms[0].thruMs <= asOfMs
-                    ? " ended " + dayText(terms[0].thruMs)
-                    : " is not in effect")
+                (terms[0].thruMs != null && terms[0].thruMs <= asOfMs ? " ended " + day(terms[0].thruMs) : " is not in effect")
         })
     else trace.push({step: "agreement", text: "No service agreement with a warranty term covers it"})
     // 2. the product's warranty at sale
@@ -323,7 +348,7 @@ function coverageOf(facts) {
             step: "sale",
             text:
                 "Shipped " +
-                dayText(sale.shipMs) +
+                day(sale.shipMs) +
                 " on order " +
                 sale.orderId +
                 (sale.shipmentId ? ", shipment " + sale.shipmentId : "") +
@@ -335,7 +360,7 @@ function coverageOf(facts) {
             step: "sale",
             text: asset || facts.lotId ? "No delivery of it to the customer was found" : "No serial, lot or order to trace"
         })
-    const warrantyEndMs = warranty ? addTerm(sale.shipMs, warranty.quantity, warranty.uomId) : null
+    const warrantyEndMs = warranty ? addTerm(sale.shipMs, warranty.quantity, warranty.uomId, zone) : null
     if (sale && warranty)
         trace.push({
             step: "term",
@@ -351,12 +376,12 @@ function coverageOf(facts) {
             termText: termText(warranty.quantity, warranty.uomId) + " from shipment",
             termsSourceText: "Product warranty " + warranty.description + " (" + warranty.productFeatureId + ")",
             coverageStartDate: stamp(sale.shipMs),
-            coverageStartText: dayText(sale.shipMs),
+            coverageStartText: day(sale.shipMs),
             coverageEndDate: stamp(warrantyEndMs),
-            coverageEndText: dayText(warrantyEndMs),
+            coverageEndText: day(warrantyEndMs),
             coverageEndSourceText:
                 "Shipped " +
-                dayText(sale.shipMs) +
+                day(sale.shipMs) +
                 " (order " +
                 sale.orderId +
                 ") plus " +
@@ -399,14 +424,17 @@ function assetOf(theCase, assetId) {
     const unavailable = () =>
         denied("ASSET_UNAVAILABLE", "Serial or asset " + (assetId || "") + " is not available on this claim")
     if (!asset) unavailable()
+    // its latest sale by the organization decides whose it is (a serial sold again is the later customer's, on the asset of
+    // that sale); without one, the facility's owner and the asset's owner (customer-owned equipment)
     const sale = traceSale({assetId: asset.assetId, organizationPartyId: theCase.organizationPartyId})
-    const facilityOwner = asset.facilityId ? one(FACILITY, {facilityId: asset.facilityId})?.ownerPartyId : null
-    const ours = facilityOwner === theCase.organizationPartyId || sale?.vendorPartyId === theCase.organizationPartyId
+    const current = sale?.assetId && sale.assetId !== asset.assetId ? one(ASSET, {assetId: sale.assetId}) || asset : asset
+    const facilityOwner = current.facilityId ? one(FACILITY, {facilityId: current.facilityId})?.ownerPartyId : null
+    const ours = sale ? sale.vendorPartyId === theCase.organizationPartyId : facilityOwner === theCase.organizationPartyId
     const theirs =
         !!theCase.customerPartyId &&
-        (asset.ownerPartyId === theCase.customerPartyId || sale?.customerPartyId === theCase.customerPartyId)
+        (sale ? sale.customerPartyId === theCase.customerPartyId : current.ownerPartyId === theCase.customerPartyId)
     if (!ours || !theirs) unavailable()
-    return {asset, sale}
+    return {asset: current, sale}
 }
 // A serial number of the customer's: the asset by its serial (and product, when given) that the claim's checks pass.
 function assetBySerial(theCase, serialNumber, productId) {
@@ -845,6 +873,7 @@ function updateWork(p) {
 // as it is. A failure is logged and never fails the update that finished the repair.
 function notifyFinished(p) {
     let sent = 0
+    ec.message.pushErrors()
     try {
         const maintenance = one(MAINTENANCE, {assetMaintenanceId: p.assetMaintenanceId})
         if (!maintenance) return {sentCount: 0}
@@ -879,6 +908,9 @@ function notifyFinished(p) {
         }
     } catch (error) {
         ec.logger.error("Warranty repair " + p.assetMaintenanceId + ": the finished notice was not sent: " + error.message)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
     }
     return {sentCount: sent}
 }
@@ -972,7 +1004,7 @@ function decisionRow(row, revision) {
         basisText: enumText(row.coverageBasisEnumId),
         termsText: row.termsText || "",
         termsSourceText: row.termsSourceText || "",
-        coverageEndText: row.coverageEndDate ? dayText(ms(row.coverageEndDate)) : "",
+        coverageEndText: row.coverageEndDate ? dayText(ms(row.coverageEndDate), zoneOf(row.organizationPartyId)) : "",
         coverageEndSourceText: row.coverageEndSourceText || "",
         overrideReason: row.overrideReason || "",
         reason: row.reason || "",
@@ -1188,7 +1220,9 @@ function findClaims(p) {
             productText: productText(evidence.productId),
             assetText: assetText(asset),
             orderId: evidence.orderId,
-            coverageEndText: current?.coverageEndDate ? dayText(ms(current.coverageEndDate)) : found?.coverageEndText || "",
+            coverageEndText: current?.coverageEndDate
+                ? dayText(ms(current.coverageEndDate), zoneOf(organizationPartyId))
+                : found?.coverageEndText || "",
             coverageText: found ? (found.covered ? "Covered" : "Not covered") + " · " + found.basisText : "",
             decisionText: current ? enumText(current.decisionEnumId) : "",
             approverName: current?.approvedByUserId
@@ -1250,10 +1284,18 @@ function deliveredItems(p) {
               ).map(row => [row.assetId, row])
             : []
     )
+    // the customer's own open claim on it (another customer's claim on the serial is not theirs to see)
     const claimsOf = assetId =>
         rows(RECORD, {recordEntityName: ASSET, recordId: assetId})
             .map(row => one(REQUEST, {requestId: row.requestId}))
-            .filter(request => request?.requestTypeEnumId === claimType && !closedStatuses.includes(request.statusId))
+            .filter(
+                request =>
+                    request?.requestTypeEnumId === claimType &&
+                    !closedStatuses.includes(request.statusId) &&
+                    rows(REQUEST_PARTY, {requestId: request.requestId, roleTypeId: "Customer"}).some(
+                        row => row.partyId === p.customerPartyId && lib.active(row)
+                    )
+            )
     const seen = new Set()
     const deliveredList = []
     for (const issuance of issuances) {
@@ -1267,6 +1309,8 @@ function deliveredItems(p) {
         } catch (error) {
             ec.logger.warn("Delivered item " + asset.assetId + ": coverage not read: " + error.message)
         }
+        // a serial returned and sold again to another customer is no longer this customer's
+        if (found && asset.serialNumber && !found.saleOrderId) continue
         const claim = claimsOf(asset.assetId)[0] || null
         deliveredList.push({
             assetId: asset.assetId,
