@@ -1316,6 +1316,12 @@ General Order Placement and eCommerce Usage
             <if condition="holdTypeEnumId != 'OhtCredit' &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
                     .holdAllowed(orderId, orderPartSeqId, holdTypeEnumId, holdType.enumCode)">
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
+            <!-- Warehouse's lock order (F294, Packing.js lockOrders): the order parts (the one held, else all), then the
+                header, so a hold never deadlocks against a pack or reopen of the order -->
+            <entity-find entity-name="mantle.order.OrderPart" list="lockedParts" for-update="true" disable-authz="true">
+                <econdition field-name="orderId"/>
+                <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
+                <order-by field-name="orderPartSeqId"/></entity-find>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"
                     disable-authz="true"/>
             <if condition="orderHeader == null">
@@ -1389,6 +1395,12 @@ General Order Placement and eCommerce Usage
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
             <set field="orderId" from="reason.orderId"/>
             <set field="orderPartSeqId" from="reason.orderPartSeqId || null"/>
+            <!-- Warehouse's lock order (F294, Packing.js lockOrders): the order parts (the reason's, else all), then the
+                header, then the reason -->
+            <entity-find entity-name="mantle.order.OrderPart" list="lockedParts" for-update="true" disable-authz="true">
+                <econdition field-name="orderId"/>
+                <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
+                <order-by field-name="orderPartSeqId"/></entity-find>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"
                     disable-authz="true"/>
             <entity-find-one entity-name="mantle.order.OrderHoldReason" value-field="reason" for-update="true"

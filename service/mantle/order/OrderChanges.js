@@ -99,8 +99,9 @@ const amountRead = () => hasAny(amountPermissions)
 // ===== the order =====
 // Warehouse's one lock order (F294) is the shipment, then the order parts and header: a pick locks its shipment and never
 // the order, and a pack or reopen locks the shipment before the order. So the order's lock is taken after its shipments,
-// in id order: a pick, pack or reopen of the order then either commits before the checks (which see it: STOCK_CHANGED) or
-// waits for the change, and apply's own reopen never waits on a shipment while holding the order.
+// in id order, and its parts (as hold#Order and release#OrderHold take them): a pick, pack or reopen of the order then
+// either commits before the checks (which see it: STOCK_CHANGED) or waits for the change, and apply's own reopen and hold
+// never wait on a shipment or a part while holding the order.
 function lockShipmentsOf(orderId) {
     const shipmentIds = [
         ...new Set(
@@ -110,6 +111,7 @@ function lockShipmentsOf(orderId) {
         )
     ].sort()
     for (const shipmentId of shipmentIds) find(SHIPMENT, {shipmentId}).forUpdate(true).one()
+    find(PART, {orderId}).orderBy("orderPartSeqId").forUpdate(true).list()
 }
 // A sales order: every part sold by an internal organization to an outside party. Scoped, one of the user's organizations
 // sells it; a missing order, a purchase order and another organization's are refused alike (RECORD_UNAVAILABLE).
