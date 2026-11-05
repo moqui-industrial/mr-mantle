@@ -371,7 +371,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="['ReturnCancelled', 'ReturnCompleted', 'ReturnManResp'].includes(returnHeader.statusId)">
                 <return error="true" message="Cannot add items to return in status ${returnHeader.status?.description}"/></if>
 
-            <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem"/>
+            <!-- the order line locked (impl-customer-service P9 review), so two returns added at once cannot together exceed what
+                is returnable; every caller (Warehouse's NewReturn, ReturnPolicyServices.save#ReturnItem) takes it -->
+            <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem" for-update="true"/>
             <if condition="orderItem == null"><return error="true" message="Could not find Order Item ${orderId}:${orderItemSeqId}"/></if>
 
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" in-map="context" out-map="context"/>
