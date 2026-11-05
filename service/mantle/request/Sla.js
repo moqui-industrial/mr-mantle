@@ -463,13 +463,15 @@ function recordMessage(p) {
     const event = one(COMM, {communicationEventId: p.communicationEventId})
     if (!event || ["CeCancelled", "CeBounced"].includes(event.statusId)) return {}
     if (notResponses.includes(event.communicationEventTypeId)) return {}
-    if (
+    // an acknowledgement or another automatic message (an autoresponder's), and a call logged as internal (P6), are no
+    // response and no customer reply; nor is a logged call that did not reach the customer
+    const purpose = purposeEnumId =>
         one("mantle.party.communication.CommunicationEventPurpose", {
             communicationEventId: event.communicationEventId,
-            purposeEnumId: "CpAcknowledgement"
+            purposeEnumId
         })
-    )
-        return {}
+    if (purpose("CpAcknowledgement") || purpose("CpServiceInternal")) return {}
+    if (event.communicationEventTypeId === "Phone" && ["CcoNoAnswer", "CcoVoicemail"].includes(event.reasonEnumId)) return {}
     const mail = event.emailMessageId ? one("moqui.basic.email.EmailMessage", {emailMessageId: event.emailMessageId}) : null
     if (staffSide(event.fromPartyId)) {
         // a mail counts once it is sent (filed from ES_SENT, file#SentEmail); one waiting or failed does not

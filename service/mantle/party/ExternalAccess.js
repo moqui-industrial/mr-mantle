@@ -58,6 +58,41 @@ const records = {
             if (!order || !quoteStatuses.includes(order.statusId)) return null
             return purchasePart(recordId)
         }
+    },
+    // a service queue's intake token (Customer Service P6, F10, F61): the queue's public form (the Support app's
+    // NewCustomerCase, P15) takes it; a queue has no outside party, so the record kind is party-less and only a token reaches
+    // it, never a signed-in contact
+    RequestCategory: {
+        permissions: ["SUPPORT_POLICY_EDIT"],
+        scopes: ["CaseIntake"],
+        page: {app: "support", path: "/NewCustomerCase?token="},
+        partyless: true,
+        resolve(recordId) {
+            const category = one("mantle.request.RequestCategory", {requestCategoryId: recordId})
+            if (!category || !internal(category.ownerPartyId)) return null
+            const queue = Array.from(
+                find("mantle.request.support.ServiceQueue", {requestCategoryId: recordId})
+                    .condition(ec.entity.conditionFactory.makeCondition("fromDate", "is-not-null", null))
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .list()
+            )[0]
+            return queue ? {organizationPartyId: category.ownerPartyId, partyId: null} : null
+        }
+    },
+    // a support case, read by its customer's contacts (Customer Service P6 registers it; the Support app's CustomerCase
+    // reads it, P15): a case (a CaseProfile) of an internal organization (its OrgInternal party) for its customer
+    Request: {
+        permissions: ["SUPPORT_CASE_EDIT"],
+        scopes: ["CaseView"],
+        page: {app: "support", path: "/CustomerCase?token="},
+        resolve(recordId) {
+            if (!recordId || !one("mantle.request.support.CaseProfile", {requestId: recordId})) return null
+            const parties = rows("mantle.request.RequestParty", {requestId: recordId}).filter(row => lib.entityLib.active(row))
+            const organizationPartyId = parties.find(row => row.roleTypeId === "OrgInternal")?.partyId
+            const partyId = parties.find(row => row.roleTypeId === "Customer")?.partyId
+            if (!internal(organizationPartyId) || !partyId || internal(partyId)) return null
+            return {organizationPartyId, partyId}
+        }
     }
 }
 // The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
@@ -187,9 +222,11 @@ function check(p) {
             ...record
         }
     }
-    // a contact needs the organization the page serves, and a grant for this record type's app there
+    // a contact needs the organization the page serves, and a grant for this record type's app there; a party-less kind (a
+    // queue's intake) is reached only by its token
     const record = recordOf(p.recordType, p.recordId)
     if (
+        kind.partyless ||
         !record ||
         !p.organizationPartyId ||
         record.organizationPartyId !== p.organizationPartyId ||

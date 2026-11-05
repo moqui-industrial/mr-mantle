@@ -658,10 +658,29 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="create" noun="IntakeToken">
         <description>Turns on a project's public request form, or rotates its link: a new random token (WstIntakeToken), so the
-            old link stops working. The form is at /r/&lt;token&gt; (IronStone's token route r).</description>
-        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
-        <out-parameters><parameter name="token"/></out-parameters>
+            old link stops working. The form is at /r/&lt;token&gt; (IronStone's token route r). For a service queue
+            (requestCategoryId; Customer Service P6, F10): the token is an ExternalAccessCapability on the queue's
+            RequestCategory (scope CaseIntake), its earlier tokens revoked, lasting the web form route's token days (else 60);
+            needs SUPPORT_POLICY_EDIT in the queue's organization; url is the Support app's form when the organization has a
+            site with it.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="requestCategoryId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="token"/>
+            <parameter name="url"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </out-parameters>
         <actions><script><![CDATA[
+            if (requestCategoryId) {
+                const made = ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').execute('createToken', {requestCategoryId})
+                token = made.token
+                url = made.url
+                thruDate = made.thruDate
+                return
+            }
+            if (!workEffortId) { ec.message.addError('Choose the project or queue of the form'); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(`Project ${workEffortId} not found`); return }
             token = ec.user.randomString(32).replace(/[^A-Za-z0-9_-]/g, 'x')
@@ -670,9 +689,19 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="remove" noun="IntakeToken">
-        <description>Turns off a project's public request form: its link stops working.</description>
-        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <description>Turns off a project's public request form: its link stops working. For a service queue
+            (requestCategoryId; Customer Service P6) revokes the queue's intake tokens, with SUPPORT_POLICY_EDIT in its
+            organization.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="requestCategoryId"/>
+        </in-parameters>
         <actions>
+            <if condition="requestCategoryId">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').execute('removeToken', {requestCategoryId})</script>
+                <return/>
+            </if>
+            <if condition="!workEffortId"><return error="true" message="Choose the project or queue of the form"/></if>
             <service-call name="mantle.work.ProjectServices.store#ProjectSetting" in-map="{workEffortId:workEffortId, settingTypeEnumId:'WstIntakeToken', settingValue:null}"/>
         </actions>
     </service>
@@ -744,6 +773,10 @@ along with this software (see the LICENSE.md file). If not, see
             Reporter and Customer); the request is Submitted in the project on channel Web (ScWeb), its files are RequestContent,
             the triage assignee is its Assignee. The confirmation goes from the project's intake account when it has one and
             the form sends one. The answer is only the request's id.
+            A service queue's intake token (Customer Service P6, F10; the Support app's form, P15) files into the queue: the
+            same checks, the types the queue offers, its web form route's hourly limit (else 30) and the address's (5) per
+            queue; a customer the organization serves (found by the address) makes a case, anyone else is held for review
+            (Channels.js formRequest), and a held one is not confirmed.
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
@@ -770,13 +803,17 @@ along with this software (see the LICENSE.md file). If not, see
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
                 const project = ec.service.sync().name('mantle.request.RequestServices.find#IntakeProject').parameters({token: token}).call()?.project
-                if (project == null) { fail('This form is not available'); return }
+                // a service queue's token (Customer Service P6): an ExternalAccessCapability on its RequestCategory
+                const channels = project == null ? ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js') : null
+                const queueForm = channels ? channels.formTarget(token) : null
+                if (project == null && queueForm == null) { fail('This form is not available'); return }
+                const formName = project ? project.workEffortId : 'queue ' + queueForm.requestCategoryId
                 if (website != null && String(website).trim() !== '') {
-                    ec.logger.warn(`Public request form of ${project.workEffortId}: the honeypot was filled, nothing made`)
+                    ec.logger.warn(`Public request form of ${formName}: the honeypot was filled, nothing made`)
                     received = true
                     return
                 }
-                const settings = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings').parameters({workEffortId: project.workEffortId})
+                const settings = queueForm ? queueForm.settings : ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings').parameters({workEffortId: project.workEffortId})
                         .call()?.settings || {}
                 const form = settings.publicForm || {}
                 const clean = (value, max) => String(value == null ? '' : value).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().substring(0, max)
@@ -809,17 +846,55 @@ along with this software (see the LICENSE.md file). If not, see
                 const nowValue = ec.user.nowTimestamp
                 const nowMillis = typeof nowValue === 'number' ? nowValue : (nowValue instanceof Date ? nowValue.getTime() : Number(String(nowValue)))
                 const hourAgo = new Date(nowMillis - 3600000)
-                const recent = ec.entity.find('mantle.request.Request').condition('rootWorkEffortId', project.workEffortId).condition('salesChannelEnumId', 'ScWeb')
+                const recent = ec.entity.find('mantle.request.Request').condition(queueForm ? 'requestCategoryId' : 'rootWorkEffortId',
+                        queueForm ? queueForm.requestCategoryId : project.workEffortId).condition('salesChannelEnumId', 'ScWeb')
                         .condition('requestDate', 'greater-equals', hourAgo).count()
-                if (recent >= 30) {
-                    ec.logger.warn(`Public request form of ${project.workEffortId}: ${recent} requests in the last hour, refused for now`)
+                if (recent >= (queueForm ? queueForm.hourlyLimit : 30)) {
+                    ec.logger.warn(`Public request form of ${formName}: ${recent} requests in the last hour, refused for now`)
                     fail('This form takes no more requests just now; try again in an hour'); return
                 }
                 const addressIds = Array.from(ec.entity.find('mantle.party.contact.ContactMech').condition('infoString', email).selectField('contactMechId').list())
                         .map((row) => row.contactMechId)
-                if (addressIds.length && ec.entity.find('mantle.request.Request').condition('emailContactMechId', 'in', addressIds)
-                        .condition('salesChannelEnumId', 'ScWeb').condition('requestDate', 'greater-equals', hourAgo).count() >= 5) {
+                let addressFind = ec.entity.find('mantle.request.Request').condition('emailContactMechId', 'in', addressIds)
+                        .condition('salesChannelEnumId', 'ScWeb').condition('requestDate', 'greater-equals', hourAgo)
+                if (queueForm) addressFind = addressFind.condition('requestCategoryId', queueForm.requestCategoryId)
+                if (addressIds.length && addressFind.count() >= 5) {
                     fail('You sent several requests just now; try again in an hour'); return
+                }
+                if (queueForm) {
+                    const made = channels.formRequest({target: queueForm, firstName: first, lastName: last, emailAddress: email, requestName: subject,
+                        description: text, requestTypeEnumId: typeId})
+                    if (ec.message.hasError()) {
+                        ec.logger.warn(`Public request form of ${formName}: not made: ${ec.message.getErrorsString()}`)
+                        ec.message.clearErrors()
+                        fail('Your request could not be sent; check the fields and try again')
+                        return
+                    }
+                    received = true
+                    requestId = made.requestId || null
+                    if (!requestId) return
+                    if (org) ec.service.sync().name('create#mantle.request.RequestNote').parameters({requestId: requestId, noteDate: ec.user.nowTimestamp,
+                        noteText: ec.resource.expand('Organization (as the requester gave it): ${org}', '', {org})}).call()
+                    files.forEach((file, index) => {
+                        try {
+                            const content = ec.service.sync().name('create#mantle.request.RequestContent').parameters({requestId: requestId,
+                                contentTypeEnumId: 'RqCntUserDefined', description: fileNames[index], contentDate: ec.user.nowTimestamp}).call()
+                            const location = `dbresource://mantle/content/request/${requestId}/content_${content.requestContentId}/${fileNames[index]}`
+                            const stream = file.getInputStream()
+                            try { ec.resource.getLocationReference(location).putStream(stream) } finally { stream.close() }
+                            ec.service.sync().name('update#mantle.request.RequestContent').parameters({requestContentId: content.requestContentId,
+                                contentLocation: location}).call()
+                        } catch (err) {
+                            ec.logger.error(`Public request form: file ${fileNames[index]} of request ${requestId} not kept: ${err && err.message ? err.message : err}`)
+                        }
+                    })
+                    // a new case is confirmed from the route's account with its text; a held request is not
+                    const route = queueForm.route
+                    if (made.isCase && route?.acknowledge === 'Y' && route.emailAccountId) ec.service.sync().name('mantle.request.RequestServices.send#IntakeConfirmation')
+                            .parameters({requestId: requestId, emailAccountId: route.emailAccountId, emailTextBlockId: route.ackTextBlockId || null,
+                                emailIdentityId: route.replyEmailIdentityId || null}).call()
+                    ec.message.clearErrors()
+                    return
                 }
                 const contact = {statusId: 'ReqSubmitted', priority: 5, requestTypeEnumId: typeId, requestName: subject, description: text,
                     firstName: first, lastName: last, emailAddress: email, filedByPartyId: null, customerPartyId: null}
@@ -828,7 +903,7 @@ along with this software (see the LICENSE.md file). If not, see
                     : ec.service.sync().name('mantle.request.RequestServices.create#ContactRequest').parameters(contact).call()
                 if (ec.message.hasError() || !created?.requestId) {
                     const said = ec.message.getErrorsString()
-                    ec.logger.warn(`Public request form of ${project.workEffortId}: not made: ${said}`)
+                    ec.logger.warn(`Public request form of ${formName}: not made: ${said}`)
                     ec.message.clearErrors()
                     fail(form.captcha === 'Y' && /captcha/i.test(said) ? 'Confirm you are not a robot, then send it again' : 'Your request could not be sent; check the fields and try again')
                     return
@@ -869,6 +944,11 @@ along with this software (see the LICENSE.md file). If not, see
             - A message already on a request is left (running the rules again makes nothing twice).
             - A reply in a request's thread (its In-Reply-To or References name a message on the request, or its thread's
               first message is on it) joins that request's conversation and makes nothing new.
+            - A value that names a service queue (Customer Service P6, F10, F11; Channels.js mailIntake) files into the queue
+              by its route: references, then a verified case token; an automatic message ignored or attached only, never
+              acknowledged; a customer's message a case timed by its received date and acknowledged once; staff, another
+              party or an unknown sender held for review (or ignored by the unknown-sender rule). A rule whose account is
+              not the route's and whose owner does not work for the queue's organization files as for no project.
             - Else a Submitted request on channel email (ScEmail): the project the action's value names, else the project
               whose plus tag the message was sent to (an address with +tag), else none (a request to triage with no project).
               A project is taken only when its intake account (WstIntakeAccount) is the message's account, or the rule's owner
@@ -901,6 +981,20 @@ along with this software (see the LICENSE.md file). If not, see
                 if (message == null) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
                 const already = Array.from(ec.entity.find('mantle.request.RequestEmailMessage').condition('emailMessageId', emailMessageId).list())[0]
                 if (already) { requestId = already.requestId; return }
+                // a service queue's mail (Customer Service P6)
+                const channels = ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js')
+                const queueId = channels.queueOfValue(value)
+                if (queueId) {
+                    const intake = channels.execute('mailIntake', {emailMessageId: emailMessageId, emailAccountId: emailAccountId || message.emailAccountId,
+                        ruleOwnerUserId: ruleOwnerUserId || null, requestCategoryId: queueId})
+                    if (intake.handled) {
+                        requestId = intake.requestId || null
+                        created = !!intake.created
+                        joined = !!intake.joined
+                        return
+                    }
+                    value = null
+                }
                 const thread = ec.service.sync().name('mantle.request.RequestServices.find#EmailRequest').parameters({emailMessageId: emailMessageId}).call()
                 if (thread?.requestId) {
                     requestId = thread.requestId
@@ -1138,10 +1232,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Internal: puts a received message on a request: RequestEmailMessage (with the sender's party), its
             CommunicationEvent (type Email, create#EmailCommunicationEvent) joined by RequestCommEvent so Chatter shows it,
             and its files (not the inline ones) copied as RequestContent. Each part on its own: one that fails is logged and
-            the others go on.</description>
+            the others go on. An automatic message (automatic true: an autoresponder's, Customer Service P6) has the purpose
+            CpAcknowledgement on its event before it is filed, so it is no reply to the case and no response.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="emailMessageId" required="true"/>
+            <parameter name="automatic" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters><parameter name="communicationEventId"/></out-parameters>
         <actions><script><![CDATA[
@@ -1166,6 +1262,10 @@ along with this software (see the LICENSE.md file). If not, see
                     const out = ec.service.sync().name('mantle.party.CommunicationServices.create#EmailCommunicationEvent').parameters({emailMessageId: emailMessageId,
                         contactOwnerUserIdList: []}).call()
                     communicationEventId = out?.communicationEventId || null
+                    if (automatic && communicationEventId && ec.entity.find('mantle.party.communication.CommunicationEventPurpose')
+                            .condition({communicationEventId: communicationEventId, purposeEnumId: 'CpAcknowledgement'}).count() === 0)
+                        ec.service.sync().name('create#mantle.party.communication.CommunicationEventPurpose').parameters({
+                            communicationEventId: communicationEventId, purposeEnumId: 'CpAcknowledgement'}).call()
                     if (communicationEventId && ec.entity.find('mantle.request.RequestCommEvent').condition('requestId', requestId)
                             .condition('communicationEventId', communicationEventId).count() === 0)
                         ec.service.sync().name('create#mantle.request.RequestCommEvent').parameters({requestId: requestId, communicationEventId: communicationEventId}).call()
@@ -1191,11 +1291,16 @@ along with this software (see the LICENSE.md file). If not, see
             reply adds to it. With parentEmailMessageId (the
             message that made it) it answers that message in its thread. The sent message is on the request
             (RequestEmailMessage), so a reply to it joins the request. Never fails: a send that does not go is logged and
-            waits in the account's Outbox.</description>
+            waits in the account's Outbox. A queue's route (Customer Service P6) gives its text (emailTextBlockId, a Comms text
+            block with ${requestId}, ${requestName} and ${queueName}) and the identity it goes from (emailIdentityId, one of
+            the account's); it is marked Auto-Submitted, and it is never filed on the request's conversation, so it is no
+            response (CpAcknowledgement on any event made for it).</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="emailAccountId" required="true"/>
             <parameter name="parentEmailMessageId"/>
+            <parameter name="emailTextBlockId"/>
+            <parameter name="emailIdentityId"/>
         </in-parameters>
         <out-parameters><parameter name="emailMessageId"/></out-parameters>
         <actions><script><![CDATA[
@@ -1209,18 +1314,27 @@ along with this software (see the LICENSE.md file). If not, see
                 const to = request.emailContactMechId ? ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechId', request.emailContactMechId).one()?.infoString : null
                 if (!to || !String(to).includes('@')) return
                 const identities = Array.from(ec.entity.find('moqui.basic.email.EmailIdentity').condition('emailAccountId', emailAccountId).orderBy('emailIdentityId').list())
-                const identity = identities.find((candidate) => candidate.isDefault === 'Y') || identities[0] || null
+                const identity = (emailIdentityId ? identities.find((candidate) => candidate.emailIdentityId === emailIdentityId) : null)
+                        || identities.find((candidate) => candidate.isDefault === 'Y') || identities[0] || null
                 const fromAddress = identity?.emailAddress || account.emailAddress
                 if (!fromAddress) return
                 const project = request.rootWorkEffortId ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', request.rootWorkEffortId).one() : null
                 const parent = parentEmailMessageId ? ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', parentEmailMessageId).one() : null
                 const L = (text) => ec.l10n.localize(text)
-                const vars = {requestId: requestId, requestName: request.requestName || '', projectName: project?.workEffortName || ''}
+                const queue = request.requestCategoryId ? ec.entity.find('mantle.request.RequestCategory').condition('requestCategoryId', request.requestCategoryId).one() : null
+                const vars = {requestId: requestId, requestName: request.requestName || '', projectName: project?.workEffortName || '',
+                    queueName: queue?.description || ''}
+                const block = emailTextBlockId ? ec.entity.find('moqui.basic.email.EmailTextBlock').condition('emailTextBlockId', emailTextBlockId).one() : null
                 const subject = parent ? (/^re:/i.test(parent.subject || '') ? parent.subject : 'Re: ' + (parent.subject || request.requestName || ''))
                         : ec.resource.expand('[Request ${requestId}] ${requestName}', '', vars)
                 const lines = [ec.resource.expand(project ? 'We received your request ${requestId} for ${projectName}: ${requestName}' : 'We received your request ${requestId}: ${requestName}', '', vars),
                     L('We will be in touch. To add to it, reply to this email.')]
                 const escape = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                // the route's text: the block's, its variables escaped
+                const escapedVars = Object.fromEntries(Object.entries(vars).map(([key, value]) => [key, escape(value)]))
+                const blockHtml = block?.bodyHtml ? ec.resource.expand(String(block.bodyHtml), '', escapedVars) : null
+                const blockText = blockHtml ? blockHtml.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, '')
+                        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim() : null
                 const drafts = Array.from(ec.entity.find('moqui.basic.email.EmailFolder').condition('emailAccountId', emailAccountId).condition('folderKindEnumId', 'EfkDrafts').list())[0] || null
                 const references = parent ? [].concat(String(parent.referencesHeader || '').split(/\s+/), parent.messageId ? [parent.messageId] : []).filter((id) => id) : []
                 const draft = ec.entity.makeValue('moqui.basic.email.EmailMessage')
@@ -1228,8 +1342,9 @@ along with this software (see the LICENSE.md file). If not, see
                 draft.setFields({statusId: 'ES_DRAFT', emailAccountId: emailAccountId, emailFolderId: drafts ? drafts.emailFolderId : null,
                     emailIdentityId: identity ? identity.emailIdentityId : null, emailServerId: account.emailServerId, fromAddress: fromAddress,
                     fromName: identity ? (identity.displayName ?? null) : (account.accountName ?? null), toAddresses: to, subject: subject, contentType: 'text/html',
-                    isRead: 'Y', messageDate: ec.user.nowTimestamp, body: lines.map((line) => '<p>' + escape(line) + '</p>').join(''), bodyText: lines.join('\n\n'),
-                    snippet: lines[0].substring(0, 137), parentEmailMessageId: parent ? parent.emailMessageId : null,
+                    isRead: 'Y', messageDate: ec.user.nowTimestamp, body: blockHtml || lines.map((line) => '<p>' + escape(line) + '</p>').join(''),
+                    bodyText: blockText || lines.join('\n\n'), snippet: (blockText || lines[0]).substring(0, 137),
+                    headersString: block || queue?.ownerPartyId ? 'Auto-Submitted: auto-replied' : null, parentEmailMessageId: parent ? parent.emailMessageId : null,
                     rootEmailMessageId: parent ? (parent.rootEmailMessageId || parent.emailMessageId) : null,
                     inReplyTo: parent?.messageId || null, referencesHeader: references.length ? references.join(' ') : null,
                     hasAttachment: 'N'}, true, null, null)
@@ -1304,7 +1419,9 @@ along with this software (see the LICENSE.md file). If not, see
                     if (settings.triagePartyId) partyIds.add(settings.triagePartyId)
                     else for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', request.rootWorkEffortId)
                             .condition('roleTypeId', 'in', ['ProjectManager', 'Manager']).conditionDate('fromDate', 'thruDate', null).list()) partyIds.add(row.partyId)
-                } else {
+                } else if (!(request.requestCategoryId && ec.entity.find('mantle.request.support.ServiceQueue').condition('requestCategoryId', request.requestCategoryId)
+                        .condition(ec.entity.conditionFactory.makeCondition('fromDate', 'is-not-null', null)).conditionDate('fromDate', 'thruDate', ec.user.nowTimestamp).count() > 0)) {
+                    // a request in a service queue (a case, or one held for review: Customer Service P6) is the queue's, never Projects' triage
                     for (const row of ec.entity.find('mantle.party.PartySetting').condition('partySettingTypeId', 'ProjIntake').list()) {
                         const settings = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings').parameters({organizationPartyId: row.partyId}).call()?.settings || {}
                         if (settings.triagePartyId && Array.from(settings.triagedTypes || []).includes(request.requestTypeEnumId)) partyIds.add(settings.triagePartyId)
