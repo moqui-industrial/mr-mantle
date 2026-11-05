@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Service knowledge (impl-customer-service P12, CS-KNOWLEDGE, §2 "What Mantle runs is Mantle's", F15, F59; Knowledge.js has
+    the rules): the knowledge sources, article suggestions, the published article and its public link, article feedback and
+    its review, a suggested edit, and an article drafted from a case. Each checks its permission (SUPPORT_POLICY_EDIT,
+    SUPPORT_CASE_EDIT, SUPPORT_KNOWLEDGE_EDIT) and the organization or case, and the wiki's own view and update rules as the
+    user; BOSS screens call these after ironstone.customerservice.AccessServices, and the Support app (P15) calls
+    find#ArticleSuggestions and get#PublishedArticle on its customer-visible surface. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="save" noun="ServiceKnowledgeSource">
+        <description>A knowledge source of an organization (design KnowledgeSources ServiceKnowledgeSources) from its date: a wiki
+            space the user may read (SPACE_UNAVAILABLE), or the part of it under pagePathPrefix; its audience (SkaInternal,
+            SkaCustomer, SkaPublic: AUDIENCE_INVALID; never internal in a space with a public address: INTERNAL_PUBLIC_SPACE), the language of its pages (LANGUAGE_REQUIRED), the queue
+            (QUEUE_UNAVAILABLE) or product category it is first for, its priority, whether it is suggested, its review team (a
+            team of the organization: TEAM_UNAVAILABLE) and the draft space for articles from cases. A save of an existing
+            source (serviceKnowledgeSourceId) or of the same space and path ends the row it replaces; with end, ends it. Wiki
+            spaces only, and a source never widens who may read a page. Needs SUPPORT_POLICY_EDIT and the
+            organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="serviceKnowledgeSourceId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="pagePathPrefix"/>
+            <parameter name="audienceEnumId"/>
+            <parameter name="localeLanguage"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="allowSuggestions"/>
+            <parameter name="reviewTeamPartyId"/>
+            <parameter name="draftWikiSpaceId"/>
+            <parameter name="draftParentPath"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="serviceKnowledgeSourceId"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="serviceKnowledgeSourceId" from="knowledge.execute('saveSource', context).serviceKnowledgeSourceId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ArticleSuggestions">
+        <description>The articles of an organization's knowledge sources that a subject matches (text, else the case's
+            subject), the requester's language first (localeLanguage, else the case's contact's or customer's user locale), then
+            the sources for the case's queue or the product category, the words matched and the source's priority. With
+            requestId the case must be of the user's organization (RECORD_UNAVAILABLE). On an agent's surface (the default)
+            the organization must be the user's, and a page is offered only when the wiki lets the user view it, drafts and
+            internal articles flagged; with customerVisible only published, unrestricted pages of customer and public sources,
+            never an internal article. No permission: it shows nothing the wiki does not.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestId"/>
+            <parameter name="text"/>
+            <parameter name="localeLanguage"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="customerVisible" type="Boolean" default="false"/>
+            <parameter name="limit" type="Integer" default="10"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="articleList" type="List"/>
+            <parameter name="requesterLanguage"/>
+            <parameter name="configured" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="out" from="knowledge.execute('suggestions', context)"/>
+            <set field="articleList" from="out.articleList"/>
+            <set field="requesterLanguage" from="out.requesterLanguage"/>
+            <set field="configured" from="!!out.configured"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PublishedArticle">
+        <description>A published article (F59) by the exact-published-version rule of the forum's site pages: the text of the
+            page's published version (get#PublishedWikiPageText with no version asked, its answer checked against the page's
+            published version), cleaned. On a customer-visible surface (the default, for the Support app) only a page of a
+            current customer or public source (of organizationPartyId when given), not restricted; for an agent
+            (customerVisible false) a page of the user's organizations' sources the wiki lets them view. A draft, an internal
+            article and a page in no source are unavailable alike (ARTICLE_UNAVAILABLE), whatever the address guessed.</description>
+        <in-parameters>
+            <parameter name="wikiPageId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="pagePath"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerVisible" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="article" type="Map"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="article" from="knowledge.execute('publishedArticle', context).article"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ArticlePublicLink">
+        <description>The published address of an article an agent sends a customer (Send to customer): a published, unrestricted
+            page of a customer or public source of the user's organizations, at its space's publicPageUrl (the Support app's
+            CustomerArticle once it is built), made absolute on this server when the space's is relative. Refuses a draft
+            (ARTICLE_NOT_PUBLISHED), an internal article or one in no source (ARTICLE_INTERNAL), a space with no public address
+            (NO_PUBLIC_URL), a page the user may not view and, with requestId, a case not of the user's organization.</description>
+        <in-parameters>
+            <parameter name="wikiPageId" required="true"/>
+            <parameter name="requestId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="url"/>
+            <parameter name="title"/>
+            <parameter name="versionName"/>
+        </out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="out" from="knowledge.execute('publicLink', context)"/>
+            <set field="url" from="out.url"/>
+            <set field="title" from="out.title"/>
+            <set field="versionName" from="out.versionName"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ArticleFeedback">
+        <description>An agent's report on an article read for a case: helpful or not (HELPFUL_REQUIRED) and a plain-text
+            comment (markup dropped), on the version given or the published one, for the organization of the article's source.
+            Needs SUPPORT_CASE_EDIT, with requestId a case of the user's organization, and a page of its sources the wiki lets
+            the user view (ARTICLE_UNAVAILABLE). The Support app's customer rating (P15) records the same record.</description>
+        <in-parameters>
+            <parameter name="wikiPageId" required="true"/>
+            <parameter name="versionName"/>
+            <parameter name="helpful"/>
+            <parameter name="comment" allow-html="safe"/>
+            <parameter name="requestId"/>
+        </in-parameters>
+        <out-parameters><parameter name="articleFeedbackId"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="articleFeedbackId" from="knowledge.execute('recordFeedback', context).articleFeedbackId"/>
+        </actions>
+    </service>
+    <service verb="review" noun="ArticleFeedback">
+        <description>The review of article feedback (design ArticleFeedback FeedbackReview): a decision for each feedback given
+            (AfdImprove makes one task per article for the assignee given or the source's review team, or links the task
+            given; AfdNoChange and AfdDismissed take none), each in its own transaction, so one of another organization
+            (Forbidden), one reviewed already (AlreadyReviewed) or one that fails is named in results and the others are
+            reviewed. The article is never changed. Needs SUPPORT_KNOWLEDGE_EDIT; with operationKey a retry answers the first
+            result.</description>
+        <in-parameters>
+            <parameter name="articleFeedbackIds" type="List" required="true"/>
+            <parameter name="decisionEnumId" default-value="AfdImprove"/>
+            <parameter name="reviewNote" allow-html="safe"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="workEffortId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="doneCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="workEffortIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="out" from="knowledge.execute('reviewFeedback', context)"/>
+            <set field="results" from="out.results"/>
+            <set field="doneCount" from="out.doneCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+            <set field="workEffortIds" from="out.workEffortIds"/>
+        </actions>
+    </service>
+    <service verb="make" noun="ArticleTask" allow-remote="false">
+        <description>Internal, for review#ArticleFeedback and suggest#ArticleEdit, which check the permission: a task on a page
+            (WikiPageWorkEffort) for an assignee (a review team), with the case it came from (RequestWorkEffort).</description>
+        <in-parameters>
+            <parameter name="wikiPageId" required="true"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueDate" type="Timestamp"/>
+            <parameter name="requestId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="workEffortId" from="knowledge.execute('makeTask', context).workEffortId"/>
+        </actions>
+    </service>
+    <service verb="suggest" noun="ArticleEdit">
+        <description>Suggest edit (F15) by an agent who may not edit the page: a task on the article for its source's review team
+            with what should change (NOTE_REQUIRED), linked to the case when given. An editor instead saves a draft version and
+            asks for its review (org.moqui.impl.WikiServices.request#WikiPageReview, Commons Knowledge's Request review). Needs
+            SUPPORT_CASE_EDIT and a page of the user's organizations' sources the wiki lets them view
+            (ARTICLE_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="wikiPageId" required="true"/>
+            <parameter name="note" allow-html="safe"/>
+            <parameter name="requestId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="workEffortId" from="knowledge.execute('suggestEdit', context).workEffortId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ArticleFromCase">
+        <description>A draft article from a case (design CaseToArticle ArticleDraft) in a draft space of the case's
+            organization's knowledge sources: the title and text given, or the text of the outward and customer messages chosen
+            (communicationEventIds; an internal note or message is refused: INTERNAL_MESSAGE), with the case's personal data
+            (its customer's and contact's names, email addresses, phone numbers and street addresses, the orders and returns
+            it is on, and anything shaped like an email address or phone number) replaced; a new page, unpublished, linked to
+            the case by WikiPageRequest, and left to Commons' review and publication. With preview, the redacted text and what
+            was taken out, nothing written. Needs SUPPORT_KNOWLEDGE_EDIT, the case of the user's organization
+            (RECORD_UNAVAILABLE) and a draft space the user may add pages to (SPACE_UNAVAILABLE); refuses a page already at
+            the path (PAGE_EXISTS).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="title"/>
+            <parameter name="body" allow-html="safe"/>
+            <parameter name="communicationEventIds" type="List"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="wikiPageId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="pagePath"/>
+            <parameter name="pageName"/>
+            <parameter name="text"/>
+            <parameter name="removedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="knowledge" from="ec.resource.script('component://mr-mantle/service/mantle/request/Knowledge.js')"/>
+            <set field="out" from="knowledge.execute('articleFromCase', context)"/>
+            <set field="wikiPageId" from="out.wikiPageId || null"/>
+            <set field="wikiSpaceId" from="out.wikiSpaceId || null"/>
+            <set field="pagePath" from="out.pagePath || null"/>
+            <set field="pageName" from="out.pageName || null"/>
+            <set field="text" from="out.text ?? null"/>
+            <set field="removedList" from="out.removedList || []"/>
+        </actions>
+    </service>
+</services>

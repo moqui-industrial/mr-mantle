@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Service knowledge (design-customer-service §3 CaseDetail Knowledge, §6 Knowledge, ArticleFeedback, CaseToArticle, §9
+    KnowledgeSources; impl-customer-service P12, CS-KNOWLEDGE, F15, F59): articles are Commons wiki pages, which keep their
+    own view and update rules (org.moqui.impl.WikiServices.get#WikiPageAccess); a ServiceKnowledgeSource says which spaces, or
+    parts of a space, an organization's service desk suggests and sends, to whom and in which language, so a source never
+    widens who may read a page. ArticleFeedback is a record of its own (a reader's report on one version of a page), reviewed
+    by a knowledge author, whose review makes or links a task and never changes the article. The rules are
+    mantle.request.KnowledgeServices (Knowledge.js). Nothing here acts until an organization has a source. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ServiceKnowledgeSource" package="mantle.request.support" cache="never">
+        <description>A wiki space, or the part of it under a page path, an organization's service desk draws articles from
+            (design KnowledgeSources), effective-dated with its key fields audit-logged: its audience (internal: agents only;
+            customer: signed-in customers; public: anyone), the language of its pages, the queue or product category it is
+            first for, its search priority, whether it is suggested at all, the team that reviews its feedback and suggested
+            edits, and where an article drafted from a case goes (draftWikiSpaceId, under draftParentPath). A page belongs to
+            the current source of its space with the longest matching pagePathPrefix. Saved by
+            mantle.request.KnowledgeServices.save#ServiceKnowledgeSource.</description>
+        <field name="serviceKnowledgeSourceId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="wikiSpaceId" type="id" enable-audit-log="true"/>
+        <field name="pagePathPrefix" type="text-medium" enable-audit-log="true"><description>The page path the source covers
+            (the page and the pages under it); empty for the whole space</description></field>
+        <field name="audienceEnumId" type="id" enable-audit-log="true"/>
+        <field name="localeLanguage" type="text-short" enable-audit-log="true"><description>The language of the source's
+            pages, a language code (en, es); suggestions in the requester's language come first</description></field>
+        <field name="requestCategoryId" type="id"><description>The queue whose cases it is suggested first for</description></field>
+        <field name="productCategoryId" type="id"><description>The product category it is suggested first for</description></field>
+        <field name="sequenceNum" type="number-integer"><description>The search priority, lowest first</description></field>
+        <field name="allowSuggestions" type="text-indicator" enable-audit-log="true"/>
+        <field name="reviewTeamPartyId" type="id" enable-audit-log="true"/>
+        <field name="draftWikiSpaceId" type="id" enable-audit-log="true"/>
+        <field name="draftParentPath" type="text-medium"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="moqui.resource.wiki.WikiSpace" short-alias="space"/>
+        <relationship type="one" title="ServiceKnowledgeAudience" related="moqui.basic.Enumeration" short-alias="audience">
+            <key-map field-name="audienceEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.RequestCategory" short-alias="category"/>
+        <relationship type="one-nofk" related="mantle.product.category.ProductCategory" short-alias="productCategory"/>
+        <relationship type="one-nofk" title="ReviewTeam" related="mantle.party.Party" short-alias="reviewTeam">
+            <key-map field-name="reviewTeamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Draft" related="moqui.resource.wiki.WikiSpace" short-alias="draftSpace">
+            <key-map field-name="draftWikiSpaceId" related="wikiSpaceId"/></relationship>
+        <index name="SVC_KNOW_SRC_ORG"><index-field name="organizationPartyId"/></index>
+        <index name="SVC_KNOW_SRC_SPACE"><index-field name="wikiSpaceId"/></index>
+        <seed-data>
+            <!-- who a source's articles are for: an internal one is never suggested or sent on a customer-visible surface -->
+            <moqui.basic.EnumerationType description="Service Knowledge Audience" enumTypeId="ServiceKnowledgeAudience"/>
+            <moqui.basic.Enumeration enumId="SkaInternal" description="Internal (agents only)" sequenceNum="1" enumTypeId="ServiceKnowledgeAudience"/>
+            <moqui.basic.Enumeration enumId="SkaCustomer" description="Customers" sequenceNum="2" enumTypeId="ServiceKnowledgeAudience"/>
+            <moqui.basic.Enumeration enumId="SkaPublic" description="Public" sequenceNum="3" enumTypeId="ServiceKnowledgeAudience"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="ArticleFeedback" package="mantle.request.support" cache="never">
+        <description>A reader's report on one version of an article (design ArticleFeedback): helpful or not, an optional
+            plain-text comment, the case it was read for, who gave it (an agent from a case, or a customer from the Support
+            app, P15) and the organization whose source the article is in; then its review: the decision, the note, who
+            reviewed it and when, and the task made or linked for an improvement. A record of its own, never changed by an
+            edit of the article. Recorded by record#ArticleFeedback, reviewed by review#ArticleFeedback.</description>
+        <field name="articleFeedbackId" type="id" is-pk="true"/>
+        <field name="wikiPageId" type="id"/>
+        <field name="versionName" type="text-short"><description>The version read (the published one when it was given)</description></field>
+        <field name="helpful" type="text-indicator"/>
+        <field name="comment" type="text-long"><description>Plain text, no markup kept</description></field>
+        <field name="requestId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="serviceKnowledgeSourceId" type="id"/>
+        <field name="sourceEnumId" type="id"/>
+        <field name="submittedByUserId" type="id"/>
+        <field name="submittedByPartyId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="decisionEnumId" type="id" enable-audit-log="true"/>
+        <field name="reviewNote" type="text-long"/>
+        <field name="reviewedByUserId" type="id"/>
+        <field name="reviewedDate" type="date-time"/>
+        <field name="workEffortId" type="id"><description>The task made or linked for the improvement</description></field>
+        <relationship type="one" related="moqui.resource.wiki.WikiPage" short-alias="page"/>
+        <relationship type="one-nofk" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.request.support.ServiceKnowledgeSource" short-alias="source"/>
+        <relationship type="one" title="ArticleFeedbackSource" related="moqui.basic.Enumeration" short-alias="feedbackSource">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ArticleFeedback" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" title="ArticleFeedbackDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort" short-alias="task"/>
+        <index name="ARTICLE_FB_PAGE"><index-field name="wikiPageId"/></index>
+        <index name="ARTICLE_FB_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="ArticleFeedback" description="Article Feedback"/>
+            <moqui.basic.StatusItem statusId="AfbSubmitted" statusTypeId="ArticleFeedback" sequenceNum="1" description="To review"/>
+            <moqui.basic.StatusItem statusId="AfbReviewed" statusTypeId="ArticleFeedback" sequenceNum="2" description="Reviewed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AfbSubmitted" toStatusId="AfbReviewed" transitionName="Review"/>
+            <moqui.basic.EnumerationType description="Article Feedback Source" enumTypeId="ArticleFeedbackSource"/>
+            <moqui.basic.Enumeration enumId="AfsAgent" description="An agent, from a case" sequenceNum="1" enumTypeId="ArticleFeedbackSource"/>
+            <moqui.basic.Enumeration enumId="AfsCustomer" description="A customer" sequenceNum="2" enumTypeId="ArticleFeedbackSource"/>
+            <moqui.basic.EnumerationType description="Article Feedback Decision" enumTypeId="ArticleFeedbackDecision"/>
+            <moqui.basic.Enumeration enumId="AfdImprove" description="Improve the article (a task)" sequenceNum="1" enumTypeId="ArticleFeedbackDecision"/>
+            <moqui.basic.Enumeration enumId="AfdNoChange" description="No change needed" sequenceNum="2" enumTypeId="ArticleFeedbackDecision"/>
+            <moqui.basic.Enumeration enumId="AfdDismissed" description="Not about the article" sequenceNum="3" enumTypeId="ArticleFeedbackDecision"/>
+        </seed-data>
+    </entity>
+</entities>
