@@ -192,6 +192,9 @@ function addEvent(fields) {
     return call("create#" + EVENT, Object.assign({eventDate: ec.user.nowTimestamp, userId: ec.user.userId || null}, fields))
         .caseSlaEventId
 }
+// The case's request locked FOR UPDATE before any of its clocks is written: the order update#Case, transition#Case and
+// merge#Cases lock in (the request, then its episodes), so a clock's writer and a case's change never wait on each other.
+const lockRequest = requestId => find(REQUEST, {requestId}).forUpdate(true).one()
 const episodesOf = requestId => Array.from(find(EPISODE, {requestId}).orderBy("clockEnumId").orderBy("sequenceNum").list())
 // A case's own clock in progress (a clock a merge carried onto it is an obligation beside it, P8)
 const openEpisode = (requestId, clockEnumId) =>
@@ -499,6 +502,7 @@ function recordMessage(p) {
     if (find(RELATION_ITEM, {toRequestId: requestId, communicationEventId: p.communicationEventId}).count() > 0) return {}
     const event = one(COMM, {communicationEventId: p.communicationEventId})
     if (!event || ["CeCancelled", "CeBounced"].includes(event.statusId)) return {}
+    lockRequest(requestId)
     if (notResponses.includes(event.communicationEventTypeId)) return {}
     // an acknowledgement or another automatic message (an autoresponder's), and a call logged as internal (P6), are no
     // response and no customer reply; nor is a logged call that did not reach the customer
@@ -679,6 +683,7 @@ function carryOnMerge(sourceRequestId, targetRequestId, caseRelationId) {
 function correct(p) {
     requirePermission("SUPPORT_CASE_MANAGE")
     const theCase = caseOf(p.requestId)
+    lockRequest(theCase.requestId)
     const episode = one(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId})
     if (!episode || episode.requestId !== theCase.requestId)
         denied("RECORD_UNAVAILABLE", "Clock " + (p.caseSlaEpisodeId || "") + " is not this case's")
@@ -1189,9 +1194,11 @@ function simulate(p) {
 // One episode of the scan, in its transaction: its warning or breach, once each, told to the case's assignee (else the
 // managers of the queue's team), and a pause past the policy's longest.
 function mark(p) {
+    const found = one(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId})
+    if (!found || !openStates.includes(found.stateEnumId)) return {}
+    const request = lockRequest(found.requestId)
     const episode = find(EPISODE, {caseSlaEpisodeId: p.caseSlaEpisodeId}).forUpdate(true).one()
     if (!episode || !openStates.includes(episode.stateEnumId)) return {}
-    const request = one(REQUEST, {requestId: episode.requestId})
     if (!request || !one(PROFILE, {requestId: episode.requestId}))
         throw new Error("its case " + episode.requestId + " is not a support case")
     const now = nowMs()
