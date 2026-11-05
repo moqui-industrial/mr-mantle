@@ -105,13 +105,17 @@ function agentSchedule(teamPartyId, partyId, participation) {
         participation?.calendarId || time.scheduleCalendarId(partyId) || time.scheduleCalendarId(teamPartyId) || null
     return calendarId ? time.scheduleOf({calendarId}) : null
 }
-// Whether a schedule has working time at the instant (none configured: around the clock).
+// Whether a schedule has working time at the instant. Hours not set (no working-hours series in effect or to come, as
+// get#WorkingHours reads them): around the clock. Set: the instant is in an occurrence, less holidays (an off week of a
+// two-weekly series, or hours that start later, are out of hours).
 function inHours(ctx, schedule, atMs) {
-    if (!schedule) return true
-    // over the week ahead, so a schedule with hours on other days is configured though it has none now
-    const span = time.calendarOf(ctx, schedule, atMs, atMs + 7 * time.dayMs)
-    if (!span.configured) return true
-    return time.intersect(span.work, [[atMs, atMs + time.minuteMs]]).length > 0
+    if (!schedule?.calendarId) return true
+    ctx.hoursSet = ctx.hoursSet || new Map()
+    if (!ctx.hoursSet.has(schedule.calendarId))
+        ctx.hoursSet.set(schedule.calendarId, time.workingHours({calendarId: schedule.calendarId}).configured)
+    if (!ctx.hoursSet.get(schedule.calendarId)) return true
+    const span = time.calendarOf(ctx, schedule, atMs, atMs + time.minuteMs)
+    return span.configured && time.intersect(span.work, [[atMs, atMs + time.minuteMs]]).length > 0
 }
 const openCaseCount = partyId =>
     find("mantle.request.support.CaseRequestParty", {partyId, roleTypeId: "Assignee"})

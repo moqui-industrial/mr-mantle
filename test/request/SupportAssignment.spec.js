@@ -411,7 +411,7 @@ feature("a move into another queue reassigns the case by that queue's rule and k
     }
 })
 
-feature("participation refusals; the team's user group follows its members", {
+feature("participation refusals; hours that start later are out of hours; the team's user group follows its members", {
     when() {
         const groupId = "SVT_" + state.team
         const members = () =>
@@ -437,6 +437,30 @@ feature("participation refusals; the team's user group follows its members", {
             participation: true,
             calendarId
         })
+        // hours that start in two weeks (Monday 23 November): on Monday 9 November agent 2 is out of hours, not around the clock
+        now("2026-11-09", "11:00")
+        const laterId = call("create#mantle.work.calendar.Calendar", {
+            calendarName: "Agent 2's later hours",
+            ownerPartyId: org,
+            calendarKindEnumId: "CalkResource",
+            timeZone: zone
+        }).calendarId
+        const laterHours = run(state.admin, "mantle.work.CalendarServices.store#WorkingHours", {
+            calendarId: laterId,
+            workDays: "1,2,3,4,5",
+            workStart: "09:00",
+            workEnd: "17:00",
+            timeZone: zone,
+            fromDate: new Date(chicago("2026-11-23", "00:00"))
+        })
+        assert(!laterHours.error, laterHours.error)
+        run(state.admin, S + "save#ServiceTeamMember", {
+            teamPartyId: state.team,
+            partyId: state.agent2,
+            participation: true,
+            calendarId: laterId
+        })
+        const later = run(state.admin, S + "preview#Assignment", {organizationPartyId: org, requestCategoryId: state.queue})
         const max = run(state.admin, S + "save#ServiceTeamMember", {
             teamPartyId: state.team,
             partyId: state.agent2,
@@ -452,6 +476,7 @@ feature("participation refusals; the team's user group follows its members", {
             substitute,
             calendar,
             max,
+            later: later.candidates?.find(row => row.partyId == state.agent2)?.reason,
             joined,
             left: members(),
             group: one("moqui.security.UserGroup", {userGroupId: groupId}),
@@ -466,6 +491,7 @@ feature("participation refusals; the team's user group follows its members", {
         code(r.substitute) == "SUBSTITUTE_UNAVAILABLE"
         code(r.calendar) == "CALENDAR_UNAVAILABLE"
         r.max.participationId != null
+        r.later == "OUTSIDE_HOURS"
         r.joined.includes(state.agent3)
         !r.left.includes(state.agent3)
         r.group.groupTypeEnumId == "UgtServiceTeam"
