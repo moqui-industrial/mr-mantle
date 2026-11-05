@@ -2905,43 +2905,51 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="userScope" from="posting.scope()"/>
             <set field="sh" from="picking.shipmentOf(userScope, shipmentId)"/>
-            <if condition="['ShipShipped', 'ShipDelivered'].includes(sh.shipment.statusId)">
-                <return error="true" message="SHIPMENT_SHIPPED: Shipment ${shipmentId} has shipped; change it with a return"/>
-            </if>
-            <if condition="!packing.packable.concat(['ShipPacked']).includes(sh.shipment.statusId)">
-                <return error="true" message="PACK_CLOSED: Shipment ${shipmentId} is ${sh.shipment.statusId}"/>
-            </if>
-            <set field="pkg" from="packing.packageOf(sh, shipmentPackageSeqId)"/>
-            <set field="plan" from="packing.reopenPlan(sh, pkg, context)"/>
-            <!-- the one lock order (F294): the shipment (above), the order parts and headers, then the invoices (the release),
-                then the lines and assets (the unpack) -->
-            <set field="ordered" from="packing.lockOrders(plan)"/>
-            <!-- the pack invoice: a finalized one keeps the package closed -->
-            <set field="invoices" from="packing.invoicesOf(shipmentId).filter(row =&gt; row.statusId != 'InvoiceCancelled')"/>
-            <set field="finalized" from="invoices.find(row =&gt; row.statusId != 'InvoiceInProcess')"/>
-            <if condition="finalized">
-                <return error="true" message="INVOICE_FINALIZED: Invoice ${finalized.invoiceId} of shipment ${shipmentId} is
-                        final, so the package stays closed; correct it with a credit memo"/>
-            </if>
+            <!-- the checks and the one lock order (F294): the shipment (above), the order parts and headers, then the
+                invoices (the release), then the lines and assets (the unpack) -->
+            <set field="checked" from="packing.reopenCheck(sh, context)"/>
             <set field="result" from="posting.settled(begun.op)"/>
             <if condition="result"><return/></if>
-            <set field="released" from="{invoiceIdList: [], cancelledInvoiceIdList: [], releasedItemCount: 0}"/>
-            <if condition="invoices.length">
-                <service-call name="mantle.account.InvoiceServices.release#ShipmentInvoiceLines" disable-authz="true"
-                        out-map="released" in-map="{shipmentId:shipmentId, reason:reason}"/>
-            </if>
-            <if condition="sh.shipment.statusId == 'ShipPacked'">
-                <service-call name="update#mantle.shipment.Shipment" disable-authz="true"
-                        in-map="{shipmentId:shipmentId, statusId:'ShipPicked'}"/>
-            </if>
-            <set field="unpacked" from="packing.unpack(sh, pkg, plan, ordered)"/>
-            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="reopened" disable-authz="true"/>
             <set field="result" from="posting.complete(begun.op, sh.facility.ownerPartyId, 'mantle.shipment.Shipment',
-                    shipmentId, {resultCode: 'REOPENED', shipmentId: shipmentId, shipmentPackageSeqId: shipmentPackageSeqId,
-                        unpacked: unpacked, releasedInvoiceIds: released.invoiceIdList || [],
-                        cancelledInvoiceIds: released.cancelledInvoiceIdList || [],
-                        releasedItemCount: released.releasedItemCount || 0, statusId: reopened.statusId,
-                        reason: String(reason).trim()})"/>
+                    shipmentId, packing.reopenWork(sh, checked, String(reason).trim()))"/>
+        </actions>
+    </service>
+    <service verb="reopen" noun="ShipmentPackageForChange" allow-remote="false">
+        <description>Internal to mantle.order.OrderChangeServices.apply#OrderChange (impl-customer-service P10): the work of
+            reopen#ShipmentPackage for an approved order change between pack and ship, which the order desk applies under
+            ORDER_CHANGE_APPLY without SHIPMENT_PACK. It checks no permission and no user facility: its caller has checked the
+            change and the order's organization, and names that organization, whose facility the shipment must leave from
+            (RECORD_UNAVAILABLE), as reopen#ShipmentPackage calls release#ShipmentInvoiceLines without RECEIVABLE_EDIT. It
+            keeps the reopen's state, confirmation and reason checks (CONFIRMATION_REQUIRED, REASON_REQUIRED,
+            SHIPMENT_SHIPPED, PACK_CLOSED, PACKAGE_UNAVAILABLE, NOTHING_TO_REOPEN, QUANTITY_INVALID, QUANTITY_EXCEEDS_PACKED,
+            ASSET_REQUIRED, INVOICE_FINALIZED) and writes no operation of its own: apply#OrderChange's operation key answers a
+            retry.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="shipmentId" required="true"/>
+            <parameter name="shipmentPackageSeqId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="assetId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="reason"/>
+            <parameter name="confirmed"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>As reopen#ShipmentPackage's, without the operation
+                fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="picking" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Picking.js')"/>
+            <set field="packing" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/Packing.js')"/>
+            <if condition="!picking.truthy(confirmed)">
+                <return error="true" message="CONFIRMATION_REQUIRED: Confirm the reopen; nothing changes until you do"/>
+            </if>
+            <if condition="!reason || !String(reason).trim()">
+                <return error="true" message="REASON_REQUIRED: Say why the package is reopened"/>
+            </if>
+            <set field="sh" from="picking.shipmentOf({organizationPartyIds: [organizationPartyId]}, shipmentId)"/>
+            <set field="checked" from="packing.reopenCheck(sh, context)"/>
+            <set field="result" from="packing.reopenWork(sh, checked, String(reason).trim())"/>
         </actions>
     </service>
     <!-- ===== shipping, labels and delivery (impl-warehouse P13; design-warehouse §10 Ship, PackageTracking; WH-LABEL) ===== -->

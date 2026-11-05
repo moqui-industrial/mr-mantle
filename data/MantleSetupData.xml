@@ -729,4 +729,15 @@ along with this software (see the LICENSE.md file). If not, see
         PDF stored once as an OrderContent of this type, which each resend attaches -->
     <moqui.basic.Enumeration enumId="OctOrderConfirmation" description="Order confirmation as placed"
             enumTypeId="OrderContentType"/>
+    <!-- An order change to decide (impl-customer-service P10, F44, F45, F46; mantle.order.OrderChangeServices): sent to the
+        approvers of its kind with requestId, orderId, sourceRevision (the proposal's revision), kindText, customerName,
+        organizationName and requestedByName, the change Request as the record; approve and refuse decide it at the message's
+        revision (decide#OrderChange), so a superseded proposal is refused naming the current one. The app that decides it
+        sets the link (IronStone Customer Service: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="OrderChangeApproval" inboxEnumId="NinNotifications"
+            description="Order change to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.OrderChangeServices.approve#OrderChangeMessage"
+            refuseServiceName="mantle.order.OrderChangeServices.refuse#OrderChangeMessage" refuseReasonRequired="Y"
+            titleTemplate="Approve ${kindText} of order ${orderId} for ${customerName} (${requestedByName})"/>
 </entity-facade-xml>
