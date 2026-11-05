@@ -232,4 +232,12 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
         </actions>
     </service>
+    <!-- Purchasing P15: supplier performance (SupplierScorecardServices.xml) -->
+    <service-include verb="get" noun="ScorecardPolicy" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="store" noun="ScorecardPolicy" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="store" noun="ScorecardCriterion" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="store" noun="ScorecardAction" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="evaluate" noun="SupplierScorecard" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="evaluate" noun="OneSupplierScorecard" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
+    <service-include verb="store" noun="SupplierRisk" location="component://mr-mantle/service/mantle/party/SupplierScorecardServices.xml"/>
 </services>

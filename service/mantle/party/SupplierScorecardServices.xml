@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Supplier performance (design-purchasing §11, §12 ScorecardPolicies; impl-purchasing P15), included in
+    mantle.party.SupplierServices by name: the dated scorecard policy, criteria and response rules (PURCHASE_POLICY_EDIT), the
+    evaluation of suppliers (SUPPLIER_SCORECARD_EDIT), each a record with its measures and evidence, and a supplier's risks
+    (SUPPLIER_PROFILE_EDIT). Each checks its permission and that the organization is one of the user's.
+    SupplierScorecards.js. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="ScorecardPolicy" allow-remote="false">
+        <description>An organization's scorecard basis in effect (period days, minimum sample, due-date basis, each with its
+            built-in default), each measure's weight, target and floor with its source, the response rules in effect and
+            starting later, the policy's dated rows and whether the user may change them. Requires a purchasing permission
+            (PERMISSION_DENIED); refuses an organization that is not the user's (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="policyFromDate" type="Timestamp"/>
+            <parameter name="policyFromDateText"/>
+            <parameter name="expectedFromDate" type="Timestamp"/>
+            <parameter name="configuredPolicy" type="Map"/>
+            <parameter name="criterionRows" type="List"/>
+            <parameter name="actionRows" type="List"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="read" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('getPolicy', context)"/>
+            <script>ec.context.putAll(read)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ScorecardPolicy" allow-remote="false">
+        <description>A dated change of an organization's scorecard basis: periodDays (1 to 730), minimumSample (1 to 1000)
+            and dueDateBasisEnumId (ScorecardDueDateBasis); the row in effect ends where the new one starts, now by default,
+            and fields not given carry over. Each field is audit-logged with the reason. Requires PURCHASE_POLICY_EDIT;
+            refuses a change without a reason, an invalid value or a start in the past (POLICY_INVALID) and a stale
+            expectedFromDate (POLICY_CHANGED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="periodDays"/>
+            <parameter name="minimumSample"/>
+            <parameter name="dueDateBasisEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="expectedFromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="policyFromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('storePolicy', context)"/>
+            <set field="organizationPartyId" from="stored.organizationPartyId"/>
+            <set field="policyFromDate" from="stored.policyFromDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ScorecardCriterion" allow-remote="false">
+        <description>A dated change of one measure's weight (0 to 100; 0 leaves it out), target and floor (the values where
+            its score is 100 and 0) for an organization: on-time delivery, quality acceptance and RFQ response are rates in
+            percent, higher better; price variance the billed difference in percent, lower better. No formula of its own.
+            Requires PURCHASE_POLICY_EDIT; refuses an unknown measure, a value out of range or a target on the floor's side
+            (CRITERION_INVALID) and a change without a reason (POLICY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="metricEnumId" required="true"/>
+            <parameter name="weight"/>
+            <parameter name="targetValue"/>
+            <parameter name="floorValue"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="organizationPartyId" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('storeCriterion', context).organizationPartyId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ScorecardAction" allow-remote="false">
+        <description>A response rule of an organization: a scored evaluation below scoreBelow, or an active supplier risk at
+            or above riskSeverityEnumId, draws effectEnumId (ScorecardEffect: a warning, a warning with review, or a block of
+            new RFQs and purchase orders, which the buying policy's supplier check applies). With scorecardActionId the rule
+            ends and its next version starts with the changes, or with end Y it only ends. An evaluation with Insufficient data
+            draws no response. Requires PURCHASE_POLICY_EDIT; refuses a rule with neither band, an unknown effect or severity,
+            a score outside 0 to 100 (ACTION_INVALID), another organization's or an ended rule (ACTION_UNAVAILABLE) and a
+            change without a reason (POLICY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="scorecardActionId"/>
+            <parameter name="scoreBelow"/>
+            <parameter name="riskSeverityEnumId"/>
+            <parameter name="effectEnumId"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="scorecardActionId"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('storeAction', context)"/>
+            <set field="organizationPartyId" from="stored.organizationPartyId"/>
+            <set field="scorecardActionId" from="stored.scorecardActionId || scorecardActionId || null"/>
+        </actions>
+    </service>
+    <service verb="evaluate" noun="SupplierScorecard" allow-remote="false">
+        <description>Evaluate an organization's suppliers over a period (the policy's days to now by default): each supplier
+            given in supplierPartyIds (or supplierPartyId), else every supplier with a receipt in the period, gets an
+            evaluation of its own (evaluate#OneSupplierScorecard) in its own transaction, and a result row: the evaluation, its
+            result (Scored or Insufficient data), score and response, or the reason it failed while the others go on. A retry
+            with the same operationKey answers the first result. Requires SUPPLIER_SCORECARD_EDIT; refuses an organization
+            that is not the user's (RECORD_UNAVAILABLE) and a period that ends before it starts or is over two years
+            (PERIOD_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="supplierPartyIds" type="List"/>
+            <parameter name="periodFromDate" type="Timestamp"/>
+            <parameter name="periodThruDate" type="Timestamp"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="periodFromDate"/>
+            <parameter name="periodThruDate"/>
+            <parameter name="resultRows" type="List"/>
+            <parameter name="evaluatedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="evaluated" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('evaluate', context)"/>
+            <script>ec.context.putAll(evaluated)</script>
+        </actions>
+    </service>
+    <service verb="evaluate" noun="OneSupplierScorecard" allow-remote="false">
+        <description>One supplier's evaluation for evaluate#SupplierScorecard: on-time delivery from each receipt's due date
+            (the line's first acknowledged date, else its required date, by the policy's basis), quality from the received
+            quantity less what was rejected and what its inspections disposed as scrap, rework or return to supplier, price
+            variance from billed against ordered prices, and RFQ response from the invitations sent, each with its evidence,
+            numerator and denominator; fewer eligible receipts than the policy's minimum sample is Insufficient data, and a
+            scored evaluation draws the response of the rules its score is below. A recalculation of the same period names the
+            evaluation it follows, which stays. Requires SUPPLIER_SCORECARD_EDIT; refuses a supplier the organization may not
+            work with (SUPPLIER_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="supplierPartyId" required="true"/>
+            <parameter name="periodFromDate" type="Timestamp"/>
+            <parameter name="periodThruDate" type="Timestamp"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="supplierScorecardId"/>
+            <parameter name="resultEnumId"/>
+            <parameter name="score" type="BigDecimal"/>
+            <parameter name="effectEnumId"/>
+            <parameter name="previousScorecardId"/>
+        </out-parameters>
+        <actions>
+            <set field="evaluated" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('evaluateOne', context)"/>
+            <script>ec.context.putAll(evaluated)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SupplierRisk" allow-remote="false">
+        <description>A risk an organization keeps about a supplier: new (severity, category and its evidence, with an owner,
+            response, the evaluation it came from and its dates), changed (supplierRiskId, audit-logged with the reason) or
+            ended (end Y). An active risk at or above a response rule's severity draws its effect on new RFQs and purchase
+            orders. Requires SUPPLIER_PROFILE_EDIT; refuses an unknown severity or category, no evidence, an end before the
+            start or a change without a reason (RISK_INVALID), a supplier the organization may not work with
+            (SUPPLIER_UNAVAILABLE) and another organization's risk (RISK_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="supplierRiskId"/>
+            <parameter name="severityEnumId"/>
+            <parameter name="categoryEnumId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="description"/>
+            <parameter name="responseText"/>
+            <parameter name="supplierScorecardId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="supplierRiskId"/>
+        </out-parameters>
+        <actions>
+            <set field="supplierRiskId" from="ec.resource.script('component://mr-mantle/service/mantle/party/SupplierScorecards.js')
+                    .execute('storeRisk', context).supplierRiskId"/>
+        </actions>
+    </service>
+</services>

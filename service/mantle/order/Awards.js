@@ -396,6 +396,8 @@ function offerRow(ctx, basisContext, item, offer, comparedQuantity) {
         expired,
         riskResult: risk.result,
         riskText: risk.result === "OK" ? "None" : risk.message || risk.result,
+        // P15 (R-PUR-39, F161): the on-time rate of the supplier's latest evaluation, with its sample
+        onTimeText: onTimeText(ctx, quote.supplierPartyId),
         rank: null,
         rankText: "",
         canSelect: false
@@ -461,6 +463,17 @@ function offerRow(ctx, basisContext, item, offer, comparedQuantity) {
     row.canSelect =
         status === "OrderProposed" && !expired && !!price && basis.comparable && risk.result !== "STOP" && !!line.productId
     return row
+}
+// The supplier's on-time rate from its latest scorecard evaluation for the RFQ's organization, once per supplier.
+function onTimeText(ctx, supplierPartyId) {
+    ctx.onTimeTexts ??= {}
+    if (!(supplierPartyId in ctx.onTimeTexts)) {
+        const onTime = ec.resource
+            .script("component://mr-mantle/service/mantle/party/SupplierScorecards.js")
+            .onTimeOf(ctx.rfq.organizationPartyId, supplierPartyId)
+        ctx.onTimeTexts[supplierPartyId] = onTime ? onTime.text : "Not evaluated"
+    }
+    return ctx.onTimeTexts[supplierPartyId]
 }
 // Ranking by the committed unit price: the comparable offers first, cheapest first, with the reason; it chooses nothing.
 function rank(offerRows) {
@@ -588,6 +601,7 @@ function csvOf(basis, demandRows, offerRows) {
         "Lead days",
         "Validity",
         "Risk",
+        "On-time rate",
         "Rank",
         "Not comparable"
     ]
@@ -617,6 +631,7 @@ function csvOf(basis, demandRows, offerRows) {
                 row.leadDays == null ? "" : row.leadDays,
                 row.validityText,
                 row.riskText,
+                row.onTimeText,
                 row.rank == null ? "" : row.rank,
                 row.comparable ? "" : row.reasonText
             ]
