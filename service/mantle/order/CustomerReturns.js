@@ -172,6 +172,8 @@ function lineRows(header) {
 }
 
 // ===== MyReturns =====
+// findCustomerReturns: a page of the returns of the customers the account acts for (not an agent's draft), newest first, with
+// the cursor of the next page (SupportPortal.js listPage).
 function findCustomerReturns(p) {
     const s = portal()
     const organizationPartyId = s.served(p.siteId)
@@ -179,25 +181,42 @@ function findCustomerReturns(p) {
     const customers = s.actingFor(organizationPartyId)
     const chosen = blank(p.customerPartyId) ? customers : customers.filter(row => row.partyId === p.customerPartyId)
     const query = text(p.query)?.toLowerCase() || null
+    const pg = s.listPage(p, ["returns", query, blank(p.customerPartyId) ? null : String(p.customerPartyId)])
+    const names = new Map(chosen.map(row => [row.partyId, row.name]))
     const out = []
-    for (const customer of chosen)
-        for (const header of find(HEADER, {customerPartyId: customer.partyId, vendorPartyId: organizationPartyId})
-            .orderBy("-entryDate")
-            .limit(200)
-            .list()) {
-            if (header.statusId === "ReturnCreated") continue
-            const row = Object.assign(returnRow(header), {customerName: customer.name})
-            if (
-                query &&
-                ![row.reference, row.customerReference, row.orderId || ""].some(value =>
-                    String(value).toLowerCase().includes(query)
-                )
-            )
-                continue
-            out.push(row)
+    let nextCursor = null
+    const headers = chosen.length
+        ? Array.from(
+              find(HEADER, {vendorPartyId: organizationPartyId})
+                  .condition(
+                      "customerPartyId",
+                      "in",
+                      chosen.map(row => row.partyId)
+                  )
+                  .orderBy("-entryDate,-returnId")
+                  .list()
+          )
+        : []
+    for (const header of headers) {
+        if (header.statusId === "ReturnCreated") continue
+        const enteredMs = Number(ms(header.entryDate) || 0)
+        if (!pg.isAfter(enteredMs, header.returnId)) continue
+        const row = Object.assign(returnRow(header), {customerName: names.get(header.customerPartyId) || ""})
+        if (
+            query &&
+            ![row.reference, row.customerReference, row.orderId || ""].some(value => String(value).toLowerCase().includes(query))
+        )
+            continue
+        if (out.length === pg.limit) {
+            const last = out[out.length - 1]
+            nextCursor = pg.cursorAt(last.enteredMs, last.returnId)
+            break
         }
+        out.push(Object.assign(row, {enteredMs}))
+    }
     return {
-        returnList: out.slice(0, 100),
+        returnList: out.map(row => (delete row.enteredMs, row)),
+        nextCursor,
         customers: customers.map(row => ({partyId: row.partyId, name: row.name})),
         capabilities: {canRequestReturn: customers.length > 0}
     }
@@ -272,8 +291,21 @@ function requestCustomerReturn(p) {
         line => line && line.orderItemSeqId
     )
     if (!chosen.length) s.fail("Unprocessable", "Choose what you want to return")
+    // a retry of a request already made answers the first (submit#CustomerReturn's operation record), though what is left to
+    // return has changed since: its lines are passed as given, unchecked here, so the same request matches the first
+    const prior = !!one(lib.operationEntity, {operationKey: key})
     let evidence = false
     const lineList = chosen.map(line => {
+        if (prior)
+            return {
+                orderItemSeqId: String(line.orderItemSeqId),
+                quantity: Number(line.quantity),
+                returnReasonEnumId: String(line.returnReasonEnumId || ""),
+                returnResponseEnumId: String(
+                    line.returnResponseEnumId || reasons.get(String(line.returnReasonEnumId || ""))?.suggestedResponseEnumId || ""
+                ),
+                description: text(line.condition)?.substring(0, 255) || null
+            }
         const row = offered.find(o => o.orderItemSeqId === String(line.orderItemSeqId))
         if (!row || !row.returnable) s.fail("Unprocessable", "Choose items you may return now")
         const quantity = Number(line.quantity)
@@ -295,7 +327,7 @@ function requestCustomerReturn(p) {
         }
     })
     if (evidence && !(p.file && Number(p.file.size) > 0)) s.fail("Unprocessable", "Add a photo or document of the goods")
-    const staged = media().stageGiven(p.file, "evidence", "support")
+    const staged = prior ? null : media().stageGiven(p.file, "evidence", "support")
     try {
         const submitted = policies.asCustomer({organizationPartyId, customerPartyId: customer.partyId}, () =>
             policies.execute("submit", {
@@ -411,8 +443,7 @@ function withdrawCustomerReturn(p) {
     s.operationKey(p)
     const header = theReturn.header
     if (header.statusId === "ReturnCancelled") return {statusText: L(customerTexts.ReturnCancelled), alreadyApplied: true}
-    if (!blank(p.expectedRevision) && String(p.expectedRevision) !== String(policies.revisionOf(header.returnId)))
-        s.fail("Conflict", "This return changed since you opened it; look at it again")
+    s.requireRevision(p, policies.revisionOf(header.returnId), "return")
     if (!["ReturnRequested", "ReturnApproved"].includes(header.statusId) || policies.effectsOf(header.returnId).length)
         s.fail("Unprocessable", "This return can no longer be withdrawn here; reply to us and an agent will help")
     asCustomer(

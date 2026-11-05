@@ -241,8 +241,8 @@ function contactOf(partyId, organizationPartyId, app) {
     return !!partyId && grants(organizationPartyId, app).some(row => row.outsidePartyId === partyId)
 }
 // The self relationship (Customer Service P15; design-customer-service §8 Access, review X6): a signed-in account whose own
-// party is the outside party, not internal and not working for an internal organization, with a verified email address
-// (a PASS account's VerifiedAddress), reaches that party's records of a kind that allows it with no invitation. A
+// party is the outside party, not internal and not working for an internal organization, with its current email address
+// verified (a PASS account's VerifiedAddress of that address), reaches that party's records of a kind that allows it with no invitation. A
 // customer contact's account is a different party, so this never reaches a colleague's or an employer's records.
 function selfOf(partyId) {
     const account = ec.user.userAccount
@@ -255,7 +255,12 @@ function selfOf(partyId) {
             internal(row.toPartyId)
     )
     if (works) return false
-    return rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(row => !!row.verifiedAt)
+    // the account's current address verified (a changed email needs fresh verification; an older verified one is not it)
+    const email = String(account.emailAddress || "").trim().toLowerCase()
+    if (!email) return false
+    return rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
+        row => !!row.verifiedAt && String(row.emailAddress || "").trim().toLowerCase() === email
+    )
 }
 // What a page may reach: a token's record within its scope, or a record whose outside party the signed-in user is a
 // contact of. organizationPartyId, when given, is the organization the page serves (its app mount's target).

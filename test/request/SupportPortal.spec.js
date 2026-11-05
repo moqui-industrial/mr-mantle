@@ -5,7 +5,9 @@
 // outward messages and customer-shared files only, takes the customer's reply and is cancelled at its revision; a queue's form
 // token files a request that reads no case, a forged token nothing; a return of a shipped order's eligible lines is requested
 // with the server's facility and policy, read through its RMA link and withdrawn before receipt; a cancel request of an
-// approved order is filed as a proposal ("Cancellation requested"), read and withdrawn by its filer. Standalone: spec-local
+// approved order is filed as a proposal ("Cancellation requested"), read and withdrawn by its filer. P15 review: MyCases' opaque
+// cursor, a changed email ending the self relationship, a stale change naming the current revision, a retried return request
+// answering the first and the authorization's notice to the customer with the return's link. Standalone: spec-local
 // organization, customers, accounts, stock and site, artifact authorization disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec SupportPortal
 const helper = () => ec.resource.script("component://mr-mantle/test/ledger/AccountingReceivablesFixtures.js")
@@ -179,6 +181,7 @@ spec({
         })
         state.admin = staff("ADMIN", ["SUPPORT_POLICY_EDIT", "SUPPORT_CASE_EDIT", "SUPPORT_CASE_MANAGE", "RETURN_POLICY_EDIT"])
         state.agent = staff("AGENT", ["SUPPORT_CASE_EDIT"])
+        state.authorizer = staff("AUTHORIZER", ["RETURN_AUTHORIZE"])
         state.queue = run(state.admin, S + "save#ServiceQueue", {
             organizationPartyId: org,
             description: "Portal spec queue"
@@ -243,6 +246,17 @@ spec({
         state.unverified = prefix + "_UNVERIFIED"
         party(state.unverified, "Eve", "Customer", "PtyPerson", org)
         account(state.unverified, null)
+        // the customer's address, for the return decision's notice
+        const mech = svc("create#mantle.party.contact.ContactMech", {
+            contactMechTypeEnumId: "CmtEmailAddress",
+            infoString: "office@portal-customer.example.test"
+        }).contactMechId
+        svc("create#mantle.party.contact.PartyContactMech", {
+            partyId: customer,
+            contactMechId: mech,
+            contactMechPurposeId: "EmailPrimary",
+            fromDate: since
+        })
         state.shipped = sale(true)
         state.approved = sale(false)
     },
@@ -335,6 +349,38 @@ feature("a contact files and sees its own cases, an administrator the customer's
     }
 })
 
+feature("MyCases pages by an opaque cursor scoped to the list and the account; a changed email ends the self relationship", {
+    when() {
+        const first = page(state.boss, S + "find#CustomerCases", {limit: 1})
+        const second = page(state.boss, S + "find#CustomerCases", {limit: 1, cursor: first.nextCursor})
+        const otherFilter = page(state.boss, S + "find#CustomerCases", {
+            limit: 1,
+            statusCategory: "open",
+            cursor: first.nextCursor
+        })
+        const otherAccount = page(state.contact, S + "find#CustomerCases", {limit: 1, cursor: first.nextCursor})
+        const altered = page(state.boss, S + "find#CustomerCases", {limit: 1, cursor: "00" + first.nextCursor})
+        const tooMany = page(state.boss, S + "find#CustomerCases", {limit: 101})
+        // the own account's email changed to an address not verified: no longer its own customer's
+        svc("update#moqui.security.UserAccount", {userId: state.self, emailAddress: "dee.new@consumer.example.test"})
+        const changed = page(state.self, S + "find#CustomerCases", {})
+        svc("update#moqui.security.UserAccount", {userId: state.self, emailAddress: "dee@consumer.example.test"})
+        const restored = page(state.self, S + "find#CustomerCases", {})
+        return {first, second, otherFilter, otherAccount, altered, tooMany, changed, restored}
+    },
+    then(r) {
+        r.first.caseList.length === 1 && !!r.first.nextCursor
+        !/SPP/.test(r.first.nextCursor)
+        r.second.caseList.length === 1 && r.second.caseList[0].requestId !== r.first.caseList[0].requestId
+        r.otherFilter.kind === "Unprocessable"
+        r.otherAccount.kind === "Unprocessable"
+        r.altered.kind === "Unprocessable"
+        r.tooMany.kind === "Unprocessable"
+        r.changed.customers.length === 0 && r.changed.caseList.length === 0
+        r.restored.caseList.length === 1
+    }
+})
+
 feature("a case shows outward messages and shared files only, takes a reply, and is cancelled at its revision", {
     when() {
         const requestId = state.filed
@@ -376,7 +422,7 @@ feature("a case shows outward messages and shared files only, takes a reply, and
         read.fileList.length === 1 && read.fileList[0].filename === "size-chart.pdf"
         read.case.statusText === "Received"
         read.capabilities.canCancel === true
-        stale.kind === "Conflict"
+        stale.kind === "Conflict" && stale.error.includes("it is now at revision " + read.case.revision)
         cancelled.alreadyApplied === false
         request.statusId === "ReqCancelled" && request.requestResolutionEnumId === "RrWithdrawn"
     }
@@ -483,6 +529,54 @@ feature("a return of a shipped order's eligible lines is requested, read through
     }
 })
 
+feature(
+    "a retried return request answers the first; a withdrawal needs the revision shown; the authorization tells the customer",
+    {
+        when() {
+            const seq = page(state.contact, R + "get#ReturnableOrder", {orderId: state.shipped}).order.lines[0].orderItemSeqId
+            const input = {
+                orderId: state.shipped,
+                lines: [
+                    {orderItemSeqId: seq, quantity: 3, returnReasonEnumId: "RrsnDefective", returnResponseEnumId: "RrspCredit"}
+                ],
+                operationId: opId()
+            }
+            const first = page(state.contact, R + "request#CustomerReturn", input)
+            const retry = page(state.contact, R + "request#CustomerReturn", input)
+            const otherPayload = page(
+                state.contact,
+                R + "request#CustomerReturn",
+                Object.assign({}, input, {customerReference: "X"})
+            )
+            const noRevision = page(state.contact, R + "withdraw#CustomerReturn", {returnId: first.returnId, operationId: opId()})
+            const stale = page(state.contact, R + "withdraw#CustomerReturn", {
+                returnId: first.returnId,
+                expectedRevision: "1",
+                operationId: opId()
+            })
+            const authorized = run(state.authorizer, R + "authorize#Return", {operationKey: opId(), returnId: first.returnId})
+            const end = Date.now() + 5000
+            let notices = []
+            while (!notices.length && Date.now() < end)
+                notices = rows("moqui.basic.email.EmailMessage", {emailTemplateId: "MANTLE_RETURN_DECISION_EMAIL"}).filter(row =>
+                    String(row.toAddresses || "").includes("office@portal-customer.example.test")
+                )
+            return {first, retry, otherPayload, noRevision, stale, authorized, notices}
+        },
+        then(r) {
+            !!r.first.returnId && r.first.alreadyApplied === false
+            r.retry.returnId === r.first.returnId && r.retry.alreadyApplied === true
+            r.otherPayload.kind === "Conflict"
+            r.noRevision.kind === "Unprocessable"
+            r.stale.kind === "Conflict" && r.stale.error.includes("it is now at revision")
+            r.authorized.error === ""
+            r.notices.length === 1
+            String(r.notices[0].body).includes("https://spp.example.test/support/CustomerReturn?token=")
+            String(r.notices[0].body).includes("is authorized")
+        }
+    }
+)
+
 feature("a cancel request of an approved order is filed as a proposal, read and withdrawn by its filer", {
     when() {
         const intake = page(state.contact, S + "get#CaseIntake", {orderId: state.approved})
@@ -501,13 +595,18 @@ feature("a cancel request of an approved order is filed as a proposal, read and 
         })
         const read = page(state.contact, O + "get#CustomerCancel", {requestId: asked.requestId})
         const otherCustomer = page(state.outsider, O + "get#CustomerCancel", {requestId: asked.requestId})
-        const withdrawn = page(state.contact, O + "withdraw#CustomerCancel", {requestId: asked.requestId})
+        const noRevision = page(state.contact, O + "withdraw#CustomerCancel", {requestId: asked.requestId})
+        const withdrawn = page(state.contact, O + "withdraw#CustomerCancel", {
+            requestId: asked.requestId,
+            expectedRevision: read.request.revision
+        })
         return {
             intake,
             noConsent,
             asked,
             read,
             otherCustomer,
+            noRevision,
             withdrawn,
             request: one("mantle.request.Request", {requestId: asked.requestId})
         }
@@ -519,6 +618,7 @@ feature("a cancel request of an approved order is filed as a proposal, read and 
         r.request.requestTypeEnumId === "RqtOrderChange" && r.request.filedByPartyId === state.contact
         r.read.request.stateText && r.read.request.capabilities.canWithdraw === true
         r.otherCustomer.kind === "NotFound"
+        r.noRevision.kind === "Unprocessable"
         r.withdrawn.stateText === "Withdrawn"
         r.request.statusId === "ReqCancelled"
     }

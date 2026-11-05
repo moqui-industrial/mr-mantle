@@ -1051,7 +1051,14 @@
     },
     findCustomerCases: {
         service: 'mantle.request.SupportCaseServices.find#CustomerCases',
-        fields: ['siteId', 'query', 'statusCategory', 'customerPartyId'],
+        fields: [
+            'siteId',
+            'query',
+            'statusCategory',
+            'customerPartyId',
+            'cursor',
+            'limit',
+        ],
     },
     getCaseIntake: {
         service: 'mantle.request.SupportCaseServices.get#CaseIntake',
@@ -1108,7 +1115,7 @@
     },
     findCustomerReturns: {
         service: 'mantle.order.ReturnPolicyServices.find#CustomerReturns',
-        fields: ['siteId', 'query', 'customerPartyId'],
+        fields: ['siteId', 'query', 'customerPartyId', 'cursor', 'limit'],
     },
     getReturnableOrder: {
         service: 'mantle.order.ReturnPolicyServices.get#ReturnableOrder',
@@ -1166,6 +1173,6 @@
     },
     withdrawOrderCancel: {
         service: 'mantle.order.OrderChangeServices.withdraw#CustomerCancel',
-        fields: ['siteId', 'requestId', 'reason'],
+        fields: ['siteId', 'requestId', 'expectedRevision', 'reason'],
     },
 })

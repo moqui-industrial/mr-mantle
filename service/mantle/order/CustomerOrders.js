@@ -90,6 +90,7 @@ function requestView(request) {
         requestId: request.requestId,
         stateText: L(customerStates[state] || "Cancellation requested"),
         requestedText: lib.dateText(request.requestDate),
+        revision: changes().revisionOf(request.requestId),
         lines: changes()
             .linesOf(request.requestId)
             .map(({item, orderItemSeqId}) => ({
@@ -174,7 +175,8 @@ function getCustomerCancel(p) {
     orderFor(request.orderId, organizationPartyId, s.actingFor(organizationPartyId))
     return {request: requestView(request), orderId: request.orderId}
 }
-// withdrawOrderCancel: the filer withdraws an open request of their own (withdraw#OrderChange's own path).
+// withdrawOrderCancel: the filer withdraws an open request of their own (withdraw#OrderChange's own path) at the revision the
+// page showed (a later change is a Conflict naming the current one).
 function withdrawCustomerCancel(p) {
     const s = portal()
     const organizationPartyId = s.served(p.siteId)
@@ -184,6 +186,7 @@ function withdrawCustomerCancel(p) {
         s.unavailable()
     orderFor(request.orderId, organizationPartyId, s.actingFor(organizationPartyId))
     if (request.statusId === "ReqCancelled") return {stateText: L("Withdrawn"), alreadyApplied: true}
+    s.requireRevision(p, changes().revisionOf(request.requestId), "cancel request")
     changes().execute("withdraw", {requestId: request.requestId, reason: text(p.reason) || L("Withdrawn by the customer")})
     return {stateText: L("Withdrawn"), alreadyApplied: false}
 }

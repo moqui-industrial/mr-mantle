@@ -67,6 +67,21 @@ const fail = (kind, message) => {
     throw error
 }
 const unavailable = () => fail("NotFound", "This page is not available")
+// A change at the revision the page showed (design-forum §4.3): required, and a stale one is a Conflict naming the current.
+function requireRevision(p, current, noun) {
+    if (blank(p.expectedRevision)) fail("Unprocessable", "Reload the page and try again")
+    if (String(p.expectedRevision) !== String(current))
+        fail(
+            "Conflict",
+            "This " +
+                noun +
+                " changed since you opened it (you saw revision " +
+                p.expectedRevision +
+                "; it is now at revision " +
+                current +
+                "); look at it again"
+        )
+}
 const signInRequired = () => fail("AuthenticationRequired", "Sign in to continue")
 function operationKey(p) {
     const value = String(p.operationId || "")
@@ -84,7 +99,8 @@ function refused(error) {
     if (!code) throw error
     ec.message.clearErrors()
     const message = first.replace(/^[A-Z][A-Z0-9_]+: /, "")
-    if (["STALE_CASE", "STALE_REVISION", "STALE_ORDER"].includes(code)) fail("Conflict", message)
+    // a stale revision, and an operation ID used for another request (design-forum §4.3: a different payload conflicts)
+    if (["STALE_CASE", "STALE_REVISION", "STALE_ORDER", "OPERATION_KEY_CONFLICT"].includes(code)) fail("Conflict", message)
     if (["RECORD_UNAVAILABLE", "PERMISSION_DENIED", "CUSTOMER_UNAVAILABLE"].includes(code)) unavailable()
     fail("Unprocessable", message)
 }
@@ -454,8 +470,48 @@ function rateArticle(p) {
     return {receipt: {helpful: helpful === "Y", message: L("Thank you for your answer.")}, alreadyApplied: false}
 }
 
+// ===== list pages (design-forum §4.3) =====
+// A list's page: 30 rows by default, at most 100, newest first by a time with the record's ID as the tie-breaker, after an
+// opaque cursor scoped to the list, its filters, the site and the account (a cursor of another list, account or filter, or one
+// altered, is refused). The cursor holds the last row's time and ID, signed with the scope.
+const PAGE_ROWS = 30,
+    PAGE_MAX = 100
+const hexOf = value =>
+    Array.from(String(value))
+        .map(c => c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join("")
+const unhex = value => (String(value).match(/../g) || []).map(pair => String.fromCharCode(parseInt(pair, 16))).join("")
+const signOf = (scopeKey, payload) =>
+    String(lib.hash([scopeKey, payload]))
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 24)
+function listPage(p, scope) {
+    const limit = blank(p.limit) ? PAGE_ROWS : Number(p.limit)
+    if (!Number.isInteger(limit) || limit < 1 || limit > PAGE_MAX) fail("Unprocessable", "Ask for 1 to 100 rows")
+    const scopeKey = lib.hash({scope, siteId: p.siteId || null, userId: ec.user.userId || null})
+    let after = null
+    if (!blank(p.cursor)) {
+        const parts = /^([0-9a-f]{2,200})\.([A-Za-z0-9]{8,24})$/.exec(String(p.cursor))
+        const payload = parts ? unhex(parts[1]) : ""
+        const fields = /^([0-9a-z]{1,12})~(.{1,60})$/.exec(payload)
+        if (!parts || !fields || signOf(scopeKey, payload) !== parts[2])
+            fail("Unprocessable", "This list changed since; open it again")
+        after = {at: parseInt(fields[1], 36), id: fields[2]}
+    }
+    return {
+        limit,
+        // whether a row comes after the cursor in the list's order (its time descending, then its ID descending)
+        isAfter: (at, id) => !after || at < after.at || (at === after.at && String(id) < after.id),
+        cursorAt: (at, id) => {
+            const payload = Math.max(0, Math.floor(at)).toString(36) + "~" + id
+            return hexOf(payload) + "." + signOf(scopeKey, payload)
+        }
+    }
+}
+
 // ===== MyCases =====
-const VISIBLE_LIMIT = 300
+// findCustomerCases: a page of the cases the account reaches for its customers (a contact's own, every case of the customer for
+// a customer administrator or the customer's own account), the latest change first, with the cursor of the next page.
 function findCustomerCases(p) {
     const organizationPartyId = served(p.siteId)
     if (!ec.user.userId) signInRequired()
@@ -463,22 +519,30 @@ function findCustomerCases(p) {
     const chosen = blank(p.customerPartyId) ? customers : customers.filter(row => row.partyId === p.customerPartyId)
     const query = text(p.query)?.toLowerCase() || null
     const state = ["open", "resolved", "all"].includes(p.statusCategory) ? p.statusCategory : "all"
+    const pg = listPage(p, ["cases", query, state, blank(p.customerPartyId) ? null : String(p.customerPartyId)])
     const userPartyId = ec.user.userAccount?.partyId
-    const found = new Map()
-    for (const customer of chosen) {
-        const links = Array.from(
-            find("mantle.request.RequestParty", {partyId: customer.partyId, roleTypeId: "Customer"})
-                .orderBy("-fromDate")
-                .limit(VISIBLE_LIMIT)
+    // each case of the chosen customers, with the customer it is listed for
+    const customerOf = new Map()
+    for (const customer of chosen)
+        for (const link of rows("mantle.request.RequestParty", {partyId: customer.partyId, roleTypeId: "Customer"}))
+            if (!customerOf.has(link.requestId) && lib.active(link)) customerOf.set(link.requestId, customer)
+    const caseList = []
+    let nextCursor = null
+    if (customerOf.size) {
+        const requests = Array.from(
+            find(REQUEST)
+                .condition("requestId", "in", Array.from(customerOf.keys()))
+                .orderBy("-lastUpdatedStamp,-requestId")
                 .list()
         )
-        for (const link of links) {
-            if (found.has(link.requestId) || !lib.active(link)) continue
-            const profile = one(PROFILE, {requestId: link.requestId})
+        for (const request of requests) {
+            const updatedMs = Number(ms(request.lastUpdatedStamp) || 0)
+            if (!pg.isAfter(updatedMs, request.requestId)) continue
+            const profile = one(PROFILE, {requestId: request.requestId})
             if (!profile) continue
-            const parties = cases.partiesOf(link.requestId)
+            const parties = cases.partiesOf(request.requestId)
             if (cases.roleParty(parties, "OrgInternal") !== organizationPartyId) continue
-            const request = one(REQUEST, {requestId: link.requestId})
+            const customer = customerOf.get(request.requestId)
             // a contact sees a colleague's case only as a customer administrator (the self account is the customer)
             const own =
                 customer.administrator ||
@@ -495,7 +559,12 @@ function findCustomerCases(p) {
                 !String(request.requestId).toLowerCase().includes(query)
             )
                 continue
-            found.set(link.requestId, {
+            if (caseList.length === pg.limit) {
+                const last = caseList[caseList.length - 1]
+                nextCursor = pg.cursorAt(last.updatedMs, last.requestId)
+                break
+            }
+            caseList.push({
                 requestId: request.requestId,
                 title: request.requestName || request.requestId,
                 statusText: statusLabel(profile, request.statusId),
@@ -504,16 +573,13 @@ function findCustomerCases(p) {
                 customerName: customer.name,
                 createdText: dayText(request.requestDate),
                 updatedText: dayText(request.lastUpdatedStamp),
-                updatedMs: Number(ms(request.lastUpdatedStamp) || 0)
+                updatedMs
             })
         }
     }
-    const caseList = Array.from(found.values())
-        .sort((a, b) => b.updatedMs - a.updatedMs)
-        .slice(0, 100)
-        .map(row => (delete row.updatedMs, row))
     return {
-        caseList,
+        caseList: caseList.map(row => (delete row.updatedMs, row)),
+        nextCursor,
         customers: customers.map(row => ({partyId: row.partyId, name: row.name})),
         capabilities: {canCreateCase: customers.length > 0 && offeredQueues(organizationPartyId).length > 0}
     }
@@ -907,9 +973,7 @@ function cancelCustomerCase(p) {
     theCase.request = locked
     if (locked.statusId === "ReqCancelled")
         return {statusText: statusLabel(theCase.profile, locked.statusId), alreadyApplied: true}
-    const revision = cases.revisionOf(theCase.requestId)
-    if (!blank(p.expectedRevision) && Number(p.expectedRevision) !== revision)
-        fail("Conflict", "This request changed since you opened it; look at it again")
+    requireRevision(p, cases.revisionOf(theCase.requestId), "request")
     if (!caseCapabilities(theCase).canCancel) fail("Unprocessable", "This request can no longer be cancelled here")
     const reason = text(plain(p.reason))
     if (reason)
@@ -977,21 +1041,12 @@ function getSetting(p) {
 
 // ===== links a notice carries (F60) =====
 // A case's page for its customer: a CaseView link on the organization's first published site with the Support app, made by
-// an agent of the case's organization (SUPPORT_CASE_EDIT); null with no site.
+// an agent of the case's organization (SUPPORT_CASE_EDIT); url null, and no link made, with no site (SupportNotices.js).
 function caseLink(p) {
     cases.requirePermission("SUPPORT_CASE_EDIT")
-    const theCase = cases.caseOf(p.requestId)
-    try {
-        return access().create({
-            recordType: "Request",
-            recordId: theCase.requestId,
-            scopes: "CaseView",
-            validDays: p.validDays || 60
-        })
-    } catch (error) {
-        if (lib.reasonCode(error) === "RECORD_UNAVAILABLE") return {url: null}
-        throw error
-    }
+    return ec.resource
+        .script("component://mr-mantle/service/mantle/request/SupportNotices.js")
+        .caseLink(p.requestId, p.validDays || 60)
 }
 
 const operations = {
@@ -1020,6 +1075,8 @@ const internalOperations = new Set(["saveSetting", "getSetting", "caseLink"])
     operationKey,
     refused,
     fail,
+    requireRevision,
+    listPage,
     unavailable,
     signInRequired,
     // the PASS operations check the asker first; Mantle's reads and writes below them run without artifact authorization, and a
