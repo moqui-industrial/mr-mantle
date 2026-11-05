@@ -93,6 +93,20 @@ const records = {
             if (!internal(organizationPartyId) || !partyId || internal(partyId)) return null
             return {organizationPartyId, partyId}
         }
+    },
+    // a customer return's RMA (Customer Service P9, F61): the link mailed with the authorization (send#ReturnAuthorization),
+    // which the Support app's CustomerReturn takes (P15); a customer return of an internal organization (its vendor) to a
+    // customer that is not one, while it is not cancelled
+    ReturnHeader: {
+        permissions: ["RETURN_AUTHORIZE", "SUPPORT_CASE_EDIT"],
+        scopes: ["ReturnRma"],
+        page: {app: "support", path: "/CustomerReturn?token="},
+        resolve(recordId) {
+            const header = one("mantle.order.return.ReturnHeader", {returnId: recordId})
+            if (!header || header.statusId === "ReturnCancelled") return null
+            if (!internal(header.vendorPartyId) || !header.customerPartyId || internal(header.customerPartyId)) return null
+            return {organizationPartyId: header.vendorPartyId, partyId: header.customerPartyId}
+        }
     }
 }
 // The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
