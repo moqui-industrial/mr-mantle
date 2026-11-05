@@ -46,6 +46,10 @@ const listOf = value =>
               .map(s => s.trim())
               .filter(Boolean)
 const factory = () => ec.entity.conditionFactory
+// P5: the assignment rules and team groups (Assignment.js), read once for this evaluation
+let assignmentModule = null
+const assignment = () =>
+    assignmentModule || (assignmentModule = ec.resource.script("component://mr-mantle/service/mantle/request/Assignment.js"))
 
 // ===== effective-dated rows =====
 // The rows in effect at a date: started (a draft has no from date) and not ended, the latest first.
@@ -237,6 +241,20 @@ function ensure(p) {
         ec.message.clearErrors()
         ec.message.popErrors()
     }
+    // P5: its assignee by the queue's assignment rules (assign#Case; an assigned request stays so): a failure is logged,
+    // never the case's
+    if (!p.skipAssignment) {
+        ec.message.pushErrors()
+        try {
+            assignment().execute("assign", {requestId: p.requestId})
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        } catch (error) {
+            ec.logger.error("Case " + p.requestId + ": its assignment rules did not run: " + (error?.message || error))
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
     return {
         isCase: true,
         created: true,
@@ -389,7 +407,7 @@ function notifyAssigned(theCase, assigneePartyId) {
             requestId: theCase.requestId,
             requestName: theCase.request.requestName || theCase.requestId,
             customerName: partyName(theCase.customerPartyId),
-            assignedByName: partyName(ec.user.userAccount?.partyId) || ec.user.username || "",
+            assignedByName: partyName(ec.user.userAccount?.partyId) || ec.user.username || "The assignment rules",
             recordEntityName: REQUEST,
             recordId: theCase.requestId
         }
@@ -474,7 +492,12 @@ function create(p) {
                 recordEntityName: record.recordEntityName,
                 recordId: record.recordId
             })
-    const made = ensure({requestId, communicationEventId: p.communicationEventId, emailMessageId: p.emailMessageId})
+    const made = ensure({
+        requestId,
+        communicationEventId: p.communicationEventId,
+        emailMessageId: p.emailMessageId,
+        skipAssignment: !blank(p.assigneePartyId)
+    })
     if (!made.isCase) denied("NOT_A_CASE", "Request " + requestId + " is not a case: " + (made.reason || ""))
     if (templateFormId) templates.record(requestId, templateFormId, templateValues)
     if (p.assigneePartyId) {
@@ -511,6 +534,10 @@ function update(p) {
         const assigneePartyId = text(p.assigneePartyId)
         if (assigneePartyId) checkAssignee(assigneePartyId, queue, theCase.organizationPartyId)
         assigned = assign(theCase, assigneePartyId)
+    } else if (fields.requestCategoryId) {
+        // P5: moved with no assignee given, the new queue's rules assign it (a queue with none leaves it); the clocks stay
+        const out = assignment().execute("assign", {requestId: theCase.requestId, reassign: true})
+        assigned = !!out.outcome && out.assigneePartyId !== theCase.assigneePartyId
     }
     return {
         requestId: theCase.requestId,
@@ -826,6 +853,7 @@ function saveTeam(p) {
     if (p.teamPartyId) {
         requireTeam(p.teamPartyId, organizationPartyId)
         call("update#mantle.party.Organization", {partyId: p.teamPartyId, organizationName: name})
+        assignment().syncTeamGroup(p.teamPartyId)
         return {teamPartyId: p.teamPartyId}
     }
     const teamPartyId = call("create#mantle.party.Party", {
@@ -834,6 +862,8 @@ function saveTeam(p) {
     }).partyId
     call("create#mantle.party.Organization", {partyId: teamPartyId, organizationName: name})
     call("create#mantle.party.PartyRole", {partyId: teamPartyId, roleTypeId: "OrgTeam"})
+    // P5: the team's user group, its saved replies' audience (F3)
+    assignment().syncTeamGroup(teamPartyId)
     return {teamPartyId}
 }
 // save#ServiceTeamMember: an agent (Agent) or a team manager (Manager) joins or leaves a team, by a dated
@@ -859,24 +889,38 @@ function saveMember(p) {
         denied("MEMBER_UNAVAILABLE", (p.partyId || "") + " is not someone who can join a team")
     const roleTypeId = p.roleTypeId === "Manager" ? "Manager" : "Agent"
     const live = teamMembers(p.teamPartyId).filter(row => row.fromPartyId === p.partyId)
+    // P5: a participation change of a current member keeps the membership as it is
+    const participationOnly = !end && p.participation === true && live.length > 0
     for (const row of live)
-        if (end || row.fromRoleTypeId !== roleTypeId) {
+        if (end || (!participationOnly && row.fromRoleTypeId !== roleTypeId)) {
             row.set("thruDate", p.fromDate || now())
             row.update()
         }
-    if (end || live.some(row => row.fromRoleTypeId === roleTypeId)) return {partyRelationshipId: null}
-    for (const roleType of [roleTypeId])
-        if (!one("mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: roleType}))
-            call("create#mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: roleType})
-    const out = call("create#" + RELATIONSHIP, {
-        relationshipTypeEnumId: teamRelationship,
-        fromPartyId: p.partyId,
-        fromRoleTypeId: roleTypeId,
-        toPartyId: p.teamPartyId,
-        toRoleTypeId: "OrgTeam",
-        fromDate: p.fromDate || now()
-    })
-    return {partyRelationshipId: out.partyRelationshipId}
+    if (end) {
+        // P5: the participation ends with the membership, and the team's user group follows
+        assignment().endParticipation(p.teamPartyId, p.partyId, p.fromDate || now())
+        assignment().syncTeamGroup(p.teamPartyId)
+        return {partyRelationshipId: null, participationId: null}
+    }
+    let partyRelationshipId = null
+    if (!participationOnly && !live.some(row => row.fromRoleTypeId === roleTypeId)) {
+        for (const roleType of [roleTypeId])
+            if (!one("mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: roleType}))
+                call("create#mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: roleType})
+        partyRelationshipId = call("create#" + RELATIONSHIP, {
+            relationshipTypeEnumId: teamRelationship,
+            fromPartyId: p.partyId,
+            fromRoleTypeId: roleTypeId,
+            toPartyId: p.teamPartyId,
+            toRoleTypeId: "OrgTeam",
+            fromDate: p.fromDate || now()
+        }).partyRelationshipId
+    }
+    // P5: the participation (eligible, the most open cases, the substitute, the calendar) from its date, when given
+    const participationId =
+        p.participation === true ? assignment().saveParticipation(p, p.teamPartyId, organizationPartyId) : null
+    assignment().syncTeamGroup(p.teamPartyId)
+    return {partyRelationshipId, participationId}
 }
 
 // ===== rules on other paths =====
@@ -991,6 +1035,18 @@ const operations = {
     requirePermission,
     requireOrganization,
     currentRow,
+    // P5: for Assignment.js and SavedReplies.js
+    teamMembers,
+    checkAssignee,
+    checkRevision,
+    requireTeam,
+    partiesOf,
+    roleParty,
+    transitionFor,
+    assignParty: assign,
+    transitionCase: transition,
+    setTags: tags,
+    updateCase: update,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown support case operation " + op)

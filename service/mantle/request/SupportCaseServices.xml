@@ -395,18 +395,212 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A person joins a service team as an agent (roleTypeId Agent) or its manager (Manager), from a date, by a
             dated PartyRelationship (PrtServiceTeam); with end, leaves it (the relationship ended, history kept). Needs
             SUPPORT_CASE_MANAGE and to manage the team, or SUPPORT_POLICY_EDIT; the team must be one of the user's
-            organizations' (TEAM_UNAVAILABLE) and the member a person (MEMBER_UNAVAILABLE).</description>
+            organizations' (TEAM_UNAVAILABLE) and the member a person (MEMBER_UNAVAILABLE). P5: with participation, the
+            member's participation from its date (eligible for assignment, the most open cases, a substitute who is another
+            member: SUBSTITUTE_UNAVAILABLE, a calendar of the organization, the team or the member: CALENDAR_UNAVAILABLE); the
+            team's user group (its saved replies' audience) follows the members.</description>
         <in-parameters>
             <parameter name="teamPartyId" required="true"/>
             <parameter name="partyId" required="true"/>
             <parameter name="roleTypeId" default-value="Agent"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="end" type="Boolean"/>
+            <!-- P5: the member's participation (design AgentTeams TeamParticipation), from participationFromDate (else now) -->
+            <parameter name="participation" type="Boolean" default="false"><description>The participation fields are given:
+                a current member's membership stays as it is and a new participation row replaces the one in
+                effect</description></parameter>
+            <parameter name="assignmentEligible"/>
+            <parameter name="maxActiveCases"/>
+            <parameter name="substitutePartyId"/>
+            <parameter name="calendarId"/>
+            <parameter name="participationFromDate" type="Timestamp"/>
         </in-parameters>
-        <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="participationId"/>
+        </out-parameters>
         <actions>
             <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
-            <set field="partyRelationshipId" from="cases.execute('saveMember', context).partyRelationshipId"/>
+            <set field="out" from="cases.execute('saveMember', context)"/>
+            <set field="partyRelationshipId" from="out.partyRelationshipId"/>
+            <set field="participationId" from="out.participationId || null"/>
+        </actions>
+    </service>
+
+    <!-- ===== P5: assignment (CS-ASSIGNMENT; Assignment.js) ===== -->
+    <service verb="assign" noun="Case" authenticate="anonymous-all" allow-remote="false">
+        <description>Runs the case's queue's assignment rules (design AssignmentRules): the first rule whose conditions hold
+            picks an eligible agent of its team by its distribution (round robin, fewest open cases; manual leaves the case),
+            else its fallback, else the queue's fallback, else the case stays unassigned and the queue team's managers are
+            told (SupportCaseUnassigned). The rule's cursor is locked with the assignment. At intake an assigned case stays
+            so; with reassign (a move to another queue) the rule's agent replaces the assignee, or none is left. Records the
+            rule, outcome and reason on the case's profile. The clocks are not touched. Internal: run by ensure#CaseProfile
+            and update#Case; a queue with no rule changes nothing.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="reassign" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcome"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="assignmentRuleId"/>
+            <parameter name="reason"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/Assignment.js').execute('assign', context)"/>
+            <set field="outcome" from="out.outcome || null"/>
+            <set field="assigneePartyId" from="out.assigneePartyId || null"/>
+            <set field="assignmentRuleId" from="out.assignmentRuleId || null"/>
+            <set field="reason" from="out.reason || null"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="Assignment">
+        <description>What the assignment rules would do (design AssignmentRules AssignmentPreview), through the same evaluator
+            as assign#Case and writing nothing: for a case (requestId), or for a case with the facts given (queue, type,
+            priority, channel, customer, tags) of the organization; with assignmentRuleId, that rule alone (a draft to try).
+            Each rule with its conditions and whether each held, the winning rule's agents with whether each is eligible now
+            and why not (not taking cases, at their most open cases, outside their working hours), the outcome and the agent
+            it would pick. Needs SUPPORT_POLICY_EDIT, SUPPORT_CASE_MANAGE or SUPPORT_CASE_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="requestTypeEnumId"/>
+            <parameter name="priority"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="tagEnumIds"/>
+            <parameter name="assignmentRuleId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcome"/>
+            <parameter name="outcomeText"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="assigneeName"/>
+            <parameter name="assignmentRuleId"/>
+            <parameter name="ruleName"/>
+            <parameter name="reason"/>
+            <parameter name="rules" type="List"/>
+            <parameter name="candidates" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/Assignment.js').execute('preview', context)"/>
+            <set field="outcome" from="out.outcome"/>
+            <set field="outcomeText" from="out.outcomeText"/>
+            <set field="assigneePartyId" from="out.assigneePartyId"/>
+            <set field="assigneeName" from="out.assigneeName"/>
+            <set field="assignmentRuleId" from="out.assignmentRuleId"/>
+            <set field="ruleName" from="out.ruleName"/>
+            <set field="reason" from="out.reason"/>
+            <set field="rules" from="out.rules"/>
+            <set field="candidates" from="out.candidates"/>
+        </actions>
+    </service>
+    <service verb="save" noun="AssignmentRule">
+        <description>An assignment rule of a service queue of the organization (design AssignmentRules AssignmentRuleEdit), from
+            its date: a draft has none and changes in place; a change of a published rule is a new row naming the one it
+            replaces, which it ends; with end, ends it. Its queue (QUEUE_UNAVAILABLE), name, order, distribution
+            (DISTRIBUTION_UNKNOWN), team (the queue's by default; TEAM_UNAVAILABLE, TEAM_REQUIRED), the members it takes
+            (MEMBER_UNAVAILABLE), whether working hours count, the most open cases (MAX_LOAD_INVALID), the fallback
+            (ASSIGNEE_UNAVAILABLE) and its typed conditions: the list given (conditions), else the row's with one added,
+            changed or removed (conditionAction add, update or remove, conditionSeqId, fieldEnumId, operatorEnumId,
+            conditionValue), each an allowlisted field (CONDITION_FIELD_UNKNOWN), an operator it takes
+            (CONDITION_OPERATOR_INVALID) and a value of its type (CONDITION_VALUE_INVALID). A field not given keeps the row's.
+            Needs SUPPORT_POLICY_EDIT and the organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#DatedSave"/>
+        <in-parameters>
+            <parameter name="assignmentRuleId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="requestCategoryId"/>
+            <parameter name="ruleName"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="distributionEnumId"/>
+            <parameter name="eligibleTeamPartyId"/>
+            <parameter name="eligiblePartyIds"/>
+            <parameter name="respectSchedule"/>
+            <parameter name="maxOpenCases"/>
+            <parameter name="fallbackPartyId"/>
+            <parameter name="conditions" type="List"><description>Maps of fieldEnumId, operatorEnumId and conditionValue</description></parameter>
+            <parameter name="conditionAction"/>
+            <parameter name="conditionSeqId"/>
+            <parameter name="fieldEnumId"/>
+            <parameter name="operatorEnumId"/>
+            <parameter name="conditionValue"/>
+            <parameter name="changeReason"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="assignmentRuleId"/></out-parameters>
+        <actions>
+            <set field="assignmentRuleId" from="ec.resource.script('component://mr-mantle/service/mantle/request/Assignment.js').execute('save', context).assignmentRuleId"/>
+        </actions>
+    </service>
+    <service verb="sync" noun="ServiceTeamGroup" authenticate="anonymous-all" allow-remote="false">
+        <description>Puts a service team's user group (SVT_ and the team's id, made on first use; the audience of its saved
+            replies, F3) in step with its current members: each of their users a current member, any other ended; and its
+            organization's group (SVO_ and the organization's id; its service-wide replies) with the members of all its teams.
+            save#ServiceTeam and save#ServiceTeamMember run it; internal, for loaded data.</description>
+        <in-parameters><parameter name="teamPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="userGroupId"/>
+            <parameter name="userIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/Assignment.js').execute('syncTeamGroup', context)"/>
+            <set field="userGroupId" from="out.userGroupId"/>
+            <set field="userIds" from="out.userIds || []"/>
+        </actions>
+    </service>
+
+    <!-- ===== P5: saved replies (CS-REPLIES; SavedReplies.js) ===== -->
+    <service verb="define" noun="SavedReplyParameters" type="interface">
+        <description>A saved reply on a case: the text block, the agent's edit of its body and subject, and the mailbox.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="emailTextBlockId" required="true"/>
+            <parameter name="bodyHtml" allow-html="safe"><description>The body as the agent edited it; empty: the block's</description></parameter>
+            <parameter name="subject"/>
+            <parameter name="emailAccountId"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="SavedReply">
+        <description>A saved reply as it would go on a case (design SavedReplies ReplyPreview, CaseDetail CaseReplyAction): a
+            text block the user may use (their own or shared with a group they are in) of the case's organization
+            (REPLY_UNAVAILABLE); the subject and body with the case's values put in, and an error for a variable it does not
+            know (UNSUPPORTED_VARIABLE) or one with no value on the case (UNRESOLVED_VARIABLE), never an empty value; the
+            recipient (the case's contact, else its customer: RECIPIENT_REQUIRED with no email); the mailbox
+            (SEND_ACCOUNT_REQUIRED); each action with whether it may run on the case now and why not; the case's revision.
+            Needs SUPPORT_CASE_EDIT and the case's organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#SavedReplyParameters"/>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/request/SavedReplies.js').execute('preview', context)"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="SavedReply">
+        <description>Applies a saved reply on a case once the agent confirmed its preview: its actions (status, tag, assignee,
+            priority, note, each through the case services' rules; a refused one refuses all) and, with send (the default), the
+            reply as a draft in the user's mailbox sent through the mail client (send#EmailDraft), filed on the case when it
+            is sent; all in one transaction. Refuses what preview#SavedReply names as an error and a case changed since
+            caseRevision (STALE_CASE). The message keeps its pending or failed state by its emailMessageId (deliveryStatus
+            pending, sent or failed). operationKey is required: a retry answers the first result, and sends a message whose
+            send failed again, never a second reply. Needs SUPPORT_CASE_EDIT and the case's organization.</description>
+        <implements service="mantle.request.SupportCaseServices.define#SavedReplyParameters"/>
+        <in-parameters>
+            <parameter name="send" type="Boolean" default="true"/>
+            <parameter name="caseRevision"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="deliveryStatus"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SavedReplies.js').execute('apply', context)"/>
+            <set field="emailMessageId" from="result.emailMessageId || null"/>
+            <set field="deliveryStatus" from="result.deliveryStatus || null"/>
+            <set field="alreadyApplied" from="!!result.alreadyApplied"/>
         </actions>
     </service>
 
