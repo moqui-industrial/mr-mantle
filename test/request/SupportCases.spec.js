@@ -119,6 +119,52 @@ spec({
     cleanup() {
         ec.artifactExecution.enableAuthz()
         login("john.doe")
+    },
+    // the project the spec makes has john.doe as its manager: take it out, so specs after this one (Projects' QuickCreate and
+    // project lists) see the demo's projects only
+    cleanupSpec() {
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            for (const row of ec.entity.find("mantle.request.Request").condition("rootWorkEffortId", "SCSPRJ").list()) {
+                row.rootWorkEffortId = null
+                row.update()
+            }
+            const cf = ec.entity.conditionFactory
+            const rows = Array.from(
+                ec.entity
+                    .find("mantle.work.effort.WorkEffort")
+                    .condition(
+                        cf.makeCondition(
+                            [
+                                cf.makeCondition("workEffortId", "equals", "SCSPRJ"),
+                                cf.makeCondition("rootWorkEffortId", "equals", "SCSPRJ")
+                            ],
+                            "or"
+                        )
+                    )
+                    .list()
+            )
+            const ids = rows.map(row => row.workEffortId)
+            for (const entityName of [
+                "mantle.work.effort.WorkEffortParty",
+                "mantle.work.effort.WorkEffortSetting",
+                "mantle.request.RequestWorkEffort",
+                "mantle.work.effort.WorkEffortUpdate",
+                "mantle.work.effort.WorkEffortAssoc"
+            ])
+                ec.entity.find(entityName).condition("workEffortId", "in", ids).deleteAll()
+            ec.entity.find("mantle.work.effort.WorkEffortAssoc").condition("toWorkEffortId", "in", ids).deleteAll()
+            for (const row of rows)
+                if (row.parentWorkEffortId || row.rootWorkEffortId) {
+                    row.parentWorkEffortId = null
+                    row.rootWorkEffortId = null
+                    row.update()
+                }
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", "in", ids).deleteAll()
+            ec.entity.find("moqui.entity.SequenceValueItem").condition("seqName", "Project_SCSPRJ").deleteAll()
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
     }
 })
 
