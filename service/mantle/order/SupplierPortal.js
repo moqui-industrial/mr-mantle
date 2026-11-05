@@ -121,6 +121,9 @@ function refused(error) {
     if (!code) throw error
     ec.message.clearErrors()
     const message = first.replace(/^[A-Z][A-Z0-9_]+: /, "")
+    // F118 (P17 review): a revision the buyer applied and has not yet sent, said in the supplier's terms
+    if (code === "REVISION_PENDING")
+        fail("Conflict", "The buyer is revising this order; acknowledge it once the revised order is sent to you")
     if (["SUPERSEDED_REVISION", "STALE_REVISION", "QUOTE_CLOSED", "ORDER_NOT_SENT"].includes(code)) fail("Conflict", message)
     if (["RECORD_UNAVAILABLE", "NOT_PURCHASE", "PERMISSION_DENIED"].includes(code)) unavailable()
     fail("Unprocessable", message)
@@ -552,23 +555,39 @@ function quoteView(checked) {
     const draftLines = Object.fromEntries(listOf(draftData.lines || []).map(line => [String(line.orderItemSeqId), line]))
     const currency = order.currencyUomId
     const proposed = order.statusId === "OrderProposed"
-    const lines = linesOf(orderId, checked.orderPartSeqId).map(item => {
-        const sent = publishedLines[String(item.orderItemSeqId)] || {}
-        const drafted = draftLines[item.orderItemSeqId] || {}
-        const offered = proposed && item.unitAmount != null && dec(item.unitAmount).compare(0) > 0 ? item.unitAmount : null
-        return {
-            orderItemSeqId: item.orderItemSeqId,
-            productText: productText(item),
-            description: item.productId && item.itemDescription !== productText(item) ? item.itemDescription || "" : "",
-            quantityText: quantityText(sent.quantity ?? item.quantity),
-            unitText: uomText(sent.quantityUomId ?? item.quantityUomId),
-            requiredText: day(sent.requiredByDate ?? item.requiredByDate),
-            unitAmount: drafted.unitAmount ?? (offered == null ? null : String(lib.money(offered, currency))),
-            unitAmountText: offered == null ? null : moneyText(offered, currency),
-            promisedDate: drafted.promisedDate ?? dayValue(item.promisedDate),
-            otherPartyProductId: drafted.otherPartyProductId ?? item.otherPartyProductId ?? null
-        }
-    })
+    // P17 review: a line the buyer added (or changed to another product) since the send was not sent, so it is not shown;
+    // the others show as sent (quantity, unit, date and description)
+    const wasSent = item => {
+        const sent = publishedLines[String(item.orderItemSeqId)]
+        return !!sent && (sent.productId || null) === (item.productId || null)
+    }
+    const lines = linesOf(orderId, checked.orderPartSeqId)
+        .filter(item => !published || wasSent(item))
+        .map(row => {
+            const sent = publishedLines[String(row.orderItemSeqId)]
+            const item = sent
+                ? Object.assign({}, row, {
+                      quantity: sent.quantity,
+                      quantityUomId: sent.quantityUomId,
+                      requiredByDate: sent.requiredByDate,
+                      itemDescription: sent.description
+                  })
+                : row
+            const drafted = draftLines[item.orderItemSeqId] || {}
+            const offered = proposed && item.unitAmount != null && dec(item.unitAmount).compare(0) > 0 ? item.unitAmount : null
+            return {
+                orderItemSeqId: item.orderItemSeqId,
+                productText: productText(item),
+                description: item.productId && item.itemDescription !== productText(item) ? item.itemDescription || "" : "",
+                quantityText: quantityText(item.quantity),
+                unitText: uomText(item.quantityUomId),
+                requiredText: day(item.requiredByDate),
+                unitAmount: drafted.unitAmount ?? (offered == null ? null : String(lib.money(offered, currency))),
+                unitAmountText: offered == null ? null : moneyText(offered, currency),
+                promisedDate: drafted.promisedDate ?? dayValue(item.promisedDate),
+                otherPartyProductId: drafted.otherPartyProductId ?? item.otherPartyProductId ?? null
+            }
+        })
     return {
         quote: {
             orderId,
@@ -871,7 +890,9 @@ function orderView(checked) {
             .slice(0, 10)
             .map(receiptOf),
         capabilities: {
-            canAcknowledge: acknowledgeStatuses.includes(order.statusId) && !receipt,
+            // F118 (P17 review): not while a revision the buyer applied waits for its approval (record#Acknowledgement refuses it)
+            canAcknowledge:
+                acknowledgeStatuses.includes(order.statusId) && !receipt && !revisions().awaitingApproval({orderId, order}),
             canReportDelivery: !!shipTo && deliveryStatuses.includes(order.statusId),
             canSendBill: true,
             expiresText: day(checked.thruDate)

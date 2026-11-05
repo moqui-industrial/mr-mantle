@@ -504,15 +504,39 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
         const own = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO"}, state.contact)
         const competitor = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO_B"}, state.contact)
         const competitorQuote = page("getQuoteInvitation", {orderId: state.quoteB}, state.contact)
+        // F118 (P17 review): a revision the buyer applied waits for its approval: Acknowledge is not offered, and an
+        // acknowledgement is refused as a conflict in the supplier's terms
+        // the hold as apply#PurchaseRevision leaves it (a direct write: the status flow has no Sent to Held)
+        const held0 = one("mantle.order.OrderHeader", {orderId: prefix + "_PO"})
+        held0.set("statusId", "OrderHold")
+        held0.update()
+        call("create#mantle.order.OrderHoldReason", {
+            orderHoldReasonId: prefix + "_CHANGE",
+            orderId: prefix + "_PO",
+            holdTypeEnumId: "OhtChange",
+            sourceId: prefix + "_CHANGE",
+            appliedRevision: 2,
+            returnStatusId: "OrderSent",
+            placedDate: ec.user.nowTimestamp
+        })
+        const held = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO"}, state.contact)
+        const heldAcknowledged = page(
+            "acknowledgePurchaseOrder",
+            {orderId: prefix + "_PO", operationId: key(), outcome: "accept"},
+            state.contact
+        )
         capability("Order", prefix + "_PO", "OrderAcknowledgement,BillUpload", token("PO_R2"), supplierA, {recordRevision: 2})
         call("update#mantle.order.OrderHeader", {orderId: prefix + "_PO", statusId: "OrderCancelled"})
         const live = rows("mantle.party.ExternalAccessCapability", {recordType: "Order", recordId: prefix + "_PO"}).filter(
             row => !row.revokedDate
         )
         const cancelled = page("getPublishedPurchaseOrder", {token: token("PO_R2")})
-        return {home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId}
+        return {home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged}
     },
-    then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId}) {
+    then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged}) {
+        held.capabilities.canAcknowledge === false
+        heldAcknowledged.errorKind === "Conflict"
+        heldAcknowledged.errorMessage.includes("The buyer is revising this order")
         unsentId != null
         unsent.errorKind === "NotFound"
         !home.documentList.some(doc => doc.orderId === unsentId)
@@ -530,36 +554,62 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
 })
 
 // P17 (F176): once the RFQ went to supplier A, an edit the buyer has not sent again is not on A's page: it shows the RFQ as
-// last sent (its specification, due date and revision), and the revision A answers is that one
+// last sent (its specification, due date and revision), and the revision A answers is that one. (P17 review) Supplier B's
+// quote, still requested, follows the RFQ's lines: a quantity changed and a line added since its send are not on B's page.
 feature("The supplier's page shows the RFQ as last sent to it, not the buyer's edit since", {
     when() {
         const before = page("getQuoteInvitation", {token: token("QUOTE_A")})
-        // the RFQ's mail to supplier A, sent now
-        const emailMessageId = call("create#moqui.basic.email.EmailMessage", {
-            statusId: "ES_SENT",
-            sentDate: new Date(Date.now() - 100),
-            subject: "RFQ " + state.requestId,
-            toAddresses: "quotes@supplier-a.example.test"
-        }).emailMessageId
-        call("create#mantle.order.OrderEmailMessage", {
-            orderId: state.quoteA,
-            emailMessageId,
-            partyId: supplierA,
-            roleTypeId: "Supplier"
-        })
+        // the RFQ's mail to suppliers A and B, sent now
+        for (const [orderId, partyId] of [
+            [state.quoteA, supplierA],
+            [state.quoteB, supplierB]
+        ]) {
+            const emailMessageId = call("create#moqui.basic.email.EmailMessage", {
+                statusId: "ES_SENT",
+                sentDate: new Date(Date.now() - 100),
+                subject: "RFQ " + state.requestId,
+                toAddresses: "quotes@supplier.example.test"
+            }).emailMessageId
+            call("create#mantle.order.OrderEmailMessage", {orderId, emailMessageId, partyId, roleTypeId: "Supplier"})
+        }
+        capability("Quote", state.quoteB, "QuoteResponse", token("QUOTE_B"), supplierB)
         const sent = page("getQuoteInvitation", {token: token("QUOTE_A")})
+        const sentB = page("getQuoteInvitation", {token: token("QUOTE_B")})
         const edited = run(state.buyer, S + "store#QuoteRequest", {
             requestId: state.requestId,
             description: "Changed after the send: anodized"
         })
+        const changed = run(state.buyer, S + "store#QuoteRequestItem", {
+            requestId: state.requestId,
+            requestItemSeqId: "01",
+            quantity: 120
+        })
+        const added = run(state.buyer, S + "store#QuoteRequestItem", {
+            requestId: state.requestId,
+            description: "Added after the send: spacers",
+            quantity: 77
+        })
         const after = page("getQuoteInvitation", {token: token("QUOTE_A")})
-        return {before, sent, edited, after}
+        const afterB = page("getQuoteInvitation", {token: token("QUOTE_B")})
+        const linesB = rows("mantle.order.OrderItem", {orderId: state.quoteB})
+        return {before, sent, sentB, edited, changed, added, after, afterB, linesB}
     },
-    then({before, sent, edited, after}) {
+    then({before, sent, sentB, edited, changed, added, after, afterB, linesB}) {
         edited.error == ""
+        changed.error == ""
+        added.error == ""
         Number(edited.sourceRevision) > after.quote.revision
         sent.quote.revision == before.quote.revision
         after.quote.revision == before.quote.revision
         !JSON.stringify(after).includes("Changed after the send")
+        // B's quote follows the RFQ (120 and the added line), its page shows what was sent
+        linesB.length == 2
+        linesB.some(line => toDecimal(line.quantity).compare(120) === 0)
+        afterB.quote.revision == sentB.quote.revision
+        afterB.lines.length == 1
+        afterB.lines[0].quantityText == sentB.lines[0].quantityText
+        sentB.lines[0].quantityText == "100"
+        !JSON.stringify(afterB).includes("Added after the send")
+        !JSON.stringify(afterB).includes("Changed after the send")
     }
 })
