@@ -18,7 +18,8 @@ const ids = {
     book: prefix + "_BOOK",
     ebook: prefix + "_EBOOK",
     buyer: prefix + "_BUYER",
-    unverified: prefix + "_UNVERIFIED"
+    unverified: prefix + "_UNVERIFIED",
+    staffParty: prefix + "_SUPPLIER"
 }
 const make = (entity, values) => call("create#" + entity, values)
 const one = (entity, fields) => ec.entity.find(entity).condition(fields).disableAuthz().one()
@@ -183,6 +184,18 @@ spec({
         // the buyer's guest purchase of a digital item (invoiced at once), and someone else's
         state.mine = buy(ids.ebook, "buyer@shcu.example.test")
         state.other = buy(ids.ebook, "other@shcu.example.test")
+        // a guest purchase of the buyer's email that staff merged into another of the organization's parties (a supplier
+        // contact sharing the address): never claimed by the email
+        state.staffMerged = buy(ids.ebook, "buyer@shcu.example.test")
+        system(() => {
+            make("mantle.party.Party", {partyId: ids.staffParty, partyTypeEnumId: "PtyPerson"})
+            make("mantle.party.Person", {partyId: ids.staffParty, firstName: "Sam", lastName: "Supplier"})
+            make("mantle.party.PartyRole", {partyId: ids.staffParty, roleTypeId: "Supplier"})
+            call("mantle.party.DuplicateServices.merge#Parties", {
+                toPartyId: ids.staffParty,
+                fromPartyId: state.staffMerged.partyId
+            })
+        })
     },
     cleanupSpec() {
         login("john.doe")
@@ -218,6 +231,7 @@ feature("a guest's link and a verified account read their own orders; another or
         // the order's invoice is the account's own in Billing (the self relationship)
         r.invoices.result.invoiceList.length == 1
         one("mantle.party.Party", {partyId: state.mine.partyId}).mergedToPartyId == ids.buyer
+        !one("mantle.party.Party", {partyId: ids.staffParty}).mergedToPartyId
     }
 })
 
@@ -325,6 +339,8 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
         const before = op(ids.buyer, H + "get#EmailPreferences", {})
         const topicId = before.result?.topics[0]?.topicId
         const turnedOn = op(ids.buyer, H + "store#EmailPreferences", {choices: JSON.stringify({topics: {[topicId]: true}})})
+        // an account whose email is not verified cannot turn them on
+        const unverifiedOn = op(ids.unverified, H + "store#EmailPreferences", {choices: {topics: {[topicId]: true}}})
         const consented = system(
             () => call(H + "check#CartReminderConsent", {partyId: ids.buyer, productStoreId: ids.store}).consented
         )
@@ -355,10 +371,11 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
             })
             return call("mantle.party.ConsentServices.create#UnsubscribeToken", {contactListId, partyId: ids.buyer})
         })
-        return {before, turnedOn, consented, turnedOff, guest, visitor, link}
+        return {before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}
     },
-    then({before, turnedOn, consented, turnedOff, guest, visitor, link}) {
+    then({before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}) {
         before.result.topics.length == 1
+        unverifiedOn.error.includes("VERIFY_REQUIRED")
         before.result.topics[0].on == false
         turnedOn.result.topics[0].on == true
         consented == true

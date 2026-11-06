@@ -73,6 +73,17 @@ function getAccountHub(p) {
     }
 }
 
+// Whether the signed-in account's current email address is verified (a PASS account's VerifiedAddress of it).
+function emailVerified() {
+    const account = ec.user.userAccount
+    const email = text(account?.emailAddress).toLowerCase()
+    return (
+        !!email &&
+        rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
+            row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === email
+        )
+    )
+}
 // ===== a store's cart reminders topic =====
 // The store's topic list (a ContactList of type CART_REMINDER, named by the store's PsstCartReminderList setting), made
 // when first needed.
@@ -207,6 +218,10 @@ function storeEmailPreferences(p) {
     for (const [topicId, wanted] of Object.entries(choices.topics || {})) {
         const store = stores.find(row => "cartReminders:" + row.productStoreId === topicId)
         if (!store || on(wanted) === cartReminderOn(partyId, store.productStoreId)) continue
+        // a reminder goes to the account's address, so turning one on needs that address verified (Shop P6 review); turning
+        // one off never does
+        if (on(wanted) && !emailVerified())
+            refuse("Unauthorized", "VERIFY_REQUIRED", "Verify your email address to turn on cart reminders")
         call("mantle.party.ConsentServices.store#PartyConsent", {
             partyId,
             purposeEnumId: "PcpCartReminder",

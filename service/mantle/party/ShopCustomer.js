@@ -115,13 +115,18 @@ function claimGuestPurchases(shop, partyId) {
     const email = text(account?.emailAddress).toLowerCase()
     if (!email || !partyId) return {claimed: 0}
     let claimed = 0
-    for (const checkout of rows(C, {productStoreId: shop.productStoreId, statusId: "ScoCompleted", accountCheckout: "N"})) {
-        if (text(checkout.contactEmail).toLowerCase() !== email || checkout.customerPartyId === partyId) continue
+    // a guest's email is kept lower case (set#CheckoutContact)
+    const guestCheckouts = rows(C, {
+        productStoreId: shop.productStoreId,
+        statusId: "ScoCompleted",
+        accountCheckout: "N",
+        contactEmail: email
+    })
+    for (const checkout of guestCheckouts) {
+        if (checkout.customerPartyId === partyId) continue
         const guest = one("mantle.party.Party", {partyId: checkout.customerPartyId})
         if (!guest || guest.disabled === "Y" || guest.mergedToPartyId) continue
-        if (find("moqui.security.UserAccount", {partyId: guest.partyId}).count() > 0) continue
-        const cart = one("mantle.order.StoreCartAccess", {cartAccessId: checkout.cartAccessId})
-        if (!cart || cart.guestPartyId !== guest.partyId) continue
+        if (!anonymousGuest(guest.partyId, checkout)) continue
         ec.message.pushErrors()
         try {
             ec.service
@@ -143,6 +148,20 @@ function claimGuestPurchases(shop, partyId) {
         }
     }
     return {claimed}
+}
+// Whether a party is still only the anonymous guest of one Shop cart (Shop P6 review): the party its cart was made with, the
+// only cart it has, with no account, no relationship, no role but Customer, and no order but that cart's. A party staff
+// merged with a guest (a customer of the organization's own, another account's, a colleague's) is never claimed by email.
+function anonymousGuest(guestPartyId, checkout) {
+    const cart = one("mantle.order.StoreCartAccess", {cartAccessId: checkout.cartAccessId})
+    if (!cart || cart.guestPartyId !== guestPartyId || cart.orderId !== checkout.orderId) return false
+    if (find("mantle.order.StoreCartAccess", {guestPartyId}).count() !== 1) return false
+    if (find("mantle.order.StoreCartAccess", {customerPartyId: guestPartyId}).count() > 0) return false
+    if (find("moqui.security.UserAccount", {partyId: guestPartyId}).count() > 0) return false
+    if (rows("mantle.party.PartyRole", {partyId: guestPartyId}).some(row => row.roleTypeId !== "Customer")) return false
+    if (find("mantle.party.PartyRelationship", {fromPartyId: guestPartyId}).count() > 0) return false
+    if (find("mantle.party.PartyRelationship", {toPartyId: guestPartyId}).count() > 0) return false
+    return rows(PART, {customerPartyId: guestPartyId}).every(part => part.orderId === checkout.orderId)
 }
 
 // ===== order projections =====
