@@ -157,7 +157,7 @@ function membersOf(productCategoryId) {
 }
 // The feed's candidates: the store's products with a current published row now (ShopCatalog.js publishedIds' rule, featured
 // rank first then id), in the category tree when the feed is scoped. The publication rows are read a page at a time with no
-// bound but limits.candidates, so a store larger than the Shop list's candidate bound (2,000) is covered (F-P14-1).
+// bound but limits.candidates, so a store larger than the Shop list's candidate bound (2,000) is covered (Commerce F150).
 function candidatesOf(shop, feed) {
     const members = feed.productCategoryId ? membersOf(feed.productCategoryId) : null
     const seen = new Set()
