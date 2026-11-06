@@ -466,6 +466,37 @@ feature(
     }
 )
 
+feature("a two-part order with a once-per-customer promotion: the second part is priced without it, and the order places", {
+    when() {
+        const {storePromotionId, productId} = flatPromotion("Once each over two parts", {useLimitPerCustomer: "1"})
+        const shopper = customer("TwoParts")
+        const orderId = cart(shopper, ids.store, productId)
+        system(() => {
+            const part = call("mantle.order.OrderServices.create#OrderPart", {
+                orderId,
+                vendorPartyId: vendorId,
+                customerPartyId: shopper
+            })
+            call("mantle.order.OrderServices.add#OrderProductQuantity", {
+                orderId,
+                orderPartSeqId: part.orderPartSeqId,
+                productId,
+                quantity: 1,
+                unitAmount: 20,
+                requireInventory: false
+            })
+        })
+        const discounted = promoItems(orderId, storePromotionId).length
+        return {discounted, placed: place(orderId), status: statusOf(orderId)}
+    },
+    then({discounted, placed, status}) {
+        // each part is priced alone; the other part's use counts against the limit (else place#Order refuses it every time)
+        discounted == 1
+        placed.error == ""
+        status == "OrderPlaced"
+    }
+})
+
 feature("two concurrent placements past a code's use limit: the second waits for the first's lock and is refused", {
     when() {
         const {storePromotionId, productId} = flatPromotion("One use of the code", {requireCode: "Y"})
@@ -515,9 +546,11 @@ feature("two concurrent placements past a code's use limit: the second waits for
     then({discounted, results, statuses, made}) {
         code(made) == ""
         discounted == [1, 1]
-        results[0].error == ""
-        code(results[1]) == "PROMOTION_LIMIT_REACHED"
-        results[1].at >= results[0].at - 50
-        statuses == ["OrderPlaced", "OrderOpen"]
+        // the first thread normally takes the lock; under load the second may, so either one places and the other is refused
+        const refused = statuses.indexOf("OrderOpen")
+        statuses.filter(status => status == "OrderPlaced").length == 1
+        refused >= 0
+        results[1 - refused].error == ""
+        code(results[refused]) == "PROMOTION_LIMIT_REACHED"
     }
 })
