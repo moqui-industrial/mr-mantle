@@ -1466,6 +1466,13 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="bodyParameters" from="{orderId:orderId, storeDomain:productStore.storeDomain,
                         profileUrlPath:productStore.profileUrlPath, headerImagePath:storeEmail.headerImagePath,
                         detailLinkPath:storeEmail.detailLinkPath}"/>
+                    <!-- a Shop order's receipt carries the link that confirms the buyer's checkout opt-ins waiting for it
+                        (impl-commerce P9 follow-up; StoreTopics.js); any other order gets none and this changes nothing -->
+                    <if condition="emailTypeEnumId == 'PsetOrderPlaced'">
+                        <service-call name="mantle.public.AccountHubServices.make#OptInConfirmLink" in-map="{orderId:orderId}"
+                                out-map="optInLink" transaction="force-new" ignore-error="true" disable-authz="true"/>
+                        <if condition="optInLink?.confirmUrl"><set field="bodyParameters" from="Object.assign({}, bodyParameters, {optInConfirmUrl: optInLink.confirmUrl})"/></if>
+                    </if>
 
                     <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                             in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId, toAddresses:toAddresses,
