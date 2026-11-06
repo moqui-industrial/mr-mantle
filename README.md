@@ -35,6 +35,9 @@ The two suites are described in `docs/Build-Test.md` (The two suites) in the mr-
 A database made before an entity's key changed needs its table rebuilt once: see [docs/Upgrading.md](docs/Upgrading.md)
 (ProductStoreProduct, dated store publication; PublicSitePage, pages by mount and route).
 
+Fixes made here to behaviour carried over from mantle-udm and mantle-usl, candidates to take upstream, are in
+[docs/Upstream-Fixes.md](docs/Upstream-Fixes.md).
+
 For details about Mantle see its page on moqui.org:
 
 <http://www.moqui.org/mantle.html>
