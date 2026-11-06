@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's checkout and payment (mr-pass impl-shop P5; design-shop §7.2, §8.2, §8.4): the payment hold's release
+    permission (X4, F15) with its ADMIN grant (BOSS grants it to Accounting's treasury group), and the checkout jobs, each
+    attempt or checkout in its own transaction: the reconciliation of pending checkout payments (a lookup by reference,
+    bounded with backoff, then the one placement) and the expiry of checkouts left unsubmitted. -->
+<entity-facade-xml type="seed-initial">
+    <!-- PAYMENT_HOLD_RELEASE releases an order's Payment hold reason (OrderHoldType OhtPayment's enumCode): a capture that
+        failed, or an amount or account mismatch found after placement (design-shop §8.2) -->
+    <moqui.security.UserPermission userPermissionId="PAYMENT_HOLD_RELEASE" description="Payment Hold Release"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="PAYMENT_HOLD_RELEASE" fromDate="0"/>
+
+    <moqui.service.job.ServiceJob jobName="reconcile_StoreCheckouts" description="Reconcile pending Shop checkout payments"
+            serviceName="mantle.order.ShopCheckoutServices.reconcile#Checkouts" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.service.job.ServiceJob jobName="expire_StoreCheckouts" description="Expire unsubmitted Shop checkouts"
+            serviceName="mantle.order.ShopCheckoutServices.expire#Checkouts" cronExpression="0 15 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

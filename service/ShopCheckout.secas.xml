@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <!-- mr-pass impl-shop P5 (design-shop §8.2, X4): a capture of a Shop checkout's payment that is declined or refused after
+        its order was placed holds the order with a Payment reason, which Accounting's payment operator releases
+        (PAYMENT_HOLD_RELEASE). Only a payment with a Shop checkout attempt is looked at; every other capture is unchanged. -->
+    <seca id="ShopCheckoutCaptureHold" service="mantle.account.PaymentServices.capture#SinglePayment" when="post-service" run-on-error="false">
+        <condition><expression>paymentGatewayResponseId &amp;&amp; paymentId</expression></condition>
+        <actions>
+            <entity-find-count entity-name="mantle.account.payment.PortalPaymentAttempt" count-field="shopAttemptCount" disable-authz="true">
+                <econdition field-name="paymentId"/>
+                <econdition field-name="purposeEnumId" value="PapShopCheckout"/>
+            </entity-find-count>
+            <if condition="shopAttemptCount &gt; 0">
+                <service-call name="mantle.order.ShopCheckoutServices.check#CaptureOutcome" disable-authz="true"
+                        in-map="{paymentId:paymentId, paymentGatewayResponseId:paymentGatewayResponseId}"/>
+            </if>
+        </actions>
+    </seca>
+</secas>

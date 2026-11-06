@@ -33,7 +33,9 @@ spec({
         })
         for (const [id, authorize, capture] of [
             ["ANET_SPEC", "authorize#Payment", "capture#Payment"],
-            ["ANET_SPEC_SALE", "authorizeAndCapture#Payment", null]
+            ["ANET_SPEC_SALE", "authorizeAndCapture#Payment", null],
+            // Shop P5: Accept Hosted
+            ["ANET_SPEC_HOSTED", "authorizeHosted#Payment", "capture#Payment"]
         ]) {
             call("create#mantle.account.method.PaymentGatewayConfig", {
                 paymentGatewayConfigId: id,
@@ -860,6 +862,88 @@ feature("a held authorization is not sent again; only the payer keeps a card, an
 
 // The adapter logs only fixed text and reason codes, never a request or an answer; a run's console is checked for the
 // same values by hand (plan P1 record).
+feature("Accept Hosted: the payment waits at its page, a form token per visit, and a webhook finds it by its reference", {
+    when() {
+        const paymentId = cardPayment(30, "ANET_SPEC_HOSTED")
+        const returnUrl = "https://shop.example.test/Checkout/return?ref=1&key=" + "k".repeat(40)
+        const auth = call(P + "authorize#SinglePayment", {paymentId, operationKey: "anet-h-1", returnUrl})
+        const pending = response(auth.paymentGatewayResponseId)
+        const nothingSent = sent().length
+        answer("getHostedPaymentPageRequest", {token: "spec-form-token-1", messages: ok})
+        const form = call(A + "get#HostedPaymentForm", {
+            paymentId,
+            returnUrl,
+            cancelUrl: returnUrl + "&cancelled=true",
+            merchantName: "Spec Store"
+        })
+        const formRequest = requestOf(sent()[0])
+        const reference = pending.idempotencyKey.slice(0, 20)
+        // the payer paid on the page; the webhook names the transaction with no merchant reference: its invoice number
+        // (getTransactionDetails) matches the waiting payment, whose lookup finds it by the reference
+        answer(
+            '"transId":"60200"',
+            details("60200", "authorizedPendingCapture", {order: {invoiceNumber: reference}, authAmount: 30})
+        )
+        answer(
+            "transrefId",
+            details("60200", "authorizedPendingCapture", {
+                order: {invoiceNumber: reference},
+                authAmount: 30,
+                networkTransId: "SPECNTI0001"
+            })
+        )
+        const notification = call(A + "receive#Webhook", {
+            systemMessageTypeId: "AuthorizeNetWebhook",
+            systemMessageRemoteId: "ANET_SPEC",
+            messageText: JSON.stringify({
+                notificationId: "spec-notification-hosted-1",
+                eventType: "net.authorize.payment.authorization.created",
+                payload: {entityName: "transaction", id: "60200", authAmount: 30}
+            })
+        })
+        call("org.moqui.impl.SystemMessageServices.consume#ReceivedSystemMessage", {
+            systemMessageId: notification.systemMessageIdList[0]
+        })
+        const lookups = ec.entity
+            .find("mantle.account.method.PaymentGatewayResponse")
+            .condition({paymentId, paymentOperationEnumId: "PgoTxDetails"})
+            .list()
+        return {
+            pending,
+            nothingSent,
+            form,
+            formRequest,
+            reference,
+            after: payment(paymentId),
+            lookup: Array.from(lookups)[0],
+            formDate: response(pending.paymentGatewayResponseId).hostedFormDate
+        }
+    },
+    then({pending, nothingSent, form, formRequest, reference, after, lookup, formDate}) {
+        // authorized at the page, nothing sent: pending with no result and no transaction yet
+        pending.transactionStatus == "HostedPending"
+        pending.resultSuccess == "N" && pending.resultDeclined == "N" && pending.resultUnknown == "N"
+        nothingSent == 0
+        // the form: a fresh token for the sandbox page, the reference in refId and invoiceNumber, the canonical return
+        form.token == "spec-form-token-1"
+        form.formUrl == "https://test.authorize.net/payment/payment"
+        formRequest.refId == reference
+        formRequest.transactionRequest.order.invoiceNumber == reference
+        formRequest.transactionRequest.transactionType == "authOnlyTransaction"
+        toDecimal(formRequest.transactionRequest.amount).eq(30)
+        JSON.parse(formRequest.hostedPaymentSettings.setting[0].settingValue).url.startsWith(
+            "https://shop.example.test/Checkout/return"
+        )
+        JSON.parse(formRequest.hostedPaymentSettings.setting[2].settingValue).merchantName == "Spec Store"
+        formDate != null
+        // the webhook's lookup: the transaction found by the reference, its amount and network transaction id kept
+        after.statusId == "PmntAuthorized"
+        after.paymentRefNum == "60200"
+        lookup.networkTransId == "SPECNTI0001"
+        toDecimal(lookup.amount).eq(30)
+    }
+})
+
 feature("no card number, browser token or secret is in a gateway response or a system message", {
     when() {
         // its own payment, kept card and notification, so the check stands alone

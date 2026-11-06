@@ -30,6 +30,23 @@ const TOKEN_WRITES = [
     'removeCartItem',
     'applyPromoCode',
     'removePromoCode',
+    // Shop P5: the checkout's writes and its capability reads (POSTs, F75), authorized by the session's cart capability
+    // (input.token), the checkout's reference and key (a provider's return, a refreshed frontend) or a guest's order link;
+    // getCart with them
+    'getCart',
+    'beginCheckout',
+    'getCheckout',
+    'resumeCheckout',
+    'setCheckoutContact',
+    'setCheckoutAddresses',
+    'getDeliveryOptions',
+    'selectDelivery',
+    'getPaymentOptions',
+    'selectPayment',
+    'submitCheckout',
+    'getCheckoutPaymentResult',
+    'getCheckoutPaymentForm',
+    'getOrderConfirmation',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

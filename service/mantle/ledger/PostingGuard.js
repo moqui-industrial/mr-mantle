@@ -121,8 +121,8 @@ function automatic(tx) {
     )
 }
 // The one payment a public Billing page has checked and is completing (Portal.js sets PORTAL_PAYMENT in the execution
-// context's shared map around its gateway calls): a customer's card payment to the organization, which no user of the
-// organization makes. Its own posting, or its application's, skips the user's organization check; nothing else does.
+// context's shared map around its gateway calls; Shop's checkout does too, through PaymentAttempts.js asAttempt): a
+// customer's card payment to the organization, which no user of the organization makes. Its own posting, or its application's, skips the user's organization check; nothing else does.
 const PORTAL_PAYMENT = "mantle.portalPaymentId"
 function portalPayment(tx) {
     const marked = ec.context.sharedMap[PORTAL_PAYMENT]

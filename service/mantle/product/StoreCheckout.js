@@ -65,7 +65,15 @@ const gatewayCapabilities = {
         savedMethods: false,
         offSession: false
     }),
-    PgtAuthorizeNet: () => ({hostedCheckout: false, savedMethods: true, offSession: false}),
+    // Shop P5 (F14, F37): Accept Hosted, a gateway whose authorization service is authorizeHosted#Payment; its page takes a
+    // posted form token, which hostedFormService gives the frontend's relay on each visit
+    PgtAuthorizeNet: config => ({
+        hostedCheckout: /Hosted#Payment$/.test(String(config.authorizeServiceName || "")),
+        savedMethods: true,
+        offSession: false,
+        hostedFormService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedPaymentForm",
+        hostedProfileService: "mantle.ext.account.gateway.AuthorizeNetServices.store#HostedPaymentProfile"
+    }),
     PgtPayTrace: () => ({hostedCheckout: false, savedMethods: false, offSession: false})
 }
 const capabilityTexts = {hostedCheckout: "Hosted checkout", savedMethods: "Saved methods", offSession: "Off-session"}
@@ -1124,6 +1132,38 @@ const readiness = {
             ? {ready: true, message: "Customers' requests go to " + supportQueueText(store.organizationPartyId, queueId)}
             : {ready: false, message: "The support queue " + queueId + " is no longer one the organization offers"}
     },
+    // Shop P5 (design-shop §8.1): a Shop site's checkout needs a gateway with a hosted page for the store's card payments
+    hostedPayment(store) {
+        if (!shopSites(store).length) return null
+        const enabled = enabledGateways(store.organizationPartyId)
+        const hosted = rows(PAY_GATEWAY, {productStoreId: store.productStoreId}).filter(row => {
+            const config = enabled[row.paymentGatewayConfigId]
+                ? one("mantle.account.method.PaymentGatewayConfig", {paymentGatewayConfigId: row.paymentGatewayConfigId})
+                : null
+            return config && capabilitiesOf(config).hostedCheckout
+        })
+        return hosted.length
+            ? {
+                  ready: true,
+                  message:
+                      "Shoppers pay on the provider's page (" + hosted.map(row => row.paymentGatewayConfigId).join(", ") + ")"
+              }
+            : {ready: false, message: "No payment gateway of the store has a hosted payment page, so Shop takes no payments"}
+    },
+    // Shop P5 (F13): the jobs that finish a hosted payment a payer never returns from, and expire unsubmitted checkouts
+    checkoutJobs(store) {
+        if (!shopSites(store).length) return null
+        const paused = ["reconcile_StoreCheckouts", "expire_StoreCheckouts", "poll_PaymentGatewayDetails"].filter(
+            jobName => one("moqui.service.job.ServiceJob", {jobName})?.paused !== "N"
+        )
+        return paused.length
+            ? {
+                  ready: false,
+                  message:
+                      "Paused or missing: " + paused.join(", ") + "; pending payments are only reconciled when a payer returns"
+              }
+            : {ready: true, message: "Payment reconciliation and checkout expiry jobs are running"}
+    },
     supportMount(store) {
         const sites = shopSites(store)
         if (!sites.length) return null
@@ -1163,6 +1203,8 @@ const operations = {
     readiness,
     rate,
     settingAt,
+    // Shop P5: the live page rule for the terms page a checkout shows
+    livePage,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown checkout operation " + op)
         return operations[op](parameters || {})

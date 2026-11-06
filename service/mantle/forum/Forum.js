@@ -2163,16 +2163,36 @@ methods.storeMounts = (p) => {
                 invalid('Mounts overlap')
         }
     }
-    for (const old of existing) if (!kept.includes(old)) old.delete()
-    for (const [i, m] of mounts.entries())
-        create(S + 'PublicSiteApp', {
-            siteId: p.siteId,
-            appMountId: m.appMountId || m.app + '-' + i,
+    // Shop P5 (impl-shop F75): a named mount that is already the site's keeps its row (and so its id and what refers to it,
+    // a theme binding, a cart's mount): the one with its appMountId, else the site's mount of the same app at the same path,
+    // else of the same app; only the existing mounts no save names and none matched are deleted
+    const matched = new Map()
+    for (const [i, m] of mounts.entries()) {
+        const free = (old) => !kept.includes(old) && ![...matched.values()].includes(old)
+        const found =
+            (m.appMountId && existing.find((old) => old.appMountId === m.appMountId && old.app === m.app && free(old))) ||
+            existing.find((old) => old.app === m.app && old.pathPrefix === m.pathPrefix && free(old)) ||
+            (!m.appMountId && existing.find((old) => old.app === m.app && free(old)))
+        if (found) matched.set(i, found)
+    }
+    const reused = [...matched.values()]
+    for (const old of existing) if (!kept.includes(old) && !reused.includes(old)) old.delete()
+    for (const [i, m] of mounts.entries()) {
+        const values = {
             app: m.app,
             pathPrefix: m.pathPrefix,
             enabled: m.enabled === false ? 'N' : 'Y',
             targetId: m.targetId || null,
-        })
+        }
+        const old = matched.get(i)
+        if (old) update(old, values)
+        else
+            create(S + 'PublicSiteApp', {
+                siteId: p.siteId,
+                appMountId: m.appMountId || m.app + '-' + i,
+                ...values,
+            })
+    }
     if (hosts.filter((h) => h.canonical).length > 1)
         invalid('Choose one canonical hostname')
     // Commerce P5 (F54): a theme preview host serves only the preview render, so it is never the canonical one; a host

@@ -858,6 +858,13 @@ Accounting's customer and supplier pages are the PASS Billing and Supplier apps 
   (`get#SinglePaymentGatewayDetails`) and captures an authorization, and `PaymentApplyForInvoice` applies a delivered
   payment. Nothing the payer's browser brings back is read. Test gateway: `hostedPending#PaymentAuthorization`,
   `alwaysPending#` and `alwaysDecline#PaymentDetails`.
+- **Typed attempts** (AC-02, X9; mr-pass impl-shop P5). `PortalPaymentAttempt.purposeEnumId` names whose attempt it is:
+  `PapInvoice` (Billing's, also when empty), `PapShopCheckout` (Shop's checkout, `ShopCheckout.js`), `PapShopRenewal` and
+  `PapEventRegistration` (later). Each worker selects its own purpose: Billing's pages and `resolve_PortalPayments` read only
+  invoice attempts, Shop's `reconcile_StoreCheckouts` only its own. `PaymentAttempts.js` is the coordinator the other
+  purposes use (create, the due attempts with backoff, the payment's state, a lookup in its own transaction under the
+  posting guard). `authorize#OrderPayments` skips a promised payment whose attempt is unsettled, so a placement never
+  authorizes a payment its provider is still deciding.
 - **Supplier bills.** `submit#SupplierBill` answers a repeat of the operation or of the supplier's bill number with the
   first `SupplierBillSubmission`, stages the file under `pass_media_root/bills`, checks its leading bytes are the PDF,
   PNG or JPEG it says (kept with that extension) and scans it (`pass_scanner_service`),

@@ -1619,6 +1619,18 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="totalAuthorized" from="totalAuthorized.add(payment.amount ?? 0)"/>
                     <continue/>
                 </if>
+                <!-- a promised payment whose payment attempt (PortalPaymentAttempt: a Shop checkout's hosted page) is
+                    unresolved is the provider's to decide: its lookup or callback finishes it, never a second authorization
+                    here (mr-pass impl-shop P5, impl-commerce F32); a payment with no attempt is authorized as before -->
+                <if condition="payment.statusId == 'PmntPromised'">
+                    <entity-find-count entity-name="mantle.account.payment.PortalPaymentAttempt" count-field="openAttemptCount" disable-authz="true">
+                        <econdition field-name="paymentId" from="payment.paymentId"/>
+                        <econdition field-name="settledDate" operator="is-null"/></entity-find-count>
+                    <if condition="openAttemptCount &gt; 0">
+                        <log message="Not authorizing payment ${payment.paymentId}: its payment attempt is not resolved yet"/>
+                        <continue/>
+                    </if>
+                </if>
                 <if condition="!payment.paymentMethodId &amp;&amp; !payment.finAccountId">
                     <log message="Not authorizing payment ${payment.paymentId} with no paymentMethodId or finAccountId"/>
                     <continue/>
@@ -2434,7 +2446,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="-paymentGatewayResponseId"/>
             </entity-find>
             <set field="unknownResponse" from="unknownList.length ? unknownList[0] : null"/>
-            <if condition="!payment.paymentRefNum &amp;&amp; unknownResponse == null"><return message="Payment ${paymentId} does not have a transaction ID (reference number)"/></if>
+            <!-- a promised payment with no reference yet whose latest authorization answer is pending at the provider with no
+                result (a hosted page that takes a posted form, Accept Hosted: the provider's transaction exists only once the
+                payer pays) is looked up by its gateway, which finds the transaction by the attempt's reference (mr-pass
+                impl-shop P5, F38); a payment with neither still has nothing to look up -->
+            <set field="hostedPending" from="false"/>
+            <if condition="!payment.paymentRefNum &amp;&amp; unknownResponse == null &amp;&amp; payment.statusId == 'PmntPromised'">
+                <entity-find entity-name="mantle.account.method.PaymentGatewayResponse" list="hostedList" limit="1">
+                    <econdition field-name="paymentId"/>
+                    <econdition field-name="paymentOperationEnumId" operator="in" value="PgoAuthorize,PgoAuthAndCapture"/>
+                    <order-by field-name="-transactionDate"/>
+                    <order-by field-name="-paymentGatewayResponseId"/>
+                </entity-find>
+                <set field="hostedPending" from="hostedList.length &gt; 0 &amp;&amp; hostedList[0].transactionStatus == 'HostedPending'
+                        &amp;&amp; ![hostedList[0].resultSuccess, hostedList[0].resultDeclined, hostedList[0].resultError,
+                            hostedList[0].resultUnknown].includes('Y')"/>
+            </if>
+            <if condition="!payment.paymentRefNum &amp;&amp; unknownResponse == null &amp;&amp; !hostedPending"><return message="Payment ${paymentId} does not have a transaction ID (reference number)"/></if>
 
             <!-- use paymentGatewayConfigId from Payment if present -->
             <if condition="!paymentGatewayConfigId"><set field="paymentGatewayConfigId" from="payment.paymentGatewayConfigId"/></if>

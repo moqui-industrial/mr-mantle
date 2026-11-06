@@ -137,6 +137,25 @@ const records = {
             if (!internal(invitation.organizationPartyId) || !invitation.partyId || internal(invitation.partyId)) return null
             return {organizationPartyId: invitation.organizationPartyId, partyId: invitation.partyId}
         }
+    },
+    // a customer's sales order (mr-pass impl-shop P5, X6, F16): the customer-direction kind of a placed order of an internal
+    // organization (its sales part's vendor) to an outside customer: OrderView, the guest's order link a Shop checkout
+    // issues at its confirmation; Download (P6) and RenewalAction (P7) follow. The customer's own verified account reaches
+    // it by the self relationship. Customer Service staff may issue or revoke a link (a resent order link).
+    SalesOrder: {
+        permissions: ["SUPPORT_CASE_EDIT"],
+        scopes: ["OrderView", "Download", "RenewalAction"],
+        page: {app: "shop", path: "/Orders/Status?token="},
+        self: true,
+        resolve(recordId) {
+            const order = one("mantle.order.OrderHeader", {orderId: recordId})
+            if (!order || ["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
+                return null
+            const part = rows("mantle.order.OrderPart", {orderId: recordId}).find(
+                row => internal(row.vendorPartyId) && row.customerPartyId && !internal(row.customerPartyId)
+            )
+            return part ? {organizationPartyId: part.vendorPartyId, partyId: part.customerPartyId} : null
+        }
     }
 }
 // The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
