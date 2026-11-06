@@ -25,12 +25,27 @@ const TOKEN_WRITES = [
     'addReturnEvidence',
     'withdrawCustomerReturn',
     // Shop P1: none yet; P4 adds the cart writes
+    // Shop P4: a cart's writes, authorized by the session's cart capability (input.token); the first add makes the cart
+    // with no capability yet (impl-shop F44: an anonymous write, as applyOptOut is), its creations rate limited by the
+    // requester
+    'addCartItem',
+    'updateCartItem',
+    'removeCartItem',
+    'applyPromoCode',
+    'removePromoCode',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
 const CLIENT_READS = ['getShopThemeRelease', 'getShopThemeFiles']
 /* Operations answered as a file (download: the result's location stays here, the transport streams it). */
-const DOWNLOADS = ['getAttachment', 'getExport', 'getCaseFile', 'getReturnLabel']
+const DOWNLOADS = [
+    'getAttachment',
+    'getExport',
+    'getCaseFile',
+    'getReturnLabel',
+    // Shop P4 (F61): a public product image
+    'getShopProductImage',
+]
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {
     session: 'start',
@@ -91,6 +106,11 @@ const REASONS = [
     'mountTaken',
     'rootNotAllowed',
     'targetInvalid',
+    // Shop P4: the cart's refusals
+    'itemUnavailable',
+    'promoCodeInvalid',
+    'checkoutPending',
+    'valueInvalid',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or
@@ -348,4 +368,14 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
         return { result }
     })
 }
-;({ handle, envelope, refusal, internal, REASONS, ACCOUNT_ACTIONS, SSO_ACTIONS })
+;({
+    handle,
+    envelope,
+    refusal,
+    internal,
+    REASONS,
+    ACCOUNT_ACTIONS,
+    SSO_ACTIONS,
+    // Shop P4: the list PassApi.js and PASS's Transport.js keep equal
+    TOKEN_WRITES,
+})

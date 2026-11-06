@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Shop app's carts (mr-pass impl-shop P4; design-shop §13.2's C, §6 Cart, §7.1): PASS operations through
+    pass.Facade.call#Operation, each taking PASS's restricted input map (the site the facade resolved, the session's cart
+    capability as token, and the shopper's product, option, quantity, line, code, revision and operation id) and answering
+    a declared result (CartView). Over Mantle's order and promotion services (ShopCart.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="Cart" authenticate="anonymous-all" allow-remote="false">
+        <description>getCart: the session's cart (input.token), or the signed-in account's own in this shop, as a CartView with its mini-cart summary; an empty cart when there is none. Nothing changes; an order id grants nothing.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("getCart", input)</script>
+        </actions>
+    </service>
+    <service verb="add" noun="CartItem" authenticate="anonymous-all" allow-remote="false">
+        <description>addCartItem: input.productId with its listed option (variantId) and quantity (1 to 999) added at the store's authority price; the cart is made on the first add (a guest's with an anonymous customer party), its new capability in result.token. A product not public in the store is NotFound, one that cannot be bought now ITEM_UNAVAILABLE; expectedRevision is checked when given (STALE_REVISION), a cart with a payment in progress is CHECKOUT_PENDING; cart creation is rate limited.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("addCartItem", input)</script>
+        </actions>
+    </service>
+    <service verb="update" noun="CartItem" authenticate="anonymous-all" allow-remote="false">
+        <description>updateCartItem: a line's (orderItemSeqId) new quantity (0 removes it), repriced at the authority's price for that quantity; the cart's expectedRevision is required (STALE_REVISION).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("updateCartItem", input)</script>
+        </actions>
+    </service>
+    <service verb="remove" noun="CartItem" authenticate="anonymous-all" allow-remote="false">
+        <description>removeCartItem: a line out of the cart; the cart's expectedRevision is required (STALE_REVISION).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("removeCartItem", input)</script>
+        </actions>
+    </service>
+    <service verb="apply" noun="PromoCode" authenticate="anonymous-all" allow-remote="false">
+        <description>applyPromoCode: a store's code (input.promoCode) on the cart through add#OrderPromoCode; every refusal is PROMO_CODE_INVALID with the same text; code tries are rate limited; the cart's expectedRevision is required.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("applyPromoCode", input)</script>
+        </actions>
+    </service>
+    <service verb="remove" noun="PromoCode" authenticate="anonymous-all" allow-remote="false">
+        <description>removePromoCode: a code off the cart through remove#OrderPromoCode; the cart's expectedRevision is required.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("removePromoCode", input)</script>
+        </actions>
+    </service>
+    <service verb="attach" noun="Cart" authenticate="anonymous-all" allow-remote="false">
+        <description>attachCart (sign-in): the session's guest cart attached to the signed-in account, or merged once into the account's open cart of the same site, store and currency when neither has a payment in progress (lines re-added at the account's prices, codes tried again, unavailable lines named in unavailableItems); the cart's capability rotated (result.token). SIGN_IN_REQUIRED without a signed-in account.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("attachCart", input)</script>
+        </actions>
+    </service>
+    <service verb="release" noun="Cart" authenticate="anonymous-all" allow-remote="false">
+        <description>releaseCart (sign-out): the signed-in account's open carts in this shop get new capabilities no one holds, so the browser's session reaches none of them.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("releaseCart", input)</script>
+        </actions>
+    </service>
+</services>

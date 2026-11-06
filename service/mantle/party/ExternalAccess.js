@@ -212,21 +212,29 @@ function create(p) {
 // request's own (behind a proxy, configure the framework's trusted proxies so this is the browser's).
 const account = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js")
 const TOKEN_LOOKUPS = 100
-function tokenCapability(token) {
+// The digest a capability is kept by (the token itself is never stored), and the requester's lookup throttle: each lookup
+// of a scope counts against the requester's limit in a ten-minute window, in its own transaction, before the lookup, and
+// one over it is refused (Tarpit, RATE_LIMITED). Shop P4 (impl-shop F16) exports both for StoreCartAccess (ShopCart.js),
+// so a cart's capability uses the same digest and throttle as a link's.
+const tokenDigest = token => ec.user.singleUseCodeHash(String(token))
+function throttle(scope, limit, message) {
     const allowed = ec.service
         .sync()
         .throwOnError(true)
         .name("org.moqui.public.AccountServices.record#Attempt")
-        .parameters({input: {key: "access-token:" + account().requesterKey(), limit: TOKEN_LOOKUPS, windowMillis: 600000}})
+        .parameters({input: {key: scope + ":" + account().requesterKey(), limit, windowMillis: 600000}})
         .requireNewTransaction(true)
         .call().result.allowed
     if (!allowed) {
-        const error = new Error("Wait before trying another link")
+        const error = new Error("RATE_LIMITED: " + (message || "Wait before trying another link"))
         error.moquiErrorKind = "Tarpit"
         throw error
     }
+}
+function tokenCapability(token) {
+    throttle("access-token", TOKEN_LOOKUPS)
     const text = String(token || "")
-    const row = text.length >= 32 && text.length <= 128 ? one(C, {tokenDigest: ec.user.singleUseCodeHash(text)}) : null
+    const row = text.length >= 32 && text.length <= 128 ? one(C, {tokenDigest: tokenDigest(text)}) : null
     return row && !row.revokedDate && lib.entityLib.active(row) ? row : null
 }
 // A signed-in user's contact grant (ExternalAccessContact, in effect): made by redeeming an invitation for one app of
@@ -441,6 +449,9 @@ function bindContact(partyId, scopes) {
     create,
     check,
     tokenCapability,
+    // Shop P4 (F16): the capability digest and the lookup throttle, for StoreCartAccess
+    tokenDigest,
+    throttle,
     contactOf,
     contactParties,
     // Customer Service P15: the self relationship and the parties a signed-in user acts for

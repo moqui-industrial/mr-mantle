@@ -22,6 +22,14 @@ const TOKEN_WRITES = [
     'addReturnEvidence',
     'withdrawCustomerReturn',
     // Shop P1: none yet; P4 adds the cart writes
+    // Shop P4: a cart's writes, authorized by the session's cart capability (input.token); the first add makes the cart
+    // with no capability yet (impl-shop F44: an anonymous write, as applyOptOut is), its creations rate limited by the
+    // requester
+    'addCartItem',
+    'updateCartItem',
+    'removeCartItem',
+    'applyPromoCode',
+    'removePromoCode',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)
@@ -73,6 +81,8 @@ function respond(response, answer) {
     response.write(JSON.stringify(answer.result))
 }
 ;({
+    // Shop P4: the list PassAuthority.js and PASS's Transport.js keep equal
+    TOKEN_WRITES,
     service(request, response) {
         const authority = ec.resource.script(
             'component://mr-mantle/script/PassAuthority.js',

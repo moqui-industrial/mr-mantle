@@ -1262,4 +1262,75 @@
         service: 'mantle.public.SiteServices.resolve#SiteRedirect',
         fields: ['siteId', 'path'],
     },
+    // Shop P4: the cart (input.token is the presentation session's cart capability; no operation takes an order id)
+    getCart: {
+        service: 'mantle.order.ShopCartServices.get#Cart',
+        fields: ['siteId', 'token'],
+    },
+    addCartItem: {
+        service: 'mantle.order.ShopCartServices.add#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'productId',
+            'variantId',
+            'quantity',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    updateCartItem: {
+        service: 'mantle.order.ShopCartServices.update#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'orderItemSeqId',
+            'quantity',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    removeCartItem: {
+        service: 'mantle.order.ShopCartServices.remove#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'orderItemSeqId',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    applyPromoCode: {
+        service: 'mantle.order.ShopCartServices.apply#PromoCode',
+        fields: [
+            'siteId',
+            'token',
+            'promoCode',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    removePromoCode: {
+        service: 'mantle.order.ShopCartServices.remove#PromoCode',
+        fields: [
+            'siteId',
+            'token',
+            'promoCode',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    attachCart: {
+        service: 'mantle.order.ShopCartServices.attach#Cart',
+        fields: ['siteId', 'token'],
+    },
+    releaseCart: {
+        service: 'mantle.order.ShopCartServices.release#Cart',
+        fields: ['siteId', 'token'],
+    },
+    // Shop P4 (F61): a product image of a public product, streamed by the frontend
+    getShopProductImage: {
+        service: 'mantle.product.ShopCatalogServices.get#ProductImage',
+        fields: ['siteId', 'productContentId'],
+    },
 })
