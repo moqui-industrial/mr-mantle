@@ -16,7 +16,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="SalesOrderSummary">
         <description>Sales order totals by interval from the sales search index, for the organizations named (vendorPartyIds or fromPartyIds), else every organization the user
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
-            (F6).</description>
+            (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
+            the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
+            unchanged.</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="intervalCount" type="Integer" default="13"/>
@@ -26,6 +28,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="vendorPartyIds" type="List"><parameter name="vendorPartyId"/></parameter>
             <parameter name="customerPartyIds" type="List"><parameter name="customerPartyId"/></parameter>
             <parameter name="productStoreIds" type="List"><parameter name="productStoreId"/></parameter>
+            <parameter name="currencyUomIds" type="List"><description>Only these currencies (Commerce P11: a store-scoped
+                read never sums across currencies); empty, every one as before</description><parameter name="currencyUomId"/></parameter>
             <parameter name="customerClassificationIds" type="List"><parameter name="customerClassificationId"/></parameter>
             <parameter name="productIds" type="List"><parameter name="productId"/></parameter>
             <parameter name="dateFormat" default-value="dd MMM yyyy"/>
@@ -44,8 +48,10 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             // report read, and only organizations the user may read: those named, else every one the user works in (F6)
-            vendorPartyIds = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
-                    .execute('organizations', {organizationPartyIds: vendorPartyIds}).organizationPartyIds
+            // or, for a holder of COMMERCE_VIEW without report read, productStoreIds all in their store scope (Commerce P11, F21)
+            const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
+                    .execute('organizations', {organizationPartyIds: vendorPartyIds, productStoreIds: productStoreIds})
+            vendorPartyIds = readScope.organizationPartyIds
             // aggregation metrics are decimals on Postgres and numbers on OpenSearch; the summaries work in numbers
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
             const addNumbersInMap = (total, line) => {
@@ -83,6 +89,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (vendorPartyIds?.length) filterList.push({field: {name: 'vendorPartyId', op: 'in', values: vendorPartyIds}})
             if (customerPartyIds?.length) filterList.push({field: {name: 'customerPartyId', op: 'in', values: customerPartyIds}})
             if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
+            if (currencyUomIds?.length) filterList.push({field: {name: 'currencyUomId', op: 'in', values: currencyUomIds}})
             if (customerClassificationIds?.length) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
             if (productIds?.length) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
 
@@ -174,13 +181,19 @@ along with this software (see the LICENSE.md file). If not, see
 
             salesOrderSummaryList.push(ordersAverage)
             salesOrderSummaryList.push(ordersTotal)
+            // a store-scoped reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
+            // (ordersThis/Last/Prior too: with maPeriods they may be trimmed from the list)
+            if (readScope.costWithheld) for (const line of salesOrderSummaryList.concat([ordersThis, ordersLast, ordersPrior]))
+                if (line) { line.productCostTotal = null; line.costPercent = null }
         ]]></script></actions>
     </service>
 
     <service verb="get" noun="SalesInvoiceSummary">
         <description>Sales invoice totals by interval from the sales search index, for the organizations named (vendorPartyIds or fromPartyIds), else every organization the user
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
-            (F6).</description>
+            (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
+            the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
+            unchanged.</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="intervalCount" type="Integer" default="13"/>
@@ -190,6 +203,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fromPartyIds" type="List"><parameter name="fromPartyId"/></parameter>
             <parameter name="toPartyIds" type="List"><parameter name="toPartyId"/></parameter>
             <parameter name="productStoreIds" type="List"><parameter name="productStoreId"/></parameter>
+            <parameter name="currencyUomIds" type="List"><description>Only these currencies (Commerce P11: a store-scoped
+                read never sums across currencies); empty, every one as before</description><parameter name="currencyUomId"/></parameter>
             <parameter name="customerClassificationIds" type="List"><parameter name="customerClassificationId"/></parameter>
             <parameter name="productIds" type="List"><parameter name="productId"/></parameter>
             <parameter name="dateFormat" default-value="dd MMM yyyy"/>
@@ -209,8 +224,10 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             // report read, and only organizations the user may read: those named, else every one the user works in (F6)
-            fromPartyIds = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
-                    .execute('organizations', {organizationPartyIds: fromPartyIds}).organizationPartyIds
+            // or, for a holder of COMMERCE_VIEW without report read, productStoreIds all in their store scope (Commerce P11, F21)
+            const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
+                    .execute('organizations', {organizationPartyIds: fromPartyIds, productStoreIds: productStoreIds})
+            fromPartyIds = readScope.organizationPartyIds
             // aggregation metrics are decimals on Postgres and numbers on OpenSearch; the summaries work in numbers
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
             const addNumbersInMap = (total, line) => {
@@ -246,6 +263,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (fromPartyIds?.length) filterList.push({field: {name: 'fromPartyId', op: 'in', values: fromPartyIds}})
             if (toPartyIds?.length) filterList.push({field: {name: 'toPartyId', op: 'in', values: toPartyIds}})
             if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
+            if (currencyUomIds?.length) filterList.push({field: {name: 'currencyUomId', op: 'in', values: currencyUomIds}})
             if (customerClassificationIds?.length) filterList.push({field: {name: 'customerClassId', op: 'in', values: customerClassificationIds}})
             if (productIds?.length) filterList.push({field: {name: 'productId', op: 'in', values: productIds}})
             const filter = {bool:{all:filterList}}
@@ -354,6 +372,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             salesInvoiceSummaryList.push(invoicesAverage)
             salesInvoiceSummaryList.push(invoicesTotal)
+            // a store-scoped reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
+            // (invoicesThis/Last/Prior too: with maPeriods they may be trimmed from the list)
+            if (readScope.costWithheld) for (const line of salesInvoiceSummaryList.concat([invoicesThis, invoicesLast, invoicesPrior]))
+                if (line) { line.productCostTotal = null; line.costPercent = null; line.costPercentMa = null }
         ]]></script></actions>
     </service>
 
@@ -403,7 +425,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="SalesTopProduct">
         <description>The top products of an interval's sales orders from the sales search index, for the organizations named (vendorPartyIds or fromPartyIds), else every organization the user
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
-            (F6).</description>
+            (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
+            the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
+            unchanged.</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="thruDate" type="Date" default="ec.user.nowTimestamp"/>
@@ -412,6 +436,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="topLimit" type="Integer" default="10"/>
             <parameter name="vendorPartyIds" type="List"><description>The selling organizations, so the top products are
                 theirs only (F6)</description><parameter name="vendorPartyId"/></parameter>
+            <parameter name="productStoreIds" type="List"><description>Only these stores' orders (Commerce P11, F21); a holder of
+                COMMERCE_VIEW without report read is answered for stores all in their store scope</description>
+                <parameter name="productStoreId"/></parameter>
+            <parameter name="currencyUomIds" type="List"><description>Only these currencies; empty, every one as
+                before</description><parameter name="currencyUomId"/></parameter>
             <parameter name="poffset" type="Integer" default="-1"/>
             <parameter name="dateField" default-value="placedDate"/>
             <parameter name="orderByField" default-value="totalSales"/>
@@ -424,8 +453,10 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             // report read, and only organizations the user may read: those named, else every one the user works in (F6)
-            vendorPartyIds = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
-                    .execute('organizations', {organizationPartyIds: vendorPartyIds}).organizationPartyIds
+            // or, for a holder of COMMERCE_VIEW without report read, productStoreIds all in their store scope (Commerce P11, F21)
+            const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
+                    .execute('organizations', {organizationPartyIds: vendorPartyIds, productStoreIds: productStoreIds})
+            vendorPartyIds = readScope.organizationPartyIds
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
 
             const perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
@@ -439,6 +470,8 @@ along with this software (see the LICENSE.md file). If not, see
                     {field: {name: 'partStatusId', op: 'in', values: placedStatuses}}
             ]
             if (vendorPartyIds?.length) filterList.push({field: {name: 'vendorPartyId', op: 'in', values: vendorPartyIds}})
+            if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
+            if (currencyUomIds?.length) filterList.push({field: {name: 'currencyUomId', op: 'in', values: currencyUomIds}})
             const filter = {bool:{all:filterList}}
 
             if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no top products", "danger"); return }
@@ -456,6 +489,8 @@ along with this software (see the LICENSE.md file). If not, see
                         productIssuedTotal:productIssuedTotal, productCostTotal:productCostTotal,
                         costPercent:(productIssuedTotal ? (productCostTotal/productIssuedTotal) : 0.0)}
             })
+            // a store-scoped reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
+            if (readScope.costWithheld) for (const line of topProductList) { line.productCostTotal = null; line.costPercent = null }
         ]]></script></actions>
     </service>
     <service verb="get" noun="InvoicesByCustomerClass">

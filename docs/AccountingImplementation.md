@@ -753,7 +753,10 @@ caller are scoped (F6), and answers `asOf` with `complete` and the reasons a fig
   Only sales lines (the ItemSales types) and returns once requested count; credit memos no return made are not counted;
   without a period or days, the fiscal month holding today. The search-backed `get#SalesOrderSummary`,
   `get#SalesInvoiceSummary`, `get#SalesTopProduct` and `get#InvoicesByCustomerClass` need report read and read the
-  organizations named that the user may read, else every one the user works in.
+  organizations named that the user may read, else every one the user works in. The first three also answer a holder of
+  `COMMERCE_VIEW` without report read for `productStoreIds` all in their store scope (Commerce P11), as the stores'
+  organizations with the costs withheld unless `PRODUCT_COST_VIEW`; `currencyUomIds` narrows them to currencies
+  (`SalesReportStoreScope`).
 - **Spec.** `AccountingStatements` (two spec-local organizations): an open month summed, a closed month read from its
   stored rows, the series, posted amounts, partner ledger and sales analysis, and the refusals of another organization,
   its periods and a user without report read.
