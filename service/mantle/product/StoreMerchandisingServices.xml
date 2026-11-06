@@ -358,4 +358,190 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="sites" from="done.sites"/>
         </actions>
     </service>
+    <!-- Commerce P9: reviews (StoreReviews.js; design-commerce §4 Reviews): staff reads with COMMERCE_VIEW, decisions and the
+        store's reply with COMMERCE_MERCHANDISE, each in the user's store scope; the review request on the delivery ledger -->
+    <service verb="find" noun="Reviews" allow-remote="false">
+        <description>The reviews of the user's stores (or one store), by product, status, posted dates (fromDate inclusive,
+            thruDate exclusive), text, author label or id ignoring case, and unreplied, newest first, a page at a time: each with
+            its product, rating, author's public label, posted date, state, reply, verified purchase (its proof's order) and
+            image count. COMMERCE_VIEW and the store's scope (RECORD_UNAVAILABLE outside it).</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="productId"/>
+            <parameter name="statusId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="term"/>
+            <parameter name="unreplied" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reviews" type="List"/>
+            <parameter name="reviewsCount" type="Integer"/>
+            <parameter name="reviewsPageIndex" type="Integer"/>
+            <parameter name="reviewsPageSize" type="Integer"/>
+            <parameter name="reviewsPageMaxIndex" type="Integer"/>
+            <parameter name="reviewsPageRangeLow" type="Integer"/>
+            <parameter name="reviewsPageRangeHigh" type="Integer"/>
+            <parameter name="canModerate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('findReviews', context)"/>
+            <set field="reviews" from="found.reviews"/>
+            <set field="reviewsCount" from="found.reviewsCount"/>
+            <set field="reviewsPageIndex" from="found.reviewsPageIndex"/>
+            <set field="reviewsPageSize" from="found.reviewsPageSize"/>
+            <set field="reviewsPageMaxIndex" from="found.reviewsPageMaxIndex"/>
+            <set field="reviewsPageRangeLow" from="found.reviewsPageRangeLow"/>
+            <set field="reviewsPageRangeHigh" from="found.reviewsPageRangeHigh"/>
+            <set field="canModerate" from="found.canModerate"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Review" allow-remote="false">
+        <description>One review of the user's stores for its decision and reply: the find#Reviews row with its whole text, its
+            proof (order and line) and its images (sequence, name and size; the file through get#ReviewImage).
+            COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productReviewId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="review" type="Map"/>
+            <parameter name="canModerate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('getReview', context)"/>
+            <set field="review" from="found.review"/>
+            <set field="canModerate" from="found.canModerate"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ReviewImage" allow-remote="false">
+        <description>A review image for staff in any state of its review (ReviewDecision's preview): its location, name and type,
+            which the screen sends; COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productReviewId" required="true"/>
+            <parameter name="imageSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="location"/>
+            <parameter name="filename"/>
+            <parameter name="contentType"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('getStaffImage', context)"/>
+            <set field="location" from="found.location"/>
+            <set field="filename" from="found.filename"/>
+            <set field="contentType" from="found.contentType"/>
+        </actions>
+    </service>
+    <service verb="moderate" noun="Review" allow-remote="false">
+        <description>Approve or delete reviews (decision approve or delete), each at its expected revision (reviews: a list of
+            {productReviewId, expectedLastUpdatedStamp}, or one productReviewId) and in a transaction of its own; the decision
+            covers the review's images, its reason (required to delete) goes to the status's audit log, and one refused (stale,
+            deleted, outside the scope) is named while the rest go on: results, one per review, with ok, the status or the
+            reason code. Up to 100 a call. COMMERCE_MERCHANDISE; advances the store's site generations.</description>
+        <in-parameters>
+            <parameter name="decision" required="true"/>
+            <parameter name="reviews" type="List"/>
+            <parameter name="selectionKeys"><description>A list's selected rows, each productReviewId@revision (find#Reviews'
+                selectionKey), comma-separated or a list.</description></parameter>
+            <parameter name="productReviewId"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="decidedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('moderateReviews', context)"/>
+            <set field="results" from="done.results"/>
+            <set field="decidedCount" from="done.decidedCount"/>
+            <set field="failedCount" from="done.failedCount"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="Review" allow-remote="false">
+        <description>Internal, for moderate#Review: one review's status at its expected revision, in the caller's new
+            transaction. COMMERCE_MERCHANDISE and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productReviewId" required="true"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="changed" type="Boolean"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('decideReview', context)"/>
+            <set field="statusId" from="done.statusId"/>
+            <set field="changed" from="done.changed"/>
+            <set field="message" from="done.message"/>
+        </actions>
+    </service>
+    <service verb="reply" noun="Review" allow-remote="false">
+        <description>The store's public reply to an approved review (plain text, up to 2,000 characters) at its expected
+            revision, its author and time kept and audit-logged; withdraw=true removes it. Refused: a review not approved
+            (NOT_APPROVED), a stale revision (STALE_REVISION). COMMERCE_MERCHANDISE and the store's scope; advances the store's
+            site generations.</description>
+        <in-parameters>
+            <parameter name="productReviewId" required="true"/>
+            <parameter name="replyText"/>
+            <parameter name="withdraw" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="replied" type="Boolean"/>
+            <parameter name="lastUpdatedStamp" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('replyReview', context)"/>
+            <set field="replied" from="done.replied"/>
+            <set field="lastUpdatedStamp" from="done.lastUpdatedStamp"/>
+        </actions>
+    </service>
+    <service verb="queue" noun="ReviewRequests" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the ShipmentDeliveredRequestReviews and DownloadFirstRequestReview SECAs: one review request
+            (PsetReviewRequest) per delivered line of a Shop order (a shipment's lines, a download grant's line, or a named
+            line) on the delivery ledger, once per line; an order Shop did not place or a store with no current review request
+            email queues nothing. Not transactional: the ledger sends it only with the recipient's marketing email consent.
+            Each line on its own.</description>
+        <in-parameters>
+            <parameter name="shipmentId"/>
+            <parameter name="downloadGrantId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="queued" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="queued" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('queueRequests', context).queued"/>
+        </actions>
+    </service>
+    <service verb="build" noun="ReviewRequest" allow-remote="false">
+        <description>The delivery ledger's source build of the review request (MessageDeliverySource MdsrcReviewRequest): the
+            store, product and the product's review page, made for each attempt, or suppress once the line is reviewed by its
+            buyer, cancelled or returned, or its product is no longer public.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey" required="true"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('buildRequest', context)"/>
+            <set field="toAddress" from="out.toAddress"/>
+            <set field="bodyParameters" from="out.bodyParameters"/>
+            <set field="suppress" from="out.suppress"/>
+        </actions>
+    </service>
 </services>

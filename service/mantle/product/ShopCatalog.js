@@ -845,6 +845,8 @@ const views = {
     },
     product(p) {
         const found = getProduct(p).product
+        // Commerce P9: the approved reviews under the product (StoreReviews.js; a theme's product.reviews)
+        found.reviews = productReviews(shopOf(p), found.id)
         return {
             product: found,
             page: {
@@ -911,6 +913,26 @@ const views = {
                 templateKey: found.templateKey
             }
         }
+    }
+}
+// Commerce P9: the first page of a product's approved reviews, their summary and the visitor's own review's state; a failure
+// leaves the product page without its reviews.
+function productReviews(shop, productId) {
+    try {
+        const view = ec.resource
+            .script("component://mr-mantle/service/mantle/product/StoreReviews.js")
+            .reviewsView(shop, productId, {limit: 5})
+        return {
+            summary: view.summary,
+            reviews: view.reviews,
+            moreUrl: view.nextCursor ? view.writeUrl : null,
+            writeUrl: view.canReview || view.own ? view.writeUrl : null,
+            own: view.own ? {statusText: view.own.statusText, approved: view.own.approved} : null
+        }
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.error("Reviews of " + productId + " in " + shop.productStoreId + " not read: " + error.message)
+        return null
     }
 }
 const plainText = html =>

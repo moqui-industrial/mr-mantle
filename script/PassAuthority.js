@@ -78,6 +78,8 @@ const DOWNLOADS = [
     'getShopProductImage',
     // Shop P6: a granted download, streamed with its range
     'getShopDownload',
+    // Commerce P9: an approved review's image
+    'getShopReviewImage',
 ]
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {

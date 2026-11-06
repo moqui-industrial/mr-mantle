@@ -1548,4 +1548,28 @@
         service: 'mantle.public.AccountHubServices.apply#OneClickUnsubscribe',
         fields: ['siteId', 'token'],
     },
+    // Commerce P9: a product's reviews (mantle.product.ShopCatalogServices over StoreReviews.js): the approved reviews and the
+    // signed-in author's own, a signed-in buyer's review or edit with one photo a call, and a review image by its digest
+    getProductReviews: {
+        service: 'mantle.product.ShopCatalogServices.get#Reviews',
+        fields: ['siteId', 'productId', 'cursor', 'limit'],
+    },
+    submitProductReview: {
+        service: 'mantle.product.ShopCatalogServices.submit#Review',
+        fields: [
+            'siteId',
+            'productId',
+            'productReviewId',
+            'expectedRevision',
+            'rating',
+            'body',
+            'displayChoice',
+            'removeImageSeqIds',
+            'file',
+        ],
+    },
+    getShopReviewImage: {
+        service: 'mantle.product.ShopCatalogServices.get#ReviewImage',
+        fields: ['siteId', 'reviewImage'],
+    },
 })

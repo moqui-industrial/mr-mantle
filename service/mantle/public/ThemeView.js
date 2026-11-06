@@ -93,7 +93,27 @@ const shapes = {
             ],
             selectedVariantId: "value",
             quantity: "value",
-            quote: {quantity: "value", unitPrice: price, total: price, purchasable: "value", label: "value"}
+            quote: {quantity: "value", unitPrice: price, total: price, purchasable: "value", label: "value"},
+            // Commerce P9: the approved reviews (their author's chosen label only), their summary, the store's reply, the
+            // review images by digest, and the visitor's own review's state and where to write one
+            reviews: {
+                summary: {count: "value", average: "value", distribution: [{stars: "value", count: "value"}]},
+                reviews: [
+                    {
+                        id: "value",
+                        rating: "value",
+                        body: "value",
+                        authorLabel: "value",
+                        dateText: "value",
+                        verifiedPurchase: "value",
+                        reply: {text: "value", dateText: "value"},
+                        images: [image]
+                    }
+                ],
+                moreUrl: "value",
+                writeUrl: "value",
+                own: {statusText: "value", approved: "value"}
+            }
         },
         productCard
     ),
