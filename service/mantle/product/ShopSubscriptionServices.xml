@@ -128,4 +128,145 @@
             <set field="shopManaged" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopSubscriptions.js').execute('shopManaged', context).shopManaged"/>
         </actions>
     </service>
+
+    <!-- Commerce P12 (impl-commerce P12, COM-SUBSCRIPTION; design-commerce §4 Product360 paid access, §6 Subscriptions and
+        SubscriptionDetail, §8 RecurringPolicy): the staff part over StoreSubscriptions.js. Each checks COMMERCE_VIEW and the
+        store scope (the user's organizations; a store-limited staff member's own stores); a record outside it is
+        RECORD_UNAVAILABLE. -->
+    <service verb="find" noun="StoreSubscriptions" allow-remote="false">
+        <description>Subscriptions (SubscriptionFind; Product360's ResourceUse with a product): the recurring contracts of the user's stores, or of one (the store optional, for Sales' later mount), by customer, product, resource, contract state and next renewal, newest first; each with its customer, plan, paid-through, next charge and amount, billing state and access apart, and the latest renewal's outcome. COMMERCE_ORDER_VIEW or COMMERCE_SUBSCRIPTION_MANAGE.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="productId"/>
+            <parameter name="subscriptionResourceId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="renewalFromDate" type="Timestamp"/>
+            <parameter name="renewalThruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subscriptions" type="List"/>
+            <parameter name="subscriptionsCount" type="Integer"/>
+            <parameter name="subscriptionsPageIndex" type="Integer"/>
+            <parameter name="subscriptionsPageSize" type="Integer"/>
+            <parameter name="subscriptionsPageMaxIndex" type="Integer"/>
+            <parameter name="subscriptionsPageRangeLow" type="Integer"/>
+            <parameter name="subscriptionsPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('findStoreSubscriptions', context))</script>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreSubscription" allow-remote="false">
+        <description>SubscriptionDetail (Contract, Renewals, Access): a contract of the user's stores with its accepted terms, paid-through, next renewal and cancellation, the method masked (type and last four) and whether the customer's off-session consent is recorded (no evidence, provider profile or gateway); its renewals (period, order, payment, attempts, outcome, next retry, whether it can be tried again) and the access each paid term gave (resource, from, thru, revoked). COMMERCE_ORDER_VIEW or COMMERCE_SUBSCRIPTION_MANAGE; canCancel and canRetry for a holder of COMMERCE_SUBSCRIPTION_MANAGE.</description>
+        <in-parameters><parameter name="contractId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="subscription" type="Map"/>
+            <parameter name="renewals" type="List"/>
+            <parameter name="access" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('getStoreSubscription', context))</script>
+        </actions>
+    </service>
+    <service verb="cancel" noun="RecurringContract" allow-remote="false">
+        <description>CancelRenewal: future renewals stopped at the contract's revision, access kept to the end of the paid term (no refund: that is Accounting's); a renewal waiting for a retry or the customer closed with no charge. Refused while a renewal payment is in flight (RENEWAL_IN_PROGRESS), at a stale revision (STALE_REVISION, naming the current one) and for a contract that does not renew (NOT_RENEWING). COMMERCE_SUBSCRIPTION_MANAGE.</description>
+        <in-parameters>
+            <parameter name="contractId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subscription" type="Map"/>
+            <parameter name="renewals" type="List"/>
+            <parameter name="access" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('cancelRecurringContract', context))</script>
+        </actions>
+    </service>
+    <service verb="retry" noun="Renewal" allow-remote="false">
+        <description>RetryRenewal: the contract's failed or waiting renewal (the occurrence given, or the one that can be tried again) tried again now through the coordinator, which charges the same occurrence once with the customer's recorded consent; keyed by operationKey (a retry of the request answers the first result, alreadyApplied). Refused while a renewal payment is in flight (PAYMENT_UNRESOLVED: the job looks it up, it is never charged again), without a recorded consent (CONSENT_REQUIRED: staff never enter a card), with nothing to try again (NOTHING_TO_RETRY) and for a contract that does not renew (NOT_RENEWING). COMMERCE_SUBSCRIPTION_MANAGE.</description>
+        <in-parameters>
+            <parameter name="contractId" required="true"/>
+            <parameter name="occurrenceId"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="occurrenceId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="stateText"/>
+            <parameter name="attemptCount" type="Integer"/>
+            <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('retryRenewal', context))</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ProductPaidAccess" allow-remote="false">
+        <description>Product360's Paid access (PaidAccess): the product's ProductSubscriptionResource rows, newest first, with each resource's handler services read only and whether the row is in effect, and (canEdit: COMMERCE_SUBSCRIPTION_MANAGE for a product of the user's stores) the resources a row may name, those with installed handlers only. PRODUCT_CATALOG_VIEW (Products shows the rows read only) or COMMERCE_VIEW.</description>
+        <in-parameters><parameter name="productId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="productId"/>
+            <parameter name="productName"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="terms" type="List"/>
+            <parameter name="resourceOptions" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('getProductPaidAccess', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ProductSubscriptionResource" allow-remote="false">
+        <description>PaidAccess's one editor of what a product grants (X16): a subscription resource bound to the product (from newFromDate, now by default), a row's terms changed (the row in effect, by its fromDate, ended now and its successor started, so a change applies to later purchases; a row not yet started changed in place) or ended (ended). Only a resource whose handler services are installed (RESOURCE_UNAVAILABLE; the handlers are its component's, never edited here); one current row a resource (RESOURCE_BOUND); ending one with live subscriptions refused naming the count (SUBSCRIPTIONS_LIVE). COMMERCE_SUBSCRIPTION_MANAGE and the product in one of the user's stores.</description>
+        <in-parameters>
+            <parameter name="productId" required="true"/>
+            <parameter name="subscriptionResourceId" required="true"/>
+            <parameter name="fromDate"><description>The row to change or end: its fromDate (epoch milliseconds, as get#ProductPaidAccess gives it).</description></parameter>
+            <parameter name="newFromDate" type="Timestamp"/>
+            <parameter name="change"/>
+            <parameter name="ended"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="purchaseFromDate" type="Timestamp"/>
+            <parameter name="purchaseThruDate" type="Timestamp"/>
+            <parameter name="availableTime" type="Integer"/>
+            <parameter name="availableTimeUomId"/>
+            <parameter name="useCountLimit" type="Integer"/>
+            <parameter name="useTime" type="Integer"/>
+            <parameter name="useTimeUomId"/>
+            <parameter name="useRoleTypeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productId"/>
+            <parameter name="subscriptionResourceId"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('storeProductSubscriptionResource', context))</script>
+        </actions>
+    </service>
+    <service verb="find" noun="RecurringOffers" allow-remote="false">
+        <description>CheckoutSettings' RecurringPolicy: the store's offers (current first, then ended), whether its payment gateway charges a kept card off-session, its renewal notices (PsetPaymentRetry, PsetSubscriptionRenewal), the subscriptions readiness (each Shop site's address Shop's, an outside one named), and the paid-access products of its assortment an offer may name; changed through store#RecurringOffer. COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="offers" type="List"/>
+            <parameter name="offSession" type="Boolean"/>
+            <parameter name="retryNoticeText"/>
+            <parameter name="renewalNoticeText"/>
+            <parameter name="readinessText"/>
+            <parameter name="ready" type="Boolean"/>
+            <parameter name="productOptions" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSubscriptions.js').execute('findRecurringOffers', context))</script>
+        </actions>
+    </service>
 </services>
