@@ -447,20 +447,31 @@ function fulfillDue(p) {
 }
 // Shop P8 (impl-shop F96): the approval SECA is the usual start, so a crash between the approval's commit and it leaves no
 // row for the job; the job also takes the Shop orders completed in the last days that are approved, have a line Shop
-// fulfills and have no fulfillment row yet.
+// fulfills and have no fulfillment row yet; Shop P9 (impl-shop F126): and the renewal orders (StoreRenewalOccurrence) made
+// in those days, whose approval SECA may as well never have run.
 function unstarted(p) {
     const since = new Date(nowMs() - limits.unstartedDays * 86400000)
+    const scan = Number(p.limit || limits.batch) * 5
     const completed = Array.from(
         find(C, {statusId: "ScoCompleted"})
             .condition("completedDate", "greater-equals", since)
             .condition("orderId", "is-not-null", null)
             .selectField("orderId")
             .orderBy("-completedDate")
-            .limit(Number(p.limit || limits.batch) * 5)
+            .limit(scan)
+            .list()
+    ).map(row => row.orderId)
+    const renewals = Array.from(
+        find("mantle.product.subscription.StoreRenewalOccurrence")
+            .condition("createdDate", "greater-equals", since)
+            .condition("orderId", "is-not-null", null)
+            .selectField("orderId")
+            .orderBy("-createdDate")
+            .limit(scan)
             .list()
     ).map(row => row.orderId)
     const out = []
-    for (const orderId of completed) {
+    for (const orderId of new Set(completed.concat(renewals))) {
         if (out.length >= Number(p.limit || limits.batch)) break
         if (find(F, {orderId}).count() > 0) continue
         const order = one("mantle.order.OrderHeader", {orderId})

@@ -1328,3 +1328,70 @@ feature("P12 review: a product also sold in a store outside the user's scope is 
         code(r.noRow) == "RECORD_UNAVAILABLE"
     }
 })
+
+feature("Shop P9 (F126): the fulfillment job finds a renewal order whose approval never started fulfillment", {
+    when() {
+        // a renewal occurrence's order approved with no fulfillment row (the approval SECA never ran); its payment declined,
+        // so the run holds the row and grants nothing
+        const orderId = prefix + "_BORD"
+        system(() => {
+            make("mantle.order.OrderHeader", {
+                orderId,
+                statusId: "OrderApproved",
+                currencyUomId: "USD",
+                entryDate: ec.user.nowTimestamp
+            })
+            make("mantle.order.OrderPart", {
+                orderId,
+                orderPartSeqId: "01",
+                vendorPartyId: ids.org,
+                customerPartyId: ids.buyer,
+                statusId: "OrderApproved"
+            })
+            make("mantle.order.OrderItem", {
+                orderId,
+                orderItemSeqId: "01",
+                orderPartSeqId: "01",
+                itemTypeEnumId: "ItemProduct",
+                productId: ids.product,
+                quantity: 1,
+                unitAmount: 12
+            })
+            make("mantle.account.payment.Payment", {
+                paymentId: prefix + "_BPAY",
+                statusId: "PmntDeclined",
+                amount: "12.00",
+                amountUomId: "USD",
+                fromPartyId: ids.buyer,
+                toPartyId: ids.org
+            })
+            make(SUB + "StoreRenewalOccurrence", {
+                occurrenceId: prefix + "_BOCC",
+                contractId: prefix + "_PASTDUE",
+                periodStartDate: new Date(Number(ec.user.nowTimestamp) + 100 * 86400000),
+                stateEnumId: "SrsCharging",
+                orderId,
+                paymentId: prefix + "_BPAY",
+                attemptCount: 1,
+                createdDate: ec.user.nowTimestamp
+            })
+        })
+        const F = "mantle.product.store.StoreItemFulfillment"
+        const before = list(F, {orderId}).length
+        const job = system(() => call("mantle.product.ShopFulfillmentServices.fulfill#StoreItems", {limit: 500}))
+        const after = list(F, {orderId})
+        // left inert: the row and the occurrence removed so no later run retries them
+        system(() => {
+            for (const row of after) call("delete#" + F, {fulfillmentId: row.fulfillmentId})
+            call("delete#" + SUB + "StoreRenewalOccurrence", {occurrenceId: prefix + "_BOCC"})
+        })
+        return {before, job, after}
+    },
+    then(r) {
+        r.before == 0
+        r.job.orders >= 1
+        r.after.length == 1
+        r.after[0].productStoreId == ids.store && r.after[0].recipientPartyId == ids.buyer
+        r.after[0].stepEnumId == "SifHeld" && r.after[0].failureCode == "CAPTURE_DECLINED"
+    }
+})

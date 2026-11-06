@@ -104,3 +104,20 @@ CREATE UNIQUE INDEX PASS_PAGE_ROLE ON PUBLIC_SITE_PAGE (SITE_ID, PAGE_ROLE);
 Start the server. The query above should list `site_page_id` alone, and the Forum's guidelines and about pages read as
 before. No shipped data file has PublicSitePage rows; a data file of your own that names one by site and role still loads
 once its rows carry a `sitePageId`.
+
+## ZZW_RETAIL's public page address (Shop P3, November 2026; demo data only)
+
+The demo wiki space `ZZW_RETAIL` (`data/ZcaProductDemoData.xml`) no longer points at PopRestStore's `/popc` pages: its
+`publicPageUrl` is the demo Shop site's article page (`https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=...`),
+its `publicAttachmentUrl` is empty (PASS serves no wiki file), and the `/pcontact` screen path alias is gone. Data files
+load only into a new database, so a demo database made before keeps the old values. Nothing breaks: Knowledge.js links an
+article to the organization's Support mount when a published site has one, whatever the space says. To match a new
+database, stop the server (screen path aliases are cached), update the space and end the alias, and start it again:
+
+```sql
+UPDATE wiki_space SET public_page_url = 'https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=${wikiPageId}',
+       public_attachment_url = NULL WHERE wiki_space_id = 'ZZW_RETAIL';
+UPDATE screen_path_alias SET thru_date = CURRENT_TIMESTAMP WHERE alias_path = '/pcontact' AND thru_date IS NULL;
+```
+
+(MySQL: the same statements with the table and column names in upper case.)
