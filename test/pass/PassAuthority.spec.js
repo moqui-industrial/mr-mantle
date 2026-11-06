@@ -88,7 +88,8 @@ feature("an operation runs its schema service and a field the schema does not li
         client.result.capabilities != null
         extra.error.code == "Unprocessable"
         extra.error.status == 422
-        extra.error.message == "Invalid request fields"
+        // the request's own fault names itself (impl-shop P1, F4)
+        extra.error.message == "Unsupported request field: bogus"
         extra.error.correlationId.length == 24
         extra.error.fieldErrors.length == 0
         !extra.result
@@ -250,5 +251,45 @@ feature("the servlet answers a route through the authority, and a failure with t
         emptyBearer.status == 403
         emptyBearer.body.code == "Unauthorized"
         spacedBearer.status == 403
+    }
+})
+feature("a refusal's listed reason, its field and the text of a request's own fault go through the envelope; nothing else does", {
+    when() {
+        const refused = (kind, message) => {
+            const e = new Error(message)
+            e.moquiErrorKind = kind
+            return authority().envelope(e)
+        }
+        return {
+            // a Shop read of a site with no Shop mount, through the authority as a remote frontend calls it
+            concealed: handle({operation: "getShopContext", clientId: CLIENT, clientVerified: true}),
+            stale: refused("Conflict", "Error: Error: STALE_REVISION: This changed; reload"),
+            field: refused("Unprocessable", "TARGET_INVALID[targetId]: Choose the store the shop app serves"),
+            unlisted: refused("Unprocessable", "STORE_LIMITED: A store-limited staff member does not start stores"),
+            hidden: refused("NotFound", "NOT_AVAILABLE: Store PASS_X of ORG_Y is closed"),
+            plain: refused("Unauthorized", "secret detail"),
+            // a nested call's failure in the message facade is an Unprocessable too; its text stays in the log
+            internal: refused("Unprocessable", "Error creating mantle.order.OrderItem: error returned from database: duplicate key"),
+            script: refused("Conflict", "TypeError: cannot read property 'x' of undefined")
+        }
+    },
+    then({concealed, stale, field, unlisted, hidden, plain, internal, script}) {
+        concealed.error.code == "NotFound"
+        concealed.error.reason == "notAvailable"
+        concealed.error.message == "Resource not found"
+        stale.reason == "staleRevision"
+        stale.message == "This changed; reload"
+        field.reason == "targetInvalid"
+        field.fieldErrors[0].field == "targetId"
+        field.fieldErrors[0].message == "Choose the store the shop app serves"
+        unlisted.reason == null
+        unlisted.message == "A store-limited staff member does not start stores"
+        // a NotFound says nothing beyond its reason
+        hidden.reason == "notAvailable"
+        !hidden.message.includes("PASS_X")
+        plain.reason == null
+        plain.message == "Action is not permitted"
+        internal.message == "Invalid request fields"
+        script.message == "State changed; reload and compare"
     }
 })

@@ -2,7 +2,8 @@
  * The PASS apps a public site may mount (PublicSiteApp.app), the one list the authority keeps. An app with a target is
  * bound to a record of its own type (PublicSiteApp.targetId), which only an operator sets, since the app's pages read
  * that record's business data; its readiness service adds the app's checks to the site's. A new app registers here, in
- * PASS's Apps.js and the PASS runtime's <public-site> mounts (mr-pass docs/Deployment.md).
+ * PASS's Apps.js and the PASS runtime's <public-site> mounts (mr-pass docs/Deployment.md). root: the app may mount at
+ * '/', a site's one root app; onePerSite: a site has at most one mount of it.
  */
 const apps = {
     forum: { root: true },
@@ -22,6 +23,14 @@ const apps = {
         target: 'organization',
         readiness: 'mantle.request.CaseFeedbackServices.check#SupportAppReadiness',
     },
+    // Shop (mr-pass impl-shop P1, F2, F34): its target the ProductStore it sells from; it may be a site's one root app in
+    // place of Forum; a site has one Shop mount; its readiness is Commerce's store readiness (read only)
+    shop: {
+        target: 'productStore',
+        root: true,
+        onePerSite: true,
+        readiness: 'mantle.product.StoreAdminServices.check#StoreReadiness',
+    },
 }
 /* Whether a target id names a record of the target type. */
 const targets = {
@@ -31,6 +40,15 @@ const targets = {
             .condition({ partyId: targetId, roleTypeId: 'OrgInternal' })
             .disableAuthz()
             .one(),
+    // a real store whose organization is internal (Shop)
+    productStore: (targetId) => {
+        const store = ec.entity
+            .find('mantle.product.store.ProductStore')
+            .condition({ productStoreId: targetId })
+            .disableAuthz()
+            .one()
+        return !!store?.organizationPartyId && targets.organization(store.organizationPartyId)
+    },
 }
 /* The enabled mount of an app on a site, with its base path ('' for '/'), or null. */
 function mount(siteId, app) {
