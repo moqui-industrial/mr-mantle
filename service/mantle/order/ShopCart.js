@@ -694,6 +694,10 @@ const operations = {
     pendingCheckout,
     rotate,
     digest,
+    // Commerce P10 (CartRecovery.js): the recovery link's cart repriced, its access rule, the shop's limits and throttle
+    reprice,
+    usable,
+    answer,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop cart operation " + op)
         return operations[op](parameters || {})

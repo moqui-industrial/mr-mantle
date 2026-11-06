@@ -1573,4 +1573,10 @@
         service: 'mantle.product.ShopCatalogServices.get#ReviewImage',
         fields: ['siteId', 'reviewImage'],
     },
+    // Commerce P10: a cart recovery link (token is the link's one-time token, never a cart capability): the signed-in
+    // account's cart restored into its session, repriced, its unavailable lines named
+    recoverCart: {
+        service: 'mantle.order.ShopCartServices.recover#Cart',
+        fields: ['siteId', 'token'],
+    },
 })

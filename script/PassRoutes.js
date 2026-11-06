@@ -279,4 +279,6 @@
     ['GET', 'shop/products/{productId}/reviews', 'getProductReviews'],
     ['POST', 'shop/products/{productId}/reviews', 'submitProductReview'],
     ['GET', 'shop/media/review', 'getShopReviewImage'],
+    // Commerce P10: a cart recovery link's one-time token spent (a token write)
+    ['POST', 'shop/cart/recovery', 'recoverCart'],
 ]

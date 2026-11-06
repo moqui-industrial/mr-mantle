@@ -86,11 +86,19 @@ const settingTypes = {
     PsstCheckoutPhone: "contactPhone",
     PsstCheckoutSupportQueue: "supportQueue",
     PsstTaxDisplay: "taxDisplay",
-    PsstTaxOrigin: "storeFacility"
+    PsstTaxOrigin: "storeFacility",
+    // P10: the recovery policy (CheckoutSettings' RecoveryPolicy) and, F118, the checkout's opt-ins and the news list
+    PsstRecoveryEnabled: "boolean",
+    PsstRecoveryDelay: "recoveryDelay",
+    PsstRecoverySender: "recoverySender",
+    PsstRecoveryMaxSends: "recoveryMaxSends",
+    PsstRecoveryRetention: "recoveryRetention",
+    PsstCheckoutOptIns: "checkoutOptIns",
+    PsstNewsList: "newsList"
 }
 // Setting types a clone never copies (a recovery schedule, P10).
 // P6: the support queue and tax origin name the store organization's queue and facility.
-const cloneLeftOutSettingTypes = ["PsstCheckoutSupportQueue", "PsstTaxOrigin"]
+const cloneLeftOutSettingTypes = ["PsstCheckoutSupportQueue", "PsstTaxOrigin", "PsstRecoveryEnabled", "PsstNewsList"]
 // The search documents a store may bind, by type: a DataDocument with a search index over the type's records.
 const documentTypes = {
     PsdtProduct: "mantle.product.Product",
@@ -741,6 +749,12 @@ const choiceKind = values => (raw, label) => {
     if (!values.includes(raw)) denied("VALUE_INVALID", label + " is one of " + values.join(", "))
     return raw
 }
+// P10: a whole number from min to max
+const wholeKind = (min, max) => (raw, label) => {
+    if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max)
+        denied("VALUE_INVALID", label + " is a whole number from " + min + " to " + max)
+    return String(Number(raw))
+}
 const settingKinds = {
     checkoutAccount: choiceKind(["either", "account", "guest"]),
     stockDisclosure: choiceKind(["hidden", "availability", "backorder"]),
@@ -766,6 +780,42 @@ const settingKinds = {
         const offered = store ? portal.offeredQueues(store.organizationPartyId) : []
         if (!offered.some(queue => queue.requestCategoryId === raw))
             denied("QUEUE_NOT_OFFERED", label + ": choose one of the queues the store's organization offers its customers")
+        return raw
+    },
+    // P10: the recovery policy's numbers (whole minutes from 15 minutes to 30 days; 1 to 5 sends; a 1 to 365 day window) and
+    // its sender (built-in recovery until Marketing's automation exists, design §8)
+    recoveryDelay: wholeKind(15, 43200),
+    recoveryMaxSends: wholeKind(1, 5),
+    recoveryRetention: wholeKind(1, 365),
+    recoverySender: choiceKind(["builtin"]),
+    // F118: the checkout's opt-ins (none, or some of reviewRequests, cartReminders and news, StoreTopics.js) and the news list
+    // (a current marketing list the store's organization owns, never a topic's list)
+    checkoutOptIns: (raw, label) => {
+        if (raw === "none") return raw
+        const named = Array.from(
+            new Set(
+                raw
+                    .split(",")
+                    .map(part => part.trim())
+                    .filter(Boolean)
+            )
+        )
+        const known = ["reviewRequests", "cartReminders", "news"]
+        if (!named.length || named.some(id => !known.includes(id)))
+            denied("VALUE_INVALID", label + " is none or some of " + known.join(", "))
+        return known.filter(id => named.includes(id)).join(",")
+    },
+    newsList: (raw, label, store) => {
+        const list = one("mantle.marketing.contact.ContactList", {contactListId: raw})
+        const topicTypes = ["CART_REMINDER", "REVIEW_REQUEST"]
+        if (
+            !list ||
+            !store ||
+            list.ownerPartyId !== store.organizationPartyId ||
+            topicTypes.includes(list.contactListTypeEnumId) ||
+            (list.archivedDate && ms(list.archivedDate) <= nowMs())
+        )
+            denied("VALUE_INVALID", label + ": choose a current list of the store's organization")
         return raw
     },
     storeFacility: (raw, label, store) => {

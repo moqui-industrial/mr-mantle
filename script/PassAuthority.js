@@ -64,6 +64,8 @@ const TOKEN_WRITES = [
     'getReturnableOrder',
     'requestCustomerReturn',
     'requestOrderCancel',
+    // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
+    'recoverCart',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */

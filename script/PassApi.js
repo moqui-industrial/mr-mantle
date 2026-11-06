@@ -61,6 +61,8 @@ const TOKEN_WRITES = [
     'getReturnableOrder',
     'requestCustomerReturn',
     'requestOrderCancel',
+    // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
+    'recoverCart',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

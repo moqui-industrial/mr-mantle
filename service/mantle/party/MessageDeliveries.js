@@ -68,6 +68,18 @@ function queue(p) {
     if (p.sendNow === true || p.sendNow === "true") stateEnumId = attemptNow(made.deliveryId).stateEnumId
     return {deliveryId: made.deliveryId, created: true, stateEnumId}
 }
+// A source's build apart from the attempt's transaction, its errors kept from it.
+function buildApart(name, parameters) {
+    ec.message.pushErrors()
+    try {
+        const out = ec.service.sync().name(name).parameters(parameters).disableAuthz().requireNewTransaction(true).call() || {}
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        return out
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
 function createApart(name, parameters) {
     const out = ec.service.sync().name(name).parameters(parameters).disableAuthz().requireNewTransaction(true).call() || {}
     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
@@ -158,8 +170,10 @@ function attemptStep(p) {
     const source = one("moqui.basic.Enumeration", {enumId: delivery.sourceEnumId})
     let built
     try {
+        // the source's build in a transaction of its own (Commerce P10, F-P10-1): one that fails is recorded failed here,
+        // where before its error left this attempt's transaction unable to record anything
         built = source?.enumCode
-            ? call(source.enumCode, {
+            ? buildApart(source.enumCode, {
                   deliveryId: delivery.deliveryId,
                   eventKey: delivery.eventKey,
                   recipientPartyId: delivery.recipientPartyId

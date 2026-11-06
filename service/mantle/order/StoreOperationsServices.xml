@@ -404,4 +404,118 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="records" from="found.records"/>
         </actions>
     </service>
+
+    <!-- Commerce P10: cart recovery (CartRecovery.js; design-commerce §6 CartDetail's RecoveryHistory and RecoverCart) -->
+    <service verb="get" noun="CartRecovery" allow-remote="false">
+        <description>CartDetail's RecoveryHistory: whether the cart may be sent a recovery now and why not (recovery off, no
+            template, made by staff, a guest's, closed, completed, checking out, empty, no cart reminders consent, an
+            unverified email, active, past the window, already handled in this window, the most sends reached), the consent
+            state, the store's policy, the prior sends on the delivery ledger (the address masked, the outcome, redeemed), and
+            whether the user may send; with preview, for a user with COMMERCE_RECOVERY and an eligible cart, the exact
+            subject and body (the link shown as made at the send). COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="recovery" type="Map"/></out-parameters>
+        <actions>
+            <set field="recovery" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('getRecovery', context)"/>
+        </actions>
+    </service>
+    <service verb="send" noun="CartRecovery" allow-remote="false">
+        <description>RecoverCart: one recovery of an eligible cart (the reason refused names why not) through the delivery
+            ledger, with its reason (REASON_REQUIRED), an operation key (a retry answers the first send) and the cart's
+            revision as shown (STALE_REVISION). Sending never changes the order or signs staff in as the shopper.
+            COMMERCE_RECOVERY, COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="stateText"/>
+            <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="sent" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('sendRecovery', context)"/>
+            <set field="deliveryId" from="sent.deliveryId"/>
+            <set field="stateEnumId" from="sent.stateEnumId"/>
+            <set field="stateText" from="sent.stateText"/>
+            <set field="message" from="sent.message"/>
+            <set field="alreadyApplied" from="!!sent.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="run" noun="CartRecovery" allow-remote="false">
+        <description>The run_CartRecovery job: for each store with recovery enabled (or the ones named), its signed-in carts
+            idle past the delay within the recovery window, each in its own transaction (queue#CartRecovery); one that
+            fails is logged and named, and the rest go on. A store that has not enabled recovery is never read.</description>
+        <in-parameters><parameter name="productStoreIds" type="List"/></in-parameters>
+        <out-parameters>
+            <parameter name="stores" type="Integer"/>
+            <parameter name="carts" type="Integer"/>
+            <parameter name="queued" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failures" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('runRecovery', context)"/>
+            <set field="stores" from="out.stores"/>
+            <set field="carts" from="out.carts"/>
+            <set field="queued" from="out.queued"/>
+            <set field="failed" from="out.failed"/>
+            <set field="failures" from="out.failures"/>
+        </actions>
+    </service>
+    <service verb="queue" noun="CartRecovery" allow-remote="false">
+        <description>Internal (the job's and send#CartRecovery's step, a transaction of its own): one cart's recovery handed to
+            the delivery ledger when it is eligible now (one event per cart and inactivity window), tried at once unless
+            sendNow is false.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="sentBy"/>
+            <parameter name="reason"/>
+            <parameter name="sendNow" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="queued" type="Boolean"/>
+            <parameter name="code"/>
+            <parameter name="text"/>
+            <parameter name="deliveryId"/>
+            <parameter name="stateEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('queueRecovery', context)"/>
+            <set field="queued" from="!!out.queued"/>
+            <set field="code" from="out.code"/>
+            <set field="text" from="out.text"/>
+            <set field="deliveryId" from="out.deliveryId"/>
+            <set field="stateEnumId" from="out.stateEnumId"/>
+        </actions>
+    </service>
+    <service verb="build" noun="CartRecovery" allow-remote="false">
+        <description>The delivery ledger's source build of a cart recovery (MessageDeliverySource MdsrcCartRecovery), each
+            attempt: suppressed when the cart is closed, its checkout completed or in progress, the shopper came back since
+            the window, or it is no longer eligible; else the message's parameters with a new one-time recovery link (its
+            token's digest on the cart's access row until the window ends) and the email preferences link.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey" required="true"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions>
+            <set field="built" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('buildRecovery', context)"/>
+            <set field="toAddress" from="built.toAddress"/>
+            <set field="bodyParameters" from="built.bodyParameters"/>
+            <set field="suppress" from="built.suppress"/>
+        </actions>
+    </service>
 </services>
