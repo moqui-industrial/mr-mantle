@@ -3329,7 +3329,7 @@ along with this software (see the LICENSE.md file). If not, see
         INVOICE_APPROVE), the organization the user works in, the period and locks of the invoice date. The checks are in
         InvoiceWorkflow.js; the services above keep their own behavior for other callers. -->
 
-    <service verb="change" noun="InvoiceState" allow-remote="false">
+    <service verb="change" noun="InvoiceState" transaction="cache" allow-remote="false">
         <description>The guarded invoice status change over Mantle's status flow: finalize or approve (lines, a total that is
             not negative, a linked credit within its original, the single currency and approval preferences, and the posting
             done), resume or cancel (not applied, not posted, a reason), receive, and sent (after send#Invoice). It refuses a
@@ -3415,7 +3415,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="sourceVersion" from="saved.sourceVersion"/>
         </actions>
     </service>
-    <service verb="store" noun="InvoiceDraftItem" allow-remote="false">
+    <service verb="store" noun="InvoiceDraftItem" transaction="cache" allow-remote="false">
         <description>Add a line to a draft invoice through create#InvoiceItem, or change one (invoiceItemSeqId with its
             lastUpdatedStamp) through update#InvoiceItem: an ItemType type, an existing product, a positive quantity, the
             amount rounded to the invoice currency; a customer credit's line posts to the item's outgoing sales account. The
@@ -3787,7 +3787,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="errors" from="summary.errors"/>
         </actions>
     </service>
-    <service verb="create" noun="Receivable" allow-remote="false">
+    <service verb="create" noun="Receivable" transaction="cache" allow-remote="false">
         <description>A draft customer invoice (create#Invoice from the organization) or customer credit (from the customer,
             kept a receivable draft), in the currency given or the organization's base currency. It is not issued or posted.
             Refuses a customer another user keeps private, another invoice type and an unknown currency. Needs

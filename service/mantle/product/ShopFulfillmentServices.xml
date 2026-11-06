@@ -69,7 +69,7 @@
             <set field="failed" from="out.failed"/>
         </actions>
     </service>
-    <service verb="run" noun="FulfillmentStep" allow-remote="false">
+    <service verb="run" noun="FulfillmentStep" transaction="cache" allow-remote="false">
         <description>One fulfillment step of an order in its own transaction (called by fulfill#ShopOrder).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>

@@ -21,7 +21,7 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== the runs (P16a, part of M4) ===== -->
-    <service verb="create" noun="ProductionOrder" allow-remote="false">
+    <service verb="create" noun="ProductionOrder" transaction="cache" allow-remote="false">
         <description>Create a draft production run (design-manufacturing NewWorkOrder, §12.1's create#ProductionOrder
             contract): the product checked usable for Produce (check#ProductUsable), Mantle's
             ManufacturingServices.create#ProductionRun without the legacy consume and produce products (no PatMfgBom row is
@@ -743,7 +743,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="history" from="found.history"/>
         </actions>
     </service>
-    <service verb="transition" noun="ProductionOrder" allow-remote="false">
+    <service verb="transition" noun="ProductionOrder" transaction="cache" allow-remote="false">
         <description>The one path to a production run's status (design-manufacturing WorkOrderDetail Lifecycle, the WorkOrders
             board and bulk action; R-MFG-11): an action, or the move to toStatusId a board makes, on the run at its expected
             revision, with an operation key (a retry answers the first result). release (PRODUCTION_PLAN) runs the release gate
@@ -1328,7 +1328,7 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('storeOutput', context)"/>
         </actions>
     </service>
-    <service verb="record" noun="ProductionQuantity" allow-remote="false">
+    <service verb="record" noun="ProductionQuantity" transaction="cache" allow-remote="false">
         <description>Record what a released or running run produced on an output line (design-manufacturing Quantities
             Reconcile, §12.2), in one transaction: process loss, scrap (before it was stock) and rework through their losses
             (record#ProductionLoss's rules: a reason, an approval above the reason's threshold), then good output received

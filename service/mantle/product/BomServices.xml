@@ -130,7 +130,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('access',context))</script>
         </actions>
     </service>
-    <service verb="store" noun="Bom" allow-remote="false">
+    <service verb="store" noun="Bom" transaction="cache" allow-remote="false">
         <in-parameters>
             <auto-parameters entity-name="mantle.product.bom.ProductBom" include="all"/>
             <parameter name="expectedRevision"/>
@@ -179,7 +179,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('storeBom',context))</script>
         </actions>
     </service>
-    <service verb="store" noun="BomItem" allow-remote="false">
+    <service verb="store" noun="BomItem" transaction="cache" allow-remote="false">
         <in-parameters>
             <auto-parameters entity-name="mantle.product.bom.ProductBomItem" include="all"/>
             <parameter name="expectedRevision"/>
@@ -233,7 +233,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('validate',context))</script>
         </actions>
     </service>
-    <service verb="release" noun="BomDraft" allow-remote="false">
+    <service verb="release" noun="BomDraft" transaction="cache" allow-remote="false">
         <implements service="mantle.product.BomServices.define#BomOperationParameters"/>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Boms.js').execute('release',context))</script>
