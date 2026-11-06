@@ -105,3 +105,15 @@ fixtures ([Build-Test](../../../../docs/Build-Test.md#http-fixtures)):
 ```
 
 Sandbox and live calls are deployment exercises, not regression tests.
+
+## Stored-credential renewals (Shop P7)
+
+A merchant-initiated charge of a kept customer payment profile, made under the customer's recorded off-session consent
+(Shop's subscription renewals), passes `storedCredential` to `authorize#SinglePayment`: `{kind: "recurring",
+originalNetworkTransId, originalAuthAmount}`, the original being the customer-initiated transaction that kept the card
+(its `PaymentGatewayResponse.networkTransId`). The adapter then sends, after `transactionSettings` in the schema's order,
+`processingOptions` (`isSubsequentAuth`, `isStoredCredentials`), `subsequentAuthInformation` (the original network
+transaction id and amount; no `reason`, which is for resubmissions and delayed charges) and `authorizationIndicatorType`
+(`pre` for an authorization, `final` for a sale). On an Accept Hosted gateway such a charge is the same profile charge,
+not a hosted page. These were checked against the request shape in `test/ext/AuthorizeNetGateway`, not yet against the
+sandbox.

@@ -1418,6 +1418,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return/></if>
+            <!-- a recurring base (RecurringTemplate, X5) sends no store email: it is never placed for the customer (mr-pass impl-shop P7) -->
+            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
             <set field="productStoreId" from="orderHeader.productStoreId"/>
             <if condition="!productStoreId"><return/></if>
 

@@ -1400,6 +1400,11 @@ along with this software (see the LICENSE.md file). If not, see
                 Protect.js hpf_token and enc_key, a provider payment method id). Never stored or logged; a reusable
                 provider reference the adapter gets back goes on the PaymentMethod (gatewayCimId the payment profile,
                 gatewayCustomerId its customer profile).</description></parameter>
+            <parameter name="storedCredential" type="Map"><description>A merchant-initiated charge of the payment's kept method
+                under the customer's recorded off-session consent (mr-pass impl-shop P7, F14, F41): kind (recurring), the
+                originalNetworkTransId and originalAuthAmount of the customer-initiated transaction that first used it. An
+                adapter with stored-credential indicators sends them (Authorize.Net's processingOptions,
+                subsequentAuthInformation and authorizationIndicatorType); one without ignores it. Empty, as before.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="paymentGatewayResponseId"/>
@@ -1722,6 +1727,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="returnUrl"><description>Passed to a hosted gateway (authorize#Payment).</description></parameter>
             <parameter name="paymentToken" type="Map"><description>Single-use browser tokenization output, passed to the
                 gateway (authorize#Payment) and never stored.</description></parameter>
+            <parameter name="storedCredential" type="Map"><description>A merchant-initiated charge under recorded off-session
+                consent, passed to the gateway (authorize#Payment; Shop's renewals, mr-pass impl-shop P7).</description></parameter>
             <parameter name="payment" type="EntityValue"/>
         </in-parameters>
         <out-parameters>
@@ -1803,7 +1810,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="${paymentGatewayConfig.authorizeServiceName}" out-map="authOut"
                     in-map="{paymentId:payment.paymentId, cardSecurityCode:cardSecurityCode, returnUrl:returnUrl,
                         paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId, operationKey:operationKey,
-                        idempotencyKey:keyOut.idempotencyKey, paymentToken:paymentToken}"/>
+                        idempotencyKey:keyOut.idempotencyKey, paymentToken:paymentToken, storedCredential:storedCredential}"/>
 
             <set field="paymentGatewayResponseId" from="authOut.paymentGatewayResponseId"/>
             <if condition="!paymentGatewayResponseId"><then>

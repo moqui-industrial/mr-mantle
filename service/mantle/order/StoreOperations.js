@@ -335,10 +335,19 @@ function findStoreOrders(p) {
     return Object.assign({}, page, {orders: shape(page.rows), rows: undefined, truncated: false})
 }
 // RecurringTemplate bases (F112) are never a store's orders: Shop P7 marks them (Sales' RecurringTemplate marker, X5), and
-// the condition goes here, in the one function the order worklist and the store reports (StoreReports.js) call. Until a
-// base is marked nothing is left out.
+// the condition is here, in the one function the order worklist, Home's counts and the store reports (StoreReports.js) call.
 function withoutRecurringBases(query) {
-    return query
+    // Shop P7 (F112): a RecurringTemplate base is the next period's template, never an order of the store's worklists
+    const cf = ec.entity.conditionFactory
+    return query.condition(
+        cf.makeCondition(
+            [
+                cf.makeCondition("orderPurposeEnumId", "is-null", null),
+                cf.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+            ],
+            "or"
+        )
+    )
 }
 function orderQuery(s, p, storeIds) {
     let query = withoutRecurringBases(
@@ -963,8 +972,7 @@ function getStoreCustomer(p) {
     if (!party || party.disabled === "Y" || !storeIds.length) unavailable("Customer", partyId)
     const names = lib.partyNames([partyId])
     const orders = Array.from(
-        s
-            .own(find(ORDER))
+        withoutRecurringBases(s.own(find(ORDER)))
             .condition("productStoreId", "in", storeIds)
             .condition(
                 "orderId",
@@ -1227,7 +1235,7 @@ function getStoreWorkSummary(p) {
     const storeIds = storesFor(s, p.productStoreId)
     const count = (conditions, extra) => {
         if (!storeIds.length) return 0
-        let query = s.own(find(ORDER, conditions).condition("productStoreId", "in", storeIds))
+        let query = withoutRecurringBases(s.own(find(ORDER, conditions).condition("productStoreId", "in", storeIds)))
         if (extra) query = extra(query)
         return Number(query.count())
     }
@@ -1259,8 +1267,7 @@ function getStoreWorkSummary(p) {
     each("unpaid", () => {
         if (!storeIds.length) return 0
         const recent = Array.from(
-            s
-                .own(find(ORDER))
+            withoutRecurringBases(s.own(find(ORDER)))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "in", ["OrderPlaced", "OrderApproved", "OrderSent", "OrderHold", "OrderProcessing"])
                 .orderBy("-placedDate")
@@ -1280,8 +1287,7 @@ function getStoreWorkSummary(p) {
     let recentOrders = []
     if (s.canOrders && storeIds.length) {
         const list = Array.from(
-            s
-                .own(find(ORDER))
+            withoutRecurringBases(s.own(find(ORDER)))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "!=", "OrderOpen")
                 .orderBy("-placedDate")

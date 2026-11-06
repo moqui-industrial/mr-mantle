@@ -297,6 +297,9 @@ function fulfillmentInvoice(p) {
 function invoiceSource(p, {part, header, payable, organizationPartyId}) {
     if (!["OrderApproved", "OrderSent", "OrderProcessing", "OrderCompleted"].includes(header.statusId))
         denied("ORDER_STATE_INVALID", "Only an approved order is invoiced")
+    // a recurring base (RecurringTemplate, X5) is the next period's template, never invoiced (mr-pass impl-shop P7)
+    if (header.orderPurposeEnumId === "OrpRecurringTemplate")
+        denied("RECURRING_TEMPLATE", "A recurring template is not invoiced; its renewal orders are")
     const basis = p.basis || "ordered"
     if (!["ordered", "received"].includes(basis)) denied("SOURCE_BASIS_INVALID", "Choose the ordered or the received basis")
     if (basis === "received" && !payable) denied("SOURCE_BASIS_INVALID", "Only a purchase is billed on its receipts")

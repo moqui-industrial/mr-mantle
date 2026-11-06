@@ -233,7 +233,25 @@ function authorize(p, sale) {
         request.transactionSettings = {
             setting: [{settingName: "duplicateWindow", settingValue: String(gw.options.duplicateWindow)}]
         }
+    if (p.storedCredential && request.profile) storedCredentialFields(request, p.storedCredential, sale)
     return transact(base, {refId, transactionRequest: request})
+}
+// Shop P7 (F14, F41): a merchant-initiated charge of a kept profile under the customer's recorded off-session consent
+// (a renewal): the stored-credential indicators, in the schema's order after transactionSettings (processingOptions,
+// subsequentAuthInformation, then authorizationIndicatorType): a subsequent authorization of stored credentials, the
+// original customer-initiated transaction's network id and amount, and a final authorization (pre for an authorization
+// captured later). The reason field is for resubmissions and delayed charges, not a scheduled recurring charge, so it
+// is not sent.
+function storedCredentialFields(request, credential, sale) {
+    request.processingOptions = {isSubsequentAuth: "true", isStoredCredentials: "true"}
+    const original = credential.originalNetworkTransId ? clip(String(credential.originalNetworkTransId), 255) : null
+    if (original) {
+        request.subsequentAuthInformation = {originalNetworkTransId: original}
+        const amount =
+            credential.originalAuthAmount != null ? amountText(credential.originalAuthAmount, request.currencyCode) : null
+        if (amount) request.subsequentAuthInformation.originalAuthAmount = amount
+    }
+    request.authorizationIndicatorType = {authorizationIndicator: sale ? "final" : "pre"}
 }
 
 function capture(p) {
@@ -846,6 +864,9 @@ function hostedPendingOf(gatewayIds) {
 // (transactionStatus HostedPending, no result), which the frontend's relay opens with a fresh token (get#HostedPaymentForm)
 // and whose transaction the details lookup finds by the attempt's reference.
 function authorizeHosted(p, sale) {
+    // Shop P7: a merchant-initiated renewal of a kept profile is a profile charge with its indicators, whatever page the
+    // gateway shows a payer
+    if (p.storedCredential) return authorize(p, sale)
     const {payment, base, problem} = start(p, sale ? "PgoAuthAndCapture" : "PgoAuthorize")
     if (problem) return refuse(base, "GATEWAY_NOT_AVAILABLE", problem)
     if (!amountText(payment.amount, payment.amountUomId))

@@ -1159,3 +1159,39 @@ feature("no card number, browser token or secret is in a gateway response or a s
         leaks.length == 0
     }
 })
+
+feature("Shop P7: a renewal charges the kept profile with the stored-credential indicators, also on an Accept Hosted gateway", {
+    when() {
+        const card = ec.resource
+            .script("component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js")
+            .createCardMethod(customerId, {paymentGatewayConfigId: "ANET_SPEC_HOSTED", gatewayCimId: "80070", gatewayCustomerId: "70070"}, "1111", "CctVisa")
+        const paymentId = cardPayment(12, "ANET_SPEC_HOSTED", {paymentMethodId: card})
+        answer("authOnlyTransaction", transaction("1", "60070"))
+        const auth = call(P + "authorize#SinglePayment", {
+            paymentId,
+            operationKey: "shop-renew-" + paymentId,
+            storedCredential: {kind: "recurring", originalNetworkTransId: "NTI-FIRST-1", originalAuthAmount: "12"}
+        })
+        const request = requestOf(sent()[0]).transactionRequest
+        // a customer-initiated profile charge sends none of them
+        const plainId = cardPayment(5, "ANET_SPEC", {paymentMethodId: card})
+        call("update#mantle.account.method.PaymentMethod", {paymentMethodId: card, paymentGatewayConfigId: "ANET_SPEC"})
+        answer("authOnlyTransaction", transaction("1", "60071"))
+        call(P + "authorize#SinglePayment", {paymentId: plainId})
+        return {auth: response(auth.paymentGatewayResponseId), request, keys: Object.keys(request), plain: requestOf(sent()[1]).transactionRequest}
+    },
+    then({auth, request, keys, plain}) {
+        auth.resultSuccess == "Y"
+        request.profile.customerProfileId == "70070"
+        request.processingOptions.isSubsequentAuth == "true"
+        request.processingOptions.isStoredCredentials == "true"
+        request.subsequentAuthInformation.originalNetworkTransId == "NTI-FIRST-1"
+        request.subsequentAuthInformation.originalAuthAmount == "12.00" || request.subsequentAuthInformation.originalAuthAmount == "12"
+        request.authorizationIndicatorType.authorizationIndicator == "pre"
+        // the schema's order: after the order and the customer's facts
+        keys.indexOf("processingOptions") > keys.indexOf("order")
+        keys.indexOf("subsequentAuthInformation") > keys.indexOf("processingOptions")
+        keys.indexOf("authorizationIndicatorType") == keys.length - 1
+        plain.processingOptions == null
+    }
+})

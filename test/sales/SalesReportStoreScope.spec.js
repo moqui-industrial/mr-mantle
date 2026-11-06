@@ -85,9 +85,10 @@ const total = (list, field) => Math.round(periods(list).reduce((sum, line) => su
 const costs = list => periods(list).map(line => line.productCostTotal)
 // this month and the one before, so the orders placed now are in the summaries
 const window = {interval: "M", intervalCount: 1}
-function order(orderId, productStoreId, vendorPartyId, currencyUomId, unitAmount) {
+function order(orderId, productStoreId, vendorPartyId, currencyUomId, unitAmount, orderPurposeEnumId = null) {
     make("mantle.order.OrderHeader", {
         orderId,
+        orderPurposeEnumId,
         productStoreId,
         statusId: "OrderApproved",
         currencyUomId,
@@ -164,6 +165,8 @@ spec({
             order(prefix + "_O2", ids.storeA, orgA, "EUR", 7)
             order(prefix + "_O3", ids.storeA2, orgA, "USD", 5)
             order(prefix + "_O4", ids.storeB, orgB, "USD", 3)
+            // a recurring base of store A (Shop P7, F139): indexed, but never a sale, so every answer below is as without it
+            order(prefix + "_O5", ids.storeA, orgA, "USD", 1000, "OrpRecurringTemplate")
             searchAvailable = ec.search.isAvailable()
         })
         if (searchAvailable)
@@ -171,7 +174,7 @@ spec({
                 const started = Date.now()
                 while (Date.now() - started < 10000) {
                     call("org.moqui.EntityServices.process#DataFeedPending", {})
-                    if (searchCount("orderId:" + prefix + "_O4") > 0) break
+                    if (searchCount("orderId:" + prefix + "_O4") > 0 && searchCount("orderId:" + prefix + "_O5") > 0) break
                 }
             })
     }
@@ -196,10 +199,11 @@ feature("a COMMERCE_VIEW holder reads the summaries of the stores in their scope
                 currencyUomIds: ["USD"]
             }),
             costed: run(users.costReader, R + "get#SalesOrderSummary", scoped),
-            staff: run(users.staff, R + "get#SalesOrderSummary", scoped)
+            staff: run(users.staff, R + "get#SalesOrderSummary", scoped),
+            baseIndexed: searchAvailable ? system(() => searchCount("orderId:" + prefix + "_O5")) : 0
         }
     },
-    then({orders, usd, both, invoices, top, costed, staff}) {
+    then({orders, usd, both, invoices, top, costed, staff, baseIndexed}) {
         orders.error == ""
         usd.error == ""
         both.error == ""
@@ -209,6 +213,10 @@ feature("a COMMERCE_VIEW holder reads the summaries of the stores in their scope
         staff.error == ""
         // the test runtime has a search backend (MantleSearch checks it too), so the counts below are checked
         searchAvailable
+        // the base is in the index and left out of the summaries and top products (F139)
+        !searchAvailable || baseIndexed > 0
+        !searchAvailable || total(usd.salesOrderSummaryList, "productSaleTotal") == 20
+        !searchAvailable || Number(String(top.topProductList[0]?.totalQuantity ?? 0)) == 2
         if (searchAvailable) {
             total(orders.salesOrderSummaryList, "orderCount") == 2
             total(usd.salesOrderSummaryList, "orderCount") == 1

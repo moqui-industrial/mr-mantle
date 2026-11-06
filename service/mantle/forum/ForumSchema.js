@@ -1434,6 +1434,7 @@
             'acceptTerms',
             'operationId',
             'optIns',
+            'recurringConsent',
         ],
     },
     getCheckoutPaymentResult: {
@@ -1578,5 +1579,45 @@
     recoverCart: {
         service: 'mantle.order.ShopCartServices.recover#Cart',
         fields: ['siteId', 'token'],
+    },
+    // Shop P7: prepaid and recurring access (mantle.product.ShopSubscriptionServices), the signed-in verified account's own
+    getSubscriptions: {
+        service: 'mantle.product.ShopSubscriptionServices.get#Subscriptions',
+        fields: ['siteId'],
+    },
+    getSubscription: {
+        service: 'mantle.product.ShopSubscriptionServices.get#Subscription',
+        fields: ['siteId', 'contractId'],
+    },
+    beginSubscriptionPurchase: {
+        service:
+            'mantle.product.ShopSubscriptionServices.begin#SubscriptionPurchase',
+        fields: ['siteId', 'offerId', 'contractId', 'operationId'],
+    },
+    changeSubscriptionMethod: {
+        service:
+            'mantle.product.ShopSubscriptionServices.change#SubscriptionMethod',
+        fields: [
+            'siteId',
+            'contractId',
+            'paymentMethodId',
+            'consent',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    cancelSubscription: {
+        service: 'mantle.product.ShopSubscriptionServices.cancel#Subscription',
+        fields: [
+            'siteId',
+            'contractId',
+            'reason',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    resumeRenewal: {
+        service: 'mantle.product.ShopSubscriptionServices.resume#Renewal',
+        fields: ['siteId', 'contractId', 'operationId'],
     },
 })

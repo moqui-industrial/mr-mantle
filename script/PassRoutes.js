@@ -281,4 +281,11 @@
     ['GET', 'shop/media/review', 'getShopReviewImage'],
     // Commerce P10: a cart recovery link's one-time token spent (a token write)
     ['POST', 'shop/cart/recovery', 'recoverCart'],
+    // Shop P7: the signed-in account's subscriptions (no capability: reads are GETs)
+    ['GET', 'shop/subscriptions', 'getSubscriptions'],
+    ['GET', 'shop/subscriptions/view', 'getSubscription'],
+    ['POST', 'shop/subscriptions/purchase', 'beginSubscriptionPurchase'],
+    ['POST', 'shop/subscriptions/method', 'changeSubscriptionMethod'],
+    ['POST', 'shop/subscriptions/cancel', 'cancelSubscription'],
+    ['POST', 'shop/subscriptions/resume', 'resumeRenewal'],
 ]

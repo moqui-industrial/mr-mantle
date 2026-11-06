@@ -682,9 +682,20 @@ function setupGateway(shop) {
     }
     return null
 }
-// The recurring orders (a base with a schedule, not cancelled) that charge a method: what ending it affects (P7 adds the
-// store's recurring contracts).
+// The recurring orders (a base with a schedule, not cancelled) that charge a method, and (P7, F94) the Shop subscriptions
+// that renew with it: what ending it affects.
 function contractsOf(paymentMethodId) {
+    const shopContracts = rows("mantle.product.subscription.StoreRecurringContract", {paymentMethodId})
+        .filter(row => ["ScsActive", "ScsPastDue"].includes(row.stateEnumId) && row.autoRenew === "Y")
+        .map(row => ({
+            contractId: row.contractId,
+            orderId: row.baseOrderId || null,
+            name: (one("mantle.product.Product", {productId: row.productId})?.productName || row.productId) + " subscription"
+        }))
+    const shopBases = new Set(shopContracts.map(row => row.orderId).filter(Boolean))
+    return shopContracts.concat(recurringOrdersOf(paymentMethodId).filter(row => !shopBases.has(row.orderId)))
+}
+function recurringOrdersOf(paymentMethodId) {
     const orderIds = [
         ...new Set(
             rows("mantle.account.payment.Payment", {paymentMethodId})
@@ -796,6 +807,15 @@ function endPaymentMethod(p) {
     if (contracts.length && !yes(p.confirm))
         return {ended: false, needsConfirmation: true, contracts, methods: methodList(partyId)}
     call("mantle.account.PaymentMethodServices.delete#PaymentMethod", {paymentMethodId: method.paymentMethodId})
+    // P7 (F94): a subscription renewing with the ended card loses its off-session consent; its next renewal waits for the
+    // customer to choose another card (ChangeMethod), never charging the ended one
+    for (const contract of contracts.filter(row => row.contractId))
+        call("update#mantle.product.subscription.StoreRecurringContract", {
+            contractId: contract.contractId,
+            consentDate: null,
+            consentMethodId: null,
+            consentEndedReason: "METHOD_ENDED"
+        })
     return {ended: true, contracts, methods: methodList(partyId)}
 }
 

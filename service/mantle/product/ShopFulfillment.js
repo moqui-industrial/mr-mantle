@@ -16,6 +16,11 @@
  *   file's location (kept on the server) with its range. A raw location is never answered to a page.
  * - Refunds (reconcile#RefundedItem, from the PaymentRefundedReconcileAccess and ReturnSettledReconcileAccess SECAs): a
  *   returned digital line, a cancelled one, or an order whose payment no longer covers its digital lines ends their grants.
+ * - Paid access (Shop P7, F20): a line of a PtDigital product with a subscription resource is fulfilled the same way, its
+ *   payment captured, invoiced, finalized and its part completed first; then activated once on its contract's resource
+ *   instance (ShopSubscriptions.js activate: the first purchase makes the contract, a renewal order extends it). A renewal
+ *   order (a StoreRenewalOccurrence's) is Shop's as a completed checkout's is. A refund revokes only the term the refunded
+ *   line paid for (ShopSubscriptions.js revokeLine), never an independent grant.
  * Reads and writes are the authority's own (authorization disabled), after these checks.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -23,6 +28,7 @@ const externalAccess = () => ec.resource.script("component://mr-mantle/service/m
 const catalog = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
 const attempts = () => ec.resource.script("component://mr-mantle/service/mantle/account/PaymentAttempts.js")
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+const subscriptions = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopSubscriptions.js")
 const {find, one, rows, call, ms} = lib
 const F = "mantle.product.store.StoreItemFulfillment"
 const G = "mantle.product.store.StoreDownloadGrant"
@@ -89,12 +95,23 @@ function plainDigital(productId) {
     return !rows("mantle.product.subscription.ProductSubscriptionResource", {productId}).some(row => lib.active(row))
 }
 const digitalLines = orderId => productLines(orderId).filter(item => plainDigital(item.productId))
+// Shop P7: a paid-access product: digital, with a subscription resource in effect.
+function paidAccess(productId) {
+    const product = one("mantle.product.Product", {productId})
+    if (!product || product.productTypeEnumId !== "PtDigital") return false
+    return rows("mantle.product.subscription.ProductSubscriptionResource", {productId}).some(row => lib.active(row))
+}
+const accessLines = orderId => productLines(orderId).filter(item => paidAccess(item.productId))
+// The lines Shop's fulfillment settles: the downloads and the paid access.
+const fulfilledLines = orderId => productLines(orderId).filter(item => plainDigital(item.productId) || paidAccess(item.productId))
+// What the rows take from the order's Shop source: its completed checkout, else (Shop P7) its renewal occurrence's contract.
+const sourceOf = orderId => checkoutOf(orderId) || subscriptions().renewalSourceOf(orderId)
 // Whether every product line of a Shop order is plain digital (OrderApprovedSendEmail does not run for it: its payment's
 // approval is its approval, and the invoice's receipt and the download notice follow; design-shop §8.3).
 function allDigitalShopOrder(orderId) {
-    if (!checkoutOf(orderId)) return false
+    if (!sourceOf(orderId)) return false
     const lines = productLines(orderId)
-    return lines.length > 0 && lines.every(item => plainDigital(item.productId))
+    return lines.length > 0 && lines.every(item => plainDigital(item.productId) || paidAccess(item.productId))
 }
 // The files a product delivers: its current PcntDownload contents.
 const downloadContents = productId =>
@@ -107,9 +124,9 @@ const downloadContents = productId =>
 // fulfillment rows, then advance. A non-Shop order, or one with no digital line, is left as it is.
 function fulfillOrder(p) {
     const order = one("mantle.order.OrderHeader", {orderId: p.orderId})
-    const checkout = order ? checkoutOf(order.orderId) : null
-    if (!checkout || !approvedOrderStatuses.includes(order.statusId)) return {fulfilled: false}
-    const lines = digitalLines(order.orderId)
+    const source = order ? sourceOf(order.orderId) : null
+    if (!source || !approvedOrderStatuses.includes(order.statusId)) return {fulfilled: false}
+    const lines = fulfilledLines(order.orderId)
     if (!lines.length) return {fulfilled: false}
     if (rows(F, {orderId: order.orderId}).length < lines.length) {
         const prepared = step("prepare", {orderId: order.orderId})
@@ -140,13 +157,15 @@ function advance(orderId) {
         run("finalize", () => order().some(row => !row.paidDate)) &&
         run("complete", () => order().some(row => !row.completedDate))
     if (ok && order().some(row => row.completedDate && !row.noticeDate)) notify(orderId)
+    // Shop P7: a renewal's notice once its term is activated
+    if (ok) subscriptions().renewedNotice(orderId)
     const rowsNow = order()
     return {fulfilled: rowsNow.length > 0 && rowsNow.every(row => row.stepEnumId === "SifCompleted")}
 }
 // prepare: a row per digital line (the order's Shop checkout names the store, site and recipient).
 function prepareStep(p) {
-    const checkout = checkoutOf(p.orderId)
-    for (const item of digitalLines(p.orderId))
+    const checkout = sourceOf(p.orderId)
+    for (const item of fulfilledLines(p.orderId))
         if (!one(F, {orderId: p.orderId, orderItemSeqId: item.orderItemSeqId}))
             call("create#" + F, {
                 orderId: p.orderId,
@@ -248,7 +267,11 @@ function completeStep(p) {
     for (const partSeqId of new Set(list.map(row => row.orderPartSeqId)))
         call("mantle.order.OrderServices.checkComplete#OrderPart", {orderId: p.orderId, orderPartSeqId: partSeqId})
     for (const row of list) {
-        for (const content of downloadContents(row.productId))
+        // Shop P7: a paid-access line's term activated on its contract (once: its Subscription keyed by the line)
+        const activated = paidAccess(row.productId)
+            ? subscriptions().activate({orderId: row.orderId, orderItemSeqId: row.orderItemSeqId})
+            : null
+        for (const content of activated ? [] : downloadContents(row.productId))
             if (!one(G, {orderId: row.orderId, orderItemSeqId: row.orderItemSeqId, productContentId: content.productContentId}))
                 call("create#" + G, {
                     fulfillmentId: row.fulfillmentId,
@@ -271,6 +294,7 @@ function completeStep(p) {
             fulfillmentId: row.fulfillmentId,
             completedDate: ec.user.nowTimestamp,
             stepEnumId: "SifCompleted",
+            subscriptionId: activated?.subscriptionIds?.[0] || null,
             failureCode: null,
             failureMessage: null
         })
@@ -301,6 +325,11 @@ function failedStep(p) {
 // sends none. The rows are marked handed off either way.
 function notify(orderId) {
     const checkout = checkoutOf(orderId)
+    // a renewal order, or an order with no file, has no download notice (Shop P7: the renewal's is its own)
+    if (!checkout || !rows(G, {orderId}).length) {
+        step("noticed", {orderId})
+        return
+    }
     const email = rows("mantle.product.store.ProductStoreEmail", {
         productStoreId: checkout.productStoreId,
         emailTypeEnumId: "PsetDownloadReady"
@@ -588,7 +617,7 @@ function reconcileRefunded(p) {
     if (p.orderId && p.orderItemSeqId) add(p.orderId, p.orderItemSeqId)
     const payment = p.paymentId ? one(P, {paymentId: p.paymentId}) : null
     const orderId = p.orderId || payment?.orderId
-    if (orderId && checkoutOf(orderId)) {
+    if (orderId && sourceOf(orderId)) {
         const fulfilled = rows(F, {orderId}).filter(row => row.stepEnumId !== "SifRevoked")
         // a cancelled line
         for (const row of fulfilled) {
@@ -616,6 +645,9 @@ function reconcileRefunded(p) {
                 })
                 revoked++
             }
+        // Shop P7: the paid-access term the line paid for (its source's grant only)
+        if (paidAccess(one(F, target)?.productId))
+            revoked += subscriptions().revokeLine(target.orderId, target.orderItemSeqId).revoked
         const row = one(F, target)
         if (row && row.stepEnumId !== "SifRevoked")
             call("update#" + F, {fulfillmentId: row.fulfillmentId, stepEnumId: "SifRevoked", revokedDate: ec.user.nowTimestamp})
@@ -658,6 +690,8 @@ const operations = {
     allDigitalShopOrder,
     digitalLines,
     plainDigital,
+    paidAccess,
+    accessLines,
     rangeOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop fulfillment operation " + op)

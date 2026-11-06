@@ -37,9 +37,14 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" >
                 <field-map field-name="orderId"/></entity-find-one>
-            <if condition="orderHeader.recurCronExpression != null">
+            <if condition="orderHeader.recurCronExpression != null || orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'">
                 <return/>
             </if>
+            <!-- a Shop order's paid access is Shop's fulfillment, settled first and activated on the contract's resource
+                instance (mr-pass impl-shop P7, F20); every other order as before -->
+            <service-call name="mantle.product.ShopSubscriptionServices.check#ShopAccessOrder" in-map="{orderId:orderId}"
+                    out-map="shopAccess" disable-authz="true"/>
+            <if condition="shopAccess.shopManaged"><return/></if>
             <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
                 <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
             <iterate list="orderPartList" entry="orderPart">
@@ -127,6 +132,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="psrFromDate" type="Timestamp"><description>The fromDate key of the ProductSubscriptionResource,
                 which is when that product began to grant the resource, not when this subscription starts; by default the
                 one in effect now.</description></parameter>
+            <parameter name="resourceInstanceId"><description>The resource instance the subscription is for (mr-pass impl-shop P7,
+                F20: a Shop contract's id), so a renewal extends only that instance's subscriptions and never another
+                independent one of the same person; by default the customer's latest subscription's instance, as before.</description></parameter>
         </in-parameters>
         <out-parameters><parameter name="subscriptionId"/></out-parameters>
         <actions>
@@ -146,7 +154,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="customerPartyId" from="orderPart.customerPartyId"/>
 
             <!-- determine fromDate (either last Subscription.thruDate if in future, or nowTimestamp -->
-            <!-- TODO: for renewals of a particular subscription, get resourceInstanceId from somewhere... (maybe OrderItem?) -->
+            <!-- a renewal of a particular subscription names its resourceInstanceId (Shop's contract, impl-shop P7) -->
             <entity-find entity-name="mantle.product.subscription.Subscription" list="existingSubscriptionList">
                 <econdition field-name="subscriptionResourceId" from="subscriptionResourceId"/>
                 <econdition field-name="subscriberPartyId" from="customerPartyId"/>

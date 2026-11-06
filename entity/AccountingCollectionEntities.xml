@@ -304,6 +304,8 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="OPRT" name="customerPartyId"/>
         <alias entity-alias="OPRT" name="partStatusId" field="statusId"/>
         <alias entity-alias="ORHD" name="currencyUomId"/>
+        <!-- a RecurringTemplate base is never open exposure (X5; mr-pass impl-shop P7) -->
+        <alias entity-alias="ORHD" name="orderPurposeEnumId"/>
         <alias entity-alias="OPRT" name="partTotalSum" field="partTotal" function="sum"/>
     </view-entity>
     <view-entity entity-name="CreditOrderBillingSum" package="mantle.order">

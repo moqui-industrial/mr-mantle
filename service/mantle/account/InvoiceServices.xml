@@ -1035,6 +1035,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
+            <!-- a recurring base (RecurringTemplate, X5) is never invoiced: each period's renewal order is (mr-pass impl-shop P7) -->
+            <if condition="orderHeader?.orderPurposeEnumId == 'OrpRecurringTemplate'">
+                <return error="true" message="RECURRING_TEMPLATE: Order ${orderId} is a recurring template; invoice its renewal orders"/></if>
             <if condition="orderPart == null"><return error="true" message="Order ${orderId} part ${orderPartSeqId} not found"/></if>
 
             <set field="toPartyId" from="orderPart.customerPartyId"/>
