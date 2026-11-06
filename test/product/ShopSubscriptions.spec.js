@@ -103,7 +103,7 @@ spec({
                 requireInventory: "N",
                 defaultDisableShippingCalc: "Y"
             })
-            // (a card kept from the hosted page carries no name, so the store's name check is off too: F-SP7-1)
+            // (a card kept from the hosted page carries no name, so the store's name check is off too: Shop F102)
             for (const settingTypeEnumId of [
                 "PsstCheckoutTerms",
                 "PsstOrdApproveNewCust",
