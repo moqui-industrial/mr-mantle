@@ -808,14 +808,18 @@ function endPaymentMethod(p) {
         return {ended: false, needsConfirmation: true, contracts, methods: methodList(partyId)}
     call("mantle.account.PaymentMethodServices.delete#PaymentMethod", {paymentMethodId: method.paymentMethodId})
     // P7 (F94): a subscription renewing with the ended card loses its off-session consent; its next renewal waits for the
-    // customer to choose another card (ChangeMethod), never charging the ended one
-    for (const contract of contracts.filter(row => row.contractId))
+    // customer to choose another card (ChangeMethod), never charging the ended one;
+    // the contract's revision moves on, so a form shown before the change is refused as stale (Shop F114)
+    for (const contract of contracts.filter(row => row.contractId)) {
+        const row = one("mantle.product.subscription.StoreRecurringContract", {contractId: contract.contractId})
         call("update#mantle.product.subscription.StoreRecurringContract", {
             contractId: contract.contractId,
             consentDate: null,
             consentMethodId: null,
-            consentEndedReason: "METHOD_ENDED"
+            consentEndedReason: "METHOD_ENDED",
+            revision: Number(row?.revision || 1) + 1
         })
+    }
     return {ended: true, contracts, methods: methodList(partyId)}
 }
 

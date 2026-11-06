@@ -753,14 +753,19 @@ const reopenable = (contract, occurrence) =>
 function dispatch(p) {
     const contract = one(CONTRACT, {baseOrderId: p.baseOrderId})
     if (!contract) return {handled: false}
-    if (!renewable(contract) || !dueNow(contract)) return {handled: true}
+    return Object.assign({handled: true}, claimDue(contract, "dispatch"))
+}
+// A due contract's period claimed (once: unique by contract and period, under the contract's lock, so the nightly hand-off
+// and the hourly job together make one occurrence) and advanced. {occurrenceId}, empty when nothing is due.
+function claimDue(contract, mode) {
+    if (!renewable(contract) || !dueNow(contract)) return {}
     const claimed = step("claim", {contractId: contract.contractId})
     if (claimed.error) {
         ec.logger.error("Shop renewal of contract " + contract.contractId + " not claimed: " + firstLine(claimed.error))
-        return {handled: true}
+        return {}
     }
-    if (claimed.result.occurrenceId) advance(claimed.result.occurrenceId, "dispatch")
-    return {handled: true, occurrenceId: claimed.result.occurrenceId || null}
+    if (claimed.result.occurrenceId) advance(claimed.result.occurrenceId, mode)
+    return {occurrenceId: claimed.result.occurrenceId || null}
 }
 // claim: under the contract's lock, its due period's occurrence (unique by contract and period start), made once.
 function claimStep(p) {
@@ -1022,9 +1027,10 @@ function ensureFulfilled(occurrence) {
         ec.logger.error("Shop renewal " + occurrence.occurrenceId + " fulfillment: " + firstLine(error.message))
     }
 }
-// run#Renewals (the run_StoreRenewals job): occurrences in flight (claimed, charging, placed) and retries that are due, each
-// on its own; one that fails is named and the rest go on. Also the due contracts whose base the nightly job has not handed
-// over yet are left for it (dispatch is create_RecurringOrders').
+// run#Renewals (the run_StoreRenewals job, hourly): occurrences in flight (claimed, charging, placed) and retries that are
+// due, each on its own, then the contracts whose renewal is due and whose period has no occurrence yet, claimed as the
+// nightly create_RecurringOrders hand-off claims them (claimDue), so access does not lapse until the night (Shop F113); one
+// that fails is named and the rest go on.
 function runRenewals(p) {
     const cf = ec.entity.conditionFactory
     const due = Array.from(
@@ -1060,7 +1066,27 @@ function runRenewals(p) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " failed: " + firstLine(error.message))
         }
     }
-    return {occurrences: due.length, advanced, failed}
+    // the due contracts (active: a past-due one already has its period's occurrence), each claimed on its own
+    const contracts = Array.from(
+        find(CONTRACT, {autoRenew: "Y", stateEnumId: "ScsActive"})
+            .condition("cancelDate", "is-null", null)
+            .condition("baseOrderId", "is-not-null", null)
+            .condition("nextRenewalDate", "less-equals", ec.user.nowTimestamp)
+            .orderBy("nextRenewalDate")
+            .limit(Number(p.limit || limits.batch))
+            .list()
+    ).filter(row => !one(OCC, {contractId: row.contractId, periodStartDate: row.paidThroughDate}))
+    let claimed = 0
+    for (const contract of contracts) {
+        try {
+            if (claimDue(contract, "job").occurrenceId) claimed++
+        } catch (error) {
+            ec.message.clearErrors()
+            failed++
+            ec.logger.error("Shop renewal of contract " + contract.contractId + " failed: " + firstLine(error.message))
+        }
+    }
+    return {occurrences: due.length + claimed, advanced: advanced + claimed, failed}
 }
 
 // ===== the customer's changes =====
@@ -1121,9 +1147,11 @@ function stepRefusal(message) {
 }
 // The contract's renewals the customer can have tried again, each reopened in a transaction of its own (so the steps that
 // follow, each in their own, see it) and advanced at once.
-function resumeWaiting(contractId) {
+function resumeWaiting(contractId, occurrenceId = null) {
     const contract = one(CONTRACT, {contractId})
-    for (const row of rows(OCC, {contractId}).filter(row => reopenable(contract, row))) {
+    for (const row of rows(OCC, {contractId}).filter(
+        row => reopenable(contract, row) && (!occurrenceId || row.occurrenceId === occurrenceId)
+    )) {
         const reopened = step("reopen", {occurrenceId: row.occurrenceId})
         if (reopened.error) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " not reopened: " + firstLine(reopened.error))
@@ -1172,14 +1200,22 @@ function cancelSubscription(p) {
     if (contract.stateEnumId === "ScsCancelled") return getSubscription(p)
     if (contract.autoRenew !== "Y" || !renewableStates.includes(contract.stateEnumId))
         refuse("Unprocessable", "NOT_RENEWING", "This subscription does not renew")
-    // the occurrences locked after the contract, as the renewal steps take them (review R2)
+    stopRenewal(contract, text(p.reason), true)
+    return getSubscription(p)
+}
+// Future renewals of a contract stopped (cancel#Subscription, Commerce's cancel#RecurringContract, a refund of its latest
+// term), the contract locked by the caller: its occurrences locked after it, as the renewal steps take them (review R2); one
+// whose payment is in flight refused (RENEWAL_IN_PROGRESS: it must settle first) when refuseInFlight, else left to its next
+// step, which closes it unless its payment was already asked; one waiting for a retry or the customer closed with no charge
+// and its open order cancelled; cancel-at the paid-through date; the base no longer scheduled. Access is kept.
+function stopRenewal(contract, reason, refuseInFlight = true) {
+    const inFlight = row => row.stateEnumId === "SrsPlaced" || (row.stateEnumId === "SrsCharging" && !!row.paymentId)
     const occurrences = Array.from(find(OCC, {contractId: contract.contractId}).forUpdate(true).list()).filter(
         row => !doneStates.includes(row.stateEnumId)
     )
-    for (const row of occurrences)
-        if (row.stateEnumId === "SrsPlaced" || (row.stateEnumId === "SrsCharging" && row.paymentId))
-            refuse("Conflict", "RENEWAL_IN_PROGRESS", "A renewal payment is being processed. Try again in a few minutes")
-    for (const row of occurrences) {
+    if (refuseInFlight && occurrences.some(inFlight))
+        refuse("Conflict", "RENEWAL_IN_PROGRESS", "A renewal payment is being processed. Try again in a few minutes")
+    for (const row of occurrences.filter(row => !inFlight(row))) {
         const payment = row.paymentId ? one(P, {paymentId: row.paymentId}) : null
         if (payment?.statusId === "PmntPromised") call("update#" + P, {paymentId: payment.paymentId, statusId: "PmntCancelled"})
         if (row.orderId) {
@@ -1193,7 +1229,7 @@ function cancelSubscription(p) {
         stateEnumId: "ScsCancelled",
         cancelDate: ec.user.nowTimestamp,
         cancelAtDate: contract.paidThroughDate,
-        cancelReason: text(p.reason).slice(0, 255) || null,
+        cancelReason: text(reason).slice(0, 255) || null,
         nextRenewalDate: null,
         revision: Number(contract.revision || 1) + 1
     })
@@ -1205,7 +1241,6 @@ function cancelSubscription(p) {
             base.update()
         }
     }
-    return getSubscription(p)
 }
 
 // ===== refunds (from ShopFulfillment.js reconcileRefunded) =====
@@ -1239,6 +1274,14 @@ function revokeLine(orderId, orderItemSeqId) {
             paidThroughDate: paid ? new Date(paid) : ec.user.nowTimestamp,
             revision: Number(contract.revision || 1) + 1
         })
+        // a refund of an automatic contract's latest term (its paid-through dropped) ends its renewal at the new paid-through
+        // date, so a refunded buyer is never charged again; the buyer subscribes again to start over (Shop F112, the lead's
+        // decision). A renewal whose payment is already in flight is left to settle.
+        // (P12 review R1: every term refunded counts as dropped, also on a past-due contract whose paid-through had passed;
+        // its paid-through moving to now must not open a new period to claim)
+        const dropped = paid < (ms(contract.paidThroughDate) ?? 0)
+        if (dropped && renewable(contract))
+            stopRenewal(one(CONTRACT, {contractId}), "Renewal ended: the latest paid term was refunded", false)
     }
     return {revoked}
 }
@@ -1324,7 +1367,6 @@ const operations = {
     }
 }
 ;({
-    limits,
     // ShopCheckout.js: the checkout's subscription, its submit check and its freeze
     checkoutView,
     submitCheck,
@@ -1338,6 +1380,22 @@ const operations = {
     // StoreAdmin.js: the subscriptions readiness
     readiness,
     advance,
+    // StoreSubscriptions.js (Commerce P12, the staff part): the contract's terms and states, its consent, the renewals that
+    // can be tried again, stopping its renewal and the coordinator's resumption
+    limits,
+    stateTexts,
+    renewableStates,
+    doneStates,
+    termOf,
+    termText,
+    currentOffers,
+    offSessionGateways,
+    subscriptionsOf,
+    accessActive,
+    consentHolds,
+    reopenable,
+    stopRenewal,
+    resumeWaiting,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop subscription operation " + op)
         return operations[op](parameters || {})

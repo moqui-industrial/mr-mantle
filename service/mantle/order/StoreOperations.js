@@ -1065,8 +1065,20 @@ function getStoreCustomer(p) {
         carts,
         requests,
         returns,
-        // P12 (Subscriptions)
-        subscriptions: []
+        // P12: the customer's recurring contracts in these stores (StoreSubscriptions.js), billing and access apart
+        subscriptions: customerSubscriptions(storeIds, partyId)
+    }
+}
+
+// a customer's contracts, failing alone (the rest of Customer360 still shows)
+function customerSubscriptions(storeIds, partyId) {
+    try {
+        return ec.resource
+            .script("component://mr-mantle/service/mantle/product/StoreSubscriptions.js")
+            .customerSubscriptions(storeIds, partyId)
+    } catch (error) {
+        ec.logger.error("Subscriptions of customer " + partyId + " not read: " + error.message)
+        return []
     }
 }
 
