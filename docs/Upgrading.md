@@ -112,7 +112,7 @@ The demo wiki space `ZZW_RETAIL` (`data/ZcaProductDemoData.xml`) no longer point
 its `publicAttachmentUrl` is empty (PASS serves no wiki file), and the `/pcontact` screen path alias is gone. Data files
 load only into a new database, so a demo database made before keeps the old values. Nothing breaks: Knowledge.js links an
 article to the organization's Support mount when a published site has one, whatever the space says. To match a new
-database, update the space and end the alias:
+database, stop the server (screen path aliases are cached), update the space and end the alias, and start it again:
 
 ```sql
 UPDATE wiki_space SET public_page_url = 'https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=${wikiPageId}',
