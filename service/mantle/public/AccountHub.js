@@ -260,7 +260,8 @@ function checkCartReminder(p) {
 function checkReviewRequest(p) {
     return {consented: !!p.partyId && storeTopics().topicOn("reviewRequests", p.partyId, p.productStoreId)}
 }
-// A confirmation in a transaction of its own: one that fails is logged and the page still shows.
+// A confirmation apart from the page (each opt-in is granted in a transaction of its own): one that fails is logged and the
+// page still shows.
 function confirmApart(work) {
     ec.message.pushErrors()
     try {

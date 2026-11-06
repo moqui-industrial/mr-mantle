@@ -943,12 +943,13 @@ function selectPayment(p) {
 function submitCheckout(p) {
     const reached = reach(p)
     const {checkout, cart, shop} = reached
-    const request = {
-        revision: text(p.expectedRevision),
-        termsVersion: text(p.termsVersion),
-        acceptTerms: yes(p.acceptTerms),
-        optIns: storeTopics().chosenFrom(checkout, p.optIns)
-    }
+    // the opt-ins as asked are part of the request's identity only when some are asked (a submit without any is the request
+    // it was before them); those the store offers are what the freeze keeps
+    const askedOptIns = storeTopics().askedOf(p.optIns)
+    const request = Object.assign(
+        {revision: text(p.expectedRevision), termsVersion: text(p.termsVersion), acceptTerms: yes(p.acceptTerms)},
+        askedOptIns.length ? {optIns: askedOptIns} : {}
+    )
     // a retry of a submit answers its first result, also once the order is placed (the cart's capability then reads it)
     const replay = replayOf(checkout.checkoutId, "submitCheckout", p, request)
     if (replay?.answer) return replay.answer
@@ -989,7 +990,7 @@ function submitCheckout(p) {
             : null,
         quoteNeeded: physical(cart.row.orderId),
         returnKeyDigest: digest(returnKey),
-        optIns: request.optIns
+        optIns: storeTopics().chosenFrom(checkout, askedOptIns)
     })
     if (frozen.error) raise(frozen)
     // another submit froze it first (two tabs, a double click): its attempt again, without this request's key, whose digest

@@ -6,16 +6,17 @@
  * - Topics: a store's "cart reminders" (Shop P6) and "review requests", each a contact list of its own (its type, named by
  *   a store setting, made when first needed) whose state for a party is its latest PartyConsent of the topic's purpose on
  *   that list. The review request is sent only with its topic granted; cart recovery only to an account with its topic.
- * - Checkout opt-ins: the store offers some of reviewRequests, cartReminders (to a signed-in buyer only: a guest's cart is
- *   never recovered) and news (its marketing list, only when PsstNewsList names one), by PsstCheckoutOptIns (absent: all
+ * - Checkout opt-ins: the store offers some of reviewRequests, cartReminders (to a signed-in buyer whose account email is
+ *   verified only: a guest's cart is never recovered, and a reminder goes to the account's address) and news (its marketing list, only when PsstNewsList names one), by PsstCheckoutOptIns (absent: all
  *   three, news only with its list; "none": none). Each is unchecked until the buyer checks it, and says what it is and is
  *   not. The order's receipt and notices are transactional whatever is chosen.
  * - Recording, at placement: a signed-in buyer whose account email is verified and is the checkout's gets each choice granted
  *   (store#PartyConsent on a topic's list; set#ContactListPartySubscription on the news list). Anyone else's choice waits as
  *   Mantle's pending membership (ContactListParty CLPT_PENDING on the list), never sent to, until it is confirmed: by the
  *   link in the order receipt (make#OptInConfirmLink: a code whose digest the checkout keeps; the page reads, its button
- *   confirms, so a mail scanner's fetch changes nothing) or by the buyer signing in with the checkout's email verified
- *   (the account pages' claim, the email preferences page). Mantle's PartyConsent has no pending state; the list's pending
+ *   confirms, so a mail scanner's fetch changes nothing) or, for a choice checked while signed in, by the account signing
+ *   in with the checkout's email verified (the account pages' claim, the email preferences page); a claimed guest's choice
+ *   only by the link. Mantle's PartyConsent has no pending state; the list's pending
  *   membership is the existing one.
  * Reads and writes are the authority's own (authorization disabled by the callers), after their checks.
  */
@@ -148,14 +149,17 @@ function optInOn(optInId, partyId, productStoreId) {
 }
 
 // ===== the checkout's opt-ins =====
-// The opt-ins a store offers a checkout (a guest is never offered cart reminders).
-function offered(store, accountCheckout) {
+// The opt-ins a store offers a checkout: cart reminders only to a signed-in buyer whose account email is verified (a
+// guest's cart is never recovered, and a reminder goes to the account's address, which Shop P6 review R2 requires verified).
+function offered(store, checkout) {
     const value = text(settingOf(store.productStoreId, "PsstCheckoutOptIns")?.settingValue)
     const named = value ? (value === "none" ? [] : value.split(",").map(text)) : defaultOptIns
+    const accountOnly = named.some(id => optIns[id]?.accountOnly)
+    const verifiedAccount = accountOnly && checkout.accountCheckout === "Y" && verifiedAccountOf(checkout.customerPartyId)
     return defaultOptIns.filter(
         id =>
             named.includes(id) &&
-            (!optIns[id].accountOnly || accountCheckout) &&
+            (!optIns[id].accountOnly || verifiedAccount) &&
             (id !== "news" || !!newsList(store.productStoreId))
     )
 }
@@ -168,7 +172,7 @@ function checkoutView(checkout) {
     if (!store) return []
     const account = checkout.accountCheckout === "Y"
     const chosen = chosenOf(checkout)
-    return offered(store, account).map(id => ({
+    return offered(store, checkout).map(id => ({
         optInId: id,
         label: optIns[id].label(nameOf(store)),
         statement: optIns[id].statement,
@@ -176,13 +180,24 @@ function checkoutView(checkout) {
         alreadyOn: account && optInOn(id, checkout.customerPartyId, store.productStoreId)
     }))
 }
-// The opt-ins a submit asks for (a list, a comma list or JSON), kept to those the store offers this checkout.
-function chosenFrom(checkout, requested) {
+// The opt-ins a submit asks for (a list, a comma list or JSON), each once, sorted: the request as sent, for its operation
+// identity (a submit asking none is the request it was before opt-ins).
+function askedOf(requested) {
     let asked = requested
     if (typeof asked === "string") asked = text(asked).startsWith("[") ? json(asked, []) : text(asked).split(",")
-    asked = Array.from(asked || []).map(text)
-    const store = one(STORE, {productStoreId: checkout.productStoreId})
-    return store ? offered(store, checkout.accountCheckout === "Y").filter(id => asked.includes(id)) : []
+    return [
+        ...new Set(
+            Array.from(asked || [])
+                .map(text)
+                .filter(id => id)
+        )
+    ].sort()
+}
+// The opt-ins a submit asks for, kept to those the store offers this checkout.
+function chosenFrom(checkout, requested) {
+    const asked = askedOf(requested)
+    const store = asked.length ? one(STORE, {productStoreId: checkout.productStoreId}) : null
+    return store ? offered(store, checkout).filter(id => asked.includes(id)) : []
 }
 // Whether a party has an account whose verified email is this address.
 function verifiedFor(partyId, email) {
@@ -195,6 +210,10 @@ function verifiedFor(partyId, email) {
                 row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === address
             )
     )
+}
+// Whether a party has an account whose own email is verified.
+function verifiedAccountOf(partyId) {
+    return !!partyId && rows("moqui.security.UserAccount", {partyId}).some(account => verifiedFor(partyId, account.emailAddress))
 }
 // The checkout's email contact, when it is the party's.
 function contactOf(checkout) {
@@ -351,14 +370,16 @@ function confirmCheckout(checkout, sourceEnumId, how) {
     })
     return {outcome}
 }
-// A verified account's pending checkout choices of a store, made with that verified email, confirmed (the account pages'
-// claim and the email preferences page call this after the account's verified email is known). {confirmed}.
+// A verified account's own pending checkout choices of a store (checked while signed in to it), made with that verified
+// email, confirmed (the account pages' claim and the email preferences page call this after the account's verified email
+// is known). A claimed guest checkout's choice is not: whoever checked it was not signed in, so only the receipt's link
+// (or the account turning the topic on itself) confirms it. {confirmed}.
 function confirmVerified(productStoreId, partyId, email) {
     const address = text(email).toLowerCase()
     if (!productStoreId || !partyId || !address) return {confirmed: 0}
     // one indexed read on each account page; the verification is read only when a choice waits
     const waiting = rows(C, {customerPartyId: partyId, optInPending: "Y", productStoreId}).filter(
-        checkout => text(checkout.contactEmail).toLowerCase() === address
+        checkout => checkout.accountCheckout === "Y" && text(checkout.contactEmail).toLowerCase() === address
     )
     if (!waiting.length || !verifiedFor(partyId, address)) return {confirmed: 0}
     let confirmed = 0
@@ -435,6 +456,7 @@ const operations = {applyOptIn, makeConfirmLink}
     topicListTypes,
     endTopicPending,
     checkoutView,
+    askedOf,
     chosenFrom,
     recordCheckout,
     confirmVerified,

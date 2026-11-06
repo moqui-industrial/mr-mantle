@@ -147,8 +147,9 @@ function claimGuestPurchases(shop, partyId) {
             ec.message.popErrors()
         }
     }
-    // the checkout opt-ins of this verified email waiting for confirmation, the claimed guest's and the account's own,
-    // confirmed by this sign-in (Commerce P9 follow-up, StoreTopics.js); a failure is logged and the page goes on
+    // the account's own checkout opt-ins of this verified email waiting for confirmation, confirmed by this sign-in (Commerce
+    // P9 follow-up, StoreTopics.js; a claimed guest's choice waits for the receipt's link); a failure is logged and the page
+    // goes on
     ec.message.pushErrors()
     try {
         ec.resource

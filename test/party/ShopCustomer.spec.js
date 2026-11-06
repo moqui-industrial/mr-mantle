@@ -228,6 +228,16 @@ feature("a guest's link and a verified account read their own orders; another or
         const own = op(ids.buyer, A + "get#Order", {orderId: state.mine.orderId})
         const others = op(ids.buyer, A + "get#Order", {orderId: state.other.orderId})
         const invoices = op(ids.buyer, "mantle.account.PortalServices.find#Invoices", {})
+        const optInAfter = one("mantle.order.StoreCheckout", {orderId: state.mine.orderId})
+        const claimedConsent = reviewRequests()
+        const claimedPending = list("mantle.marketing.contact.ContactListParty", {partyId: ids.buyer, statusId: "CLPT_PENDING"})
+        // a choice the account checked itself while signed in (the same checkout marked so) is confirmed by its verified
+        // sign-in
+        system(() => call("update#mantle.order.StoreCheckout", {checkoutId: optInAfter.checkoutId, accountCheckout: "Y"}))
+        op(ids.buyer, A + "get#Account", {})
+        const ownConfirmed = one("mantle.order.StoreCheckout", {orderId: state.mine.orderId})
+        const ownConsent = reviewRequests()
+        system(() => call("update#mantle.order.StoreCheckout", {checkoutId: optInAfter.checkoutId, accountCheckout: "N"}))
         return {
             byLink,
             linkOther,
@@ -239,8 +249,11 @@ feature("a guest's link and a verified account read their own orders; another or
             others,
             invoices,
             optInBefore,
-            optInAfter: one("mantle.order.StoreCheckout", {orderId: state.mine.orderId}),
-            reviewRequests: reviewRequests()
+            optInAfter,
+            claimedConsent,
+            claimedPending,
+            ownConfirmed,
+            ownConsent
         }
     },
     then(r) {
@@ -259,11 +272,16 @@ feature("a guest's link and a verified account read their own orders; another or
         r.invoices.result.invoiceList.length == 1
         one("mantle.party.Party", {partyId: state.mine.partyId}).mergedToPartyId == ids.buyer
         !one("mantle.party.Party", {partyId: ids.staffParty}).mergedToPartyId
-        // the guest's review requests opt-in, pending, is confirmed by the verified sign-in that claims it (P9 follow-up)
+        // the guest's review requests opt-in, pending, moves to the account with the claim and still waits: whoever checked
+        // it was not signed in, so the sign-in does not confirm it (P9 follow-up review R1)
         r.optInBefore == "Y"
-        r.optInAfter.optInPending == "N"
-        JSON.parse(r.optInAfter.optInsJson).outcome.reviewRequests == "granted"
-        r.reviewRequests == true
+        r.optInAfter.optInPending == "Y"
+        r.claimedConsent == false
+        r.claimedPending.length == 1
+        // the account's own choice is confirmed by its verified sign-in
+        r.ownConfirmed.optInPending == "N"
+        JSON.parse(r.ownConfirmed.optInsJson).outcome.reviewRequests == "granted"
+        r.ownConsent == true
     }
 })
 
@@ -381,6 +399,15 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
             () => call(H + "check#CartReminderConsent", {partyId: state.other.partyId, productStoreId: ids.store}).consented
         )
         const visitor = op(null, H + "get#EmailPreferences", {})
+        // checkout offers cart reminders to a signed-in buyer whose email is verified only (P9 follow-up review R2)
+        const offered = username => {
+            const token = op(username, CART + "add#CartItem", {productId: ids.ebook, quantity: "1"}).result?.token
+            op(username, CHECKOUT + "begin#Checkout", {token})
+            const view = op(username, CHECKOUT + "get#Checkout", {token})
+            return view.error || (view.result.checkout.optIns || []).map(optIn => optIn.optInId).join(",")
+        }
+        const verifiedOffer = offered(ids.buyer)
+        const unverifiedOffer = offered(ids.unverified)
         // a list link of a party who belongs to a site with Account mounted goes to that site's page
         const link = system(() => {
             make("mantle.public.PublicSiteApp", {
@@ -403,11 +430,11 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
             })
             return call("mantle.party.ConsentServices.create#UnsubscribeToken", {contactListId, partyId: ids.buyer})
         })
-        return {before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}
+        return {before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, verifiedOffer, unverifiedOffer, link}
     },
-    then({before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}) {
-        // cart reminders, then the store's review requests (Commerce P9 follow-up), on from the guest checkout's opt-in the
-        // first feature's claim confirmed
+    then({before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, verifiedOffer, unverifiedOffer, link}) {
+        // cart reminders, then the store's review requests (Commerce P9 follow-up), on from the first feature's confirmed
+        // checkout opt-in
         before.result.topics.length == 2
         before.result.topics[1].topicId == "reviewRequests:" + ids.store
         before.result.topics[1].name == "Review requests from Customer account store"
@@ -419,6 +446,8 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
         turnedOff.result.topics[0].on == false
         guest == false
         visitor.error.includes("SIGN_IN_REQUIRED")
+        verifiedOffer == "reviewRequests,cartReminders"
+        unverifiedOffer == "reviewRequests"
         link.unsubscribeUrl.startsWith("https://" + ids.host + "/account/EmailPreferences?token=")
         link.oneClickUrl.includes("/account/EmailPreferences/oneClick?token=")
     }
