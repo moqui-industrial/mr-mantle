@@ -413,8 +413,8 @@ function publishedArticle(p) {
     }
 }
 // get#ArticlePublicLink: the published URL of an article an agent sends a customer (Send to customer): a page of a customer
-// or public source of the user's organizations, published and not restricted, at its space's publicPageUrl (the Support
-// app's CustomerArticle once P15 builds it). A draft (ARTICLE_NOT_PUBLISHED), an internal or unsourced article
+// or public source of the user's organizations, published and not restricted, at the Support app's CustomerArticle of the
+// source organization's published site (impl-shop P3, F56), else at its space's publicPageUrl. A draft (ARTICLE_NOT_PUBLISHED), an internal or unsourced article
 // (ARTICLE_INTERNAL) and a space with no public address (NO_PUBLIC_URL) are refused.
 function publicLink(p) {
     const page = p.wikiPageId ? one(PAGE, {wikiPageId: p.wikiPageId}) : null
@@ -427,6 +427,14 @@ function publicLink(p) {
     if (!page.publishedVersionName) denied("ARTICLE_NOT_PUBLISHED", pageTitle(page) + " is a draft; publish it before sending it")
     if (blank(space.publicPageUrl))
         denied("NO_PUBLIC_URL", "The space " + (space.description || space.wikiSpaceId) + " has no public address")
+    // the article page of the source organization's Support mount on its first published site (impl-shop P3, F56), else
+    // the space's own address
+    const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+    const siteId = source.organizationPartyId ? apps.sitesFor("support", source.organizationPartyId)[0] : null
+    const supportUrl = siteId
+        ? apps.pageUrl(siteId, "support", "/CustomerArticle?wikiPageId=" + encodeURIComponent(page.wikiPageId))
+        : null
+    if (supportUrl) return {url: supportUrl, title: pageTitle(page), versionName: page.publishedVersionName}
     let url = ec.resource.expand(String(space.publicPageUrl), "", {
         pagePath: page.pagePath,
         versionName: page.publishedVersionName,

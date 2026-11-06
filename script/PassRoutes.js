@@ -213,4 +213,16 @@
     ['GET', 'shop/theme/release', 'getShopThemeRelease'],
     ['GET', 'shop/theme/files', 'getShopThemeFiles'],
     ['GET', 'site/generation', 'getSiteGeneration'],
+    // Shop P3
+    ['GET', 'shop/home', 'getShopHome'],
+    ['GET', 'shop/categories', 'getStoreCategories'],
+    ['GET', 'shop/categories/{productCategoryId}', 'getStoreCategory'],
+    ['GET', 'shop/products', 'findProducts'],
+    ['GET', 'shop/search', 'searchShop'],
+    ['GET', 'shop/products/{productId}', 'getProduct'],
+    ['GET', 'shop/products/{productId}/quote', 'quoteSelection'],
+    ['GET', 'shop/pages', 'getStorePage'],
+    ['GET', 'shop/sitemap', 'getShopSitemap'],
+    ['GET', 'site/navigation', 'getSiteNavigation'],
+    ['GET', 'site/redirect', 'resolveSiteRedirect'],
 ]

@@ -30,4 +30,113 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopContext.js").execute("getShopContext", input)</script>
         </actions>
     </service>
+    <!-- Shop P3: the catalog reads (ShopCatalog.js) -->
+    <service verb="get" noun="Home" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopHome: the store's featured products and its top categories. Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getHome", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Categories" authenticate="anonymous-all" allow-remote="false">
+        <description>getStoreCategories: the store's browse tree, each category with a published product in it or below it. Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getCategories", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Category" authenticate="anonymous-all" allow-remote="false">
+        <description>getStoreCategory: a category of the store's tree (NotFound otherwise), its subcategories and a page of its public products (input productCategoryId, sort, cursor, limit). Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getCategory", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Products" authenticate="anonymous-all" allow-remote="false">
+        <description>findProducts: a page of the store's public products, of a category and by name when given (input productCategoryId, query, sort, cursor, limit). Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("findProducts", input)</script>
+        </actions>
+    </service>
+    <service verb="search" noun="Shop" authenticate="anonymous-all" allow-remote="false">
+        <description>searchShop: the public products whose index document (MantleProduct, a candidate source only) or name matches input.query, and the site's live Shop pages by title; state results, noMatch or unavailable. Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("searchShop", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Product" authenticate="anonymous-all" allow-remote="false">
+        <description>getProduct: a product public in the store (NotFound otherwise): its card, description, public variants and the quote of input.variantId and input.quantity. Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getProduct", input)</script>
+        </actions>
+    </service>
+    <service verb="quote" noun="Selection" authenticate="anonymous-all" allow-remote="false">
+        <description>quoteSelection: the price of a product's variant and quantity with its availability; nothing is added. Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("quoteSelection", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Page" authenticate="anonymous-all" allow-remote="false">
+        <description>getStorePage: the site's page of the Shop mount live at input.routePath, its exact published version (Commerce P4's get#SitePage by mount, route and locale). Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getPage", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Sitemap" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopSitemap: the site paths of the store's current public pages (home, categories, products, Shop pages). Every answer carries the site's generation and active releaseId (impl-shop P3; ShopCatalog.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getSitemap", input)</script>
+        </actions>
+    </service>
 </services>

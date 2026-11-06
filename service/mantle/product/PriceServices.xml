@@ -574,4 +574,59 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/PriceChanges.js').execute('changeInfo', context))</script>
         </actions>
     </service>
+
+    <!-- Shop P3 (mr-pass impl-shop F18): the catalog's price as the authority for the routed store -->
+    <service verb="get" noun="StoreProductPrice" authenticate="anonymous-view" allow-remote="false">
+        <description>A store's sale price of a product for the signed-in customer or a visitor, read as the store's
+            authority (impl-shop P3, F18): get#ProductPrice's resolver and modifiers, where the store organization's
+            rows and the customer's own are eligible beside the public ones (get#ProductPrice gives a visitor only the
+            public rows and a customer without PRICE_VIEW no scoped one); never an agreement's row, an average cost or
+            another party's, and no trace. In process only: Shop's catalog (ShopCatalog.js) calls it after its own checks
+            (the store a published site's Shop mount targets, the product public there, the customer the signed-in
+            account's party).</description>
+        <in-parameters>
+            <parameter name="productId" required="true"/>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="quantity" type="BigDecimal" default="1.0"/>
+            <parameter name="validDate" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="priceUomId" default="ec.user.getPreference('CurrencyDefault') || 'USD'"/>
+            <parameter name="pricePurposeEnumId" default-value="PppPurchase"/>
+            <parameter name="defaultToListPrice" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="price" type="BigDecimal"/>
+            <parameter name="productPriceId"/>
+            <parameter name="listPrice" type="BigDecimal"/>
+            <parameter name="priceUomId"/>
+            <parameter name="priceAvailable" type="Boolean"/>
+            <parameter name="listPriceAvailable" type="Boolean"/>
+            <parameter name="priceSource"/>
+            <parameter name="taxInPrice"/>
+            <parameter name="virtualPriceFallback" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/PriceResolver.js').execute('resolve',Object.assign({},context,{storeAuthority:true})))
+                for (const modifier of ec.entity.find('mantle.product.ProductPriceModify').disableAuthz().orderBy('sequenceNum,priceModifyId').list()) {
+                    const serviceName=modifier.serviceRegister.serviceName
+                    const before=price
+                    ec.message.pushErrors()
+                    try {
+                        const input=Object.assign({},context)
+                        for(const parameter of modifier.parameters) input[parameter.parameterName]=parameter.parameterValue
+                        const result=ec.service.sync().name(serviceName).parameters(input).disableAuthz().call()||{}
+                        if(ec.message.hasError())throw new Error(ec.message.getErrorsString())
+                        ec.context.putAll(result)
+                        if(pricingContext?.traceAllowed && serviceName!=='mantle.product.PriceServices.modify#ProductPriceList')
+                            priceTrace.push({sequence:priceTrace.length+1,kind:'modifier',sourceEntity:'mantle.product.ProductPriceModify',sourceId:modifier.priceModifyId,eligible:true,beforeAmount:before,afterAmount:price})
+                    } catch(error) {
+                        ec.logger.error('Price modifier '+modifier.priceModifyId+' ('+serviceName+') failed: '+error)
+                        if(serviceName==='mantle.product.PriceServices.modify#ProductPriceList')throw error
+                    } finally {ec.message.clearErrors();ec.message.popErrors()}
+                }
+                ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/PriceResolver.js').execute('finalize',context))
+            ]]></script>
+        </actions>
+    </service>
 </services>
