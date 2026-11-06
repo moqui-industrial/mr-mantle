@@ -8,7 +8,9 @@
  *   made for the send and never stored here), or suppress with a reason when the event no longer holds (a refunded item). A
  *   source with no build service sends the parameters it queued (no secret among them).
  * - Consent: a transactional notice (the recipient's own purchase) needs no marketing consent and its snapshot says so; any
- *   other needs its purpose granted (get#PartyConsentState) at the hand-off, else it is suppressed. The snapshot is kept.
+ *   other needs its purpose granted (get#PartyConsentState) at the hand-off, else it is suppressed. A topic's delivery
+ *   (consentContactListId: a store's review requests, Commerce P9 follow-up) needs the recipient's latest consent of its
+ *   purpose on that list granted instead. The snapshot is kept.
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
@@ -46,7 +48,14 @@ function queue(p) {
             siteId: p.siteId || null,
             productStoreId: p.productStoreId || null,
             transactional: p.transactional === false || p.transactional === "N" ? "N" : "Y",
-            consentJson: p.marketingPurposeEnumId ? JSON.stringify({purposeEnumId: p.marketingPurposeEnumId}) : null,
+            consentJson: p.marketingPurposeEnumId
+                ? JSON.stringify(
+                      Object.assign(
+                          {purposeEnumId: p.marketingPurposeEnumId},
+                          text(p.consentContactListId) ? {contactListId: text(p.consentContactListId)} : {}
+                      )
+                  )
+                : null,
             parametersJson: p.bodyParameters ? JSON.stringify(p.bodyParameters) : null,
             stateEnumId: "MdsQueued",
             attempts: 0,
@@ -90,16 +99,36 @@ function attemptNow(deliveryId) {
 function consentOf(delivery) {
     const at = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd'T'HH:mm:ssZ")
     if (delivery.transactional !== "N") return {transactional: true, at}
-    const purposeEnumId = lib.json(delivery.consentJson, {})?.purposeEnumId || "PcpMarketingEmail"
+    const queued = lib.json(delivery.consentJson, {}) || {}
+    const purposeEnumId = queued.purposeEnumId || "PcpMarketingEmail"
     let granted = false
     try {
-        const state = call("mantle.party.ConsentServices.get#PartyConsentState", {partyId: delivery.recipientPartyId})
-        granted = Array.from(state.grantedPurposeEnumIds || []).includes(purposeEnumId)
+        if (queued.contactListId) {
+            // a topic: the latest consent of its purpose on its list
+            const latest = Array.from(
+                find("mantle.party.PartyConsent", {
+                    partyId: delivery.recipientPartyId,
+                    purposeEnumId,
+                    contactListId: queued.contactListId
+                })
+                    .orderBy("-consentDate")
+                    .orderBy("-partyConsentId")
+                    .limit(1)
+                    .list()
+            )[0]
+            granted = latest?.statusId === "PconGranted"
+        } else {
+            const state = call("mantle.party.ConsentServices.get#PartyConsentState", {partyId: delivery.recipientPartyId})
+            granted = Array.from(state.grantedPurposeEnumIds || []).includes(purposeEnumId)
+        }
     } catch (error) {
         ec.message.clearErrors()
         granted = false
     }
-    return {transactional: false, purposeEnumId, granted, at}
+    return Object.assign(
+        {transactional: false, purposeEnumId, granted, at},
+        queued.contactListId ? {contactListId: queued.contactListId} : {}
+    )
 }
 // attempt#Delivery: the delivery locked; a queued or retrying one is built by its source, its consent snapshotted, and
 // handed to send#EmailTemplate; the outcome recorded with the attempt. A sent, failed, suppressed or uncertain one is left.

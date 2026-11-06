@@ -7,4 +7,15 @@
     <moqui.basic.Enumeration enumId="PcpCartReminder" description="Cart Reminders" sequenceNum="5" enumTypeId="PartyConsentPurpose"/>
     <moqui.basic.Enumeration enumId="CART_REMINDER" description="Cart reminders" enumTypeId="ContactListType"/>
     <moqui.basic.Enumeration description="Cart reminders topic list" enumId="PsstCartReminderList" enumTypeId="ProductStoreSettingType"/>
+    <!-- Commerce P9 follow-up (Nov 6, impl-commerce §4): a store's review requests are a topic of their own (type
+        REVIEW_REQUEST, named by PsstReviewRequestList, purpose PcpReviewRequest), as cart reminders are; the review request
+        is sent only with it granted. Checkout offers the store's opt-ins (PsstCheckoutOptIns: a comma list of reviewRequests,
+        cartReminders and news; absent, the first two, and news only once PsstNewsList names the store's news list; "none"
+        offers none), each unchecked; a guest's or an unverified account's choice waits as a pending ContactListParty row
+        until the receipt's link or a verified sign-in confirms it. -->
+    <moqui.basic.Enumeration enumId="PcpReviewRequest" description="Review Requests" sequenceNum="6" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="REVIEW_REQUEST" description="Review requests" enumTypeId="ContactListType"/>
+    <moqui.basic.Enumeration description="Review requests topic list" enumId="PsstReviewRequestList" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Checkout opt-ins offered" enumId="PsstCheckoutOptIns" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="News and offers list" enumId="PsstNewsList" enumTypeId="ProductStoreSettingType"/>
 </entity-facade-xml>

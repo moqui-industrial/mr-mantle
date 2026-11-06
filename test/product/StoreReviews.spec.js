@@ -3,7 +3,8 @@
 // order line (no proof refused), a wrong-type or unscanned photo is refused and the text kept; only approved reviews are public
 // and in the summary, a pending review's image is not served, the reply shows and the author's label hides the account; the
 // author's edit returns it to pending and out of the average; the review request is queued once per delivered line of a Shop
-// order, needs consent, stops once the line is reviewed, and another order queues none. Standalone: a spec-local
+// order, needs the store's review requests topic (marketing email consent is not enough; P9 follow-up, F95), stops once the
+// line is reviewed, and another order queues none. Standalone: a spec-local
 // organization, store, site, product, staff and buyers; orders written directly. Run: ./moq test mr-mantle --spec StoreReviews
 const M = "mantle.product.StoreMerchandisingServices."
 const K = "mantle.product.ShopCatalogServices."
@@ -398,7 +399,7 @@ feature("the author's edit returns the review to pending, out of the average and
 })
 
 feature(
-    "the review request is queued once per delivered Shop order line, needs consent and stops once reviewed; another order none",
+    "the review request is queued once per delivered Shop order line, needs the store's review requests topic (not marketing email) and stops once reviewed; another order none",
     {
         when() {
             const theirs = order(ids.other, true)
@@ -406,9 +407,40 @@ feature(
             const again = run("john.doe", M + "queue#ReviewRequests", {orderId: theirs.orderId, orderItemSeqId: "01"})
             const deliveries = list("mantle.party.MessageDelivery", {eventKey: "reviewRequest:" + theirs.orderId + ":01"})
             const built = run("john.doe", M + "build#ReviewRequest", {eventKey: "reviewRequest:" + theirs.orderId + ":01"})
+            // marketing email consent is not the topic: still suppressed
+            system(() =>
+                call("mantle.party.ConsentServices.store#PartyConsent", {
+                    partyId: ids.other,
+                    purposeEnumId: "PcpMarketingEmail",
+                    statusId: "PconGranted"
+                })
+            )
             const attempted = run("john.doe", "mantle.party.MessageServices.attempt#Delivery", {
                 deliveryId: deliveries[0]?.deliveryId
             })
+            const suppressed = one("mantle.party.MessageDelivery", {deliveryId: deliveries[0]?.deliveryId})
+            // the store's review requests topic turned on: the next attempt is no longer suppressed
+            const topicListId = one(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: "PsstReviewRequestList"
+            })?.settingValue
+            system(() => {
+                call("mantle.party.ConsentServices.store#PartyConsent", {
+                    partyId: ids.other,
+                    purposeEnumId: "PcpReviewRequest",
+                    statusId: "PconGranted",
+                    contactListId: topicListId
+                })
+                call("update#mantle.party.MessageDelivery", {deliveryId: deliveries[0]?.deliveryId, stateEnumId: "MdsQueued"})
+            })
+            const consented = system(
+                () =>
+                    call("mantle.public.AccountHubServices.check#ReviewRequestConsent", {
+                        partyId: ids.other,
+                        productStoreId: ids.store
+                    }).consented
+            )
+            run("john.doe", "mantle.party.MessageServices.attempt#Delivery", {deliveryId: deliveries[0]?.deliveryId})
             const reviewed = run("john.doe", M + "build#ReviewRequest", {
                 eventKey: "reviewRequest:" + state.bought.orderId + ":01",
                 recipientPartyId: ids.buyer
@@ -420,6 +452,9 @@ feature(
                 deliveries,
                 built,
                 attempted,
+                suppressed,
+                topicListId,
+                consented,
                 reviewed,
                 plain,
                 buyerRequests: list("mantle.party.MessageDelivery", {eventKey: "reviewRequest:" + state.bought.orderId + ":01"}),
@@ -434,7 +469,13 @@ feature(
             r.again.queued == 0
             r.built.bodyParameters.reviewUrl == "https://" + ids.host + "/shop/Review?productId=" + ids.product
             r.built.bodyParameters.productName == "Review mug"
-            r.delivery.stateEnumId == "MdsSuppressed"
+            r.suppressed.stateEnumId == "MdsSuppressed"
+            JSON.parse(r.suppressed.consentJson).purposeEnumId == "PcpReviewRequest"
+            JSON.parse(r.suppressed.consentJson).contactListId == r.topicListId
+            JSON.parse(r.suppressed.consentJson).granted == false
+            r.consented == true
+            r.delivery.stateEnumId != "MdsSuppressed"
+            JSON.parse(r.delivery.consentJson).granted == true
             r.buyerRequests.length == 1
             r.reviewed.suppress == "Already reviewed"
             r.plain.queued == 0

@@ -147,6 +147,19 @@ function claimGuestPurchases(shop, partyId) {
             ec.message.popErrors()
         }
     }
+    // the checkout opt-ins of this verified email waiting for confirmation, the claimed guest's and the account's own,
+    // confirmed by this sign-in (Commerce P9 follow-up, StoreTopics.js); a failure is logged and the page goes on
+    ec.message.pushErrors()
+    try {
+        ec.resource
+            .script("component://mr-mantle/service/mantle/public/StoreTopics.js")
+            .confirmVerified(shop.productStoreId, partyId, email)
+    } catch (error) {
+        ec.logger.error("Checkout opt-ins of party " + partyId + " not confirmed: " + String(error.message).split("\n")[0])
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
     return {claimed}
 }
 // Whether a party is still only the anonymous guest of one Shop cart (Shop P6 review): the party its cart was made with, the

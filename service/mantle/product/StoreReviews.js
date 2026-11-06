@@ -21,8 +21,10 @@
  *   public in the store.
  * - The review request (PsetReviewRequest): once per order item, queued on the delivery ledger (MessageDeliveries.js, one per
  *   event and recipient) when a Shop order's shipment is delivered or a digital item is first downloaded, for a store with a
- *   current PsetReviewRequest email; not transactional, so the ledger sends it only with the recipient's marketing email
- *   consent (PcpMarketingEmail), and its build suppresses it once the item is reviewed, returned or no longer public.
+ *   current PsetReviewRequest email; not transactional, so the ledger sends it only with the recipient's consent of the
+ *   store's own "review requests" topic (PcpReviewRequest on the store's topic list, StoreTopics.js; turned on on the email
+ *   preferences page or by a confirmed checkout opt-in: the P9 follow-up of Nov 6, F95), never by marketing email consent,
+ *   and its build suppresses it once the item is reviewed, returned or no longer public.
  * Reads and writes run without artifact authorization after these checks. Refusals start with their reason code.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -33,6 +35,7 @@ const customers = () => ec.resource.script("component://mr-mantle/service/mantle
 const media = () => ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js")
 const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+const storeTopics = () => ec.resource.script("component://mr-mantle/service/mantle/public/StoreTopics.js")
 const {find, one, rows, denied, call, ms, dateText, access} = lib
 const R = "mantle.product.ProductReview"
 const IMAGE = "mantle.product.ProductReviewImage"
@@ -773,7 +776,9 @@ function queueRequests(p) {
                 siteId: checkout.siteId,
                 productStoreId: checkout.productStoreId,
                 transactional: false,
-                marketingPurposeEnumId: "PcpMarketingEmail"
+                // the store's review requests topic (F95), not marketing email
+                marketingPurposeEnumId: "PcpReviewRequest",
+                consentContactListId: storeTopics().topicList("reviewRequests", checkout.productStoreId, true)
             })
             if (out.created) queued++
         } catch (error) {

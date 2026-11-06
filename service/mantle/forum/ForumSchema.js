@@ -1433,6 +1433,7 @@
             'termsVersion',
             'acceptTerms',
             'operationId',
+            'optIns',
         ],
     },
     getCheckoutPaymentResult: {
@@ -1538,11 +1539,11 @@
     },
     getEmailPreferences: {
         service: 'mantle.public.AccountHubServices.get#EmailPreferences',
-        fields: ['siteId', 'token'],
+        fields: ['siteId', 'token', 'confirm'],
     },
     storeEmailPreferences: {
         service: 'mantle.public.AccountHubServices.store#EmailPreferences',
-        fields: ['siteId', 'token', 'choices'],
+        fields: ['siteId', 'token', 'confirm', 'choices'],
     },
     applyOneClickUnsubscribe: {
         service: 'mantle.public.AccountHubServices.apply#OneClickUnsubscribe',

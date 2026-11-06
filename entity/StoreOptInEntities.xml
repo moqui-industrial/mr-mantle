@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Checkout opt-ins (impl-commerce P9 follow-up, Nov 6; design-shop §6 Checkout, §9 EmailPreferences;
+    service/mantle/public/StoreTopics.js): what the buyer chose among the store's opt-ins, each unchecked until they check
+    it, and the confirmation its pending choices wait for. The consent itself is Mantle's: PartyConsent for a granted
+    topic, ContactListParty CLPT_PENDING for a choice not yet confirmed. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <extend-entity entity-name="StoreCheckout" package="mantle.order">
+    <field name="optInsJson" type="text-long"><description>The opt-ins the buyer checked ({chosen}), and once the order
+      is placed what each became ({outcome}: granted, pending, already or failed).</description></field>
+    <field name="optInPending" type="text-indicator"><description>Y while a chosen opt-in waits for its confirmation (the
+      receipt's link, or a sign-in with the checkout's email verified).</description></field>
+    <field name="optInCodeDigest" type="text-medium"><description>The digest of the receipt link's confirmation code
+      (the code itself is only in the message).</description></field>
+    <field name="optInCodeDate" type="date-time"/>
+    <index name="STORE_CHECKOUT_OPT_IN">
+      <index-field name="customerPartyId"/>
+      <index-field name="optInPending"/>
+    </index>
+  </extend-entity>
+</entities>

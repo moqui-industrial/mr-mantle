@@ -55,13 +55,17 @@ function op(username, service, input) {
     }
 }
 // a guest buys a product as email; {orderId, orderToken}
-function buy(productId, email) {
+function buy(productId, email, optIns) {
     const token = op(null, CART + "add#CartItem", {productId, quantity: "1"}).result.token
     op(null, CHECKOUT + "begin#Checkout", {token})
     op(null, CHECKOUT + "set#CheckoutContact", {token, emailAddress: email, name: "Gail Guest"})
     op(null, CHECKOUT + "select#Payment", {token, paymentOptionId: "PiCreditCard"})
     const view = op(null, CHECKOUT + "get#Checkout", {token}).result
-    const submitted = op(null, CHECKOUT + "submit#Checkout", {token, expectedRevision: view.checkout.revision}).result
+    const submitted = op(
+        null,
+        CHECKOUT + "submit#Checkout",
+        Object.assign({token, expectedRevision: view.checkout.revision}, optIns ? {optIns} : {})
+    ).result
     const row = one("mantle.order.StoreCheckout", {returnReference: submitted.checkout.reference})
     system(() => call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId, lastCheckDate: null}))
     op(null, CHECKOUT + "get#CheckoutPaymentResult", {reference: submitted.checkout.reference, key: submitted.returnKey})
@@ -181,8 +185,9 @@ spec({
             account(ids.buyer, "buyer@shcu.example.test", true)
             account(ids.unverified, "other@shcu.example.test", false)
         })
-        // the buyer's guest purchase of a digital item (invoiced at once), and someone else's
-        state.mine = buy(ids.ebook, "buyer@shcu.example.test")
+        // the buyer's guest purchase of a digital item (invoiced at once), with review requests checked (pending for a guest),
+        // and someone else's
+        state.mine = buy(ids.ebook, "buyer@shcu.example.test", "reviewRequests")
         state.other = buy(ids.ebook, "other@shcu.example.test")
         // a guest purchase of the buyer's email that staff merged into another of the organization's parties (a supplier
         // contact sharing the address): never claimed by the email
@@ -209,12 +214,34 @@ feature("a guest's link and a verified account read their own orders; another or
         const linkList = op(null, A + "find#Orders", {orderToken: state.mine.orderToken})
         const unverified = op(ids.unverified, A + "get#Account", {})
         const unverifiedOrder = op(ids.unverified, A + "get#Order", {orderId: state.other.orderId})
+        const reviewRequests = () =>
+            system(
+                () =>
+                    call("mantle.public.AccountHubServices.check#ReviewRequestConsent", {
+                        partyId: ids.buyer,
+                        productStoreId: ids.store
+                    }).consented
+            )
+        const optInBefore = one("mantle.order.StoreCheckout", {orderId: state.mine.orderId}).optInPending
         // the verified account claims the guest purchase of its email, and only that
         const overview = op(ids.buyer, A + "get#Account", {})
         const own = op(ids.buyer, A + "get#Order", {orderId: state.mine.orderId})
         const others = op(ids.buyer, A + "get#Order", {orderId: state.other.orderId})
         const invoices = op(ids.buyer, "mantle.account.PortalServices.find#Invoices", {})
-        return {byLink, linkOther, linkList, unverified, unverifiedOrder, overview, own, others, invoices}
+        return {
+            byLink,
+            linkOther,
+            linkList,
+            unverified,
+            unverifiedOrder,
+            overview,
+            own,
+            others,
+            invoices,
+            optInBefore,
+            optInAfter: one("mantle.order.StoreCheckout", {orderId: state.mine.orderId}),
+            reviewRequests: reviewRequests()
+        }
     },
     then(r) {
         r.byLink.result.order.orderId == state.mine.orderId
@@ -232,6 +259,11 @@ feature("a guest's link and a verified account read their own orders; another or
         r.invoices.result.invoiceList.length == 1
         one("mantle.party.Party", {partyId: state.mine.partyId}).mergedToPartyId == ids.buyer
         !one("mantle.party.Party", {partyId: ids.staffParty}).mergedToPartyId
+        // the guest's review requests opt-in, pending, is confirmed by the verified sign-in that claims it (P9 follow-up)
+        r.optInBefore == "Y"
+        r.optInAfter.optInPending == "N"
+        JSON.parse(r.optInAfter.optInsJson).outcome.reviewRequests == "granted"
+        r.reviewRequests == true
     }
 })
 
@@ -374,7 +406,12 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
         return {before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}
     },
     then({before, turnedOn, unverifiedOn, consented, turnedOff, guest, visitor, link}) {
-        before.result.topics.length == 1
+        // cart reminders, then the store's review requests (Commerce P9 follow-up), on from the guest checkout's opt-in the
+        // first feature's claim confirmed
+        before.result.topics.length == 2
+        before.result.topics[1].topicId == "reviewRequests:" + ids.store
+        before.result.topics[1].name == "Review requests from Customer account store"
+        before.result.topics[1].on == true
         unverifiedOn.error.includes("VERIFY_REQUIRED")
         before.result.topics[0].on == false
         turnedOn.result.topics[0].on == true

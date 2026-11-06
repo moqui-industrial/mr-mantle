@@ -20,6 +20,9 @@
             <parameter name="productStoreId"/>
             <parameter name="transactional" type="Boolean" default="true"/>
             <parameter name="marketingPurposeEnumId"/>
+            <parameter name="consentContactListId"><description>A topic's list (Commerce P9 follow-up: a store's review
+                requests): the purpose is then the recipient's latest consent of it on this list, not their consent as a
+                whole</description></parameter>
             <parameter name="bodyParameters" type="Map"><description>For a source with no build service: the template's
                 parameters, kept with the delivery (never a secret)</description></parameter>
             <parameter name="sendNow" type="Boolean" default="false"/>

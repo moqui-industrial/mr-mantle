@@ -4,7 +4,8 @@
 // order is placed once; a second submit answers the first; a changed price is reviewRequired and the resubmit at the new
 // revision goes on; an unknown outcome stays unknown and makes no new attempt or key; a placement that fails after the
 // provider's success keeps the payment and its attempt, and the job places it later; a promotion past its limit at the
-// freeze is reviewRequired; nothing due skips the gateway. Standalone: spec-local organization, store, site, gateways and
+// freeze is reviewRequired; nothing due skips the gateway; the store's opt-ins are offered unchecked and a guest's waits
+// for the receipt's link (Commerce P9 follow-up). Standalone: spec-local organization, store, site, gateways and
 // products. Run: ./moq test mr-mantle --spec ShopCheckout
 const CART = "mantle.order.ShopCartServices."
 const CHECKOUT = "mantle.order.ShopCheckoutServices."
@@ -84,8 +85,11 @@ function readyCart(productId, quantity, {physical = false, code = null} = {}) {
     checkout("select#Payment", {token, paymentOptionId: "PiCreditCard"})
     return {token, view: checkout("get#Checkout", {token}).result}
 }
-const submit = (token, revision, operationId) =>
-    checkout("submit#Checkout", Object.assign({token, expectedRevision: revision}, operationId ? {operationId} : {}))
+const submit = (token, revision, operationId, optIns) =>
+    checkout(
+        "submit#Checkout",
+        Object.assign({token, expectedRevision: revision}, operationId ? {operationId} : {}, optIns ? {optIns} : {})
+    )
 // the provider's return a while after the submit (the first look at the provider waits a moment after it)
 function returned(reference, key) {
     system(() => {
@@ -629,5 +633,87 @@ feature("a promotion past its limit at the freeze is reviewRequired; nothing due
         !freeSubmitted.result.checkout.attempt
         freePayments.length == 0
         freeOrder.statusId != "OrderOpen"
+    }
+})
+
+// Commerce P9 follow-up: the store's opt-ins (StoreTopics.js) are offered unchecked; a guest's choice waits as a pending
+// membership until the receipt's link confirms it; nothing checked records nothing; an order without a checkout gets no link
+feature("the store's opt-ins are offered unchecked; a guest's choice waits until the receipt's link confirms it", {
+    when() {
+        const H = "mantle.public.AccountHubServices."
+        system(() =>
+            make("mantle.public.PublicSiteApp", {
+                siteId: ids.site,
+                appMountId: "account",
+                app: "account",
+                pathPrefix: "/account",
+                enabled: "Y"
+            })
+        )
+        const placeFree = (email, optIns) => {
+            const token = op(CART + "add#CartItem", {productId: ids.free, quantity: "1"}).result.token
+            checkout("begin#Checkout", {token})
+            checkout("set#CheckoutContact", {token, emailAddress: email, name: "Olga Optin"})
+            const offered = checkout("get#Checkout", {token}).result
+            const placed = submit(token, offered.checkout.revision, null, optIns)
+            return {offered, placed, row: checkoutRow(token)}
+        }
+        const chose = placeFree("optin@shco.example.test", "reviewRequests,cartReminders,unknown")
+        const partyId = chose.row.customerPartyId
+        const listId = one(S + "ProductStoreSetting", {
+            productStoreId: ids.store,
+            settingTypeEnumId: "PsstReviewRequestList"
+        })?.settingValue
+        const consent = () => system(() => call(H + "check#ReviewRequestConsent", {partyId, productStoreId: ids.store}).consented)
+        const before = consent()
+        const pending = list("mantle.marketing.contact.ContactListParty", {contactListId: listId, partyId})
+        const link = system(() => call(H + "make#OptInConfirmLink", {orderId: chose.row.orderId}))
+        const code = decodeURIComponent(String(link.confirmUrl).split("confirm=")[1] || "")
+        const shown = op(H + "get#EmailPreferences", {confirm: code})
+        const wrong = op(H + "get#EmailPreferences", {confirm: code.slice(0, -2) + "zz"})
+        const confirmed = op(H + "store#EmailPreferences", {confirm: code, choices: JSON.stringify({confirm: true})})
+        const none = placeFree("nothing@shco.example.test", null)
+        return {
+            chose,
+            pending,
+            before,
+            link,
+            shown,
+            wrong,
+            confirmed,
+            after: consent(),
+            ended: list("mantle.marketing.contact.ContactListParty", {contactListId: listId, partyId}),
+            none,
+            noneLink: system(() => call(H + "make#OptInConfirmLink", {orderId: none.row.orderId})),
+            otherLink: system(() => call(H + "make#OptInConfirmLink", {orderId: prefix + "_NO_ORDER"}))
+        }
+    },
+    then({chose, pending, before, link, shown, wrong, confirmed, after, ended, none, noneLink, otherLink}) {
+        // a guest is offered review requests only (cart reminders need an account; the store names no news list), unchecked
+        chose.offered.checkout.optIns.map(optIn => optIn.optInId).join(",") == "reviewRequests"
+        chose.offered.checkout.optIns.every(optIn => !optIn.chosen)
+        chose.offered.checkout.optIns[0].statement.includes("no offers")
+        chose.placed.result.checkout.state == "completed"
+        JSON.parse(chose.row.optInsJson).chosen.join(",") == "reviewRequests"
+        JSON.parse(chose.row.optInsJson).outcome.reviewRequests == "pending"
+        chose.row.optInPending == "Y"
+        pending.length == 1
+        pending[0].statusId == "CLPT_PENDING"
+        pending[0].thruDate == null
+        before == false
+        link.confirmUrl.startsWith("https://" + ids.host + "/account/EmailPreferences?confirm=")
+        shown.result.mode == "confirm"
+        shown.result.confirmed == false
+        shown.result.choices[0].optInId == "reviewRequests"
+        shown.result.maskedAddress == "o***@shco.example.test"
+        wrong.error.includes("NOT_AVAILABLE")
+        confirmed.result.confirmed == true
+        after == true
+        ended.every(row => row.thruDate != null)
+        none.placed.result.checkout.state == "completed"
+        JSON.parse(none.row.optInsJson).chosen.length == 0
+        none.row.optInPending != "Y"
+        !noneLink.confirmUrl
+        !otherLink.confirmUrl
     }
 })

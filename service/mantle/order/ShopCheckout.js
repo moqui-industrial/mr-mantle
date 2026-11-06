@@ -30,6 +30,11 @@
  *   the provider's success keeps the payment and attempt (the checkout stays placementPending with its failure, retried
  *   a bounded number of times, for staff after that). An amount mismatch found then, or a capture that fails later, holds
  *   the order (OhtPayment), which Accounting's payment operator releases.
+ * - Opt-ins (Commerce P9 follow-up, Nov 6): the store's few optional emails (StoreTopics.js: review requests, cart
+ *   reminders for a signed-in buyer, the store's news when it has a list), each unchecked until the buyer checks it and
+ *   saying what it is and is not; the submit keeps what was checked and the placement records it, granted for a verified
+ *   account, else pending until the receipt's link or a verified sign-in confirms it. Never a prerequisite: the receipt and
+ *   the order's notices are transactional whatever is chosen.
  * Reads and writes are the authority's own (authorization disabled), after these checks.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -39,6 +44,7 @@ const settings = () => ec.resource.script("component://mr-mantle/service/mantle/
 const attempts = () => ec.resource.script("component://mr-mantle/service/mantle/account/PaymentAttempts.js")
 const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+const storeTopics = () => ec.resource.script("component://mr-mantle/service/mantle/public/StoreTopics.js")
 const {find, one, rows, ms} = lib
 const C = "mantle.order.StoreCheckout"
 const A = "mantle.order.StoreCartAccess"
@@ -516,6 +522,8 @@ function view(reached, extra) {
                     savePaymentMethod: checkout.savePaymentMethod === "Y"
                 },
                 terms: terms ? {required: true, version: terms.version, title: terms.title, url: terms.url} : {required: false},
+                // the store's opt-ins, none checked but by the buyer (StoreTopics.js)
+                optIns: storeTopics().checkoutView(checkout),
                 lines: cartView.items,
                 promoCodes: cartView.promoCodes,
                 totals: {
@@ -935,7 +943,12 @@ function selectPayment(p) {
 function submitCheckout(p) {
     const reached = reach(p)
     const {checkout, cart, shop} = reached
-    const request = {revision: text(p.expectedRevision), termsVersion: text(p.termsVersion), acceptTerms: yes(p.acceptTerms)}
+    const request = {
+        revision: text(p.expectedRevision),
+        termsVersion: text(p.termsVersion),
+        acceptTerms: yes(p.acceptTerms),
+        optIns: storeTopics().chosenFrom(checkout, p.optIns)
+    }
     // a retry of a submit answers its first result, also once the order is placed (the cart's capability then reads it)
     const replay = replayOf(checkout.checkoutId, "submitCheckout", p, request)
     if (replay?.answer) return replay.answer
@@ -975,7 +988,8 @@ function submitCheckout(p) {
               }
             : null,
         quoteNeeded: physical(cart.row.orderId),
-        returnKeyDigest: digest(returnKey)
+        returnKeyDigest: digest(returnKey),
+        optIns: request.optIns
     })
     if (frozen.error) raise(frozen)
     // another submit froze it first (two tabs, a double click): its attempt again, without this request's key, whose digest
@@ -1116,7 +1130,9 @@ function freeze(p) {
         reviewJson: null,
         failureCode: null,
         failureMessage: null,
-        returnKeyDigest: p.returnKeyDigest
+        returnKeyDigest: p.returnKeyDigest,
+        // what the buyer checked of the store's opt-ins (only those; none is ever assumed), recorded at placement
+        optInsJson: JSON.stringify({chosen: Array.from(p.optIns || [])})
     }
     if (due.compare(0) <= 0) {
         // nothing due: no gateway, placement next
@@ -1219,6 +1235,10 @@ function placeStep(p) {
             !grandTotal(order.orderId).eq(dec(checkout.dueAmount))
         )
             throw new Error("ORDER_CHANGED: The order changed after its checkout was submitted")
+    }
+    // the buyer's opt-ins, each in a transaction of its own, before the order's receipt is sent (its confirmation link)
+    recordOptIns(checkout)
+    if (!placedStatuses.includes(order.statusId)) {
         if (!checkout.placementIntentDate)
             call("update#" + C, {checkoutId: checkout.checkoutId, placementIntentDate: ec.user.nowTimestamp})
         attempts().asAttempt(checkout.paymentId, () => call("mantle.order.OrderServices.place#Order", {orderId: order.orderId}))
@@ -1249,6 +1269,14 @@ function placeStep(p) {
         }
     }
     return {statusId: "ScoCompleted"}
+}
+// The checkout's opt-ins recorded (StoreTopics.js); a failure is logged and never stops the placement.
+function recordOptIns(checkout) {
+    try {
+        storeTopics().recordCheckout(checkout)
+    } catch (error) {
+        ec.logger.error("Checkout " + checkout.checkoutId + " opt-ins not recorded: " + String(error.message).split("\n")[0])
+    }
 }
 // The buyer's billing email (Shop P6): the checkout's contact email, the address the order's invoices and their receipt go
 // to (send#InvoiceStoreEmail reads EmailBilling), added once to the order's customer when it has none.
