@@ -344,6 +344,25 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="add" noun="StoreOrderNote" allow-remote="false">
+        <description>An internal note on a store order or cart of the user's stores (OrderNote with internalNote Y and the user), as Commerce's Assist "Log as note" files an answer (impl-commerce P13, F111); never sent to the customer, and nothing else on the order changes. COMMERCE_ORDER_VIEW and the order's store scope.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="noteText"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="noteDate" type="Timestamp"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('addStoreOrderNote', context)"/>
+            <set field="orderId" from="found.orderId"/>
+            <set field="noteDate" from="found.noteDate"/>
+            <set field="message" from="found.message"/>
+        </actions>
+    </service>
+
     <service verb="find" noun="StoreDeliveries" allow-remote="false">
         <description>The store's notices on the delivery ledger (MessageDelivery.productStoreId), the exceptions (failed, uncertain, waiting to retry) unless state is all, newest first, each address masked; read only, as resolve#Delivery stays MESSAGE_DELIVERY_REVIEW's (impl-shop F91). COMMERCE_ORDER_VIEW and the store scope.</description>
         <in-parameters>
