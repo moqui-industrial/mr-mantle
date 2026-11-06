@@ -4,4 +4,6 @@
 # regression specs' feature time in the final ./moq test-apps, 32.5 s, rounded up.
 # Nov 5, 2026: raised by Customer Service's measured share (the user's agreement, impl-customer-service): its fifteen
 # regression specs' feature time in the final ./moq test-apps, 34.2 s, rounded up.
-server = 370
+# Nov 6, 2026: raised by Shop P5–P6's measured share (the user's agreement, mr-pass impl-shop): mr-mantle's feature time
+# in ./moq test-apps went from 357.2 s (Wave 9) to 369.8 s (Wave 10), 12.6 s, rounded up.
+server = 383
