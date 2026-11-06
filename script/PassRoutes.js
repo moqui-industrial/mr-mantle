@@ -208,4 +208,9 @@
     ['POST', 'support/order-cancel/withdrawal', 'withdrawOrderCancel'],
     // Shop P1
     ['GET', 'shop/context', 'getShopContext'],
+    // Shop P2
+    ['GET', 'shop/page', 'getShopPage'],
+    ['GET', 'shop/theme/release', 'getShopThemeRelease'],
+    ['GET', 'shop/theme/files', 'getShopThemeFiles'],
+    ['GET', 'site/generation', 'getSiteGeneration'],
 ]

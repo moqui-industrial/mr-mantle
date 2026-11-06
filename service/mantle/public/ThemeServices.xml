@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop themes and releases (mr-pass impl-shop P2, SHOP-THEME; design-shop §12.2-§12.5; Themes.js and ThemeView.js).
+    The core, which Commerce P5's editors call: a draft from a starter package or a release, its validation and digest,
+    publish (an immutable release pinning the files' versions and digests, the site's binding and generation switched in
+    one transaction against the expected active revision), restore of an earlier release and its export manifest. Each
+    checks COMMERCE_VIEW and its own permission (COMMERCE_THEME_EDIT for drafts, COMMERCE_THEME_PUBLISH to publish or
+    restore) and the store's scope: the theme's store and the store the site's Shop mount targets (StoreAdmin.js). The
+    live part is PASS operations through pass.Facade.call#Operation (input map, result map, the site from the facade):
+    the page view of a published site's Shop mount, and the active release's manifest and files for a frontend to verify
+    and render. Commerce P4 appends the page and navigation part, P5 the authoring part. Refusals start with their code. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== core ===== -->
+    <service verb="create" noun="ThemeDraft" allow-remote="false">
+        <description>A new theme of a store with its draft copied from a starter package (starter "component/name": the
+            component's theme/{name} directory) or from one of the store's releases (releaseId). Refuses a missing starter
+            (STARTER_REQUIRED, STARTER_UNAVAILABLE), a package over its bounds (PACKAGE_TOO_LARGE) and another store's
+            release. COMMERCE_THEME_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="starter"/>
+            <parameter name="releaseId"/>
+            <parameter name="name"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="themeId"/>
+            <parameter name="name"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="fileCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('createThemeDraft', context)"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="name" from="out.name"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="fileCount" from="out.fileCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeDraft" allow-remote="false">
+        <description>A theme's record, its draft's files (path, dbresource version, digest, size; the text with includeText),
+            whether its last validation is of the current draft, and its releases. COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="includeText" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="theme" type="Map"/>
+            <parameter name="files" type="List"/>
+            <parameter name="validation" type="Map"/>
+            <parameter name="releases" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('getThemeDraft', context)"/>
+            <set field="theme" from="out.theme"/>
+            <set field="files" from="out.files"/>
+            <set field="validation" from="out.validation"/>
+            <set field="releases" from="out.releases"/>
+        </actions>
+    </service>
+    <service verb="validate" noun="Theme" allow-remote="false">
+        <description>Validates a theme's draft: the adapter's checks of files, schemas, settings and templates, a template
+            for every Shop page kind, the required purchase, cart and checkout components declared and placed, and a bounded
+            render of each page kind with a sample view. Answers ok, the diagnostics (file and line) and the validation
+            digest publish#Theme takes, and keeps them on the theme. COMMERCE_THEME_EDIT or COMMERCE_THEME_PUBLISH and the
+            store's scope.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="engine"/>
+            <parameter name="validationDigest"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('validateTheme', context)"/>
+            <set field="ok" from="out.ok"/>
+            <set field="engine" from="out.engine"/>
+            <set field="validationDigest" from="out.validationDigest"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="Theme" allow-remote="false">
+        <description>Publishes a theme's current draft to a site's Shop mount: validates it again, refuses a draft changed
+            since the given validation digest (VALIDATION_STALE) or one that does not validate (THEME_INVALID), refuses a
+            stale expectedActiveRevision (REVISION_STALE; 0 when the site has no theme), then writes the immutable release
+            (each file's version and digest, the manifest and its digest) and switches the site's binding and advances its
+            generation in one transaction. A theme of another store than the one the site sells is refused
+            (THEME_STORE_MISMATCH). A retry with the same operationKey answers the first result (alreadyApplied).
+            COMMERCE_THEME_PUBLISH and the store's scope.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="siteId" required="true"/>
+            <parameter name="validationDigest" required="true"/>
+            <parameter name="expectedActiveRevision" type="Integer" required="true"/>
+            <parameter name="operationKey" required="true"><description>The operation's identity (PostingOperation): a retry
+                with the same key answers the first result.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="releaseId"/>
+            <parameter name="manifestDigest"/>
+            <parameter name="themeId"/>
+            <parameter name="siteId"/>
+            <parameter name="appMountId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="generation" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('publishTheme', context)"/>
+            <set field="releaseId" from="out.releaseId"/>
+            <set field="manifestDigest" from="out.manifestDigest"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="siteId" from="out.siteId"/>
+            <set field="appMountId" from="out.appMountId"/>
+            <set field="revision" from="out.revision"/>
+            <set field="generation" from="out.generation"/>
+            <set field="alreadyApplied" from="out.alreadyApplied == true"/>
+        </actions>
+    </service>
+    <service verb="restore" noun="ThemeRelease" allow-remote="false">
+        <description>Makes an earlier release of the store's the active theme of a site's Shop mount, through the same gate
+            as publish: its files must still match their digests (RELEASE_DAMAGED) and validate on this renderer
+            (RELEASE_INVALID: also an engine or view API this authority no longer supports), and expectedActiveRevision must
+            be current (REVISION_STALE); a retry with the same operationKey answers the first result. The binding's audit log records
+            it; live pages still show only what is published now. COMMERCE_THEME_PUBLISH and the store's scope.</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="releaseId" required="true"/>
+            <parameter name="expectedActiveRevision" type="Integer" required="true"/>
+            <parameter name="operationKey" required="true"><description>The operation's identity (PostingOperation): a retry
+                with the same key answers the first result.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="releaseId"/>
+            <parameter name="manifestDigest"/>
+            <parameter name="themeId"/>
+            <parameter name="siteId"/>
+            <parameter name="appMountId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="generation" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('restoreThemeRelease', context)"/>
+            <set field="releaseId" from="out.releaseId"/>
+            <set field="manifestDigest" from="out.manifestDigest"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="siteId" from="out.siteId"/>
+            <set field="appMountId" from="out.appMountId"/>
+            <set field="revision" from="out.revision"/>
+            <set field="generation" from="out.generation"/>
+            <set field="alreadyApplied" from="out.alreadyApplied == true"/>
+        </actions>
+    </service>
+    <service verb="export" noun="ThemeRelease" allow-remote="false">
+        <description>A release's export manifest: its files with versions, digests and sizes, schemas, settings,
+            composition, engine, renderer and view API versions and validation digest, with the files' text when
+            includeFiles. COMMERCE_THEME_EDIT or COMMERCE_THEME_PUBLISH and the store's scope.</description>
+        <in-parameters>
+            <parameter name="releaseId" required="true"/>
+            <parameter name="includeFiles" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="manifest" type="Map"/>
+            <parameter name="manifestDigest"/>
+            <parameter name="files" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('exportThemeRelease', context)"/>
+            <set field="manifest" from="out.manifest"/>
+            <set field="manifestDigest" from="out.manifestDigest"/>
+            <set field="files" from="out.files"/>
+        </actions>
+    </service>
+
+    <!-- ===== live (PASS operations) ===== -->
+    <service verb="get" noun="ShopPage" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopPage (impl-shop P2): a page of a published site's Shop mount (NotFound otherwise, and for a page
+            kind the live path does not render yet): its status, the active release (null when none), the site's
+            generation and the view contract v1 with its references, media and sources (ThemeView.js).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/ThemeView.js").execute("getShopPage", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ShopThemeRelease" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopThemeRelease (impl-shop P2): the manifest text and digest of a published site's active Shop
+            release, which must be the releaseId asked for (RELEASE_NOT_ACTIVE, NotFound). Over the authority, only for a
+            registered frontend (PassAuthority's CLIENT_READS).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getShopThemeRelease", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ShopThemeFiles" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopThemeFiles (impl-shop P2): up to 50 files of a published site's active Shop release (paths, a
+            list or comma-separated), each read at its pinned version with its digest; a file whose text no longer matches is
+            RELEASE_DAMAGED. Over the authority, only for a registered frontend.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getShopThemeFiles", input)</script>
+        </actions>
+    </service>
+</services>

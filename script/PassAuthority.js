@@ -26,6 +26,9 @@ const TOKEN_WRITES = [
     'withdrawCustomerReturn',
     // Shop P1: none yet; P4 adds the cart writes
 ]
+/* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
+   manifest and files, which a remote frontend verifies and renders). */
+const CLIENT_READS = ['getShopThemeRelease', 'getShopThemeFiles']
 /* Operations answered as a file (download: the result's location stays here, the transport streams it). */
 const DOWNLOADS = ['getAttachment', 'getExport', 'getCaseFile', 'getReturnLabel']
 /* account.<action>: the framework's account service verb of each. */
@@ -237,6 +240,8 @@ function run(p) {
     if (action != null)
         return accountAction(action, p, input, siteId, registered, delegation)
     if (!route || !schema[operation]) fail('NotFound', 'Resource not found')
+    if (CLIENT_READS.includes(operation) && !registered)
+        fail('NotFound', 'Resource not found')
     const def = schema[operation]
     // the file comes as p.file: the servlet's multipart part, or the gRPC upload
     if (def.fields.includes('file')) delete input.file

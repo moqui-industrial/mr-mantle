@@ -1284,6 +1284,27 @@ const readinessChecks = [
             )
                 ? {ready: true, message: "Customers get an order confirmation"}
                 : {ready: false, message: "No order placed email is bound"}
+    },
+    // Shop P2: each Shop site's active theme release, on a renderer this authority supports (design-shop §12.7)
+    {
+        key: "theme",
+        area: "site",
+        label: "Theme",
+        fix: "sites",
+        severity: "warning",
+        check: store => {
+            const mounts = (shopMounts([store.productStoreId])[store.productStoreId] || []).filter(mount => mount.enabled === "Y")
+            if (!mounts.length) return null
+            const themes = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js")
+            const missing = mounts.filter(mount => {
+                const active = themes.activeRelease(mount.siteId, mount.appMountId)
+                const renderer = active ? themes.renderers[active.engine] : null
+                return !renderer || !renderer.viewApiVersions.includes(active.viewApiVersion)
+            })
+            return missing.length
+                ? {ready: false, message: "No supported theme is published on " + missing.map(mount => mount.siteId).join(", ")}
+                : {ready: true, message: "Every site shows a published theme"}
+        }
     }
 ]
 // The findings for a store: each check's result, a check that fails to answer named not ready (failure tolerance).
