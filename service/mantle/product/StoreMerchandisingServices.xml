@@ -28,7 +28,8 @@ along with this software (see the LICENSE.md file). If not, see
             nothing) and, with siteId, while the site has an enabled shop mount naming the store; purchasable adds the
             purchase-allow category. Without products, the store's published rows a page at a time. Each answer says how
             (own, virtual), why not (reasonCode) and the row's template, badge and rank. Now unless asOfDate, which needs
-            COMMERCE_VIEW and the store's scope.</description>
+            COMMERCE_VIEW and the store's scope. A caller without COMMERCE_VIEW in the store's scope gets a product that is not
+            public as its id with isPublic false and nothing more, and a list of the public products only.</description>
         <in-parameters>
             <parameter name="productStoreId" required="true"/>
             <parameter name="productId"/>
@@ -98,7 +99,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A published product's storefront details in a store (template key, badge text, featured rank, signature
             requirement) as a new row from fromDate (now when empty) ending the row in effect there; a row starting on that
             instant (or a scheduled one) is changed in place. Refused: an unpublished product (NOT_PUBLISHED), a stale row
-            (STALE_REVISION), a row starting later (DATED_OVERLAP). COMMERCE_MERCHANDISE; advances the store's site
+            (STALE_REVISION), a row starting later (DATED_OVERLAP), a past start (VALUE_INVALID). COMMERCE_MERCHANDISE; advances the store's site
             generations.</description>
         <in-parameters>
             <parameter name="productStoreId" required="true"/>
@@ -147,8 +148,8 @@ along with this software (see the LICENSE.md file). If not, see
             caller's transaction: publish starts a published row; withdraw ends the published row (one not yet started is
             withdrawn); exclude starts a variant's exclusion row under its published virtual product; restore ends the
             exclusion. Advances the store's site generations. Refused with the preview's code (ALREADY_PUBLISHED,
-            NOT_PUBLISHED, NOT_COVERED, NOT_EXCLUDED, DATED_OVERLAP, STALE_REVISION), REASON_REQUIRED, or without
-            COMMERCE_PUBLISH. publish#StoreProducts calls it per product.</description>
+            NOT_PUBLISHED, NOT_COVERED, NOT_EXCLUDED, DATED_OVERLAP, STALE_REVISION), REASON_REQUIRED, a past effective time
+            (VALUE_INVALID: a publication is not back-dated), or without COMMERCE_PUBLISH. publish#StoreProducts calls it per product.</description>
         <in-parameters>
             <parameter name="productStoreId" required="true"/>
             <parameter name="productId" required="true"/>

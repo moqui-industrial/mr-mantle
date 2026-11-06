@@ -32,6 +32,9 @@ in `service/mantle/edi/`.
 
 The two suites are described in `docs/Build-Test.md` (The two suites) in the mr-moqui repository.
 
+A database made before an entity's key changed needs its table rebuilt once: see [docs/Upgrading.md](docs/Upgrading.md)
+(ProductStoreProduct, dated store publication).
+
 For details about Mantle see its page on moqui.org:
 
 <http://www.moqui.org/mantle.html>

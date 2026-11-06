@@ -318,18 +318,35 @@ function getStorePublication(p) {
     const store = one(S + "ProductStore", {productStoreId: p.productStoreId || ""})
     if (Math.abs(at - now) > 1000) stores.storeOf(scope("view"), p.productStoreId)
     else if (!store) denied("RECORD_UNAVAILABLE", "Store " + (p.productStoreId || "") + " is not available")
+    // A caller without COMMERCE_VIEW in the store's scope (the public, Shop) learns only what is public: a product that is not
+    // is answered with its id and isPublic false (no name, reason, dates or storefront details), and the list holds only the
+    // public products, so a draft, an exclusion or another organization's product is not told apart from an unknown id.
+    const staff = lib.check(() => stores.storeOf(scope("view"), store.productStoreId)).allowed
     let productIds = unique(listOf(p.productIds).concat(p.productId ? [p.productId] : []))
-    let paging = null
     if (!productIds.length) {
         const current = Array.from(
             find(PUBLICATION, {productStoreId: store.productStoreId}).orderBy("featuredRank,productId").list()
         ).filter(row => activeAt(row, at) && kindOf(row) === PUBLISHED)
         const listed = unique(current.map(row => row.productId))
-        paging = lib.pageList(listed, p, "products")
-        productIds = paging.products
+        if (staff) {
+            const paging = lib.pageList(listed, p, "products")
+            return Object.assign(paging, {products: resolve(store, paging.products, at, p.siteId || null)})
+        }
+        return lib.pageList(
+            resolve(store, listed, at, p.siteId || null).filter(answer => answer.isPublic),
+            p,
+            "products"
+        )
     }
     const result = resolve(store, productIds, at, p.siteId || null)
-    return Object.assign({productsCount: result.length}, paging || {}, {products: result})
+    return {
+        productsCount: result.length,
+        products: staff
+            ? result
+            : result.map(answer =>
+                  answer.isPublic ? answer : {productId: answer.productId, isPublic: false, purchasable: false}
+              )
+    }
 }
 function resolve(store, productIds, at, siteId) {
     const productStoreId = store.productStoreId
@@ -515,7 +532,7 @@ function storeStoreProduct(p) {
     productOf(store, p.productId)
     const now = nowMs()
     const list = rows(PUBLICATION, {productStoreId: store.productStoreId, productId: p.productId})
-    const from = stores.dateOf(p.fromDate, now, "start date")
+    const from = startFrom(p.fromDate, now, "start date")
     const base = rowAt(list, from) || laterRow(list, from - 1)
     if (!base || kindOf(base) !== PUBLISHED) denied("NOT_PUBLISHED", "Publish the product before changing its storefront details")
     staleCheck(p.expectedLastUpdatedStamp, base)
@@ -536,6 +553,13 @@ function storeStoreProduct(p) {
         denied("VALUE_INVALID", "Choose a valid signature requirement")
     const written = startRow(store.productStoreId, p.productId, values, Math.max(from, ms(base.fromDate) ?? from), why)
     return {fromDate: written.fromDate, sites: advanceGeneration([store.productStoreId])}
+}
+// A publication's effective time, now when empty: from now on (a minute's grace for the form's clock), as a publication is not
+// back-dated (what a store showed stays what it showed) and a move of its categories is not either.
+function startFrom(value, now, label) {
+    const from = stores.dateOf(value, now, label)
+    if (from < now - 60000) denied("VALUE_INVALID", "The " + label + " is past; choose one from now on")
+    return from
 }
 function staleCheck(expected, row) {
     if (expected && row && ms(expected) !== ms(row.lastUpdatedStamp))
@@ -684,7 +708,7 @@ function previewPublication(p) {
     const productIds = unique(listOf(p.productIds))
     if (!productIds.length) denied("VALUE_INVALID", "Choose the products")
     if (productIds.length > batchLimit) denied("VALUE_INVALID", "Choose at most " + batchLimit + " products")
-    const from = stores.dateOf(p.fromDate, nowMs(), "effective time")
+    const from = startFrom(p.fromDate, nowMs(), "effective time")
     const items = productIds.map(productId => {
         try {
             return planItem(store, productId, p.action, from, null)
@@ -710,7 +734,7 @@ function publishStoreProduct(p) {
     const store = stores.storeOf(s, p.productStoreId, true)
     const why = stores.reason(p, true)
     const now = nowMs()
-    const from = stores.dateOf(p.fromDate, now, "effective time")
+    const from = startFrom(p.fromDate, now, "effective time")
     const plan = planItem(store, p.productId, p.action, from, p.expectedLastUpdatedStamp || null)
     if (!plan.allowed) denied(plan.code, plan.message)
     const list = rows(PUBLICATION, {productStoreId: store.productStoreId, productId: p.productId})
@@ -1087,7 +1111,10 @@ function storeCategoryMembership(p) {
 // how many other stores do (Commerce's CategoryDetail names them before a taxonomy change).
 function getCategoryStores(p) {
     const s = scope("view")
-    if (!p.productCategoryId || !one(CATEGORY, {productCategoryId: p.productCategoryId}))
+    const category = p.productCategoryId ? one(CATEGORY, {productCategoryId: p.productCategoryId}) : null
+    // the shared catalog's, or one of the user's organizations' (another organization's category is not told apart from none)
+    const owner = category?.ownerPartyId
+    if (!category || (owner && owner !== "_NA_" && s.organizationPartyIds && !s.organizationPartyIds.includes(owner)))
         denied("CATEGORY_UNAVAILABLE", "Category " + (p.productCategoryId || "") + " is not available")
     return storesReaching(s, [p.productCategoryId], nowMs())
 }

@@ -1,9 +1,9 @@
 // Store publication and categories (impl-commerce P3, COM-MERCH, SHOP-CATALOG's resolver core;
 // mantle.product.StoreMerchandisingServices, StoreMerchandising.js): the resolver (no row, a published virtual product and
 // its variants, an excluded variant, a future row, a withdrawal, an empty allow category, a row made the old way with no
-// date or kind); the batch's permissions, reason, per-product results and retry, and the site generation it advances; the
-// storefront details as a new dated row; the category moves' cycle, date and shared-store refusals, a reorder and the
-// membership saves.
+// date or kind; what the public is told); the batch's permissions, reason, per-product results, retry, stale revision and
+// past date, and the site generation it advances; the storefront details as a new dated row; the category moves' cycle,
+// date and shared-store refusals, a reorder and the membership saves.
 // Standalone: spec-local organizations, users, products, categories, stores and a site; artifact authorization disabled
 // (the rules are the services' own checks). Run: ./moq test mr-mantle --spec StorePublication
 const M = "mantle.product.StoreMerchandisingServices."
@@ -76,7 +76,8 @@ function user(kind, organizationPartyId, permissions) {
 const users = {}
 // a call as a user, in its own transaction: its result and its refusal code ("" when it succeeds)
 function run(username, service, parameters = {}) {
-    login(username)
+    if (username) login(username)
+    else logout()
     const was = ec.artifactExecution.disableAuthz()
     ec.message.pushErrors()
     try {
@@ -225,7 +226,16 @@ feature(
             const notCovered = publish(users.publisher, [ids.second], "exclude")
             const afterExclusion = resolve([ids.red, ids.blue])
             const otherStore = run(users.reader, M + "get#StorePublication", {productStoreId: ids.shared, productIds: [ids.red]})
+            // the public (no one signed in): the public answer in full, the excluded variant as its id only, and the list of
+            // the public products only
+            const anonymous = run(null, M + "get#StorePublication", {
+                productStoreId: ids.store,
+                productIds: [ids.red, ids.blue]
+            })
+            const anonymousList = run(null, M + "get#StorePublication", {productStoreId: ids.store})
             return {
+                anonymous,
+                anonymousList,
                 merchandiser,
                 other,
                 noReason,
@@ -243,6 +253,8 @@ feature(
             }
         },
         then({
+            anonymous,
+            anonymousList,
             merchandiser,
             other,
             noReason,
@@ -282,6 +294,11 @@ feature(
             byId(afterExclusion, ids.blue).isPublic == false
             byId(afterExclusion, ids.blue).reasonCode == "VARIANT_EXCLUDED"
             otherStore.products[0].isPublic == false
+            anonymous.error == ""
+            byId(anonymous.products, ids.red).productName == "Publication " + ids.red
+            Object.keys(byId(anonymous.products, ids.blue)).sort() == ["isPublic", "productId", "purchasable"]
+            anonymousList.products.every(answer => answer.isPublic) == true
+            !anonymousList.products.some(answer => answer.productId === ids.blue)
         }
     }
 )
@@ -298,7 +315,18 @@ feature("a future row is public only from its date; a withdrawal ends the row; a
             productIds: [ids.second],
             asOfDate: tomorrow + 60000
         })
-        const unscheduled = publish(users.publisher, [ids.second], "withdraw")
+        // the batch names each product's revision as the preview read it (through JSON, as PublishProducts posts it): a stale
+        // one is refused naming the current; a past effective time is refused
+        const seen = run(users.reader, M + "preview#Publication", {
+            productStoreId: ids.store,
+            productIds: [ids.second],
+            action: "withdraw"
+        }).items[0].lastUpdatedStamp
+        const stale = publish(users.publisher, [ids.second], "withdraw", {expectedLastUpdatedStamps: {[ids.second]: 1000}})
+        const past = publish(users.publisher, [ids.plain], "withdraw", {fromDate: Date.now() - 86400000})
+        const unscheduled = publish(users.publisher, [ids.second], "withdraw", {
+            expectedLastUpdatedStamps: JSON.parse(JSON.stringify({[ids.second]: seen}))
+        })
         const rowsLeft = list(S + "ProductStoreProduct", {productStoreId: ids.store, productId: ids.second})
         // the allow store: the plain product published there, but its view-allow category has no members
         const allowStore = run(users.publisher, M + "publish#StoreProducts", {
@@ -309,14 +337,17 @@ feature("a future row is public only from its date; a withdrawal ends the row; a
             operationKey: key()
         })
         const allowed = run(users.reader, M + "get#StorePublication", {productStoreId: ids.allow, productIds: [ids.plain]})
-        return {withdrawn, now, later, outsiderLater, unscheduled, rowsLeft, allowStore, allowed, scheduled}
+        return {withdrawn, now, later, outsiderLater, stale, past, unscheduled, rowsLeft, allowStore, allowed, scheduled}
     },
-    then({withdrawn, now, later, outsiderLater, unscheduled, rowsLeft, allowStore, allowed, scheduled}) {
+    then({withdrawn, now, later, outsiderLater, stale, past, unscheduled, rowsLeft, allowStore, allowed, scheduled}) {
         withdrawn.doneCount == 1
         scheduled.doneCount == 1
         now[0].isPublic == false
         later[0].isPublic == true
         code(outsiderLater) == "RECORD_UNAVAILABLE"
+        stale.results[0].code == "STALE_REVISION"
+        stale.results[0].message.includes("now ")
+        past.results[0].code == "VALUE_INVALID"
         unscheduled.doneCount == 1
         rowsLeft.length == 1
         rowsLeft[0].thruDate != null
@@ -407,9 +438,24 @@ feature(
             })
             const up = move(users.merchandiser, {productCategoryId: ids.three, direction: "up"})
             const tree = run(users.reader, M + "get#StoreCategories", {productStoreId: ids.store, productCategoryId: ids.three})
-            return {cycle, past, reader, outside, preview, unconfirmed, moved, reordered, up, tree, before, after: generation()}
+            const otherCategory = run(users.other, M + "get#CategoryStores", {productCategoryId: ids.one})
+            return {
+                otherCategory,
+                cycle,
+                past,
+                reader,
+                outside,
+                preview,
+                unconfirmed,
+                moved,
+                reordered,
+                up,
+                tree,
+                before,
+                after: generation()
+            }
         },
-        then({cycle, past, reader, outside, preview, unconfirmed, moved, reordered, up, tree, before, after}) {
+        then({otherCategory, cycle, past, reader, outside, preview, unconfirmed, moved, reordered, up, tree, before, after}) {
             code(cycle) == "CATEGORY_CYCLE"
             code(past) == "VALUE_INVALID"
             code(reader) == "PERMISSION_DENIED"
@@ -426,6 +472,7 @@ feature(
                 [ids.three, ids.two, ids.one]
             tree.tree.find(node => node.productCategoryId === ids.one).sequenceNum == 30
             tree.members.map(row => row.productId) == [ids.plain]
+            code(otherCategory) == "CATEGORY_UNAVAILABLE"
         }
     }
 )
