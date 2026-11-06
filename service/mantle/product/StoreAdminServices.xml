@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Store administration (impl-commerce P2, COM-STORE; design-commerce §3 Stores, StoreDetail, StoreGroups; StoreAdmin.js):
+    the stores a user works and their reads, the guarded store save, the dated child saves, store groups, the clone guard over
+    StoreServices.clone#ProductStore and the readiness findings. Each service checks COMMERCE_VIEW to read and
+    COMMERCE_STORE_EDIT to change, and the store's organization (the user's own, get#PartyOrganizationInfo); a user with a
+    current StoreStaff ProductStoreParty row works only those stores. A missing store and one outside the scope are refused
+    alike (RECORD_UNAVAILABLE). Refusals start with their reason code. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="DatedParameters" type="interface">
+        <description>The parameters of a dated child save: from (now when empty) and through; end set ends the row in effect at
+            thruDate (now when empty), or withdraws one that starts later named by its fromDate.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+    </service>
+
+    <service verb="find" noun="Stores" allow-remote="false">
+        <description>The stores the user works, by name or id (ignoring case), organization, sales channel or store group, a
+            page at a time, each with its organization, channel, locale and currency and the sites that sell from it.</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="productStoreGroupId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="stores" type="List"/>
+            <parameter name="storesCount" type="Integer"/>
+            <parameter name="storesPageIndex" type="Integer"/>
+            <parameter name="storesPageSize" type="Integer"/>
+            <parameter name="storesPageMaxIndex" type="Integer"/>
+            <parameter name="storesPageRangeLow" type="Integer"/>
+            <parameter name="storesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('findStores', context)"/>
+            <set field="stores" from="found.stores"/>
+            <set field="storesCount" from="found.storesCount"/>
+            <set field="storesPageIndex" from="found.storesPageIndex"/>
+            <set field="storesPageSize" from="found.storesPageSize"/>
+            <set field="storesPageMaxIndex" from="found.storesPageMaxIndex"/>
+            <set field="storesPageRangeLow" from="found.storesPageRangeLow"/>
+            <set field="storesPageRangeHigh" from="found.storesPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Store" allow-remote="false">
+        <description>A store the user works: its fields with display names, the reservation group (Warehouse's, read only), its
+            revision, whether the user may change it, and on request its sections (include: facilities, staff, emails,
+            approvals, content, settings, history). Staff are the staff-role rows only; customers' party rows are counted,
+            never listed. History is the audit log of the store's fields and its ship-option and payment-gateway bindings,
+            the latest 100.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="include" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="store" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="facilities" type="List"/>
+            <parameter name="staff" type="List"/>
+            <parameter name="emails" type="List"/>
+            <parameter name="approvals" type="List"/>
+            <parameter name="content" type="Map"/>
+            <parameter name="settings" type="List"/>
+            <parameter name="history" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('getStore', context)"/>
+            <set field="store" from="found.store"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="facilities" from="found.facilities"/>
+            <set field="staff" from="found.staff"/>
+            <set field="emails" from="found.emails"/>
+            <set field="approvals" from="found.approvals"/>
+            <set field="content" from="found.content"/>
+            <set field="settings" from="found.settings"/>
+            <set field="history" from="found.history"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreSites" allow-remote="false">
+        <description>The PASS sites that sell from a store (a Shop mount whose target is the store), read only, each with its
+            state, hosts, mount and whether it is served. Hosts and mounts are the site operator's
+            (mantle.public.SiteServices.store#Mounts).</description>
+        <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="sites" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('getStoreSites', context)"/>
+            <set field="productStoreId" from="found.productStoreId"/>
+            <set field="sites" from="found.sites"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Store" allow-remote="false">
+        <description>A new store, when productStoreId is empty: of one of the user's organizations, named, its currency and
+            locale from the organization (its base currency and document locale) unless given, with a facility from now when
+            one is given, and no site mount. Or a change of a store's name, organization (not once it has orders,
+            STORE_HAS_ORDERS), currency, locale, sales channel, approval delay, tax gateway, the order defaults and the email
+            domain. A change of a policy field needs its reason (REASON_REQUIRED), kept in the audit log with the user; a stale
+            expectedLastUpdatedStamp is refused (STALE_REVISION). The reservation fields are Warehouse's
+            (update#StoreReservation). A store-limited staff member does not start stores (STORE_LIMITED).</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="storeName"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="defaultCurrencyUomId"/>
+            <parameter name="defaultLocale"/>
+            <parameter name="defaultSalesChannelEnumId"/>
+            <parameter name="autoApproveDelay"/>
+            <parameter name="taxGatewayConfigId"/>
+            <parameter name="requireCustomerRole"/>
+            <parameter name="defaultDisablePromotions"/>
+            <parameter name="defaultDisableShippingCalc"/>
+            <parameter name="defaultDisableTaxCalc"/>
+            <parameter name="storeDomain"/>
+            <parameter name="facilityId"><description>For a new store: a facility of its organization, bound from now</description></parameter>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStore', context)"/>
+            <set field="productStoreId" from="saved.productStoreId"/>
+            <set field="created" from="saved.created"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="StoreFacility" allow-remote="false">
+        <description>A facility of the store's organization bound to the store from a date with its priority, ending the row
+            it replaces; or the binding ended. Refuses another organization's facility (FACILITY_UNAVAILABLE) and a row that
+            starts later (DATED_OVERLAP).</description>
+        <implements service="mantle.product.StoreAdminServices.define#DatedParameters"/>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="sequenceNum"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreFacility', context)"/>
+            <set field="fromDate" from="saved.fromDate"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreParty" allow-remote="false">
+        <description>A staff member of the store from a date (a person who works for the store's organization, in a staff
+            role: StoreStaff), or their row ended. A current StoreStaff row limits that person to their stores; it grants no
+            permission. Refuses another role (ROLE_NOT_STAFF), never writing a customer's row, and someone outside the
+            organization (PARTY_UNAVAILABLE).</description>
+        <implements service="mantle.product.StoreAdminServices.define#DatedParameters"/>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" default-value="StoreStaff"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreParty', context)"/>
+            <set field="fromDate" from="saved.fromDate"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreEmail" allow-remote="false">
+        <description>The email template the store sends for a notice type (a ProductStoreEmailType) from a date, with its
+            header image and detail link paths on the store's site and copy addresses; or the binding ended. Refuses an
+            unregistered template and a link that is not a site path.</description>
+        <implements service="mantle.product.StoreAdminServices.define#DatedParameters"/>
+        <in-parameters>
+            <parameter name="emailTypeEnumId" required="true"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="headerImagePath"/>
+            <parameter name="detailLinkPath"/>
+            <parameter name="webOrderBcc"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreEmail', context)"/>
+            <set field="fromDate" from="saved.fromDate"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreApproval" allow-remote="false">
+        <description>An order check the store runs before approving an order, from a date in its sequence: a registered
+            OrderValidate service only (CHECK_NOT_REGISTERED), with the typed parameters its register's configParameters name
+            (none otherwise); or a check ended (storeApproveId with end).</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="storeApproveId"/>
+            <parameter name="serviceRegisterId"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="parameters" type="Map"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="storeApproveId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreApproval', context)"/>
+            <set field="storeApproveId" from="saved.storeApproveId"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreContentBinding" allow-remote="false">
+        <description>A store's search document of a type (typeEnumId: a search-indexed DataDocument over the type's records,
+            else DOCUMENT_NOT_REGISTERED; an empty dataDocumentId removes it), or its wiki space of a content type and locale
+            from a date, ending the one it replaces (never a private space, SPACE_PRIVATE); storeWikiSpaceId ends a space.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="typeEnumId"/>
+            <parameter name="dataDocumentId"/>
+            <parameter name="storeWikiSpaceId"/>
+            <parameter name="spaceTypeEnumId"/>
+            <parameter name="locale"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="storeWikiSpaceId"/>
+            <parameter name="removed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreContentBinding', context)"/>
+            <set field="storeWikiSpaceId" from="saved.storeWikiSpaceId"/>
+            <set field="removed" from="saved.removed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreSetting" allow-remote="false">
+        <description>A store setting of a type staff may set (StoreAdmin.js settingTypes: true/false, a number, a percentage
+            or one line of text, checked per type), from a date ending the row it replaces, or ended. Location and URL
+            template types are refused (SETTING_NOT_EDITABLE).</description>
+        <implements service="mantle.product.StoreAdminServices.define#DatedParameters"/>
+        <in-parameters>
+            <parameter name="settingTypeEnumId" required="true"/>
+            <parameter name="settingValue"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreSetting', context)"/>
+            <set field="fromDate" from="saved.fromDate"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreGroups" allow-remote="false">
+        <description>The store groups of the user's organizations (a group's organization is its OrgInternal group party), by
+            organization, type or description, each with its member count; and with productStoreGroupId that group's members
+            and parties (a store-limited staff member sees only their stores among the members).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="storeGroupTypeEnumId"/>
+            <parameter name="term"/>
+            <parameter name="productStoreGroupId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="groups" type="List"/>
+            <parameter name="group" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('findStoreGroups', context)"/>
+            <set field="groups" from="found.groups"/>
+            <set field="group" from="found.group"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreGroup" allow-remote="false">
+        <description>A new store group of one of the user's organizations (description and type), a change of a group's
+            description or type (a stale expectedLastUpdatedStamp refused), a store of the group's organization bound from a
+            date or ended (memberStoreId; another organization's store refused, STORE_OTHER_ORGANIZATION), or a staff party of
+            the organization (partyId, roleTypeId). Groups select stores for reports and bulk work; they share no settings. A
+            store-limited staff member changes only a group whose members are all theirs.</description>
+        <in-parameters>
+            <parameter name="productStoreGroupId"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="description"/>
+            <parameter name="storeGroupTypeEnumId"/>
+            <parameter name="memberStoreId"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="partyId"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreGroupId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('storeStoreGroup', context)"/>
+            <set field="productStoreGroupId" from="saved.productStoreGroupId"/>
+            <set field="created" from="saved.created"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+
+    <service verb="clone" noun="Store" allow-remote="false">
+        <description>The guard over mantle.product.StoreServices.clone#ProductStore (impl-commerce F12). With preview, what a
+            clone copies, section by section, and the organization-sensitive references it carries (facilities, staff,
+            inventory facility, tax gateway). Without, a new store of one of the user's organizations named storeName,
+            unpublished and with no site mount: its categories and emails, the target organization's facilities, the staff
+            rows of people who work for it and the editable settings, as chosen; never a customer's or other party row,
+            products, promotions, gateways, ship options, order checks, content bindings, the integration remote or
+            credentials. Refuses the clone until the references are approved (CLONE_APPROVAL_REQUIRED) and a stale base
+            revision; the operationKey answers a retry with the first result.</description>
+        <in-parameters>
+            <parameter name="baseProductStoreId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="storeName"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+            <parameter name="copyCategories" type="Boolean" default="true"/>
+            <parameter name="copyEmails" type="Boolean" default="true"/>
+            <parameter name="copyFacilities" type="Boolean" default="true"/>
+            <parameter name="copyStaff" type="Boolean" default="true"/>
+            <parameter name="copySettings" type="Boolean" default="true"/>
+            <parameter name="approveReferences" type="Boolean" default="false"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="baseProductStoreId"/>
+            <parameter name="sections" type="List"/>
+            <parameter name="references" type="List"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="cloned" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('cloneStore', context)"/>
+            <set field="productStoreId" from="cloned.productStoreId"/>
+            <set field="sections" from="cloned.sections"/>
+            <set field="references" from="cloned.references"/>
+            <set field="alreadyApplied" from="!!cloned.alreadyApplied"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="StoreReadiness" authenticate="anonymous-all" allow-remote="false">
+        <description>What a store needs before it sells, read only: each finding with its area (store, site, delivery, tax,
+            content; later phases add catalog, theme, payments and support), whether it blocks or warns, its message and the
+            section that fixes it (general, sites, facilities, emails, settings). For a user it takes productStoreId, with
+            COMMERCE_VIEW in the store's organization (a store-limited staff member's own stores). As the shop app's PASS
+            readiness (PublicApps.js) it takes input {siteId, app, targetId: the store} and answers result {checks: [{name,
+            ready}]} without the messages. It writes no setting or site field.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="ready" type="Boolean"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="checked" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('checkStoreReadiness', context)"/>
+            <set field="productStoreId" from="checked.productStoreId"/>
+            <set field="ready" from="checked.ready"/>
+            <set field="findings" from="checked.findings"/>
+            <set field="result" from="checked.result"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreOptions" allow-remote="false">
+        <description>The options a store form may choose, the values its save accepts, searched by term, with the selected
+            value's label: facilities and staff of the store's (or the group's) organization, emailTemplates, orderChecks (the
+            registered OrderValidate services), documents (search documents, of typeEnumId), wikiSpaces (not private),
+            taxGateways, settingTypes (the ones staff set) and groupStores (the user's stores, of the group's organization).
+            Refuses an unknown choice.</description>
+        <in-parameters>
+            <parameter name="choice" required="true"/>
+            <parameter name="productStoreId"/>
+            <parameter name="productStoreGroupId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="typeEnumId"/>
+            <parameter name="term"/>
+            <parameter name="selected"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="options" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdmin.js').execute('findStoreOptions', context)"/>
+            <set field="options" from="found.options"/>
+        </actions>
+    </service>
+</services>
