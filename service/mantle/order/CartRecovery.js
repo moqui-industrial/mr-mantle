@@ -295,7 +295,9 @@ function runRecovery(p) {
                 .condition("revokedDate", "is-null", null)
                 .condition("lastActivityDate", "less-equals", new Date(at - pol.delayMinutes * 60000))
                 .condition("lastActivityDate", "greater-equals", new Date(at - pol.retentionDays * DAY_MS))
-                .orderBy("lastActivityDate")
+                // newest first: the carts just past the delay are the ones due, and the ones already handled in the window
+                // (most of them, a run every ten minutes) never crowd them out of the limit
+                .orderBy("-lastActivityDate")
                 .limit(limits.carts)
                 .list()
         )

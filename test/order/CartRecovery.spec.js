@@ -5,14 +5,16 @@
 // failing send does not stop the batch, and a second run sends nothing more (one mail per cart and window, the ledger's key);
 // the store's delay is Carts' abandonment; the link restores the cart for its own signed-in account once, repriced with the
 // unavailable line named and a new capability, a visitor signs in first and another account, a spent and an expired link reach
-// nothing; a completed checkout suppresses what was queued; a staff send needs COMMERCE_RECOVERY, a reason and an eligible
-// cart, previews the exact body and answers once per key. Standalone: spec-local organization, stores, sites, products,
+// nothing; a completed checkout, the shopper coming back or cart reminders turned off suppresses what was queued; a staff
+// send needs COMMERCE_RECOVERY, a reason, the store (another organization's operator reaches nothing) and an eligible cart,
+// previews the exact body and answers once per key. Standalone: spec-local organization, stores, sites, products,
 // accounts and carts made directly. Run: ./moq test mr-mantle --spec CartRecovery
 const O = "mantle.order.StoreOperationsServices."
 const capture = ec.factory.getTool("MailCapture")
 const prefix = "CRCV"
 const ids = {
     org: prefix + "_ORG",
+    otherOrg: prefix + "_ORG_B",
     store: prefix + "_STORE",
     storeB: prefix + "_STORE_B",
     site: prefix + "_SITE",
@@ -90,13 +92,13 @@ function consent(partyId, productStoreId) {
         evidenceText: "Cart recovery spec"
     })
 }
-function staff(kind, permissions) {
+function staff(kind, permissions, organizationPartyId = ids.org) {
     const id = prefix + "_" + kind.toUpperCase()
     person(id, kind)
     make("mantle.party.PartyRelationship", {
         partyRelationshipId: id,
         fromPartyId: id,
-        toPartyId: ids.org,
+        toPartyId: organizationPartyId,
         relationshipTypeEnumId: "PrtAgent",
         fromDate: 0
     })
@@ -198,6 +200,9 @@ spec({
             make("mantle.party.Party", {partyId: ids.org, partyTypeEnumId: "PtyOrganization"})
             make("mantle.party.Organization", {partyId: ids.org, organizationName: "Recovery organization"})
             make("mantle.party.PartyRole", {partyId: ids.org, roleTypeId: "OrgInternal"})
+            make("mantle.party.Party", {partyId: ids.otherOrg, partyTypeEnumId: "PtyOrganization"})
+            make("mantle.party.Organization", {partyId: ids.otherOrg, organizationName: "Recovery other organization"})
+            make("mantle.party.PartyRole", {partyId: ids.otherOrg, roleTypeId: "OrgInternal"})
             make("moqui.basic.email.EmailServer", {
                 emailServerId: "CRCV_SMTP",
                 smtpHost: "127.0.0.1",
@@ -269,6 +274,12 @@ spec({
                 "COMMERCE_STORE_EDIT"
             ])
             users.reader = staff("reader", ["COMMERCE_VIEW", "COMMERCE_ORDER_VIEW"])
+            // another organization's operator, every recovery permission but not this store
+            users.outsider = staff(
+                "outsider",
+                ["COMMERCE_VIEW", "COMMERCE_ORDER_VIEW", "COMMERCE_RECOVERY", "COMMERCE_STORE_EDIT"],
+                ids.otherOrg
+            )
             cart("ok", {
                 partyId: ids.buyer,
                 lines: [
@@ -456,7 +467,7 @@ feature("the link restores the cart for its own account once, repriced with the 
 })
 
 feature(
-    "a completed checkout suppresses the queued recovery; a staff send needs COMMERCE_RECOVERY, a reason and an eligible cart, once per key",
+    "a completed checkout, the shopper back or reminders turned off suppress a queued recovery; a staff send needs COMMERCE_RECOVERY, a reason, the store and an eligible cart, once per key",
     {
         when() {
             capture.clear()
@@ -491,7 +502,49 @@ feature(
                 reason: "Try",
                 operationKey: "CRCV-SEND-3"
             })
+            const outsiderRead = run(users.outsider, O + "get#CartRecovery", {orderId: manual})
+            const outsiderSend = run(users.outsider, O + "send#CartRecovery", {
+                orderId: manual,
+                reason: "Try",
+                operationKey: "CRCV-SEND-4"
+            })
+            // queued, then the shopper came back to one cart and turned cart reminders off for the other: both suppressed
+            const back = system(() => cart("back", {partyId: ids.buyer}))
+            const backQueued = run(users.operator, O + "queue#CartRecovery", {orderId: back, sendNow: false})
+            system(() =>
+                call("update#mantle.order.StoreCartAccess", {cartAccessId: back, lastActivityDate: ec.user.nowTimestamp})
+            )
+            const backAttempt = run(users.operator, "mantle.party.MessageServices.attempt#Delivery", {
+                deliveryId: backQueued.deliveryId
+            })
+            const withdrawn = system(() => cart("withdrawn", {partyId: ids.buyer}))
+            const withdrawnQueued = run(users.operator, O + "queue#CartRecovery", {orderId: withdrawn, sendNow: false})
+            system(() =>
+                call("mantle.party.ConsentServices.store#PartyConsent", {
+                    partyId: ids.buyer,
+                    purposeEnumId: "PcpCartReminder",
+                    statusId: "PconWithdrawn",
+                    contactListId: ec.resource
+                        .script("component://mr-mantle/service/mantle/public/StoreTopics.js")
+                        .topicList("cartReminders", ids.store, false),
+                    sourceEnumId: "PcsForm",
+                    evidenceText: "Cart recovery spec: turned off",
+                    updateSolicitation: false
+                })
+            )
+            const withdrawnAttempt = run(users.operator, "mantle.party.MessageServices.attempt#Delivery", {
+                deliveryId: withdrawnQueued.deliveryId
+            })
+            const lastError = deliveryId => one("mantle.party.MessageDelivery", {deliveryId})?.lastError
             return {
+                backError: lastError(backQueued.deliveryId),
+                withdrawnError: lastError(withdrawnQueued.deliveryId),
+                outsiderRead,
+                outsiderSend,
+                backQueued,
+                backAttempt,
+                withdrawnQueued,
+                withdrawnAttempt,
                 queued,
                 attempted,
                 late: one("mantle.party.MessageDelivery", {deliveryId: queued.deliveryId}),
@@ -519,6 +572,12 @@ feature(
             r.retry.alreadyApplied == true && r.retry.deliveryId == r.sent.deliveryId
             code(r.secondKey) == "ALREADY_SENT"
             code(r.guest) == "GUEST"
+            code(r.outsiderRead) == "RECORD_UNAVAILABLE"
+            code(r.outsiderSend) == "RECORD_UNAVAILABLE"
+            r.backQueued.queued == true && r.backAttempt.stateEnumId == "MdsSuppressed"
+            r.withdrawnQueued.queued == true && r.withdrawnAttempt.stateEnumId == "MdsSuppressed"
+            r.backError == "The shopper came back to the cart"
+            r.withdrawnError == "No consent for this message"
             r.mails == 1
         }
     }
