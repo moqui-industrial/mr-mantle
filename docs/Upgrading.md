@@ -70,7 +70,11 @@ adds the new columns, and stop it again. Each row gets a key made of its site an
 the sequence gives new pages numeric ids, so these never collide), and the key moves to it. The role becomes optional and
 unique within its site:
 
-PostgreSQL (the constraint name is the one the query above found, usually `public_site_page_pkey`):
+The table check may have made the `PASS_PAGE_ROLE` index already (the old key kept site and role unique), so each step
+below makes it only when it is missing.
+
+PostgreSQL (the constraint name is the one the query above found, usually `public_site_page_pkey`; `IF NOT EXISTS` skips
+an index the table check made):
 
 ```sql
 BEGIN;
@@ -87,6 +91,13 @@ MySQL (names as the database has them; the table changes are not transactional, 
 ```sql
 UPDATE PUBLIC_SITE_PAGE SET SITE_PAGE_ID = LEFT(CONCAT(SITE_ID, '_', PAGE_ROLE), 40) WHERE SITE_PAGE_ID IS NULL;
 ALTER TABLE PUBLIC_SITE_PAGE DROP PRIMARY KEY, MODIFY PAGE_ROLE VARCHAR(40) NULL, ADD PRIMARY KEY (SITE_PAGE_ID);
+SELECT INDEX_NAME FROM information_schema.STATISTICS
+ WHERE TABLE_SCHEMA = DATABASE() AND UPPER(TABLE_NAME) = 'PUBLIC_SITE_PAGE' AND UPPER(INDEX_NAME) = 'PASS_PAGE_ROLE';
+```
+
+MySQL has no `IF NOT EXISTS` for an index: only when that last query lists nothing, make it:
+
+```sql
 CREATE UNIQUE INDEX PASS_PAGE_ROLE ON PUBLIC_SITE_PAGE (SITE_ID, PAGE_ROLE);
 ```
 

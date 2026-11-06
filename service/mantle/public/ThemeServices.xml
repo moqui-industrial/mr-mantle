@@ -261,9 +261,10 @@
     <service verb="store" noun="SitePage" allow-remote="false">
         <description>A new page of a site's Shop (siteId, title, route, locale, template, policy role, SEO; its text a new page of
             the store's page space, which is made with restrictUpdate when the store has none), a page's binding fields
-            (live at once on a published page, the site's generation advanced), or a new version of its text (pageText,
+            (on a published or scheduled page a publication: COMMERCE_PUBLISH and expectedRevision, the page's publicationRevision
+            advanced, live at once on a published page with the site's generation advanced), or a new version of its text (pageText,
             versionNote; with baseVersionName a page saved since by someone else answers conflict). Saving never publishes.
-            Refuses a taken route (ROUTE_TAKEN) or role (ROLE_TAKEN), a Forum role (ROLE_RESERVED), a stale stamp
+            Refuses a taken route (ROUTE_TAKEN) or role (ROLE_TAKEN), a Forum role (ROLE_RESERVED), a stale stamp or publication revision
             (REVISION_STALE), a store page space without restrictUpdate (SPACE_NOT_RESTRICTED) and values out of shape
             (VALUE_INVALID, SCHEME_REFUSED). COMMERCE_THEME_EDIT and the site's store.</description>
         <in-parameters>
@@ -283,6 +284,7 @@
             <parameter name="baseVersionName"/>
             <parameter name="force" type="Boolean"/>
             <parameter name="expectedLastUpdatedStamp"/>
+            <parameter name="expectedRevision" type="Integer"/>
             <parameter name="changeReason"/>
         </in-parameters>
         <out-parameters>
