@@ -32,7 +32,7 @@
         </actions>
     </service>
     <service verb="change" noun="SubscriptionMethod" authenticate="anonymous-all" allow-remote="false">
-        <description>changeSubscriptionMethod (ChangeMethod): another of the account's own cards kept at one of the store's off-session gateways, with consent (consent: true) to renewal charges of it, at the subscription's revision; a renewal waiting for the customer is charged again at once. Refuses a card that is not the account's or cannot renew (VALUE_INVALID), no consent, a stale revision (STALE_REVISION) and a subscription that does not renew (NOT_RENEWING).</description>
+        <description>changeSubscriptionMethod (ChangeMethod): another of the account's own cards kept at one of the store's off-session gateways, with consent (consent: true) to renewal charges of it, at the subscription's revision; the consent committed first, then a renewal waiting for the customer (or whose retries ran out) is charged again at once. Refuses a card that is not the account's or cannot renew (VALUE_INVALID), no consent, a stale revision (STALE_REVISION) and a subscription that does not renew (NOT_RENEWING).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
@@ -48,7 +48,7 @@
         </actions>
     </service>
     <service verb="resume" noun="Renewal" authenticate="anonymous-all" allow-remote="false">
-        <description>resumeRenewal (ResolveRenewal): a renewal waiting for the customer or a retry charged again now with the subscription's card (a payment in flight is looked up, never charged again under a new key). Refuses without a recorded consent for the card (CONSENT_REQUIRED).</description>
+        <description>resumeRenewal (ResolveRenewal): a renewal waiting for the customer or a retry, or the current period's renewal whose retries ran out (the customer's recovery), charged again now with the subscription's card (a payment in flight is looked up, never charged again under a new key). Refuses without a recorded consent for the card (CONSENT_REQUIRED).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

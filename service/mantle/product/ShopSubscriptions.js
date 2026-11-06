@@ -308,7 +308,7 @@ function summary(contract) {
         .filter(sub => !sub.accessRevokedDate)
         .reduce((latest, sub) => Math.max(latest, ms(sub.thruDate) ?? 0), 0)
     const hasAccess = subs.some(accessActive)
-    const waiting = rows(OCC, {contractId: contract.contractId}).find(row => retryStates.includes(row.stateEnumId))
+    const waiting = rows(OCC, {contractId: contract.contractId}).find(row => reopenable(contract, row))
     const offer = contract.offerId ? one(OFFER, {offerId: contract.offerId}) : null
     const term = termOf(contract.productId, contract.subscriptionResourceId)
     const renews = contract.autoRenew === "Y" && renewableStates.includes(contract.stateEnumId)
@@ -397,7 +397,7 @@ function getSubscription(p) {
                 stateText: enumText(row.stateEnumId),
                 amount: money(contract.priceAmount ?? 0, contract.currencyUomId),
                 nextRetryText: row.stateEnumId === "SrsRetry" ? lib.dateText(row.nextRetryDate) : "",
-                actionNeeded: retryStates.includes(row.stateEnumId)
+                actionNeeded: reopenable(contract, row)
             })
         )
     )
@@ -576,8 +576,15 @@ function activate(p) {
     else {
         const checkout = one(C, {orderId: p.orderId, statusId: "ScoCompleted"})
         if (!checkout) throw new Error("Order " + p.orderId + " is not a Shop order")
-        if (checkout.renewContractId) contract = find(CONTRACT, {contractId: checkout.renewContractId}).forUpdate(true).one()
-        else contract = contractOfLine(checkout, item)
+        // another prepaid term extends its contract for that contract's product only; any other paid-access line of the
+        // checkout is a contract of its own (review R3)
+        const renewing = checkout.renewContractId
+            ? find(CONTRACT, {contractId: checkout.renewContractId}).forUpdate(true).one()
+            : null
+        contract =
+            renewing && renewing.productId === item.productId && renewing.customerPartyId === checkout.customerPartyId
+                ? renewing
+                : contractOfLine(checkout, item)
     }
     const terms = rows(SUB + "ProductSubscriptionResource", {productId: item.productId}).filter(row => lib.active(row))
     if (!terms.length) throw new Error("Product " + item.productId + " grants no paid access")
@@ -714,6 +721,33 @@ const renewable = contract =>
     !!contract.baseOrderId &&
     !!contract.paidThroughDate
 const dueNow = contract => (ms(contract.nextRenewalDate || contract.paidThroughDate) ?? Infinity) <= nowMs()
+// A step's contract and occurrence, locked in that order (as claim and cancel#Subscription take them), so a cancellation
+// and a renewal step never interleave (review R2).
+function lockedOccurrence(occurrenceId) {
+    const plain = occurrenceId ? one(OCC, {occurrenceId}) : null
+    if (!plain) return {contract: null, occurrence: null}
+    const contract = find(CONTRACT, {contractId: plain.contractId}).forUpdate(true).one()
+    return {contract, occurrence: find(OCC, {occurrenceId}).forUpdate(true).one()}
+}
+// A contract no longer renewing (cancelled): its unstarted occurrence is closed and its open order cancelled, never charged.
+function closedIfStopped(contract, occurrence) {
+    if (contract && contract.stateEnumId !== "ScsCancelled" && !contract.cancelDate) return false
+    if (occurrence.orderId && one(ORDER, {orderId: occurrence.orderId})?.statusId === "OrderOpen")
+        call("mantle.order.OrderServices.cancel#Order", {orderId: occurrence.orderId})
+    if (!doneStates.includes(occurrence.stateEnumId))
+        call("update#" + OCC, {occurrenceId: occurrence.occurrenceId, stateEnumId: "SrsCancelled", nextRetryDate: null})
+    return true
+}
+// Whether the customer can have a renewal tried again (resume#Renewal, change#SubscriptionMethod): one waiting for a retry
+// or for the customer, or the current period's renewal whose retries ran out, the customer's recovery action after retry
+// exhaustion (design-shop §10.2; review R1).
+const reopenable = (contract, occurrence) =>
+    retryStates.includes(occurrence.stateEnumId) ||
+    (occurrence.stateEnumId === "SrsFailed" &&
+        !!contract &&
+        contract.stateEnumId === "ScsPastDue" &&
+        !contract.cancelDate &&
+        ms(occurrence.periodStartDate) === ms(contract.paidThroughDate))
 // dispatch#Renewal (create_RecurringOrders, for a Shop-linked base): the contract's due period claimed and advanced; a base
 // of no contract is not Shop's ({handled: false}, the native path's).
 function dispatch(p) {
@@ -747,9 +781,9 @@ function claimStep(p) {
 // prepare: the renewal order, once: the base cloned with copyPayment=false (OrderOpen; its tax figured by the order's own
 // change handling), not a template.
 function prepareStep(p) {
-    const occurrence = find(OCC, {occurrenceId: p.occurrenceId}).forUpdate(true).one()
-    if (occurrence.orderId || doneStates.includes(occurrence.stateEnumId)) return {}
-    const contract = one(CONTRACT, {contractId: occurrence.contractId})
+    const {contract, occurrence} = lockedOccurrence(p.occurrenceId)
+    if (!occurrence || occurrence.orderId || doneStates.includes(occurrence.stateEnumId)) return {}
+    if (closedIfStopped(contract, occurrence)) return {}
     const orderId = call("mantle.order.OrderServices.clone#Order", {
         baseOrderId: contract.baseOrderId,
         copyPayment: false,
@@ -770,8 +804,14 @@ const orderTotal = orderId =>
 // no charge: the occurrence waits for the customer (CONSENT_REQUIRED). An attempt whose outcome is pending or unknown is
 // kept, never replaced.
 function payStep(p) {
-    const occurrence = find(OCC, {occurrenceId: p.occurrenceId}).forUpdate(true).one()
-    if (!occurrence.orderId || doneStates.includes(occurrence.stateEnumId) || occurrence.stateEnumId === "SrsPlaced") return {}
+    const {contract, occurrence} = lockedOccurrence(p.occurrenceId)
+    if (
+        !occurrence ||
+        !occurrence.orderId ||
+        doneStates.includes(occurrence.stateEnumId) ||
+        occurrence.stateEnumId === "SrsPlaced"
+    )
+        return {}
     if (occurrence.paymentId) {
         const state = attempts().stateOf(one(P, {paymentId: occurrence.paymentId}))
         if (["approved", "pending", "unknown"].includes(state)) {
@@ -780,7 +820,8 @@ function payStep(p) {
             return {paymentId: occurrence.paymentId}
         }
     }
-    const contract = one(CONTRACT, {contractId: occurrence.contractId})
+    // a cancellation that came first: nothing is charged
+    if (closedIfStopped(contract, occurrence)) return {}
     if (!consentHolds(contract)) {
         call("update#" + OCC, {
             occurrenceId: occurrence.occurrenceId,
@@ -867,11 +908,10 @@ function authorizeStep(p) {
 // offer's days from the first failure, or failed once they are used up (the contract past due, access ending with the paid
 // term: no grace); pending or unknown, nothing.
 function applyStep(p) {
-    const occurrence = find(OCC, {occurrenceId: p.occurrenceId}).forUpdate(true).one()
+    const {contract, occurrence} = lockedOccurrence(p.occurrenceId)
     if (!occurrence?.paymentId || occurrence.stateEnumId !== "SrsCharging") return {state: occurrence?.stateEnumId}
     const payment = one(P, {paymentId: occurrence.paymentId})
     const state = attempts().stateOf(payment)
-    const contract = one(CONTRACT, {contractId: occurrence.contractId})
     if (state === "approved") {
         attempts().record(payment.paymentId, "authorized", "approved")
         const order = one(ORDER, {orderId: occurrence.orderId})
@@ -1029,7 +1069,7 @@ function runRenewals(p) {
 // renewal waiting for the customer is tried again at once.
 function changeSubscriptionMethod(p) {
     const reached = reach(p)
-    const contract = contractReached(reached, p.contractId, true)
+    const contract = contractReached(reached, p.contractId)
     checkRevision(contract, p.expectedRevision)
     if (contract.autoRenew !== "Y" || !renewableStates.includes(contract.stateEnumId))
         refuse("Unprocessable", "NOT_RENEWING", "This subscription does not renew")
@@ -1038,30 +1078,58 @@ function changeSubscriptionMethod(p) {
     )
     if (!method) invalid("paymentMethodId", "Choose one of your cards")
     if (!yes(p.consent)) invalid("consent", "Agree to renewal charges of this card")
-    call("update#" + CONTRACT, {
+    // committed in a transaction of its own (at the revision, under the contract's lock) before a waiting renewal's steps,
+    // each in its own transaction, read it (review R1)
+    const recorded = step("consent", {
         contractId: contract.contractId,
+        expectedRevision: text(p.expectedRevision),
         paymentMethodId: method.paymentMethodId,
-        consentDate: ec.user.nowTimestamp,
-        consentMethodId: method.paymentMethodId,
-        consentTermsVersion: contract.termsVersion || null,
-        consentEvidence: lib.hash({
-            contractId: contract.contractId,
-            paymentMethodId: method.paymentMethodId,
-            price: dec(contract.priceAmount).toString(),
-            visitId: ec.user.visitId || null,
-            at: nowMs()
-        }),
-        // a card kept outside a purchase has no customer-initiated original of its own
-        consentPaymentId: method.paymentMethodId === contract.consentMethodId ? contract.consentPaymentId : null,
-        consentEndedReason: null,
-        revision: Number(contract.revision || 1) + 1
+        visitId: ec.user.visitId || null
     })
+    if (recorded.error) stepRefusal(recorded.error)
     resumeWaiting(contract.contractId)
     return getSubscription(Object.assign({}, p, {contractId: contract.contractId}))
 }
+// consent: the contract's card and the customer's consent to renewal charges of it, at its revision.
+function consentStep(p) {
+    const contract = find(CONTRACT, {contractId: p.contractId}).forUpdate(true).one()
+    checkRevision(contract, p.expectedRevision)
+    call("update#" + CONTRACT, {
+        contractId: contract.contractId,
+        paymentMethodId: p.paymentMethodId,
+        consentDate: ec.user.nowTimestamp,
+        consentMethodId: p.paymentMethodId,
+        consentTermsVersion: contract.termsVersion || null,
+        consentEvidence: lib.hash({
+            contractId: contract.contractId,
+            paymentMethodId: p.paymentMethodId,
+            price: dec(contract.priceAmount).toString(),
+            visitId: p.visitId || null,
+            at: nowMs()
+        }),
+        // a card kept outside a purchase has no customer-initiated original of its own
+        consentPaymentId: p.paymentMethodId === contract.consentMethodId ? contract.consentPaymentId : null,
+        consentEndedReason: null,
+        revision: Number(contract.revision || 1) + 1
+    })
+    return {}
+}
+// A step's refusal answered as the operation's own (its code and kind).
+function stepRefusal(message) {
+    if (/STALE_REVISION:/.test(message)) refuse("Conflict", "STALE_REVISION", "The subscription changed. Review it and try again")
+    throw new Error(firstLine(message))
+}
+// The contract's renewals the customer can have tried again, each reopened in a transaction of its own (so the steps that
+// follow, each in their own, see it) and advanced at once.
 function resumeWaiting(contractId) {
-    for (const row of rows(OCC, {contractId}).filter(row => retryStates.includes(row.stateEnumId))) {
-        call("update#" + OCC, {occurrenceId: row.occurrenceId, nextRetryDate: ec.user.nowTimestamp})
+    const contract = one(CONTRACT, {contractId})
+    for (const row of rows(OCC, {contractId}).filter(row => reopenable(contract, row))) {
+        const reopened = step("reopen", {occurrenceId: row.occurrenceId})
+        if (reopened.error) {
+            ec.logger.error("Shop renewal " + row.occurrenceId + " not reopened: " + firstLine(reopened.error))
+            continue
+        }
+        if (!reopened.result.reopened) continue
         try {
             advance(row.occurrenceId, "resume")
         } catch (error) {
@@ -1069,6 +1137,18 @@ function resumeWaiting(contractId) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " not resumed: " + firstLine(error.message))
         }
     }
+}
+// reopen: under the contract's and occurrence's locks, a renewal the customer can have tried again due now (one whose
+// retries ran out back to a retry, its next attempt counted as after the last).
+function reopenStep(p) {
+    const {contract, occurrence} = lockedOccurrence(p.occurrenceId)
+    if (!occurrence || !reopenable(contract, occurrence)) return {}
+    call("update#" + OCC, {
+        occurrenceId: occurrence.occurrenceId,
+        stateEnumId: occurrence.stateEnumId === "SrsFailed" ? "SrsRetry" : occurrence.stateEnumId,
+        nextRetryDate: ec.user.nowTimestamp
+    })
+    return {reopened: true}
 }
 // resume#Renewal (ResolveRenewal): a renewal waiting for the customer or a retry, charged again now with the contract's
 // card (a renewal in flight is answered as it is); without consent it stays waiting (CONSENT_REQUIRED).
@@ -1092,7 +1172,10 @@ function cancelSubscription(p) {
     if (contract.stateEnumId === "ScsCancelled") return getSubscription(p)
     if (contract.autoRenew !== "Y" || !renewableStates.includes(contract.stateEnumId))
         refuse("Unprocessable", "NOT_RENEWING", "This subscription does not renew")
-    const occurrences = rows(OCC, {contractId: contract.contractId}).filter(row => !doneStates.includes(row.stateEnumId))
+    // the occurrences locked after the contract, as the renewal steps take them (review R2)
+    const occurrences = Array.from(find(OCC, {contractId: contract.contractId}).forUpdate(true).list()).filter(
+        row => !doneStates.includes(row.stateEnumId)
+    )
     for (const row of occurrences)
         if (row.stateEnumId === "SrsPlaced" || (row.stateEnumId === "SrsCharging" && row.paymentId))
             refuse("Conflict", "RENEWAL_IN_PROGRESS", "A renewal payment is being processed. Try again in a few minutes")
@@ -1220,7 +1303,9 @@ const steps = {
     pay: payStep,
     authorize: authorizeStep,
     apply: applyStep,
-    failed: failedStep
+    failed: failedStep,
+    consent: consentStep,
+    reopen: reopenStep
 }
 const operations = {
     getSubscriptions,

@@ -660,3 +660,95 @@ feature("another recurring order keeps today's behaviour; a merge carries a cont
         r.merged.consentEndedReason == "PARTY_MERGED"
     }
 })
+
+feature("review: retries run out, then a changed card's consent charges the renewal once; another's contract is not reachable", {
+    when() {
+        // a second subscription of the buyer, bought as the first
+        op(ids.buyer, R + "begin#SubscriptionPurchase", {offerId: state.offerId})
+        op(ids.buyer, CHECKOUT + "select#Payment", {paymentOptionId: "PiCreditCard"})
+        const revision = op(ids.buyer, CHECKOUT + "get#Checkout", {}).result.checkout.revision
+        const submitted = op(ids.buyer, CHECKOUT + "submit#Checkout", {expectedRevision: revision, recurringConsent: true}).result
+        const row = one("mantle.order.StoreCheckout", {returnReference: submitted.checkout.reference})
+        system(() => call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId, lastCheckDate: null}))
+        op(ids.buyer, CHECKOUT + "get#CheckoutPaymentResult", {reference: submitted.checkout.reference, key: submitted.returnKey})
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+        const contract = one(SUB + "StoreRecurringContract", {originOrderId: row.orderId})
+        const contractId = contract.contractId
+        // its card declines: the renewal fails, and its last retry fails too (retries run out)
+        system(() =>
+            call("update#mantle.account.method.PaymentMethod", {
+                paymentMethodId: contract.paymentMethodId,
+                paymentGatewayConfigId: ids.decline
+            })
+        )
+        dueNow(contractId)
+        system(() => call(R + "dispatch#Renewal", {baseOrderId: contract.baseOrderId}))
+        const failing = occurrences(contractId)[0]
+        system(() => {
+            call("update#" + SUB + "StoreRenewalOccurrence", {
+                occurrenceId: failing.occurrenceId,
+                attemptCount: 3,
+                nextRetryDate: new Date(Number(ec.user.nowTimestamp) - 1000)
+            })
+            call(R + "run#Renewals", {})
+        })
+        const exhausted = one(SUB + "StoreRenewalOccurrence", {occurrenceId: failing.occurrenceId})
+        const listed = op(ids.buyer, R + "get#Subscription", {contractId}).result
+        const paymentsExhausted = list("mantle.account.payment.Payment", {orderId: failing.orderId})
+        // the customer's recovery: the card working again, chosen with consent; the renewal is charged once at once
+        system(() =>
+            call("update#mantle.account.method.PaymentMethod", {
+                paymentMethodId: contract.paymentMethodId,
+                paymentGatewayConfigId: ids.hosted
+            })
+        )
+        const current = one(SUB + "StoreRecurringContract", {contractId})
+        const stale = op(ids.buyer, R + "change#SubscriptionMethod", {
+            contractId,
+            paymentMethodId: contract.paymentMethodId,
+            consent: true,
+            expectedRevision: "0"
+        })
+        const changed = op(ids.buyer, R + "change#SubscriptionMethod", {
+            contractId,
+            paymentMethodId: contract.paymentMethodId,
+            consent: true,
+            expectedRevision: current.revision
+        })
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+        // a resume now answers as it is: nothing is charged again
+        const resumed = op(ids.buyer, R + "resume#Renewal", {contractId})
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+        return {
+            contract,
+            exhausted,
+            listed,
+            paymentsExhausted,
+            stale,
+            changed,
+            resumed,
+            after: one(SUB + "StoreRecurringContract", {contractId}),
+            occurrence: one(SUB + "StoreRenewalOccurrence", {occurrenceId: failing.occurrenceId}),
+            payments: list("mantle.account.payment.Payment", {orderId: failing.orderId}),
+            subs: list(SUB + "Subscription", {resourceInstanceId: contractId}),
+            // the merged party's contract (the previous feature's) is another customer's
+            forged: op(ids.buyer, R + "get#Subscription", {contractId: prefix + "_MERGED"})
+        }
+    },
+    then(r) {
+        r.exhausted.stateEnumId == "SrsFailed"
+        r.listed.subscription.actionNeeded == true
+        r.paymentsExhausted.length == 2
+        code(r.stale) == "STALE_REVISION"
+        r.changed.error == null
+        r.resumed.error == null
+        r.after.consentDate != null && r.after.consentMethodId == r.contract.paymentMethodId
+        r.after.stateEnumId == "ScsActive"
+        r.occurrence.stateEnumId == "SrsActivated"
+        r.payments.length == 3
+        r.payments.filter(payment => ["PmntAuthorized", "PmntDelivered"].includes(payment.statusId)).length == 1
+        r.subs.length == 2
+        Number(r.after.paidThroughDate) == Math.max(...r.subs.map(sub => Number(sub.thruDate)))
+        code(r.forged) == "NOT_AVAILABLE"
+    }
+})

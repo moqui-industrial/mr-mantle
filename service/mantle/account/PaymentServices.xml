@@ -1636,6 +1636,18 @@ along with this software (see the LICENSE.md file). If not, see
                         <continue/>
                     </if>
                 </if>
+                <!-- a declined payment whose payment attempt is settled (its coordinator's outcome: a Shop renewal's or
+                    checkout's failed attempt, followed by a new payment) is closed, never authorized again here (mr-pass
+                    impl-shop P7 review); a declined payment with no attempt is authorized as before -->
+                <if condition="payment.statusId == 'PmntDeclined'">
+                    <entity-find-count entity-name="mantle.account.payment.PortalPaymentAttempt" count-field="settledAttemptCount" disable-authz="true">
+                        <econdition field-name="paymentId" from="payment.paymentId"/>
+                        <econdition field-name="settledDate" operator="is-not-null"/></entity-find-count>
+                    <if condition="settledAttemptCount &gt; 0">
+                        <log message="Not authorizing payment ${payment.paymentId}: its declined payment attempt is settled"/>
+                        <continue/>
+                    </if>
+                </if>
                 <if condition="!payment.paymentMethodId &amp;&amp; !payment.finAccountId">
                     <log message="Not authorizing payment ${payment.paymentId} with no paymentMethodId or finAccountId"/>
                     <continue/>
