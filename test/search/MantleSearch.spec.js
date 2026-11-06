@@ -100,7 +100,9 @@ function settle() {
 }
 
 // the universal search for a name every organization in the demo data has, with the type facet
-const universalSearch = () => call("mantle.search.UniversalSearchServices.search#Universal", { q: "ziziwork", limit: 100, facets: ["entityType"] })
+// limit 500: a one-sided finance reader's total is the authorized page (F439, F446), so a page of 100 fills up in a full
+// run (Shop P5 review) and the limited total could no longer be less than the administrator's
+const universalSearch = () => call("mantle.search.UniversalSearchServices.search#Universal", { q: "ziziwork", limit: 500, facets: ["entityType"] })
 const generalSearch = () => call("mantle.GeneralServices.search#MantleFiltered", { indexName: "mantle", queryString: "Ziziwork", pageSize: 100 })
 
 feature("the sales fixture loads and its feed is indexed", {

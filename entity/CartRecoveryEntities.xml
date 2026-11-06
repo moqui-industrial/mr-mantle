@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Cart recovery (impl-commerce P10; design-commerce §6 CartDetail, §8 RecoveryPolicy; service/mantle/order/CartRecovery.js):
+    a recovery link's one-time token is the cart access row's recoveryTokenDigest (Shop P4 kept the field for it), with the
+    date it stops working; the sends are deliveries on the Comms ledger (MessageDelivery, source MdsrcCartRecovery), and the
+    policy is dated ProductStoreSetting rows. No record of its own. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <extend-entity entity-name="StoreCartAccess" package="mantle.order">
+    <field name="recoveryExpireDate" type="date-time"><description>When the recovery link's token stops working (the end of
+      the store's recovery window); a spent, expired or replaced token reaches nothing.</description></field>
+  </extend-entity>
+</entities>

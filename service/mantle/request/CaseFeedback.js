@@ -358,7 +358,9 @@ const isStaff = partyId =>
 // or per resolution episode), scheduled after the delay; else why none ({created: false, reason}).
 function createInvitation(p) {
     const requestId = p.requestId
-    const request = one(REQUEST, {requestId})
+    // the case locked, so the resolution rule's after-commit call and a direct call make one invitation by its key
+    // (FORM_INV_KEY): the second waits for the first to commit, then finds it
+    const request = find(REQUEST, {requestId}).forUpdate(true).one()
     if (!request || !one(PROFILE, {requestId})) return {created: false, reason: "NOT_A_CASE"}
     if (request.statusId !== "ReqCompleted") return {created: false, reason: "NOT_RESOLVED"}
     const parties = cases.partiesOf(requestId)

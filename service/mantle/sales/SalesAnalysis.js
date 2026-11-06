@@ -10,6 +10,7 @@
 const policy = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
 const reports = ec.resource.script("component://mr-mantle/service/mantle/ledger/FinanceReports.js")
 const {find, denied} = policy
+const access = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
 const LIMIT = 2000
 const PLACED = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderSent", "OrderCompleted", "OrderHold"]
 const ISSUED = ["InvoiceFinalized", "InvoiceSent", "InvoiceAcked", "InvoicePmtRecvd", "InvoiceWriteOff"]
@@ -254,12 +255,28 @@ function analysis(p) {
 }
 // The organizations of the search-backed sales summaries (get#SalesOrderSummary and the others): those named, each one
 // the user may read, else every one the user works in; refuses a user without report read.
+//
+// Store-scoped reads (impl-commerce P11, F21; X11): a user without report read (ACCOUNTING_VIEW) who holds COMMERCE_VIEW
+// is answered for productStoreIds all in their store scope (StoreAdmin.js: their organizations' stores, a store-limited
+// staff member's own; one outside it RECORD_UNAVAILABLE), read as the stores' organizations (an organization named must be
+// one of them), with the costs withheld unless PRODUCT_COST_VIEW (costWithheld). A holder of ACCOUNTING_VIEW is answered
+// as before, whatever stores they name.
 function organizations(p) {
+    const named = Array.from(p.organizationPartyIds || []).filter(Boolean)
+    const storeIds = Array.from(new Set(Array.from(p.productStoreIds || []).filter(Boolean)))
+    if (storeIds.length && !policy.capabilities().reportRead && access.has("COMMERCE_VIEW"))
+        return storeOrganizations(named, storeIds)
     const scope = policy.scope({}, "reportRead")
     const allowed = scope.organizationPartyIds
-    const named = Array.from(p.organizationPartyIds || []).filter(Boolean)
     for (const id of named) if (!allowed.includes(id)) denied("ORGANIZATION_DENIED", "Accounting organization is not available")
-    return {organizationPartyIds: named.length ? named : allowed.length ? allowed : ["_NA_"]}
+    return {organizationPartyIds: named.length ? named : allowed.length ? allowed : ["_NA_"], costWithheld: false}
+}
+function storeOrganizations(named, storeIds) {
+    const stores = ec.resource.script("component://mr-mantle/service/mantle/product/StoreAdmin.js")
+    const s = stores.scope("view")
+    const owners = Array.from(new Set(storeIds.map(productStoreId => stores.storeOf(s, productStoreId).organizationPartyId)))
+    for (const id of named) if (!owners.includes(id)) denied("ORGANIZATION_DENIED", "Organization " + id + " is not the stores'")
+    return {organizationPartyIds: named.length ? named : owners, costWithheld: !access.has("PRODUCT_COST_VIEW")}
 }
 const operations = {analysis, organizations}
 ;({

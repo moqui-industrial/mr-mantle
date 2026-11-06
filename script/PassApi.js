@@ -22,11 +22,88 @@ const TOKEN_WRITES = [
     'addReturnEvidence',
     'withdrawCustomerReturn',
     // Shop P1: none yet; P4 adds the cart writes
+    // Shop P4: a cart's writes, authorized by the session's cart capability (input.token); the first add makes the cart
+    // with no capability yet (impl-shop F44: an anonymous write, as applyOptOut is), its creations rate limited by the
+    // requester
+    'addCartItem',
+    'updateCartItem',
+    'removeCartItem',
+    'applyPromoCode',
+    'removePromoCode',
+    // Shop P5: the checkout's writes and its capability reads (POSTs, F75), authorized by the session's cart capability
+    // (input.token), the checkout's reference and key (a provider's return, a refreshed frontend) or a guest's order link;
+    // getCart with them
+    'getCart',
+    'beginCheckout',
+    'getCheckout',
+    'resumeCheckout',
+    'setCheckoutContact',
+    'setCheckoutAddresses',
+    'getDeliveryOptions',
+    'selectDelivery',
+    'getPaymentOptions',
+    'selectPayment',
+    'submitCheckout',
+    'getCheckoutPaymentResult',
+    'getCheckoutPaymentForm',
+    'getOrderConfirmation',
+    // Shop P6: reads and writes a guest's order link (orderToken) or a list link's token (email preferences) authorizes,
+    // and the Support operations an order link admits (F27); the Support reads with a capability are POSTs (F75)
+    'findShopOrders',
+    'getShopOrder',
+    'getShopOrderDocument',
+    'getDownloads',
+    'issueDownload',
+    'getEmailPreferences',
+    'storeEmailPreferences',
+    'applyOneClickUnsubscribe',
+    'getCaseIntake',
+    'getReturnableOrder',
+    'requestCustomerReturn',
+    'requestOrderCancel',
+    // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
+    'recoverCart',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)
     e.moquiErrorKind = kind
     throw e
+}
+/* A ranged file (Shop P6, a granted download): Accept-Ranges, a 206 of the range asked or a 416 outside the file, the bytes
+   read as the authority (the file may sit in the database resource store). */
+function streamRanged(response, file) {
+    const range = file.range
+    response.setHeader('Cache-Control', 'no-store')
+    response.setHeader('Accept-Ranges', 'bytes')
+    response.setHeader(
+        'Content-Disposition',
+        'attachment; filename="' + String(file.filename).replace(/["\\\r\n]/g, '_') + '"',
+    )
+    if (range && range.unsatisfiable) {
+        response.setStatus(416)
+        response.setHeader('Content-Range', 'bytes */' + file.size)
+        return
+    }
+    const start = range ? range.start : 0
+    const end = range ? range.end : file.size - 1
+    if (range) {
+        response.setStatus(206)
+        response.setHeader('Content-Range', 'bytes ' + start + '-' + end + '/' + file.size)
+    }
+    response.setContentType(file.contentType)
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        // the framework's resource stream reads whole (no partial read, impl-shop F-SP6), so the range is cut from it
+        const stream = ec.resource.getLocationReference(file.location).openStream()
+        try {
+            const bytes = stream.readAllBytes()
+            response.write(start === 0 && end === file.size - 1 ? bytes : bytes.slice(start, end + 1))
+        } finally {
+            stream.close()
+        }
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
 }
 /* An answer of PassAuthority.handle as HTTP: the error envelope with its status, a file, or JSON. */
 function respond(response, answer) {
@@ -37,6 +114,11 @@ function respond(response, answer) {
         response.setHeader('Cache-Control', 'no-store')
         if (status === 429) response.setHeader('Retry-After', '10')
         response.write(JSON.stringify(body))
+        return
+    }
+    if (answer.download && answer.download.size != null) {
+        // Shop P6: a granted download, streamed in pieces with its byte range (206, or 416 outside the file)
+        streamRanged(response, answer.download)
         return
     }
     if (answer.download) {
@@ -73,6 +155,8 @@ function respond(response, answer) {
     response.write(JSON.stringify(answer.result))
 }
 ;({
+    // Shop P4: the list PassAuthority.js and PASS's Transport.js keep equal
+    TOKEN_WRITES,
     service(request, response) {
         const authority = ec.resource.script(
             'component://mr-mantle/script/PassAuthority.js',

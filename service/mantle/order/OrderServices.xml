@@ -579,6 +579,11 @@ General Order Placement and eCommerce Usage
             </if>
             <!-- if available inventory not required return now -->
             <if condition="!requireInventory"><return/></if>
+            <!-- a digital product has no physical stock, so a store's inventory requirement does not hold it back (mr-pass
+                impl-shop P6, F76); every other product type is checked as before -->
+            <entity-find-one entity-name="mantle.product.Product" value-field="checkedProduct" cache="true">
+                <field-map field-name="productId"/></entity-find-one>
+            <if condition="checkedProduct?.productTypeEnumId == 'PtDigital'"><return/></if>
             <!-- get current available inventory -->
             <service-call name="mantle.product.AssetServices.get#AvailableForOrder" out-map="availOut"
                     in-map="{productId:productId, orderId:orderId, orderPartSeqId:orderPartSeqId, orderItemSeqId:orderItemSeqId,
@@ -1133,6 +1138,16 @@ General Order Placement and eCommerce Usage
                 <description>If true make sure inventory is available, if false don't check. If null defer to ProductStore.requireInventory setting.</description></parameter>
         </in-parameters>
         <actions>
+            <!-- the promotion and code use limits, counted again under a lock of their rows, for any store order (impl-commerce
+                P7, F18: the one deliberate change to Mantle's default; an order whose promotions and codes set no limit takes no
+                lock and places as before). Before the status changes, so the parts being placed are those not yet placed. -->
+            <service-call name="mantle.product.StorePromotionServices.check#OrderPromotionLimits" out-map="promotionLimitsOut"
+                    in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}" disable-authz="true"/>
+            <if condition="promotionLimitsOut?.withinLimits === false">
+                <set field="promotionLimitText" from="promotionLimitsOut.exceeded.map((limit) =&gt; (limit.kind == 'code' ? 'code ' : '') + limit.label + ' allows ' + limit.limit + ' ' + limit.limitText + ' (' + limit.used + ' used, this order ' + limit.requested + ')').join('; ')"/>
+                <!-- NOTE: return with error=true causes TX rollback -->
+                <return error="true" message="PROMOTION_LIMIT_REACHED: Not placing order ${orderId}: ${promotionLimitText}. Reprice the order (its discount is taken off) and place it again."/>
+            </if>
             <service-call name="mantle.order.OrderServices.update#OrderStatus" out-map="context"
                     in-map="Object.assign({}, context, {statusId:'OrderPlaced', placedDate:placedDate})"/>
 
@@ -1284,13 +1299,15 @@ General Order Placement and eCommerce Usage
     </service>
     <service verb="hold" noun="Order" allow-remote="false">
         <description>Put an order (or one part) on hold for a reason (CX-ORDER-HOLD): an OrderHoldReason of the type
-            (OrderHoldType: Credit, Change, Purchase, Manual) with its source record and comment, and the order (or the
+            (OrderHoldType: Credit, Change, Purchase, Manual, Payment) with its source record and comment, and the order (or the
             part) to OrderHold when it is not already held. Reservations made when it was placed stay. The reason keeps the
             status to return to (returnStatusId, by default the status before the hold, so an order held before its
             approval goes back to Placed and its approval runs its checks again). A reason of the same type already open
             for the part is answered (alreadyHeld). Refuses an order that is not placed, processing, approved or held
             (ORDER_HOLD_STATE); a sent purchase order is first un-sent to Approved (D7), to which its release returns it. A
-            Credit reason is placed only by the credit policy (CreditServices.evaluate#OrderCredit); the other types need the
+            Credit reason is placed only by the credit policy (CreditServices.evaluate#OrderCredit) and a Payment reason
+            only by the payment reconciliation (ShopCheckoutServices, a capture failure or a mismatch after placement;
+            released with PAYMENT_HOLD_RELEASE); the other types need the
             permission their type names (enumCode), and a Change or Purchase reason may also be placed under the order's
             change permission for its direction (PURCHASE_ORDER_EDIT on a purchase part, ORDER_CHANGE_APPLY or
             SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. It
@@ -1313,7 +1330,9 @@ General Order Placement and eCommerce Usage
                 <field-map field-name="enumId" from="holdTypeEnumId"/></entity-find-one>
             <if condition="holdType?.enumTypeId != 'OrderHoldType'">
                 <return error="true" message="HOLD_TYPE_INVALID: Choose a hold type"/></if>
-            <if condition="holdTypeEnumId != 'OhtCredit' &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+            <!-- a Payment reason is placed only by the payment reconciliation (Shop P5, as Credit is by the credit policy):
+                it names the order's own payment exception -->
+            <if condition="!['OhtCredit', 'OhtPayment'].includes(holdTypeEnumId) &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
                     .holdAllowed(orderId, orderPartSeqId, holdTypeEnumId, holdType.enumCode)">
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
             <!-- Warehouse's lock order (F294, Packing.js lockOrders): the order parts (the one held, else all), then the

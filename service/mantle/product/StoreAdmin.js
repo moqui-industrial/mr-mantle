@@ -39,10 +39,22 @@ const historyLabels = Object.assign({storeName: "Name"}, policyFields, {
     carrierPartyId: "Ship option carrier",
     shipmentMethodEnumId: "Ship option method",
     paymentInstrumentEnumId: "Payment instrument",
-    paymentGatewayConfigId: "Payment gateway"
+    paymentGatewayConfigId: "Payment gateway",
+    // P6: the settings (each named by its type), the shipping gateway binding and the reasons
+    settingValue: "Value",
+    thruDate: "Ended",
+    changeReason: "Reason",
+    shippingGatewayConfigId: "Shipping gateway"
 })
 // The entities whose audit rows are a store's History (their first key field is the store).
-const historyEntities = [STORE, S + "ProductStoreShipOption", S + "ProductStorePaymentGateway"]
+const historyEntities = [
+    STORE,
+    S + "ProductStoreShipOption",
+    S + "ProductStorePaymentGateway",
+    // P6: the dated settings (the checkout policy among them) and the shipping gateway bindings
+    S + "ProductStoreSetting",
+    S + "ProductStoreShippingGateway"
+]
 // The setting types staff may set, each with its kind of value; a type not here (template and content locations, URL
 // templates, the REST location) is shown and never written, so staff cannot choose a resource location (design §3).
 const settingTypes = {
@@ -65,10 +77,28 @@ const settingTypes = {
     PsstOrdApprovePriceMinMax: "boolean",
     PsstOrdApproveBillShipAddrDiff: "boolean",
     PsstOrdApprovePayMethNameDiff: "boolean",
-    PsstOrdApproveContactBlacklist: "boolean"
+    PsstOrdApproveContactBlacklist: "boolean",
+    // P6: the checkout policy and tax display (CheckoutSettings), each validated by its kind in settingKinds
+    PsstCheckoutAccount: "checkoutAccount",
+    PsstCheckoutDestinations: "destinations",
+    PsstCheckoutStockDisclosure: "stockDisclosure",
+    PsstCheckoutTerms: "boolean",
+    PsstCheckoutPhone: "contactPhone",
+    PsstCheckoutSupportQueue: "supportQueue",
+    PsstTaxDisplay: "taxDisplay",
+    PsstTaxOrigin: "storeFacility",
+    // P10: the recovery policy (CheckoutSettings' RecoveryPolicy) and, F118, the checkout's opt-ins and the news list
+    PsstRecoveryEnabled: "boolean",
+    PsstRecoveryDelay: "recoveryDelay",
+    PsstRecoverySender: "recoverySender",
+    PsstRecoveryMaxSends: "recoveryMaxSends",
+    PsstRecoveryRetention: "recoveryRetention",
+    PsstCheckoutOptIns: "checkoutOptIns",
+    PsstNewsList: "newsList"
 }
 // Setting types a clone never copies (a recovery schedule, P10).
-const cloneLeftOutSettingTypes = []
+// P6: the support queue and tax origin name the store organization's queue and facility.
+const cloneLeftOutSettingTypes = ["PsstCheckoutSupportQueue", "PsstTaxOrigin", "PsstRecoveryEnabled", "PsstNewsList"]
 // The search documents a store may bind, by type: a DataDocument with a search index over the type's records.
 const documentTypes = {
     PsdtProduct: "mantle.product.Product",
@@ -80,17 +110,27 @@ const groupOwnerRole = "OrgInternal"
 const staffRelationships = ["PrtAgent", "PrtEmployee", "PrtMember"]
 
 // ===== scope =====
-// The organizations whose stores the user works (null for every one: a system administrator), the stores a store-limited
-// staff member is limited to (null when none), and whether they may change stores. COMMERCE_VIEW reads; COMMERCE_STORE_EDIT
-// with it changes. A Projects client contact and a user without the read get nothing.
+// The organizations whose stores the user works (null for every one: a system administrator, or a Commerce administrator
+// with no active organization), the stores a store-limited staff member is limited to (null when none), and whether they may
+// change stores. COMMERCE_VIEW reads; COMMERCE_STORE_EDIT with it changes. A Projects client contact and a user without the
+// read get nothing.
 function scope(need = "view") {
     if (!ec.user.userId || !access.has("COMMERCE_VIEW")) denied("PERMISSION_DENIED", "COMMERCE_VIEW is required")
     const canEdit = access.has("COMMERCE_STORE_EDIT")
     if (need === "edit" && !canEdit) denied("PERMISSION_DENIED", "COMMERCE_STORE_EDIT is required")
     const organizations = facilityScope.scope()
     const systemAdmin = organizations.systemAdmin
-    // FACILITY_ALL_ORGANIZATIONS is Warehouse's: a store is worked in the user's own organizations
-    const organizationPartyIds = systemAdmin ? null : organizations.organizationPartyIds || organizations.memberPartyIds
+    // FACILITY_ALL_ORGANIZATIONS is Warehouse's: a store is worked in the user's own organizations, unless the user holds
+    // COMMERCE_ALL_ORGANIZATIONS (a Commerce administrator's, as the active organization filter of their authorization):
+    // every organization, or the active one (Commerce P6 review, F-P6-3)
+    const allOrganizations = !systemAdmin && access.has("COMMERCE_ALL_ORGANIZATIONS")
+    const organizationPartyIds = systemAdmin
+        ? null
+        : allOrganizations
+          ? organizations.activeOrganizationPartyId
+              ? [organizations.activeOrganizationPartyId]
+              : null
+          : organizations.organizationPartyIds || organizations.memberPartyIds
     const partyId = ec.user.userAccount?.partyId || null
     let storeLimit = null
     if (!systemAdmin && partyId) {
@@ -438,7 +478,10 @@ const sections = {
         return found.map(row => ({
             auditHistorySeqId: row.auditHistorySeqId,
             changedDateText: dateText(row.changedDate),
-            fieldText: historyLabels[row.changedFieldName] || row.changedFieldName,
+            // a setting's change is named by its type (P6)
+            fieldText:
+                (row.changedEntityName === S + "ProductStoreSetting" ? enumText(row.pkSecondaryValue) + ": " : "") +
+                (historyLabels[row.changedFieldName] || row.changedFieldName),
             oldValueText: row.oldValueText || "",
             newValueText: row.newValueText || "",
             userText: users[row.changedByUserId] || row.changedByUserId || "",
@@ -504,7 +547,7 @@ function getStoreSites(p) {
     const sites = mounts.map(mount => {
         const site = one("mantle.public.PublicSite", {siteId: mount.siteId})
         const hosts = rows("mantle.public.PublicSiteHost", {siteId: mount.siteId})
-        const canonical = hosts.find(host => host.canonical === "Y")
+        const canonical = hosts.find(host => host.canonical === "Y" && host.hostKindEnumId !== "PshkPreview")
         return {
             siteId: mount.siteId,
             siteName: site?.name || mount.siteId,
@@ -700,8 +743,96 @@ function checkParameters(register) {
             })
     )
 }
-function settingValue(kind, value, label) {
+// The setting kinds beyond the plain ones, each a check of the value for a store (P6: the checkout policy's choices, its
+// destinations, the support queue among the organization's offered queues, a facility of the store), answering the value kept.
+const choiceKind = values => (raw, label) => {
+    if (!values.includes(raw)) denied("VALUE_INVALID", label + " is one of " + values.join(", "))
+    return raw
+}
+// P10: a whole number from min to max
+const wholeKind = (min, max) => (raw, label) => {
+    if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max)
+        denied("VALUE_INVALID", label + " is a whole number from " + min + " to " + max)
+    return String(Number(raw))
+}
+const settingKinds = {
+    checkoutAccount: choiceKind(["either", "account", "guest"]),
+    stockDisclosure: choiceKind(["hidden", "availability", "backorder"]),
+    contactPhone: choiceKind(["hidden", "optional", "required"]),
+    taxDisplay: choiceKind(["exclusive", "inclusive"]),
+    destinations: (raw, label) => {
+        const geoIds = Array.from(
+            new Set(
+                raw
+                    .split(",")
+                    .map(part => part.trim())
+                    .filter(Boolean)
+            )
+        )
+        if (!geoIds.length || geoIds.length > 50) denied("VALUE_INVALID", label + " names 1 to 50 countries or zones")
+        for (const geoId of geoIds)
+            if (!one("moqui.basic.Geo", {geoId}))
+                denied("VALUE_INVALID", label + ": " + geoId + " is not a known country or zone")
+        return geoIds.join(",")
+    },
+    supportQueue: (raw, label, store) => {
+        const portal = ec.resource.script("component://mr-mantle/service/mantle/request/SupportPortal.js")
+        const offered = store ? portal.offeredQueues(store.organizationPartyId) : []
+        if (!offered.some(queue => queue.requestCategoryId === raw))
+            denied("QUEUE_NOT_OFFERED", label + ": choose one of the queues the store's organization offers its customers")
+        return raw
+    },
+    // P10: the recovery policy's numbers (whole minutes from 15 minutes to 30 days; 1 to 5 sends; a 1 to 365 day window) and
+    // its sender (built-in recovery until Marketing's automation exists, design §8)
+    recoveryDelay: wholeKind(15, 43200),
+    recoveryMaxSends: wholeKind(1, 5),
+    recoveryRetention: wholeKind(1, 365),
+    recoverySender: choiceKind(["builtin"]),
+    // F118: the checkout's opt-ins (none, or some of reviewRequests, cartReminders and news, StoreTopics.js) and the news list
+    // (a current marketing list the store's organization owns, never a topic's list)
+    checkoutOptIns: (raw, label) => {
+        if (raw === "none") return raw
+        const named = Array.from(
+            new Set(
+                raw
+                    .split(",")
+                    .map(part => part.trim())
+                    .filter(Boolean)
+            )
+        )
+        const known = ["reviewRequests", "cartReminders", "news"]
+        if (!named.length || named.some(id => !known.includes(id)))
+            denied("VALUE_INVALID", label + " is none or some of " + known.join(", "))
+        return known.filter(id => named.includes(id)).join(",")
+    },
+    newsList: (raw, label, store) => {
+        const list = one("mantle.marketing.contact.ContactList", {contactListId: raw})
+        const topicTypes = ["CART_REMINDER", "REVIEW_REQUEST"]
+        if (
+            !list ||
+            !store ||
+            list.ownerPartyId !== store.organizationPartyId ||
+            topicTypes.includes(list.contactListTypeEnumId) ||
+            (list.archivedDate && ms(list.archivedDate) <= nowMs())
+        )
+            denied("VALUE_INVALID", label + ": choose a current list of the store's organization")
+        return raw
+    },
+    storeFacility: (raw, label, store) => {
+        if (
+            !store ||
+            !rows(S + "ProductStoreFacility", {productStoreId: store.productStoreId, facilityId: raw}).some(r => active(r))
+        )
+            denied("FACILITY_UNAVAILABLE", label + ": choose one of the store's current fulfillment facilities")
+        return raw
+    }
+}
+function settingValue(kind, value, label, store) {
     const raw = text(value)
+    if (Object.hasOwn(settingKinds, kind)) {
+        if (!raw) denied("VALUE_INVALID", label + " needs a value")
+        return settingKinds[kind](raw, label, store)
+    }
     if (kind === "boolean") {
         if (!["true", "false"].includes(raw)) denied("VALUE_INVALID", label + " is true or false")
         return raw
@@ -816,7 +947,7 @@ function storeStoreSetting(p) {
     const ending = p.end === true || p.end === "true" || p.end === "Y"
     const values = ending
         ? {}
-        : {settingValue: settingValue(settingTypes[p.settingTypeEnumId], p.settingValue, enumText(p.settingTypeEnumId))}
+        : {settingValue: settingValue(settingTypes[p.settingTypeEnumId], p.settingValue, enumText(p.settingTypeEnumId), store)}
     const saved = saveDated(
         S + "ProductStoreSetting",
         {productStoreId: store.productStoreId, settingTypeEnumId: p.settingTypeEnumId},
@@ -1203,7 +1334,7 @@ function cloneStore(p) {
 
 // ===== readiness =====
 // What a store needs before it sells, each finding with the area it belongs to, whether it blocks or only warns, and the
-// section that fixes it (fix: general, sites, facilities, emails, settings), never a screen path: the app maps the section
+// section that fixes it (fix: general, sites, facilities, emails, settings, checkout), never a screen path: the app maps the section
 // to its own screen. P2 checks what the stores' records hold now; later phases append their checks here.
 const readinessChecks = [
     {
@@ -1246,7 +1377,11 @@ const readinessChecks = [
         check: store => {
             const mounts = shopMounts([store.productStoreId])[store.productStoreId] || []
             if (!mounts.length) return null
-            const hostless = mounts.filter(mount => !one("mantle.public.PublicSiteHost", {siteId: mount.siteId, canonical: "Y"}))
+            // a preview host (Commerce P5, F54) is never the site's address
+            const hostless = mounts.filter(mount => {
+                const host = one("mantle.public.PublicSiteHost", {siteId: mount.siteId, canonical: "Y"})
+                return !host || host.hostKindEnumId === "PshkPreview"
+            })
             return hostless.length
                 ? {ready: false, message: "No canonical host for " + hostless.map(mount => mount.siteId).join(", ")}
                 : {ready: true, message: "Every site has its address"}
@@ -1305,7 +1440,61 @@ const readinessChecks = [
                 ? {ready: false, message: "No supported theme is published on " + missing.map(mount => mount.siteId).join(", ")}
                 : {ready: true, message: "Every site shows a published theme"}
         }
-    }
+    },
+    // Commerce P4: a scheduled page, menu or redirect publication of the store's sites that its revalidation refused
+    // (SitePages.js); the old version stays live
+    {
+        key: "sitePublication",
+        area: "site",
+        label: "Scheduled publication",
+        fix: "sites",
+        severity: "warning",
+        check: store => {
+            const siteIds = (shopMounts([store.productStoreId])[store.productStoreId] || []).map(mount => mount.siteId)
+            if (!siteIds.length) return null
+            const failed = ec.resource
+                .script("component://mr-mantle/service/mantle/public/SitePages.js")
+                .failedPublications(siteIds)
+            return failed.length
+                ? {
+                      ready: false,
+                      message:
+                          "Not published at its date: " +
+                          failed.map(row => row.kind + " " + row.label + " (" + row.message + ")").join("; ")
+                  }
+                : {ready: true, message: "Every scheduled page, menu and redirect was published"}
+        }
+    },
+    // Commerce P6: what a purchase needs (StoreCheckout.js readiness): payment, delivery and its local rates, the terms page,
+    // the support queue and each site's Support mount for the store's organization (F37, F38); fixed in CheckoutSettings
+    ...[
+        {key: "payments", area: "payments", label: "Payments"},
+        {key: "delivery", area: "delivery", label: "Delivery", severity: "warning"},
+        {key: "localRates", area: "delivery", label: "Local rates"},
+        {key: "terms", area: "content", label: "Terms page", fix: "sites"},
+        {key: "supportQueue", area: "support", label: "Support queue"},
+        {key: "supportMount", area: "support", label: "Support pages", fix: "sites"}
+    ].map(definition =>
+        Object.assign({fix: "checkout"}, definition, {
+            check: store =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+                    .readiness[definition.key](store)
+        })
+    ),
+    // Shop P5: Shop's checkout takes payment through a hosted provider page (design-shop §8.1: an unsupported flow fails
+    // readiness rather than fall back), and its reconciliation jobs run (F13)
+    ...[
+        {key: "hostedPayment", area: "payments", label: "Hosted payment page"},
+        {key: "checkoutJobs", area: "payments", label: "Payment reconciliation", severity: "warning"}
+    ].map(definition =>
+        Object.assign({fix: "checkout"}, definition, {
+            check: store =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+                    .readiness[definition.key](store)
+        })
+    )
 ]
 // The findings for a store: each check's result, a check that fails to answer named not ready (failure tolerance).
 function findings(store) {
@@ -1517,6 +1706,10 @@ const operations = {
     reason,
     rowDates,
     stateOf,
+    // P6 (StoreCheckout.js): the setting types and their value check, and the Shop mounts naming a store
+    settingTypes,
+    settingValue,
+    shopMounts,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store operation " + op)
         return operations[op](parameters || {})

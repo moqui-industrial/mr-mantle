@@ -1,0 +1,399 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Store promotions (impl-commerce P7, COM-PROMO; design-commerce §7, crosscut §3.28; StorePromotions.js): a store's
+    promotions over ProductStorePromotion with their registered rule, typed parameters and products, its promotion codes
+    with their customers and a bounded generated batch, the committed uses of a promotion or code, and the use limits counted
+    again under a lock when an order is placed (check#OrderPromotionLimits, F18). Each maintenance service checks
+    COMMERCE_VIEW to read and COMMERCE_PROMOTION_EDIT to change, and the store's organization (the user's own) and a current
+    StoreStaff row's stores (StoreAdmin.js); a missing record, a promotion of no store and one outside the scope are refused
+    alike (RECORD_UNAVAILABLE). The browser never names a service: a rule is a registered ProductStorePromotion service.
+    Refusals start with their reason code. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Promotions" allow-remote="false">
+        <description>The promotions of the user's stores (or one store), by description or id ignoring case, rule, whether a code is required (Y, N) and state (current, later, ended; all by default), a page at a time, each with its store, rule, dates, limits and placed uses. COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="serviceRegisterId"/>
+            <parameter name="requireCode"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="promotions" type="List"/>
+            <parameter name="promotionsCount" type="Integer"/>
+            <parameter name="promotionsPageIndex" type="Integer"/>
+            <parameter name="promotionsPageSize" type="Integer"/>
+            <parameter name="promotionsPageMaxIndex" type="Integer"/>
+            <parameter name="promotionsPageRangeLow" type="Integer"/>
+            <parameter name="promotionsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('findPromotions', context)"/>
+            <set field="promotions" from="found.promotions"/>
+            <set field="promotionsCount" from="found.promotionsCount"/>
+            <set field="promotionsPageIndex" from="found.promotionsPageIndex"/>
+            <set field="promotionsPageSize" from="found.promotionsPageSize"/>
+            <set field="promotionsPageMaxIndex" from="found.promotionsPageMaxIndex"/>
+            <set field="promotionsPageRangeLow" from="found.promotionsPageRangeLow"/>
+            <set field="promotionsPageRangeHigh" from="found.promotionsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Promotion" allow-remote="false">
+        <description>A promotion with its rule's parameters (typed by the registered service, each with its value), its products, its code count and whether the user may change it (canEdit). A missing promotion, one of no store and one outside the user's stores are refused alike (RECORD_UNAVAILABLE). COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="storePromotionId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="promotion" type="Map"/>
+            <parameter name="parameters" type="List"/>
+            <parameter name="products" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('getPromotion', context)"/>
+            <set field="promotion" from="found.promotion"/>
+            <set field="parameters" from="found.parameters"/>
+            <set field="products" from="found.products"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Promotion" allow-remote="false">
+        <description>A new promotion of a store with a registered rule (a ServiceRegister of type ProductStorePromotion; any other is SERVICE_NOT_REGISTERED), or a change of one: description, dates, order, code requirement, free ground shipping and the use limits per order, per customer and in all (whole numbers of at least 1, empty for none). A promotion keeps its store and rule; a stale row is refused (STALE_REVISION); a change of the audit-logged dates and limits carries changeReason. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="serviceRegisterId"/>
+            <parameter name="itemDescription"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="sequenceNum" type="Integer"/>
+            <parameter name="requireCode"/>
+            <parameter name="freeGroundShipping"/>
+            <parameter name="useLimitPerOrder"/>
+            <parameter name="useLimitPerCustomer"/>
+            <parameter name="useLimitPerPromotion"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="storePromotionId"/>
+            <parameter name="changed" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('storePromotion', context)"/>
+            <set field="storePromotionId" from="found.storePromotionId"/>
+            <set field="changed" from="found.changed"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PromotionParameters" allow-remote="false">
+        <description>The rule parameters of a promotion, a map of name to value, each typed by the registered service's in-parameter (number, true or false, one line of text); an empty value removes one (not a required one). A name the rule does not take is refused (VALUE_INVALID). Answers the required parameters still missing. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId" required="true"/>
+            <parameter name="parameters" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="saved" type="List"/>
+            <parameter name="missing" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('storePromotionParameters', context)"/>
+            <set field="saved" from="found.saved"/>
+            <set field="missing" from="found.missing"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PromotionProducts" allow-remote="false">
+        <description>Products a promotion applies to (excludeProduct N) or leaves out (Y), or with remove their rows removed; each a product of the store's organization or the shared catalog (PRODUCT_UNAVAILABLE otherwise), at most 200. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="productIds" type="List"/>
+            <parameter name="excludeProduct"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('storePromotionProducts', context)"/>
+            <set field="productIds" from="found.productIds"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="PromoCodes" allow-remote="false">
+        <description>The codes of the user's stores' promotions (or one promotion or store), by code ignoring case, state (current, later, ended) and whether limited to customers (requireParty Y), a page at a time, each with its promotion, dates, limits and placed uses. COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="state"/>
+            <parameter name="requireParty"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="codes" type="List"/>
+            <parameter name="codesCount" type="Integer"/>
+            <parameter name="codesPageIndex" type="Integer"/>
+            <parameter name="codesPageSize" type="Integer"/>
+            <parameter name="codesPageMaxIndex" type="Integer"/>
+            <parameter name="codesPageRangeLow" type="Integer"/>
+            <parameter name="codesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('findPromoCodes', context)"/>
+            <set field="codes" from="found.codes"/>
+            <set field="codesCount" from="found.codesCount"/>
+            <set field="codesPageIndex" from="found.codesPageIndex"/>
+            <set field="codesPageSize" from="found.codesPageSize"/>
+            <set field="codesPageMaxIndex" from="found.codesPageMaxIndex"/>
+            <set field="codesPageRangeLow" from="found.codesPageRangeLow"/>
+            <set field="codesPageRangeHigh" from="found.codesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="PromoCode" allow-remote="false">
+        <description>A promotion code with its promotion, dates, limits and placed uses, the customers it is limited to (a private contact unnamed) and whether the user may change it. A missing code and one outside the user's stores are refused alike (RECORD_UNAVAILABLE). COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="promoCodeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="code" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('getPromoCode', context)"/>
+            <set field="code" from="found.code"/>
+            <set field="parties" from="found.parties"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PromoCode" allow-remote="false">
+        <description>A new code of a promotion (its text 2 to 40 letters, digits, - or _, unique ignoring case, CODE_TAKEN otherwise; drawn at random when empty) or a change of one: dates, the use limits per code and per customer, customer entered and customers only (requireParty). A code keeps its promotion, and its text once used (CODE_REDEEMED); a stale row is refused; a change of the audit-logged dates and limits carries changeReason. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="promoCodeId"/>
+            <parameter name="storePromotionId"/>
+            <parameter name="promoCode"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="useLimitPerCode"/>
+            <parameter name="useLimitPerCustomer"/>
+            <parameter name="userEntered"/>
+            <parameter name="requireParty"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="promoCodeId"/>
+            <parameter name="promoCode"/>
+            <parameter name="changed" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('storePromoCode', context)"/>
+            <set field="promoCodeId" from="found.promoCodeId"/>
+            <set field="promoCode" from="found.promoCode"/>
+            <set field="changed" from="found.changed"/>
+        </actions>
+    </service>
+
+    <service verb="generate" noun="PromoCodes" allow-remote="false">
+        <description>A bounded batch of codes of a promotion: count (1 to 500), a prefix (up to 20 letters, digits, - or _) and a random part of suffixLength (4 to 16, 8 by default) drawn again on a collision, or numbered from startNumber; each with the same dates, limits and customer restriction. With preview nothing is written: the codes it would make (up to ten), how many collide (numbered codes taken are listed) and how many codes already have the prefix. Otherwise each code is made in its own transaction, a taken one named (CODE_TAKEN) and the rest made, keyed by operationKey (PostingOperation PromoCodeBatch) so a retry answers the first result. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId" required="true"/>
+            <parameter name="count" type="Integer"/>
+            <parameter name="prefix"/>
+            <parameter name="numbered" type="Boolean"/>
+            <parameter name="suffixLength" type="Integer"/>
+            <parameter name="startNumber" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="useLimitPerCode"/>
+            <parameter name="useLimitPerCustomer"/>
+            <parameter name="userEntered"/>
+            <parameter name="requireParty"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="codes" type="List"/>
+            <parameter name="makeCount" type="Integer"/>
+            <parameter name="taken" type="List"/>
+            <parameter name="collisions" type="Integer"/>
+            <parameter name="existingWithPrefix" type="Integer"/>
+            <parameter name="results" type="List"/>
+            <parameter name="doneCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('generatePromoCodes', context)"/>
+            <set field="preview" from="found.preview"/>
+            <set field="codes" from="found.codes"/>
+            <set field="makeCount" from="found.makeCount"/>
+            <set field="taken" from="found.taken"/>
+            <set field="collisions" from="found.collisions"/>
+            <set field="existingWithPrefix" from="found.existingWithPrefix"/>
+            <set field="results" from="found.results"/>
+            <set field="doneCount" from="found.doneCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+            <set field="alreadyApplied" from="found.alreadyApplied"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PromoCodeParty" allow-remote="false">
+        <description>A customer a code is limited to, or with remove their row removed; a missing or disabled party and another user's private contact are refused (PARTY_UNAVAILABLE). COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="promoCodeId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="removed" type="Boolean"/>
+            <parameter name="requireParty" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('storePromoCodeParty', context)"/>
+            <set field="removed" from="found.removed"/>
+            <set field="requireParty" from="found.requireParty"/>
+        </actions>
+    </service>
+
+    <service verb="expire" noun="PromoCode" allow-remote="false">
+        <description>Ends a code at thruDate (now when empty), with changeReason in the audit log; one already ended is refused (ALREADY_EXPIRED). A code is never deleted, so its uses stay readable. COMMERCE_PROMOTION_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="promoCodeId" required="true"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="thruDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('expirePromoCode', context)"/>
+            <set field="thruDate" from="found.thruDate"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="PromotionUses" allow-remote="false">
+        <description>The committed uses of a promotion or of a code (orders placed or later): a row per order and code with its placed date, customer (name only; a private contact unnamed, no customer a guest), uses, discount and status, most recent first, a page at a time, with the total uses and orders. COMMERCE_VIEW and the store's scope.</description>
+        <in-parameters>
+            <parameter name="storePromotionId"/>
+            <parameter name="promoCodeId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="uses" type="List"/>
+            <parameter name="usesCount" type="Integer"/>
+            <parameter name="usesPageIndex" type="Integer"/>
+            <parameter name="usesPageSize" type="Integer"/>
+            <parameter name="usesPageMaxIndex" type="Integer"/>
+            <parameter name="usesPageRangeLow" type="Integer"/>
+            <parameter name="usesPageRangeHigh" type="Integer"/>
+            <parameter name="useCount" type="Integer"/>
+            <parameter name="orderCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('findPromotionUses', context)"/>
+            <set field="uses" from="found.uses"/>
+            <set field="usesCount" from="found.usesCount"/>
+            <set field="usesPageIndex" from="found.usesPageIndex"/>
+            <set field="usesPageSize" from="found.usesPageSize"/>
+            <set field="usesPageMaxIndex" from="found.usesPageMaxIndex"/>
+            <set field="usesPageRangeLow" from="found.usesPageRangeLow"/>
+            <set field="usesPageRangeHigh" from="found.usesPageRangeHigh"/>
+            <set field="useCount" from="found.useCount"/>
+            <set field="orderCount" from="found.orderCount"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="PromotionOptions" allow-remote="false">
+        <description>A promotion form's drop-down options: the registered promotion rules (choice rules) or the promotions of the user's stores (choice promotions, of productStoreId when given), by name or id, with the selected value's label when it is in scope. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="choice" required="true"/>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="selected"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="options" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('findPromotionOptions', context)"/>
+            <set field="options" from="found.options"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="OrderPromotionLimits" allow-remote="false" authenticate="false">
+        <description>Whether a store order's promotion uses, in the parts being placed (those not yet placed, or orderPartSeqId), stay within every limit of their promotions and codes: the code's uses per code and per customer and the promotion's uses per order (per part, as apply#OrderPromotions applies them), per customer and in all, counted over the orders placed or later under a lock of the promotion and code rows whose limits the order uses (promotions then codes, in id order). place#Order calls it for any store order and refuses one past a limit; Shop's checkout freeze calls it too; with lock false (a cart's preview) nothing is locked. An order of no store, without promotion uses, or whose promotions and codes set no limit, is within its limits and locks nothing. Each limit passed names its kind (promotion, code), id, label, field, limit, uses and the uses the order asks. Internal: no permission check.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="lock" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="withinLimits" type="Boolean"/>
+            <parameter name="exceeded" type="List"/>
+            <parameter name="locked" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StorePromotions.js').execute('checkOrderPromotionLimits', context)"/>
+            <set field="withinLimits" from="found.withinLimits"/>
+            <set field="exceeded" from="found.exceeded"/>
+            <set field="locked" from="found.locked"/>
+        </actions>
+    </service>
+    <!-- Commerce P11 (COM-REPORTS, StoreReports.js): the report definition's query that Commerce's Reports screen reads -->
+    <service verb="get" noun="PromotionUseSummary" allow-remote="false">
+        <description>Promotion use of the user's stores (design-commerce §3 PromotionUse) placed in the period, by promotion, code and currency: orders, uses, the discount, the net sales of those orders (product lines less discounts) and the uses left of a promotion's or code's total limit; totals per currency (an order counted once). COMMERCE_VIEW and the store scope; a promotion outside it RECORD_UNAVAILABLE; PERIOD_INVALID.</description>
+        <in-parameters>
+            <parameter name="productStoreIds" type="List"><description>The stores, each in the user's store scope; empty, every
+                one of theirs</description><parameter name="productStoreId"/></parameter>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"><description>The period's start; 30 days before its end when empty</description></parameter>
+            <parameter name="thruDate" type="Timestamp"><description>The period's end (exclusive); now when empty</description></parameter>
+            <parameter name="storePromotionId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"/>
+            <parameter name="totals" type="List"><description>One row per currency, never summed across currencies</description></parameter>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="periodText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreReports.js').execute('promotionUseSummary', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="totals" from="found.totals"/>
+            <set field="truncated" from="found.truncated"/>
+            <set field="productStoreIds" from="found.productStoreIds"/>
+            <set field="fromDate" from="found.fromDate"/>
+            <set field="thruDate" from="found.thruDate"/>
+            <set field="asOf" from="found.asOf"/>
+            <set field="periodText" from="found.periodText"/>
+        </actions>
+    </service>
+</services>

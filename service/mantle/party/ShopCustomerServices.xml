@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's customer account (mr-pass impl-shop P6; design-shop §13.2's A, §9): PASS operations through
+    pass.Facade.call#Operation, each taking PASS's restricted input map (the site the facade resolved, the signed-in account
+    or a guest's order link as orderToken, and what the buyer chose) and answering a declared result, over Mantle's order,
+    contact and payment method services (ShopCustomer.js). Ownership is ExternalAccess's self relationship or the
+    SalesOrder capability, never a party id from the browser. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="Account" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopAccount (AccountOverview, the PASS Account hub's Shop card): the signed-in verified account's purchases in the site's store: recent orders, those in progress, downloads, the invoices of these orders and the account links; the guest purchases made with its verified email in this store are claimed first (merge#Parties of the anonymous guest party). An unverified account sees only that it must verify (verified false). SIGN_IN_REQUIRED for a visitor.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("getAccount", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Orders" authenticate="anonymous-all" allow-remote="false">
+        <description>findShopOrders (Orders): the verified account's placed orders of the store, newest first, a page at a time (cursor); open carts and recurring bases are left out. A guest's order link (orderToken) reaches its one order.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("findOrders", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Order" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopOrder (OrderDetail): one order the verified account owns, or the guest's order link reaches: its lines, discounts, delivery and tax, the placed addresses, shipments with tracking, its invoices, and the Support pages' links for a return, a question or a cancellation request (and whether one is open). Another's order, or another order than the link's, is NOT_AVAILABLE.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("getOrder", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="OrderDocument" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopOrderDocument (PurchaseDocuments): one issued invoice of a reached order, as the buyer reads it (its lines and totals, and the Billing page for a signed-in buyer).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("getOrderDocument", input)</script>
+        </actions>
+    </service>
+    <service verb="preview" noun="Reorder" authenticate="anonymous-all" allow-remote="false">
+        <description>previewReorder: an own order's lines as they would be bought now (each still offered at today's price, or not); never the historic price, discount or delivery. A verified account only.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("previewReorder", input)</script>
+        </actions>
+    </service>
+    <service verb="reorder" noun="Order" authenticate="anonymous-all" allow-remote="false">
+        <description>reorder: an own order's chosen still-offered lines added to the session's cart through the cart's path (repriced as any add); the lines no longer offered are named. The same operation id answers the first result without the cart's capability. A verified account only.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("reorderOrder", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Addresses" authenticate="anonymous-all" allow-remote="false">
+        <description>getAddresses (AddressList): the verified account's current postal addresses with their purposes and revisions.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("getAddresses", input)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Address" authenticate="anonymous-all" allow-remote="false">
+        <description>storeAddress (AddressEdit): a new address, or a change of an own one at the revision shown (update#PartyPostalAddress, so a placed order keeps its address); a store carrier's suggested correction is offered, never applied. STALE_REVISION, VALUE_INVALID, NOT_AVAILABLE for another's.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("storeAddress", input)</script>
+        </actions>
+    </service>
+    <service verb="end" noun="Address" authenticate="anonymous-all" allow-remote="false">
+        <description>endAddress (EndAddress): an own address stops being used (its purposes end now); placed orders keep it.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("endAddress", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="PaymentMethods" authenticate="anonymous-all" allow-remote="false">
+        <description>getPaymentMethods (SavedMethods): the verified account's current cards, masked (brand, last four, expiry, provider), each with the recurring orders it charges; whether the store's gateway can add one.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("getPaymentMethods", input)</script>
+        </actions>
+    </service>
+    <service verb="begin" noun="PaymentMethodSetup" authenticate="anonymous-all" allow-remote="false">
+        <description>beginPaymentMethodSetup (AddMethod): the store's card gateway's hosted setup page for the verified account (a redirect, or a form for the frontend's relay), returning to the Shop mount's PaymentMethods/return with the setup's reference; the card never reaches the site. PROVIDER_UNAVAILABLE when the store's gateway has none.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("beginPaymentMethodSetup", input)</script>
+        </actions>
+    </service>
+    <service verb="finish" noun="PaymentMethodSetup" authenticate="anonymous-all" allow-remote="false">
+        <description>finishPaymentMethodSetup: after the setup page, the provider asked for the account's methods (new cards kept masked); nothing the browser brings back is trusted.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("finishPaymentMethodSetup", input)</script>
+        </actions>
+    </service>
+    <service verb="end" noun="PaymentMethod" authenticate="anonymous-all" allow-remote="false">
+        <description>endPaymentMethod (EndMethod): an own card ended (delete#PaymentMethod); the recurring orders it charges are named, and with any the end needs confirm, so none silently loses its method.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("endPaymentMethod", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="AccountCard" authenticate="anonymous-all" allow-remote="false">
+        <description>The PASS Account hub's Shop card (PublicApps accountCard): the account's purchases in the site's store, or that it must verify.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/party/ShopCustomer.js").execute("accountCard", input)</script>
+        </actions>
+    </service>
+</services>

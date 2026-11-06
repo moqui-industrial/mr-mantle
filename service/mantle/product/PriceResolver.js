@@ -55,7 +55,10 @@ function context(p) {
     }
     if (out.direction === "purchase" && (!out.vendorPartyId || !internal(out.customerPartyId)))
         throw new Error("Purchase prices need an external supplier and an internal buyer")
-    out.traceAllowed = !!p.explain && read(out.direction)
+    // Shop's catalog prices as the authority for its routed store and signed-in customer (impl-shop P3, F18): only
+    // get#StoreProductPrice sets this, in its own script (no service declares it, so no caller's input can)
+    out.storeAuthority = p.storeAuthority === true && !!out.productStoreId && out.direction === "sales"
+    out.traceAllowed = !!p.explain && !out.storeAuthority && read(out.direction)
     out.priceTrace = []
     out.priceWarnings = []
     return out
@@ -67,6 +70,15 @@ function readable(row, c) {
     if (row.priceTypeEnumId === "PptAverage" && !read(c.direction, true)) return false
     const d = internal(row.vendorPartyId) ? "sales" : row.vendorPartyId ? "purchase" : "sales"
     if (d !== c.direction) return false
+    // The store's authority (get#StoreProductPrice): the public rows, the store organization's and the customer's own;
+    // never an agreement's, an average cost or another party's.
+    if (c.storeAuthority)
+        return (
+            row.priceTypeEnumId !== "PptAverage" &&
+            !row.agreementId &&
+            (!row.vendorPartyId || row.vendorPartyId === c.vendorPartyId) &&
+            (!row.customerPartyId || (!!c.customerPartyId && row.customerPartyId === c.customerPartyId))
+        )
     // A purchase context never falls back to a public sales row. Anonymous users see only public, unscoped sale prices.
     if (!ec.user.userId)
         return !row.vendorPartyId && !row.customerPartyId && !row.agreementId && row.priceTypeEnumId !== "PptAverage"
@@ -245,17 +257,24 @@ function fallback(c, type) {
     }
     return null
 }
+// The feature extras of a virtual's price for a variant priced by its virtual: for a price reader, the features of its
+// scope's owners; as the store's authority (get#StoreProductPrice, impl-shop P4, F64), the features with no owner (_NA_) or the
+// store organization's (the selling vendor), so a shopper's variant price is the one staff see.
 function extras(c, selected) {
-    if (!selected?.virtualFallback || !read("sales") || c.direction !== "sales") return selected
+    if (!selected?.virtualFallback || c.direction !== "sales" || !(c.storeAuthority || read("sales"))) return selected
     let price = toDecimal(selected.price)
     const unit = one(P + "Product", {productId: selected.productId})?.amountUomId,
         factor = conversion(1, c.quantityUomId || unit, unit, c.validDate, c, "quantity-unit-factor"),
-        s = policy().scope()
+        s = c.storeAuthority ? null : policy().scope()
+    const owned = feature =>
+        c.storeAuthority
+            ? !feature.ownerPartyId || feature.ownerPartyId === "_NA_" || feature.ownerPartyId === c.vendorPartyId
+            : s.systemAdmin || s.ownerPartyIds.includes(feature.ownerPartyId)
     for (const appl of rows(P + "feature.ProductFeatureAppl", {productId: c.productId}).filter(
         r => active(r, c.validDate) && ["PfatStandard", "PfatDistinguishing"].includes(r.applTypeEnumId)
     )) {
         const feature = one(P + "feature.ProductFeature", {productFeatureId: appl.productFeatureId})
-        if (!feature || (!s.systemAdmin && !s.ownerPartyIds.includes(feature.ownerPartyId))) continue
+        if (!feature || !owned(feature)) continue
         const key = c.pricePurposeEnumId === "PppRecurring" ? "recurringAmount" : "amount"
         let amount = appl[key],
             source = appl

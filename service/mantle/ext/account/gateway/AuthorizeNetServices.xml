@@ -37,6 +37,100 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('sale', context).paymentGatewayResponseId"/>
         </actions>
     </service>
+    <!-- mr-pass impl-shop P5 (F37-F41): Accept Hosted, Authorize.Net's hosted payment page -->
+    <service verb="authorizeHosted" noun="Payment">
+        <description>Accept Hosted (authOnlyTransaction on Authorize.Net's page): nothing is sent; the payment waits at the
+            hosted page (a response with transactionStatus HostedPending and no result), which the frontend's relay opens
+            with a fresh form token (get#HostedPaymentForm), and the details lookup finds the payer's transaction by the
+            attempt's reference (the idempotency key's first 20 characters, in refId and order.invoiceNumber). Needs the
+            https returnUrl Mantle builds.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorizeHosted', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="authorizeAndCaptureHosted" noun="Payment">
+        <description>Accept Hosted as a sale (authCaptureTransaction): as authorizeHosted#Payment, captured on the page.
+            Configure it with no captureServiceName.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('saleHosted', context).paymentGatewayResponseId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="HostedProfileForm" allow-remote="false">
+        <description>Shop P6 (F40): a form token of the hosted profile page (getHostedProfilePageRequest) where a payer adds a
+            card to their customer profile (made now, with the party as its merchantCustomerId, when the party has none),
+            returning to returnUrl (https); never stored. Answers the page's address and its form fields, which the caller's
+            relay posts at once.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference"/>
+            <parameter name="returnUrl" required="true"/>
+            <parameter name="merchantName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formUrl"/>
+            <parameter name="fields" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('hostedProfileForm', context)"/>
+            <set field="formUrl" from="out.formUrl"/>
+            <set field="fields" from="out.fields"/>
+        </actions>
+    </service>
+    <service verb="sync" noun="CustomerProfile" allow-remote="false">
+        <description>Shop P6 (F40): the party's customer profile read after the hosted profile page (getCustomerProfileRequest,
+            by its kept reference or the party as merchantCustomerId); each payment profile not kept yet is kept as a masked
+            card method. A party with no profile adds none.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference"/>
+        </in-parameters>
+        <out-parameters><parameter name="added" type="Integer"/></out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('syncCustomerProfile', context).added"/>
+        </actions>
+    </service>
+    <service verb="get" noun="HostedPaymentForm" allow-remote="false">
+        <description>A fresh Accept Hosted form token for a payment waiting at its hosted page (getHostedPaymentPageRequest),
+            asked on each call and never stored: its amount and transaction type, the attempt's reference, the canonical
+            return and cancel addresses (https, Mantle's), the receipt shown and the merchant's name. Answers the page's
+            address (accept.authorize.net, or test.authorize.net for a sandbox connection) and the token, which the caller
+            posts at once; the token's time is kept on the pending answer, after which (15 minutes and the lookup grace) a
+            payment found nowhere is cancelled.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+            <parameter name="returnUrl" required="true"/>
+            <parameter name="cancelUrl"/>
+            <parameter name="merchantName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formUrl"/>
+            <parameter name="token"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('hostedForm', context)"/>
+            <set field="formUrl" from="out.formUrl"/>
+            <set field="token" from="out.token"/>
+        </actions>
+    </service>
+    <service verb="store" noun="HostedPaymentProfile" allow-remote="false">
+        <description>After an approved Accept Hosted payment its payer asked to keep (F40): the transaction's customer payment
+            profile, else one made from it (createCustomerProfileFromTransactionRequest, onto the party's customer profile
+            when it has one), kept on a new payment method (references and masked card only) that the payment then
+            names.</description>
+        <in-parameters>
+            <parameter name="paymentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="paymentMethodId"/>
+        </out-parameters>
+        <actions>
+            <set field="paymentMethodId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('hostedProfile', context).paymentMethodId"/>
+        </actions>
+    </service>
     <service verb="capture" noun="Payment">
         <description>Capture an authorization (priorAuthCaptureTransaction), the whole or a smaller amount. A capture the
             provider says was already done (reason 311) is a success.</description>

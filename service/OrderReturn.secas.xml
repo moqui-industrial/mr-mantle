@@ -31,8 +31,14 @@ along with this software (see the LICENSE.md file). If not, see
     </seca>
     <seca id="OrderApprovedSendEmail" service="update#mantle.order.OrderHeader" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
-        <actions><service-call name="mantle.order.OrderInfoServices.send#OrderStoreEmail"
-                in-map="{orderId:orderId, emailTypeEnumId:'PsetOrderApproved'}"/></actions>
+        <actions>
+            <!-- not for a Shop order whose lines are all digital (mr-pass impl-shop P6; design-shop §8.3): its receipt and
+                download notice follow; every other order as before -->
+            <service-call name="mantle.product.ShopFulfillmentServices.check#ApprovedEmail" in-map="{orderId:orderId}"
+                    out-map="approvedEmail" disable-authz="true"/>
+            <if condition="!approvedEmail.skip"><service-call name="mantle.order.OrderInfoServices.send#OrderStoreEmail"
+                    in-map="{orderId:orderId, emailTypeEnumId:'PsetOrderApproved'}"/></if>
+        </actions>
     </seca>
     <seca id="OrderApprovedNotify" service="update#mantle.order.OrderPart" when="tx-commit">
         <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>

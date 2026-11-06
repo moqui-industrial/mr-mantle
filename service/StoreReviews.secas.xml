@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Store reviews (impl-commerce P9): the review request after delivery or download. queue#ReviewRequests acts only on a Shop
+    order (a completed StoreCheckout's) of a store with a current PsetReviewRequest email, once per line on the delivery
+    ledger; any other shipment or grant queues nothing. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="ShipmentDeliveredRequestReviews" service="update#mantle.shipment.Shipment" when="tx-commit">
+        <condition><expression>statusChanged &amp;&amp; statusId == 'ShipDelivered'</expression></condition>
+        <actions><service-call name="mantle.product.StoreMerchandisingServices.queue#ReviewRequests" in-map="{shipmentId:shipmentId}"/></actions>
+    </seca>
+    <!-- a digital line's first download (ShopFulfillment.js get#DownloadFile counts each) -->
+    <seca id="DownloadFirstRequestReview" service="update#mantle.product.store.StoreDownloadGrant" when="tx-commit">
+        <condition><expression>downloadCount == 1</expression></condition>
+        <actions><service-call name="mantle.product.StoreMerchandisingServices.queue#ReviewRequests" in-map="{downloadGrantId:downloadGrantId}"/></actions>
+    </seca>
+</secas>

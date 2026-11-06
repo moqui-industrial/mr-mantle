@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The one outbound delivery ledger's services (design-crosscut CX-DELIVERY, X8; Comms' contract, mr-pass impl-shop P6,
+    F24) over service/mantle/party/MessageDeliveries.js. Internal: Mantle's sources call them; nothing is remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="queue" noun="Delivery" allow-remote="false">
+        <description>One delivery of an event to a recipient by a channel and template (MessageDelivery): an existing one for
+            the same four is answered and nothing is queued again. The source (a MessageDeliverySource whose enumCode is its
+            build service) makes the message's parameters at each attempt. A transactional notice needs no marketing consent;
+            another needs its purpose granted when it is handed off. sendNow tries it at once, in its own
+            transaction.</description>
+        <in-parameters>
+            <parameter name="eventKey" required="true"/>
+            <parameter name="sourceEnumId" required="true"/>
+            <parameter name="recipientPartyId" required="true"/>
+            <parameter name="toAddress"/>
+            <parameter name="channelEnumId" default-value="MdcEmail"/>
+            <parameter name="templateKey" required="true"/>
+            <parameter name="siteId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="transactional" type="Boolean" default="true"/>
+            <parameter name="marketingPurposeEnumId"/>
+            <parameter name="consentContactListId"><description>A topic's list (Commerce P9 follow-up: a store's review
+                requests): the purpose is then the recipient's latest consent of it on this list, not their consent as a
+                whole</description></parameter>
+            <parameter name="bodyParameters" type="Map"><description>For a source with no build service: the template's
+                parameters, kept with the delivery (never a secret)</description></parameter>
+            <parameter name="sendNow" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="stateEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('queue', context)"/>
+            <set field="deliveryId" from="out.deliveryId"/>
+            <set field="created" from="out.created"/>
+            <set field="stateEnumId" from="out.stateEnumId"/>
+        </actions>
+    </service>
+    <service verb="attempt" noun="Delivery" allow-remote="false">
+        <description>One attempt of a queued or retrying delivery, under its lock: its source builds the message, the consent
+            is snapshotted, send#EmailTemplate hands it off, and its outcome is recorded (sent; retryable, again later;
+            permanent, failed; anything else uncertain, kept for review). Another state is left as it is.</description>
+        <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
+        <out-parameters><parameter name="stateEnumId"/></out-parameters>
+        <actions>
+            <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('attempt', context).stateEnumId"/>
+        </actions>
+    </service>
+    <service verb="record" noun="DeliveryReceipt" allow-remote="false">
+        <description>A provider's later report of a delivery's last hand-off (a delivery report, a bounce): its outcome
+            recorded as an attempt's is (messageId sent; deliveryOutcome retryable, permanent, or anything else uncertain,
+            kept for review).</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+            <parameter name="out" type="Map" required="true"><description>{messageId, deliveryOutcome, sendError}</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="stateEnumId"/></out-parameters>
+        <actions>
+            <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('receipt', context).stateEnumId"/>
+        </actions>
+    </service>
+    <service verb="run" noun="Deliveries" allow-remote="false">
+        <description>The run_MessageDeliveries job: the queued and retrying deliveries that are due, oldest first, each in its
+            own transaction; an uncertain one is never tried again here.</description>
+        <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
+        <out-parameters>
+            <parameter name="attempted" type="Integer"/>
+            <parameter name="sent" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('runDeliveries', context)"/>
+            <set field="attempted" from="out.attempted"/>
+            <set field="sent" from="out.sent"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="Delivery" allow-remote="false">
+        <description>A reviewer's decision on an uncertain delivery: sent (the provider shows it went out), failed, or retry.
+            Needs ADMIN-held MESSAGE_DELIVERY_REVIEW.</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+            <parameter name="outcome" required="true"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters><parameter name="stateEnumId"/></out-parameters>
+        <actions>
+            <if condition="!ec.user.hasPermission('MESSAGE_DELIVERY_REVIEW')"><return error="true" message="PERMISSION_DENIED: Reviewing deliveries needs MESSAGE_DELIVERY_REVIEW"/></if>
+            <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('resolveDelivery', context).stateEnumId"/>
+        </actions>
+    </service>
+</services>

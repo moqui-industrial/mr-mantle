@@ -328,14 +328,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="itemDescription" type="text-medium"><description>Description for the OrderItem (itemDescription), promo service
             should run this through ResourceFacade.expand() with parameters depending on the promo service</description></field>
         <field name="serviceRegisterId" type="id" not-null="true"><description>Registered Service of type ProductStorePromotion that implements the
-            mantle.product.StoreServices.apply#Promotion interface</description></field>
-        <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
+            mantle.product.PromotionServices.apply#Promotion interface</description></field>
+        <!-- the dates and use limits are audit-logged (impl-commerce P7, §2: promotion limits and dates); the limits are
+            counted again under a lock at place#Order (StorePromotionServices.check#OrderPromotionLimits) -->
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="requireCode" type="text-indicator"/>
-        <field name="useLimitPerOrder" type="number-integer"/>
-        <field name="useLimitPerCustomer" type="number-integer"/>
-        <field name="useLimitPerPromotion" type="number-integer"/>
+        <field name="useLimitPerOrder" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerPromotion" type="number-integer" enable-audit-log="true"/>
         <field name="freeGroundShipping" type="text-indicator"/>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" related="moqui.service.ServiceRegister" short-alias="serviceRegister"/>
@@ -362,15 +364,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="promoCodeId" type="id" is-pk="true"/>
         <field name="promoCode" type="text-short" default="promoCodeId"/>
         <field name="storePromotionId" type="id"/>
-        <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="useLimitPerCode" type="number-integer"/>
-        <field name="useLimitPerCustomer" type="number-integer"/>
+        <!-- the dates and use limits are audit-logged (impl-commerce P7); a code is expired, never deleted -->
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="useLimitPerCode" type="number-integer" enable-audit-log="true"/>
+        <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
         <field name="userEntered" type="text-indicator"/>
         <field name="requireParty" type="text-indicator"/>
         <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
         <relationship type="many" related="mantle.product.store.ProductStorePromoCodeParty" short-alias="parties">
-            <key-map field-name="storePromotionId"/></relationship>
+            <key-map field-name="promoCodeId"/></relationship>
         <index name="PSTR_PROMO_CODE" unique="true"><index-field name="promoCode"/></index>
     </entity>
     <entity entity-name="ProductStorePromoCodeParty" package="mantle.product.store">
@@ -384,8 +387,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="settingTypeEnumId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="settingValue" type="text-medium"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="settingValue" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the setting was started or
+            ended (the checkout policy names its reason, impl-commerce P6; the store's History shows it).</description></field>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" title="ProductStoreSettingType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="settingTypeEnumId"/></relationship>
@@ -436,7 +441,8 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="ProductStoreShippingGateway" package="mantle.product.store">
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="carrierPartyId" type="id" is-pk="true"/>
-        <field name="shippingGatewayConfigId" type="id"/>
+        <!-- audit-logged (impl-commerce P6): a delete is not logged, so store#StoreShippingGateway records a removal -->
+        <field name="shippingGatewayConfigId" type="id" enable-audit-log="true"/>
         <field name="billingType" type="text-short"><description>For third party and other carrier account billing;
             for Shippo valid values are SENDER, RECIPIENT, THIRD_PARTY</description></field>
         <field name="billingAccount" type="text-short"><description>Third party or other carrier account number</description></field>

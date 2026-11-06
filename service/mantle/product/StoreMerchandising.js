@@ -322,6 +322,19 @@ function getStorePublication(p) {
     // is answered with its id and isPublic false (no name, reason, dates or storefront details), and the list holds only the
     // public products, so a draft, an exclusion or another organization's product is not told apart from an unknown id.
     const staff = lib.check(() => stores.storeOf(scope("view"), store.productStoreId)).allowed
+    // Shop P3 (impl-shop F50): the public reads a store's catalog only through a site: the site must be named, and nothing
+    // is public on a site that is not published (the site's own access); an enabled Shop mount naming the store is
+    // resolve's check
+    if (!staff) {
+        if (!p.siteId) denied("SITE_REQUIRED", "Name the site whose catalog is read")
+        if (one(SITE, {siteId: p.siteId})?.state !== "published") {
+            const asked = unique(listOf(p.productIds).concat(p.productId ? [p.productId] : []))
+            return {
+                productsCount: asked.length,
+                products: asked.map(productId => ({productId, isPublic: false, purchasable: false}))
+            }
+        }
+    }
     let productIds = unique(listOf(p.productIds).concat(p.productId ? [p.productId] : []))
     if (!productIds.length) {
         const current = Array.from(
@@ -1183,6 +1196,8 @@ const operations = {
     // (pages, menus and themes, P4 and P5)
     resolve,
     advanceGeneration,
+    // the categories of a store's tree at a time, for the site navigation's live check (Commerce P4, SitePages.js)
+    storeTree,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store merchandising operation " + op)
         return operations[op](parameters || {})

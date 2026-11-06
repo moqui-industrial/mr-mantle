@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The one outbound delivery ledger (design-crosscut CX-DELIVERY, X8; Comms' contract, built with mr-pass impl-shop P6, F24;
+    mantle.party.MessageServices, service/mantle/party/MessageDeliveries.js), generalized from the Forum's ForumDelivery: one
+    delivery per event, recipient, channel and template key, with the consent snapshot taken before the hand-off and each
+    attempt's outcome from send#EmailTemplate (sent, retryable, permanent or uncertain). A retryable outcome is tried again
+    by the job with backoff, a permanent one stops, and an uncertain one waits for review, never a blind resend. Its first
+    source is Shop's download-ready notice; Commerce's review requests and cart recovery and Shop's renewal notices follow.
+    The existing store emails keep their own senders until Comms moves them (impl-shop §4). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="MessageDelivery" package="mantle.party" cache="never">
+    <description>One message to one recipient for one event: the event (its source's key, such as
+      shopDownloads:ORDER), the recipient (a party and the address it went to), the channel and template key, the consent
+      snapshot (transactional, or the marketing consent state when it was handed off), the state (MessageDeliveryState:
+      queued, sent, retry, failed, suppressed, uncertain), the attempts with the next one's time, the provider's message id
+      and the last safe error. The event, recipient, channel and template key are unique, so a retry or a second source call
+      never sends twice.</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="eventKey" type="text-medium"/>
+    <field name="sourceEnumId" type="id"/>
+    <field name="recipientPartyId" type="id"/>
+    <field name="toAddress" type="text-medium"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="templateKey" type="id"><description>The EmailTemplate (emailTemplateId) for the email channel.</description></field>
+    <field name="siteId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="parametersJson" type="text-long"><description>The template's body parameters as handed off, without
+      secrets kept elsewhere (a link's token is put in only for the send and never stored).</description></field>
+    <field name="transactional" type="text-indicator"><description>Y for a notice of the recipient's own purchase or
+      account, which needs no marketing consent.</description></field>
+    <field name="consentJson" type="text-medium"><description>The consent snapshot taken before the hand-off.</description></field>
+    <field name="stateEnumId" type="id"/>
+    <field name="attempts" type="number-integer"/>
+    <field name="nextAttemptDate" type="date-time"/>
+    <field name="providerMessageId" type="text-medium"/>
+    <field name="lastError" type="text-medium"/>
+    <field name="createdDate" type="date-time"/>
+    <field name="sentDate" type="date-time"/>
+    <relationship type="one" title="Recipient" related="mantle.party.Party">
+      <key-map field-name="recipientPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliverySource" related="moqui.basic.Enumeration">
+      <key-map field-name="sourceEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_DELIVERY_EVENT" unique="true">
+      <index-field name="eventKey"/>
+      <index-field name="recipientPartyId"/>
+      <index-field name="channelEnumId"/>
+      <index-field name="templateKey"/>
+    </index>
+    <index name="MESSAGE_DELIVERY_DUE">
+      <index-field name="stateEnumId"/>
+      <index-field name="nextAttemptDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery state" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsQueued" description="Queued" sequenceNum="1" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsSent" description="Sent" sequenceNum="2" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsRetry" description="Waiting to retry" sequenceNum="3" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsFailed" description="Failed" sequenceNum="4" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsSuppressed" description="Suppressed" sequenceNum="5" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.Enumeration enumId="MdsUncertain" description="Uncertain, for review" sequenceNum="6" enumTypeId="MessageDeliveryState"/>
+      <moqui.basic.EnumerationType description="Message delivery channel" enumTypeId="MessageDeliveryChannel"/>
+      <moqui.basic.Enumeration enumId="MdcEmail" description="Email" sequenceNum="1" enumTypeId="MessageDeliveryChannel"/>
+      <moqui.basic.EnumerationType description="Message delivery source" enumTypeId="MessageDeliverySource"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="MessageDeliveryAttempt" package="mantle.party" cache="never">
+    <description>One hand-off of a delivery to its channel: when, the outcome (sent, retryable, permanent, uncertain,
+      suppressed), the provider's message id and the safe error. History only.</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="attemptSeqId" type="id" is-pk="true"/>
+    <field name="attemptDate" type="date-time"/>
+    <field name="outcome" type="id"/>
+    <field name="providerMessageId" type="text-medium"/>
+    <field name="emailMessageId" type="id"/>
+    <field name="error" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+  </entity>
+</entities>

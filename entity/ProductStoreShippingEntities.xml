@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- A store's checkout records (impl-commerce P6, COM-CHECKOUT; design-commerce §8 CheckoutSettings): the local shipping rates
+    that replace get#OrderShippingRateLocal's zero for a store with rules, and the checkout policy setting types (dated
+    ProductStoreSetting rows, impl-commerce §4, F14). mantle.product.StoreAdminServices writes them (StoreCheckout.js) after
+    its permission and store checks. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ProductStoreShippingRate" package="mantle.product.store" cache="never">
+        <description>A local shipping rate of a store: the charge for an order part going to a destination zone (a Geo, often a
+            group of GAT_GROUP_MEMBER members: it matches when it is one of the address's geos, from get#PostalAddressGeoIdSet,
+            or a group holding one), optionally for one carrier and method, within a weight band and a value band (each lower
+            bound inclusive, upper bound exclusive, empty for none), in its currency, from a date. Among the rules that match,
+            the lowest priority number wins; rules of the same priority whose zone, method, bands and dates overlap are refused.
+            A store with a rule in effect now or later is rated by its rules: no matching rule means no delivery, never free
+            shipping; a store with none keeps Mantle's local default. A change ends the rule and starts its successor.</description>
+        <field name="shippingRateId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id" enable-audit-log="true"/>
+        <field name="geoId" type="id" enable-audit-log="true"><description>The destination zone.</description></field>
+        <field name="carrierPartyId" type="id" enable-audit-log="true"><description>Empty for any carrier.</description></field>
+        <field name="shipmentMethodEnumId" type="id" enable-audit-log="true"><description>Empty for any method.</description></field>
+        <field name="fromWeight" type="number-decimal" enable-audit-log="true"/>
+        <field name="thruWeight" type="number-decimal" enable-audit-log="true"/>
+        <field name="weightUomId" type="id" enable-audit-log="true"/>
+        <field name="fromAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="thruAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="shippingAmount" type="currency-amount" enable-audit-log="true"><description>The charge for the part.</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"/>
+        <field name="priority" type="number-integer" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="previousRateId" type="id"><description>The rule this one replaced from its start.</description></field>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="moqui.basic.Geo" short-alias="geo"/>
+        <relationship type="one" title="Carrier" related="mantle.party.Party" short-alias="carrier">
+            <key-map field-name="carrierPartyId"/></relationship>
+        <relationship type="one" title="ShipmentMethod" related="moqui.basic.Enumeration" short-alias="shipmentMethod">
+            <key-map field-name="shipmentMethodEnumId"/></relationship>
+        <relationship type="one" title="Weight" related="moqui.basic.Uom" short-alias="weightUom">
+            <key-map field-name="weightUomId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId"/></relationship>
+        <index name="PS_SHIP_RATE_STORE"><index-field name="productStoreId"/></index>
+        <seed-data>
+            <!-- the checkout policy (CheckoutSettings' CheckoutPolicy and TaxDisplay), each a dated ProductStoreSetting type that
+                StoreAdmin.js settingTypes validates by its kind; Shop's checkout reads them, an absent one meaning its default -->
+            <moqui.basic.Enumeration description="Checkout: guest or account (either, account, guest; default either)"
+                    enumId="PsstCheckoutAccount" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: destinations (countries or zones, comma separated; default any)"
+                    enumId="PsstCheckoutDestinations" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: stock disclosure (hidden, availability, backorder; default availability)"
+                    enumId="PsstCheckoutStockDisclosure" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: buyers accept the Terms page (true/false; default true)"
+                    enumId="PsstCheckoutTerms" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: purchase contact phone (hidden, optional, required; default optional)"
+                    enumId="PsstCheckoutPhone" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Checkout: support queue (one the organization offers)"
+                    enumId="PsstCheckoutSupportQueue" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Tax display (exclusive, inclusive; default exclusive)"
+                    enumId="PsstTaxDisplay" enumTypeId="ProductStoreSettingType"/>
+            <moqui.basic.Enumeration description="Tax origin (a fulfillment facility of the store)"
+                    enumId="PsstTaxOrigin" enumTypeId="ProductStoreSettingType"/>
+        </seed-data>
+    </entity>
+</entities>

@@ -39,10 +39,12 @@ along with this software (see the LICENSE.md file). If not, see
     </moqui.resource.DbResource>
     <!-- this is the directory to put all site content under -->
     <moqui.resource.DbResource filename="content" isFile="N" resourceId="zzw_content_dir" parentResourceId="zzw_retail"/>
-    <!-- WikiSpace and root page -->
+    <!-- WikiSpace and root page: its published pages are knowledge articles, shown by the Support app's CustomerArticle on the
+        demo Shop site (impl-shop P3, impl-commerce F17 and F56; there is no PopRestStore /popc mount); its files have no
+        public address -->
     <moqui.resource.wiki.WikiSpace wikiSpaceId="ZZW_RETAIL" description="Content for Ziziwork Retail" restrictView="N" allowAnyHtml="Y"
             rootPageLocation="dbresource://Ziziwork/retail/content.html" decoratorScreenLocation=""
-            publicPageUrl="/popc/content/${pagePath}?ver=${versionName}" publicAttachmentUrl="/popc/content/attachment/${wikiPageId}/${filename}"/>
+            publicPageUrl="https://shop.zizi.localhost/support/CustomerArticle?wikiPageId=${wikiPageId}" publicAttachmentUrl=""/>
     <moqui.resource.wiki.WikiPage wikiPageId="zzw_content" wikiSpaceId="ZZW_RETAIL" pagePath="">
         <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/>
     </moqui.resource.wiki.WikiPage>
@@ -73,7 +75,6 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.resource.wiki.WikiPage wikiPageId="zzw_contact" wikiSpaceId="ZZW_RETAIL" pagePath="contact" publishedVersionName="01">
         <histories historySeqId="01" versionName="01" changeDateTime="1485028800000"/>
     </moqui.resource.wiki.WikiPage>
-    <moqui.screen.ScreenPathAlias aliasPath="/pcontact" fromDate="1485028800000" thruDate="" screenPath="/popc/content/contact"/>
 
     <!-- Ziziwork Retail Template Wiki Space -->
     <moqui.resource.DbResource filename="templates.html" isFile="Y" resourceId="zzwr_templates" parentResourceId="zzw_retail">
@@ -432,10 +433,10 @@ along with this software (see the LICENSE.md file). If not, see
             fromDate="1265184000000" sequenceNum="1"/>
     <mantle.product.category.ProductCategoryMember productCategoryId="DEMO_ONE" productId="DEMO_1_2"
             fromDate="1265184000000" sequenceNum="2"/>
-    <mantle.product.ProductReview productReviewId="100001" productId="DEMO_1_2" productStoreId="POPC_DEFAULT" productRating="5"
+    <mantle.product.ProductReview productReviewId="DEMO_REVIEW_1" productId="DEMO_1_2" productStoreId="POPC_DEFAULT" productRating="5"
             postedAnonymous="N" statusId="PrvwApproved" userId="EX_JOHN_DOE" productReview="Amazing product !!"
             postedDateTime="1432675690547" lastUpdatedStamp="1432675690534"/>
-    <mantle.product.ProductReview productReviewId="100002" productId="DEMO_1_2" productStoreId="POPC_DEFAULT" productRating="3"
+    <mantle.product.ProductReview productReviewId="DEMO_REVIEW_2" productId="DEMO_1_2" productStoreId="POPC_DEFAULT" productRating="3"
             postedAnonymous="Y" statusId="PrvwApproved" userId="_NA_" productReview="I like it ..."
             postedDateTime="1432675690547" lastUpdatedStamp="1432675690534"/>
     <!-- inventory earmarked for POPC_DEFAULT store via AssetPool -->

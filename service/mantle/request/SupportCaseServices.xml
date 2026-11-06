@@ -20,6 +20,15 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <!-- ===== the case rule (D23, F62) ===== -->
+    <service verb="get" noun="AccountCard" authenticate="anonymous-all" allow-remote="false">
+        <description>The PASS Account hub's Support card (mr-pass impl-shop P6, F6): the signed-in account's open cases and
+            returns with the organization the site's Support app serves, and its pages.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('accountCard', input)"/>
+        </actions>
+    </service>
     <service verb="queue" noun="CaseProfile" authenticate="anonymous-all" allow-remote="false">
         <description>Internal, for the SupportCaseRule rules of entity/Request.eecas.xml: ensure#CaseProfile after the commit
             of the change (at once when there is no transaction), as queue#RequestTriage. A failure is logged, never the

@@ -268,7 +268,7 @@ function billCore(p, organizationPartyId) {
 // acceptedOnly), each delivered receipt once. The order's payments are marked for the invoice, so they apply when it is
 // approved. A second invoice of the same source is refused and the first named; a retry with the same operationKey
 // answers the first result.
-function invoiceFromSource(p) {
+function sourceOf(p) {
     const part = one("mantle.order.OrderPart", {orderId: p.orderId, orderPartSeqId: p.orderPartSeqId || "01"})
     const header = part && one("mantle.order.OrderHeader", {orderId: p.orderId})
     if (!part || !header) denied("ORDER_UNAVAILABLE", "Order is not available")
@@ -277,8 +277,24 @@ function invoiceFromSource(p) {
     const organizationPartyId = payable ? part.customerPartyId : part.vendorPartyId
     if (p.organizationPartyId && p.organizationPartyId !== organizationPartyId)
         denied("ORGANIZATION_DENIED", "The order belongs to another organization")
-    lib.organization(organizationPartyId, payable ? "PAYABLE_EDIT" : "RECEIVABLE_EDIT", true)
-    supplier(payable ? part.vendorPartyId : part.customerPartyId)
+    return {part, header, payable, organizationPartyId}
+}
+function invoiceFromSource(p) {
+    const source = sourceOf(p)
+    lib.organization(source.organizationPartyId, source.payable ? "PAYABLE_EDIT" : "RECEIVABLE_EDIT", true)
+    supplier(source.payable ? source.part.vendorPartyId : source.part.customerPartyId)
+    return invoiceSource(p, source)
+}
+// create#FulfillmentInvoice (mr-pass impl-shop P6, F22): the sales invoice of an approved order part's lines on the ordered
+// basis, split from create#InvoiceFromSource for fulfillment's own entry point (StoreItemFulfillment), which checks what it
+// fulfills; no user permission is asked. orderItemSeqIds limits it to those lines and their adjustments, each set of lines
+// once (its own source key). Never a purchase.
+function fulfillmentInvoice(p) {
+    const source = sourceOf(p)
+    if (source.payable) denied("SOURCE_BASIS_INVALID", "Only a sale is invoiced for fulfillment")
+    return invoiceSource(Object.assign({}, p, {basis: "ordered"}), source)
+}
+function invoiceSource(p, {part, header, payable, organizationPartyId}) {
     if (!["OrderApproved", "OrderSent", "OrderProcessing", "OrderCompleted"].includes(header.statusId))
         denied("ORDER_STATE_INVALID", "Only an approved order is invoiced")
     const basis = p.basis || "ordered"
@@ -293,14 +309,23 @@ function invoiceFromSource(p) {
                   orderId: p.orderId,
                   orderPartSeqId: part.orderPartSeqId,
                   basis,
-                  shipmentId: p.shipmentId || null
+                  shipmentId: p.shipmentId || null,
+                  ...(p.orderItemSeqIds?.length ? {orderItemSeqIds: Array.from(p.orderItemSeqIds).map(String).sort()} : {})
               },
               false
           )
         : null
     if (operation?.old) return lib.previous(operation)
     const invoiceDate = p.invoiceDate || ec.user.nowTimestamp
-    const sourceKey = shipmentId => ["source", p.orderId, part.orderPartSeqId, basis, shipmentId || ""].join(":")
+    // some lines of the part (fulfillment's): the lines named and their adjustments, keyed by the sorted line ids
+    const itemSeqIds = Array.from(p.orderItemSeqIds || []).map(String).sort()
+    const partial = itemSeqIds.length
+        ? rows("mantle.order.OrderItem", {orderId: p.orderId, orderPartSeqId: part.orderPartSeqId})
+              .filter(item => itemSeqIds.includes(item.orderItemSeqId) || itemSeqIds.includes(item.parentItemSeqId))
+              .sort((a, b) => String(a.orderItemSeqId).localeCompare(String(b.orderItemSeqId)))
+        : null
+    const sourceKey = shipmentId =>
+        ["source", p.orderId, part.orderPartSeqId, basis, shipmentId || ""].join(":") + (partial ? ":" + itemSeqIds.join(",") : "")
     let invoiceIdList = []
     if (basis === "ordered") {
         const earlier = Array.from(
@@ -309,13 +334,15 @@ function invoiceFromSource(p) {
                 .list()
         )[0]
         if (earlier) denied("SOURCE_ALREADY_INVOICED", "This source is already invoiced as " + earlier.invoiceId)
-        if (!unbilledItems(p.orderId, part.orderPartSeqId))
+        if (!unbilledItems(p.orderId, part.orderPartSeqId, partial))
             denied("NOTHING_TO_BILL", "Every line of this order is already invoiced")
-        const invoiceId = call("mantle.account.InvoiceServices.create#EntireOrderPartInvoice", {
-            orderId: p.orderId,
-            orderPartSeqId: part.orderPartSeqId,
-            invoiceDate
-        }).invoiceId
+        const invoiceId = call(
+            "mantle.account.InvoiceServices.create#EntireOrderPartInvoice",
+            Object.assign(
+                {orderId: p.orderId, orderPartSeqId: part.orderPartSeqId, invoiceDate},
+                partial ? {partialOrderItemList: partial} : {}
+            )
+        ).invoiceId
         call("update#" + I, {invoiceId, workflowSourceKey: sourceKey(null)})
         invoiceIdList = [invoiceId]
     } else {
@@ -351,9 +378,9 @@ function invoiceFromSource(p) {
     if (operation) lib.complete(operation, I, result.invoiceId, result)
     return result
 }
-function unbilledItems(orderId, orderPartSeqId) {
+function unbilledItems(orderId, orderPartSeqId, items = null) {
     let count = 0
-    for (const item of rows("mantle.order.OrderItem", {orderId, orderPartSeqId})) {
+    for (const item of items || rows("mantle.order.OrderItem", {orderId, orderPartSeqId})) {
         const billed = rows("mantle.order.OrderItemBilling", {orderId, orderItemSeqId: item.orderItemSeqId}).reduce(
             (sum, row) => sum.add(row.quantity ?? 0),
             toDecimal(0)
@@ -541,7 +568,17 @@ function clearNotices(p) {
     return {cleared}
 }
 
-const operations = {payables, importBill, portalBill, invoiceFromSource, holds, supplierSummary, notify, clearNotices}
+const operations = {
+    payables,
+    importBill,
+    portalBill,
+    invoiceFromSource,
+    fulfillmentInvoice,
+    holds,
+    supplierSummary,
+    notify,
+    clearNotices
+}
 ;({
     execute: (op, parameters) => {
         if (!operations[op]) denied("OPERATION_UNKNOWN", "Unknown payables operation " + op)

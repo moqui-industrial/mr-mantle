@@ -55,6 +55,28 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="firstOrderPart" from="orderPartList?.[0]"/>
             <set field="customerPartyId" from="firstOrderPart?.customerPartyId"/>
 
+            <!-- the promotion uses of this order's other parts not yet placed (each part is priced alone, and the placed ones are
+                counted below), by 'P:' storePromotionId and 'C:' promoCodeId: counted against the per-code, per-customer and total
+                limits too, so that place#Order's locked recount (StorePromotionServices.check#OrderPromotionLimits) passes a
+                multi-part order once repriced (impl-commerce P7 review) -->
+            <set field="otherPartPromoUses" from="{}"/>
+            <script><![CDATA[
+            if (orderPartSeqId) {
+                const skipParts = new Set(Array.from(ec.entity.find('mantle.order.OrderPart').condition('orderId', orderId).list())
+                    .filter(part => part.orderPartSeqId === orderPartSeqId || openStatusIdList.includes(part.statusId) ||
+                        ['OrderCancelled', 'OrderRejected'].includes(part.statusId))
+                    .map(part => part.orderPartSeqId))
+                const otherItems = ec.entity.find('mantle.order.OrderItem').condition('orderId', orderId)
+                    .condition('isPromo', 'Y').condition('storePromotionId', 'is-not-null', null).list()
+                for (const item of Array.from(otherItems)) {
+                    if (skipParts.has(item.orderPartSeqId) || item.promoTimesUsed == null) continue
+                    for (const key of ['P:' + item.storePromotionId, item.promoCodeId ? 'C:' + item.promoCodeId : null]) {
+                        if (key) otherPartPromoUses[key] = toDecimal(otherPartPromoUses[key] ?? 0).add(toDecimal(item.promoTimesUsed))
+                    }
+                }
+            }
+            ]]></script>
+
             <!-- get all active promos for store -->
             <entity-find entity-name="mantle.product.store.ProductStorePromotion" list="storePromoList" cache="true">
                 <date-filter valid-date="orderHeader.placedDate"/>
@@ -110,7 +132,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                                 <select-field field-name="promoTimesUsed"/>
                             </entity-find>
-                            <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0)"/>
+                            <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0).add(toDecimal(otherPartPromoUses['C:' + storePromoCode.promoCodeId] ?? 0))"/>
                             <set field="curUseLimit" from="toDecimal(storePromoCode.useLimitPerCode).subtract(promoTimesUsed)"/>
                             <!-- if no use limit available treat as not applicable code -->
                             <if condition="curUseLimit.compare(0) &lt;= 0"><continue/></if>
@@ -125,10 +147,10 @@ along with this software (see the LICENSE.md file). If not, see
                                     <econdition field-name="promoCodeId" from="storePromoCode.promoCodeId"/>
                                     <select-field field-name="promoTimesUsed"/>
                                 </entity-find>
-                                <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0)"/>
+                                <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0).add(toDecimal(otherPartPromoUses['C:' + storePromoCode.promoCodeId] ?? 0))"/>
                                 <set field="curUseLimit" from="toDecimal(storePromoCode.useLimitPerCustomer).subtract(promoTimesUsed)"/>
                             </then><else>
-                                <set field="curUseLimit" from="toDecimal(storePromoCode.useLimitPerCustomer)"/>
+                                <set field="curUseLimit" from="toDecimal(storePromoCode.useLimitPerCustomer).subtract(toDecimal(otherPartPromoUses['C:' + storePromoCode.promoCodeId] ?? 0))"/>
                             </else></if>
                             <!-- if no use limit available treat as not applicable code -->
                             <if condition="curUseLimit.compare(0) &lt;= 0"><continue/></if>
@@ -157,7 +179,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <econdition field-name="storePromotionId" from="storePromo.storePromotionId"/>
                         <select-field field-name="promoTimesUsed"/>
                     </entity-find>
-                    <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0)"/>
+                    <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0).add(toDecimal(otherPartPromoUses['P:' + storePromo.storePromotionId] ?? 0))"/>
                     <set field="curUseLimit" from="toDecimal(storePromo.useLimitPerPromotion).subtract(promoTimesUsed)"/>
                     <if condition="curUseLimit.compare(useLimitMin) &lt; 0"><set field="useLimitMin" from="curUseLimit"/></if>
                 </if>
@@ -170,10 +192,10 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="storePromotionId" from="storePromo.storePromotionId"/>
                             <select-field field-name="promoTimesUsed"/>
                         </entity-find>
-                        <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0)"/>
+                        <set field="promoTimesUsed" from="toDecimal(itemSummaryList?.[0]?.promoTimesUsed ?? 0).add(toDecimal(otherPartPromoUses['P:' + storePromo.storePromotionId] ?? 0))"/>
                         <set field="curUseLimit" from="toDecimal(storePromo.useLimitPerCustomer).subtract(promoTimesUsed)"/>
                     </then><else>
-                        <set field="curUseLimit" from="toDecimal(storePromo.useLimitPerCustomer)"/>
+                        <set field="curUseLimit" from="toDecimal(storePromo.useLimitPerCustomer).subtract(toDecimal(otherPartPromoUses['P:' + storePromo.storePromotionId] ?? 0))"/>
                     </else></if>
                     <if condition="curUseLimit.compare(useLimitMin) &lt; 0"><set field="useLimitMin" from="curUseLimit"/></if>
                 </if>

@@ -85,8 +85,11 @@ function payGateway(organizationPartyId) {
 // The payments started from these pages (PortalPaymentAttempt), newest first: never one made in Accounting for the
 // same invoice, which a pay link's holder must not see, refresh or capture.
 const ATT = "mantle.account.payment.PortalPaymentAttempt"
+// An invoice attempt: Billing's purpose, or empty for one made before attempts had purposes (Shop P5, X9).
+const invoiceAttempt = row => !row.purposeEnumId || row.purposeEnumId === "PapInvoice"
 function attempts(invoiceId) {
     return rows(ATT, {invoiceId})
+        .filter(invoiceAttempt)
         .sort((a, b) => lib.ms(b.createdDate) - lib.ms(a.createdDate))
         .map(row => one(P, {paymentId: row.paymentId}))
         .filter(Boolean)
@@ -205,7 +208,12 @@ function getInvoice(p) {
 function findInvoices(p) {
     const organizationPartyId = served(p.siteId, "billing")
     if (!ec.user.userId) fail("AuthenticationRequired", "Sign in to see your invoices")
-    const parties = access.contactParties(organizationPartyId, "billing")
+    // Shop P6 (R-SHP-W06): the account's own party through the self relationship beside its contact grants
+    const own = ec.user.userAccount?.partyId
+    const parties = access
+        .contactParties(organizationPartyId, "billing")
+        .concat(own && access.selfOf(own) ? [own] : [])
+        .filter((partyId, index, all) => all.indexOf(partyId) === index)
     if (!parties.length) return {invoiceList: []}
     const list = Array.from(
         find(I)
@@ -286,6 +294,8 @@ function beginPayment(p) {
     const returnKey = ec.user.randomString(40)
     call("create#" + ATT, {
         paymentId,
+        // Accounting's typed attempts (AC-02, X9; Shop P5): Billing's are invoice attempts
+        purposeEnumId: "PapInvoice",
         invoiceId: invoice.invoiceId,
         siteId: p.siteId,
         capabilityId: p.capabilityId,
@@ -353,7 +363,8 @@ function startInvoicePayment(p) {
 const RETURN_READ_MS = 86400000
 function getPaymentResult(p) {
     const row = p.attemptId && one(ATT, {paymentId: p.attemptId})
-    if (!row) unavailable()
+    // only an invoice attempt is Billing's (a Shop checkout's has its own result, ShopCheckout.js)
+    if (!row || !invoiceAttempt(row)) unavailable()
     if (p.returnKey) {
         // the reference reads while the attempt is pending or for a day after it settled, and only while the invoice can
         // still be reached (issued, not cancelled), on the organization's site it came from
@@ -377,6 +388,14 @@ function resolvePending(p) {
     const ids = Array.from(
         find(ATT)
             .condition("settledDate", "is-null", null)
+            // Billing's worker selects its own purpose (X9): an invoice attempt, or one made before purposes
+            .condition(
+                ec.entity.conditionFactory.makeCondition(
+                    ec.entity.conditionFactory.makeCondition("purposeEnumId", "is-null", null),
+                    "or",
+                    ec.entity.conditionFactory.makeCondition("purposeEnumId", "equals", "PapInvoice")
+                )
+            )
             .orderBy("createdDate")
             .limit(Number(p.limit || 200))
             .list()
@@ -549,10 +568,27 @@ function appReadiness(p) {
     return {checks}
 }
 
+// The PASS Account hub's Billing card (Shop P6, F6): the open invoices the signed-in account reaches (its contacts' and its
+// own through the self relationship).
+function accountCard(p) {
+    const list = findInvoices(p).invoiceList
+    const open = list.filter(row => row.statusText !== "Paid")
+    return {
+        title: "Invoices",
+        lines: [list.length ? open.length + " open of " + list.length : "No invoices"],
+        url: apps.pageUrl(p.siteId, "billing", "/Invoices")
+    }
+}
+
 const operations = {
+    accountCard,
     beginPayment,
     resolvePending,
-    refreshPayment: p => ({statusId: refresh(p.paymentId).statusId}),
+    // Billing's refresh never touches another purpose's attempt (X9)
+    refreshPayment: p => {
+        const row = p.paymentId && one(ATT, {paymentId: p.paymentId})
+        return row && invoiceAttempt(row) ? {statusId: refresh(p.paymentId).statusId} : {statusId: null}
+    },
     getInvoice,
     findInvoices,
     issueInvoiceAccess,

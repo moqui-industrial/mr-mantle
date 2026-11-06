@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's digital delivery and the delivery ledger (mr-pass impl-shop P6): the jobs that resume digital fulfillment and run
+    the ledger's queued and retrying deliveries, each item in its own transaction, the download-ready notice's store email
+    type and ledger source, and the ledger's review permission with its ADMIN grant. -->
+<entity-facade-xml type="seed-initial">
+    <moqui.basic.Enumeration description="Downloads Ready" enumId="PsetDownloadReady" enumTypeId="ProductStoreEmailType"/>
+    <moqui.basic.Enumeration enumId="MdsrcShopDownloads" description="Shop download-ready notice" sequenceNum="1"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.product.ShopFulfillmentServices.build#DownloadNotice"/>
+    <moqui.security.UserPermission userPermissionId="MESSAGE_DELIVERY_REVIEW" description="Message Delivery Review"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MESSAGE_DELIVERY_REVIEW" fromDate="0"/>
+
+    <moqui.service.job.ServiceJob jobName="fulfill_StoreItems" description="Resume Shop digital fulfillment"
+            serviceName="mantle.product.ShopFulfillmentServices.fulfill#StoreItems" cronExpression="0 0/5 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <moqui.service.job.ServiceJob jobName="run_MessageDeliveries" description="Send queued and retrying deliveries"
+            serviceName="mantle.party.MessageServices.run#Deliveries" cronExpression="0 0/2 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

@@ -27,6 +27,8 @@ const records = {
         permissions: ["RECEIVABLE_EDIT"],
         scopes: ["InvoicePay"],
         page: {app: "billing", path: "/InvoicePay?token="},
+        // Shop P6 (design-shop §9 AccountOverview, R-SHP-W06): the customer's own verified account reaches its invoice
+        self: true,
         resolve(recordId) {
             const invoice = one("mantle.account.invoice.Invoice", {invoiceId: recordId})
             if (!invoice || !issuedInvoice.includes(invoice.statusId) || !internal(invoice.fromPartyId)) return null
@@ -137,6 +139,27 @@ const records = {
             if (!internal(invitation.organizationPartyId) || !invitation.partyId || internal(invitation.partyId)) return null
             return {organizationPartyId: invitation.organizationPartyId, partyId: invitation.partyId}
         }
+    },
+    // a customer's sales order (mr-pass impl-shop P5, X6, F16): the customer-direction kind of a placed order of an internal
+    // organization (its sales part's vendor) to an outside customer: OrderView, the guest's order link a Shop checkout
+    // issues at its confirmation; Download (P6) and RenewalAction (P7) follow. The customer's own verified account reaches
+    // it by the self relationship. Customer Service staff may issue or revoke a link (a resent order link).
+    SalesOrder: {
+        permissions: ["SUPPORT_CASE_EDIT"],
+        scopes: ["OrderView", "Download", "RenewalAction"],
+        page: {app: "shop", path: "/Orders/Status?token="},
+        self: true,
+        // Shop P6 (F82): the link's site is the order's store's Shop site (a Shop mount targets a store, not the organization)
+        siteTarget: recordId => one("mantle.order.OrderHeader", {orderId: recordId})?.productStoreId || null,
+        resolve(recordId) {
+            const order = one("mantle.order.OrderHeader", {orderId: recordId})
+            if (!order || ["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
+                return null
+            const part = rows("mantle.order.OrderPart", {orderId: recordId}).find(
+                row => internal(row.vendorPartyId) && row.customerPartyId && !internal(row.customerPartyId)
+            )
+            return part ? {organizationPartyId: part.vendorPartyId, partyId: part.customerPartyId} : null
+        }
     }
 }
 // The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
@@ -202,7 +225,7 @@ function create(p) {
     })
     // the link: the record's page of the organization's first published site with the app
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
-    const siteId = apps.sitesFor(kind.page.app, record.organizationPartyId)[0]
+    const siteId = apps.sitesFor(kind.page.app, kind.siteTarget ? kind.siteTarget(p.recordId) : record.organizationPartyId)[0]
     const url = siteId ? apps.pageUrl(siteId, kind.page.app, pagePath(kind, scopes) + encodeURIComponent(token)) : null
     return {capabilityId: out.capabilityId, token, url, thruDate, organizationPartyId: record.organizationPartyId}
 }
@@ -212,21 +235,29 @@ function create(p) {
 // request's own (behind a proxy, configure the framework's trusted proxies so this is the browser's).
 const account = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js")
 const TOKEN_LOOKUPS = 100
-function tokenCapability(token) {
+// The digest a capability is kept by (the token itself is never stored), and the requester's lookup throttle: each lookup
+// of a scope counts against the requester's limit in a ten-minute window, in its own transaction, before the lookup, and
+// one over it is refused (Tarpit, RATE_LIMITED). Shop P4 (impl-shop F16) exports both for StoreCartAccess (ShopCart.js),
+// so a cart's capability uses the same digest and throttle as a link's.
+const tokenDigest = token => ec.user.singleUseCodeHash(String(token))
+function throttle(scope, limit, message) {
     const allowed = ec.service
         .sync()
         .throwOnError(true)
         .name("org.moqui.public.AccountServices.record#Attempt")
-        .parameters({input: {key: "access-token:" + account().requesterKey(), limit: TOKEN_LOOKUPS, windowMillis: 600000}})
+        .parameters({input: {key: scope + ":" + account().requesterKey(), limit, windowMillis: 600000}})
         .requireNewTransaction(true)
         .call().result.allowed
     if (!allowed) {
-        const error = new Error("Wait before trying another link")
+        const error = new Error("RATE_LIMITED: " + (message || "Wait before trying another link"))
         error.moquiErrorKind = "Tarpit"
         throw error
     }
+}
+function tokenCapability(token) {
+    throttle("access-token", TOKEN_LOOKUPS)
     const text = String(token || "")
-    const row = text.length >= 32 && text.length <= 128 ? one(C, {tokenDigest: ec.user.singleUseCodeHash(text)}) : null
+    const row = text.length >= 32 && text.length <= 128 ? one(C, {tokenDigest: tokenDigest(text)}) : null
     return row && !row.revokedDate && lib.entityLib.active(row) ? row : null
 }
 // A signed-in user's contact grant (ExternalAccessContact, in effect): made by redeeming an invitation for one app of
@@ -441,6 +472,9 @@ function bindContact(partyId, scopes) {
     create,
     check,
     tokenCapability,
+    // Shop P4 (F16): the capability digest and the lookup throttle, for StoreCartAccess
+    tokenDigest,
+    throttle,
     contactOf,
     contactParties,
     // Customer Service P15: the self relationship and the parties a signed-in user acts for

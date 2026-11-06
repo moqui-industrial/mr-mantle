@@ -1998,7 +1998,10 @@ methods.checkReadiness = (p) => {
         },
         {
             name: 'hosts',
-            ready: find(S + 'PublicSiteHost', { siteId: p.siteId }).count() > 0,
+            // a theme preview host (Commerce P5, F54) does not serve the site
+            ready: rows(S + 'PublicSiteHost', { siteId: p.siteId }, 100).some(
+                (h) => h.hostKindEnumId !== 'PshkPreview',
+            ),
         },
         {
             name: 'mounts',
@@ -2091,38 +2094,11 @@ methods.storeMounts = (p) => {
     revision(s, p.expectedRevision)
     const mounts = p.mounts || [],
         hosts = p.hosts || [],
-        reserved = [
-            'apps',
-            'qapps',
-            'rest',
-            'rpc',
-            'status',
-            'error',
-            'health',
-            'metrics',
-            'fop',
-            'js',
-            'css',
-            'libs',
-            'images',
-            // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
-            'static',
-            'assets',
-            'Login',
-            'SecondFactor',
-            'PasswordReset',
-            'sso',
-            'notws',
-            'termws',
-            'PublicShell',
-            's',
-            'u',
-            'cal',
-            'r',
-            'sw.js',
-            'manifest.webmanifest',
-            'WebPush',
-        ]
+        // the app roots and framework routes no mount may take (PublicApps.js reservedPaths, also the site page and
+        // redirect checks of SitePages.js)
+        reserved = ec.resource.script(
+            'component://mr-mantle/service/mantle/public/PublicApps.js',
+        ).reservedPaths
     for (const h of hosts) {
         if (!isOperator())
             fail('Unauthorized', 'Host bindings require an operator')
@@ -2187,18 +2163,46 @@ methods.storeMounts = (p) => {
                 invalid('Mounts overlap')
         }
     }
-    for (const old of existing) if (!kept.includes(old)) old.delete()
-    for (const [i, m] of mounts.entries())
-        create(S + 'PublicSiteApp', {
-            siteId: p.siteId,
-            appMountId: m.appMountId || m.app + '-' + i,
+    // Shop P5 (impl-shop F75): a named mount that is already the site's keeps its row (and so its id and what refers to it,
+    // a theme binding, a cart's mount): the one with its appMountId, else the site's mount of the same app at the same path,
+    // else of the same app; only the existing mounts no save names and none matched are deleted
+    const matched = new Map()
+    for (const [i, m] of mounts.entries()) {
+        const free = (old) => !kept.includes(old) && ![...matched.values()].includes(old)
+        const found =
+            (m.appMountId && existing.find((old) => old.appMountId === m.appMountId && old.app === m.app && free(old))) ||
+            existing.find((old) => old.app === m.app && old.pathPrefix === m.pathPrefix && free(old)) ||
+            (!m.appMountId && existing.find((old) => old.app === m.app && free(old)))
+        if (found) matched.set(i, found)
+    }
+    const reused = [...matched.values()]
+    for (const old of existing) if (!kept.includes(old) && !reused.includes(old)) old.delete()
+    for (const [i, m] of mounts.entries()) {
+        const values = {
             app: m.app,
             pathPrefix: m.pathPrefix,
             enabled: m.enabled === false ? 'N' : 'Y',
             targetId: m.targetId || null,
-        })
+        }
+        const old = matched.get(i)
+        if (old) update(old, values)
+        else
+            create(S + 'PublicSiteApp', {
+                siteId: p.siteId,
+                appMountId: m.appMountId || m.app + '-' + i,
+                ...values,
+            })
+    }
     if (hosts.filter((h) => h.canonical).length > 1)
         invalid('Choose one canonical hostname')
+    // Commerce P5 (F54): a theme preview host serves only the preview render, so it is never the canonical one; a host
+    // named without `preview` keeps its kind (a save that does not know preview hosts never makes one live)
+    const kindOf = (h) => {
+        if (h.preview != null) return h.preview === true ? 'PshkPreview' : 'PshkLive'
+        return one(S + 'PublicSiteHost', { hostname: h.hostname })?.hostKindEnumId || 'PshkLive'
+    }
+    if (hosts.some((h) => h.canonical && kindOf(h) === 'PshkPreview'))
+        invalid('PREVIEW_NOT_CANONICAL[hosts]: A preview host is not the site\'s address')
     if (hosts.some((h) => h.canonical))
         for (const old of rows(
             S + 'PublicSiteHost',
@@ -2212,6 +2216,7 @@ methods.storeMounts = (p) => {
             hostname: h.hostname,
             siteId: p.siteId,
             canonical: h.canonical ? 'Y' : 'N',
+            hostKindEnumId: kindOf(h),
         }
         old ? update(old, fields) : create(S + 'PublicSiteHost', fields)
     }
@@ -3246,7 +3251,17 @@ methods.publishSitePage = (p) => {
         versionName: p.versionName,
         publicationRevision: Number(old?.publicationRevision || 0) + 1,
     }
-    old ? update(old, values) : create(S + 'PublicSitePage', values)
+    // a new binding takes its sequenced key (PublicSitePage is keyed by sitePageId since Commerce P4)
+    old
+        ? update(old, values)
+        : create(S + 'PublicSitePage', {
+              ...values,
+              sitePageId: ec.entity.sequencedIdPrimary(
+                  S + 'PublicSitePage',
+                  null,
+                  null,
+              ),
+          })
     bump(p.siteId)
     return { revision: values.publicationRevision }
 }
@@ -5519,7 +5534,8 @@ function execute(operation, p) {
                 invalid('Invalid configuration list')
             const allowed =
                 key === 'hosts'
-                    ? ['hostname', 'canonical']
+                    ? // preview: a theme preview host (Commerce P5, F54)
+                      ['hostname', 'canonical', 'preview']
                     : ['appMountId', 'app', 'pathPrefix', 'enabled', 'targetId']
             for (const item of value) {
                 if (
@@ -5532,7 +5548,7 @@ function execute(operation, p) {
                 for (const [field, data] of Object.entries(item))
                     if (
                         data != null &&
-                        (['canonical', 'enabled'].includes(field)
+                        (['canonical', 'enabled', 'preview'].includes(field)
                             ? typeof data !== 'boolean'
                             : typeof data !== 'string')
                     )

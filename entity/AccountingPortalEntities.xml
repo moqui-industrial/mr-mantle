@@ -43,7 +43,9 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="PortalPaymentAttempt" package="mantle.account.payment" cache="never">
         <description>A payment started from a Billing page (start#InvoicePayment): its invoice, the site and the link or
             contact it came from, and the digest of the reference the gateway's return carries. The pages show, refresh
-            and capture only these payments, never one made in Accounting for the same invoice.</description>
+            and capture only these payments, never one made in Accounting for the same invoice. Since Shop P5 it is Accounting's
+            typed payment attempt (purposeEnumId): Shop's checkout attempts carry their order, checkout, store and site,
+            the snapshot hash, phase, safe outcome and lookup backoff, and have no invoice.</description>
         <field name="paymentId" type="id" is-pk="true"/>
         <field name="invoiceId" type="id"/>
         <field name="siteId" type="id"/>
@@ -53,10 +55,40 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="createdDate" type="date-time"/>
         <field name="settledDate" type="date-time"><description>When the payment stopped being pending; the return
             reference reads the attempt for a day after it.</description></field>
+        <!-- Accounting's typed payment-attempt coordinator (AC-02, review X9; mr-pass impl-shop P5, F13): each attempt has
+            its purpose, and each worker selects its own (Billing's invoice attempts are PapInvoice, or empty for those made
+            before; Shop's checkout attempts PapShopCheckout), so one worker never refreshes or captures another's. -->
+        <field name="purposeEnumId" type="id"><description>PaymentAttemptPurpose: PapInvoice (Billing, also when empty),
+            PapShopCheckout, PapShopRenewal, PapEventRegistration.</description></field>
+        <field name="orderId" type="id"/>
+        <field name="checkoutId" type="id"/>
+        <field name="occurrenceId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="snapshotHash" type="text-medium"><description>The hash of what the attempt charges (the caller's
+            frozen snapshot).</description></field>
+        <field name="phase" type="text-short"><description>Where the attempt is: authorizing, pending (at the provider),
+            authorized, placed, failed.</description></field>
+        <field name="outcome" type="text-short"><description>The safe outcome a customer may see: approved, declined,
+            unknown, cancelled, mismatch.</description></field>
+        <field name="checkCount" type="number-integer"/>
+        <field name="lastCheckDate" type="date-time"/>
+        <field name="nextCheckDate" type="date-time"><description>When its worker looks it up next (bounded backoff).</description></field>
         <relationship type="one" related="mantle.account.payment.Payment"/>
         <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <relationship type="one" title="PaymentAttemptPurpose" related="moqui.basic.Enumeration">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
         <index name="PORTAL_PAY_INVOICE"><index-field name="invoiceId"/></index>
         <index name="PORTAL_PAY_OPEN"><index-field name="settledDate"/><index-field name="createdDate"/></index>
+        <index name="PORTAL_PAY_PURPOSE"><index-field name="purposeEnumId"/><index-field name="settledDate"/>
+            <index-field name="nextCheckDate"/></index>
+        <index name="PORTAL_PAY_CHECKOUT"><index-field name="checkoutId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payment Attempt Purpose" enumTypeId="PaymentAttemptPurpose"/>
+            <moqui.basic.Enumeration description="Invoice payment (Billing)" enumId="PapInvoice" enumTypeId="PaymentAttemptPurpose" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Shop checkout" enumId="PapShopCheckout" enumTypeId="PaymentAttemptPurpose" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Shop renewal" enumId="PapShopRenewal" enumTypeId="PaymentAttemptPurpose" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Event registration" enumId="PapEventRegistration" enumTypeId="PaymentAttemptPurpose" sequenceNum="4"/>
+        </seed-data>
     </entity>
     <extend-entity entity-name="PartyAcctgPreference" package="mantle.ledger.config">
         <field name="invoicePayGatewayConfigId" type="id" enable-audit-log="update">
@@ -67,5 +99,13 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="redirectUrl" type="text-medium">
             <description>Where a hosted gateway takes the payer to pay (its own page), when the authorization is
                 pending there.</description></field>
+        <!-- mr-pass impl-shop P5 (F38, F41): Authorize.Net Accept Hosted -->
+        <field name="hostedFormDate" type="date-time">
+            <description>For a pending hosted authorization whose page takes a posted form token (Accept Hosted): when
+                the last token was issued, after which (its lifetime and a grace) no payment can be made with
+                one.</description></field>
+        <field name="networkTransId" type="text-medium">
+            <description>The card network's transaction id the provider reported for an approved transaction (stored
+                credential evidence for later merchant-initiated charges).</description></field>
     </extend-entity>
 </entities>

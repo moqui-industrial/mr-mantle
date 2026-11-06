@@ -87,13 +87,58 @@
     </index>
   </entity>
   <entity entity-name="PublicSitePage" package="mantle.public">
-    <field name="siteId" type="id" is-pk="true"/>
-    <field name="pageRole" type="id" is-pk="true"/>
-    <field name="wikiPageId" type="id"/>
-    <field name="versionName" type="id"/>
+    <description>A public page of a site: an exact WikiPage version bound to the site (the Forum's guidelines and about pages
+      by their role alone) or to an app mount, route and locale (Commerce's store and policy pages, impl-commerce P4, X14),
+      public within its publication window. A role is unique within a site when set. A scheduled publication waits in the
+      scheduled fields until the publication job revalidates it at its from date; a failure leaves the live version as it
+      was and is kept in the failure fields (the store's readiness lists it). The key changed from (site, role) to
+      sitePageId in November 2026: docs/Upgrading.md has the rebuild of an older database.</description>
+    <field name="sitePageId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="pageRole" type="id" enable-audit-log="true"><description>guidelines and about (the Forum's), or a policy
+      role (delivery, returns, privacy, terms); empty for any other page.</description></field>
+    <field name="wikiPageId" type="id" enable-audit-log="true"/>
+    <field name="versionName" type="id" enable-audit-log="true"><description>The exact published version; the page's
+      published wiki version must be this one for the page to show.</description></field>
     <field name="publicationRevision" type="number-integer"/>
+    <field name="appMountId" type="id" enable-audit-log="true"/>
+    <field name="routePath" type="text-medium" enable-audit-log="true"><description>The path under the mount's pages/
+      route: lower-case segments of letters, digits and hyphens.</description></field>
+    <field name="locale" type="id" enable-audit-log="true"/>
+    <field name="templateKey" type="text-short" enable-audit-log="true"><description>The theme's page template; empty for
+      its default.</description></field>
+    <field name="title" type="text-medium"/>
+    <field name="seoTitle" type="text-medium"/>
+    <field name="seoDescription" type="text-long"/>
+    <field name="socialImageUrl" type="text-medium"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="publishedDate" type="date-time"/>
+    <field name="scheduledVersionName" type="id" enable-audit-log="true"/>
+    <field name="scheduledFromDate" type="date-time" enable-audit-log="true"/>
+    <field name="scheduledThruDate" type="date-time"/>
+    <field name="scheduledByUserId" type="id-long"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="failureDate" type="date-time"/>
+    <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
     <relationship type="one" related="mantle.public.PublicSite"/>
     <relationship type="one" related="moqui.resource.wiki.WikiPage"/>
+    <index name="PASS_PAGE_ROLE" unique="true">
+      <index-field name="siteId"/>
+      <index-field name="pageRole"/>
+    </index>
+    <index name="PASS_PAGE_ROUTE">
+      <index-field name="siteId"/>
+      <index-field name="appMountId"/>
+      <index-field name="routePath"/>
+    </index>
+    <index name="PASS_PAGE_SCHEDULE">
+      <index-field name="scheduledFromDate"/>
+    </index>
   </entity>
   <entity entity-name="PublicAccessGrant" package="mantle.public">
     <field name="grantId" type="id" is-pk="true"/>

@@ -23,7 +23,7 @@
 // recorded or logged; the request bodies are not logged at all.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const G = ec.resource.script("component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js")
-const {one, rows, find, call} = lib
+const {one, rows, find, call, ms} = lib
 const {clip, record, refuse, describe, isRefund, authorizedTransaction} = G
 const P = "mantle.account.payment.Payment",
     PM = "mantle.account.method.PaymentMethod",
@@ -353,12 +353,51 @@ function findInList(gw, requestName, fields) {
         const result = resultOf(sent.data)
         if (!result.ok) return {problem: (result.code || "") + " " + (result.text || "")}
         const list = [].concat(sent.data.transactions || [])
-        const match = list.find(row => row.invoiceNumber === fields.reference)
+        if (fields.all) fields.all.push(...list.filter(row => row.invoiceNumber === fields.reference))
+        const match = fields.all ? null : list.find(row => row.invoiceNumber === fields.reference)
         if (match) return {transId: String(match.transId)}
         if (list.length < PAGE_LIMIT) return {}
     }
     return {problem: "More than " + MAX_PAGES * PAGE_LIMIT + " transactions to search"}
 }
+// Every transaction of a reference in the lists (unsettled, held for review, and the batches settled since the request):
+// {transactions: [{transId, transactionStatus}]}, or {problem} when a search could not be done (Accept Hosted: two pages
+// open at once can each take a payment under one reference; Shop P6, F85).
+function referenceTransactions(gw, refId, sinceMillis, anyOne = false) {
+    const all = []
+    for (const before of [{status: "pendingApproval"}, {}]) {
+        const found = findInList(gw, "getUnsettledTransactionListRequest", {before, reference: refId, all})
+        if (found.problem) return found
+    }
+    // anyOne: whether there is a transaction at all, so an unsettled one ends the search
+    if (anyOne && all.length)
+        return {transactions: all.map(row => ({transId: String(row.transId), transactionStatus: row.transactionStatus}))}
+    const now = Number(ec.user.nowTimestamp)
+    const first = Math.max(Number(sinceMillis || now) - 86400000, now - SETTLED_DAYS * 86400000)
+    const batches = send(gw, "getSettledBatchListRequest", {
+        includeStatistics: false,
+        firstSettlementDate: utc(first),
+        lastSettlementDate: utc(now)
+    })
+    if (batches.unknown || batches.refused) return {problem: batches.unknown || batches.refused}
+    const batchResult = resultOf(batches.data)
+    if (!batchResult.ok && batchResult.code !== "E00004") return {problem: batchResult.code + " " + batchResult.text}
+    for (const batch of [].concat(batches.data.batchList || [])) {
+        const found = findInList(gw, "getTransactionListRequest", {
+            before: {batchId: String(batch.batchId)},
+            reference: refId,
+            all
+        })
+        if (found.problem) return found
+    }
+    const seen = new Set()
+    return {
+        transactions: all
+            .filter(row => !seen.has(String(row.transId)) && seen.add(String(row.transId)))
+            .map(row => ({transId: String(row.transId), transactionStatus: row.transactionStatus}))
+    }
+}
+const approvedStatuses = ["authorizedPendingCapture", "capturedPendingSettlement", "pendingSettlement", "settledSuccessfully"]
 const utc = millis => {
     const date = new Date(millis)
     const two = n => String(n).padStart(2, "0")
@@ -380,8 +419,10 @@ const utc = millis => {
 // The transaction Mantle sent with this reference: by transrefId, then the unsettled transactions' invoice numbers,
 // then those of the batches settled since the request. {transaction}, {notFound} when none has it, {problem} when a
 // search could not be done.
-function findByReference(gw, refId, sinceMillis) {
-    const direct = transactionDetails(gw, {transrefId: refId})
+function findByReference(gw, refId, sinceMillis, newest = false) {
+    // newest: the lists only, whose newest transaction with the reference comes first (Accept Hosted, where a payer may
+    // try again on the page after a decline, so one reference can have several transactions)
+    const direct = newest ? {} : transactionDetails(gw, {transrefId: refId})
     if (direct.transaction && (!direct.transaction.order?.invoiceNumber || direct.transaction.order.invoiceNumber === refId))
         return direct
     // the unsettled list leaves out transactions held for review, which pendingApproval lists
@@ -444,7 +485,11 @@ function details(p) {
         return {}
     }
     if (p.idempotencyKey) return resolve(gw, payment, p)
-    if (!payment.paymentRefNum) return {}
+    if (!payment.paymentRefNum) {
+        // Accept Hosted: the payer's transaction, once made on the page, is found by the attempt's reference (F38)
+        const pending = hostedResponse(payment)
+        return pending ? hostedDetails(gw, payment, pending) : {}
+    }
     const got = transactionDetails(gw, {transId: payment.paymentRefNum})
     if (!got.transaction) {
         ec.message.addMessage(
@@ -727,6 +772,20 @@ function consumeWebhook(p) {
         )
         for (const response of lost) paymentIds.add(response.refundPaymentId || response.paymentId)
     }
+    // Accept Hosted (F39): a payment still waiting at its hosted page has no transaction id yet; it is matched by its
+    // reference, the payload's merchantReferenceId or else the transaction's invoice number (getTransactionDetails)
+    if (!paymentIds.size) {
+        const hosted = hostedPendingOf(gatewayIds)
+        if (hosted.length) {
+            let hostedRef = refId && /^mq[0-9a-f]{18}$/.test(refId) ? refId : null
+            if (!hostedRef) {
+                const got = transactionDetails(gateway(gatewayIds[0]), {transId: String(payload.id)})
+                hostedRef = got.transaction?.order?.invoiceNumber ? String(got.transaction.order.invoiceNumber) : null
+            }
+            for (const response of hosted)
+                if (hostedRef && reference(response.idempotencyKey) === hostedRef) paymentIds.add(response.paymentId)
+        }
+    }
     if (!paymentIds.size)
         ec.logger.info("Authorize.Net " + event.eventType + " of transaction " + payload.id + ": no Mantle payment")
     // each payment on its own: one that fails is logged, the others go on, and the message is retried after
@@ -744,6 +803,285 @@ function consumeWebhook(p) {
     if (failed.length)
         throw new Error("The lookup of payments " + failed.join(", ") + " failed; the notification is kept to retry")
     return {}
+}
+
+// ---- Accept Hosted (mr-pass impl-shop P5, F37-F41) ----
+
+// A form token lives 15 minutes at Authorize.Net; after it (and the lookup's grace) no payment can be made with one.
+const HOSTED_TOKEN_SECONDS = 15 * 60
+// The transaction statuses of a payer's refused try on the hosted page (paymentStatus's PmntDeclined).
+const hostedDeclined = ["declined", "failedReview"]
+const HOSTED_PAGE = {
+    sandbox: "https://test.authorize.net/payment/payment",
+    production: "https://accept.authorize.net/payment/payment"
+}
+// The payment's latest authorization answer when it waits at the hosted page (no transaction yet), else null.
+function hostedResponse(payment) {
+    if (!payment || payment.paymentRefNum || payment.statusId !== "PmntPromised") return null
+    const latest = Array.from(
+        find(R, {paymentId: payment.paymentId})
+            .condition("paymentOperationEnumId", "in", ["PgoAuthorize", "PgoAuthAndCapture"])
+            .orderBy("-transactionDate")
+            .orderBy("-paymentGatewayResponseId")
+            .limit(1)
+            .list()
+    )[0]
+    return latest && latest.transactionStatus === "HostedPending" ? latest : null
+}
+// The hosted answers still waiting on these gateways (their payments promised with no transaction).
+function hostedPendingOf(gatewayIds) {
+    return Array.from(
+        find(R, {transactionStatus: "HostedPending"})
+            .condition("paymentGatewayConfigId", "in", gatewayIds)
+            .orderBy("-transactionDate")
+            .limit(200)
+            .list()
+    ).filter(
+        response =>
+            hostedResponse(one(P, {paymentId: response.paymentId}))?.paymentGatewayResponseId ===
+            response.paymentGatewayResponseId
+    )
+}
+// authorizeHosted#Payment and authorizeAndCaptureHosted#Payment: nothing is sent; the payment waits at the hosted page
+// (transactionStatus HostedPending, no result), which the frontend's relay opens with a fresh token (get#HostedPaymentForm)
+// and whose transaction the details lookup finds by the attempt's reference.
+function authorizeHosted(p, sale) {
+    const {payment, base, problem} = start(p, sale ? "PgoAuthAndCapture" : "PgoAuthorize")
+    if (problem) return refuse(base, "GATEWAY_NOT_AVAILABLE", problem)
+    if (!amountText(payment.amount, payment.amountUomId))
+        return refuse(base, "AMOUNT_INVALID", "The amount does not suit the currency or Authorize.Net")
+    if (!p.returnUrl || !/^https:\/\//.test(String(p.returnUrl)))
+        return refuse(base, "RETURN_URL_REQUIRED", "A hosted payment needs the https address its page returns to")
+    return {
+        paymentGatewayResponseId: record(base, {
+            transactionStatus: "HostedPending",
+            reasonMessage: "Waiting for the payer on the hosted payment page"
+        })
+    }
+}
+// get#HostedPaymentForm: a fresh form token for the pending hosted payment (getHostedPaymentPageRequest), asked on each
+// visit and never stored: the transaction type and amount of the pending answer, the attempt's reference as refId and
+// order.invoiceNumber (F38), the canonical return and cancel addresses, the receipt shown and the merchant's name. The
+// token's time is recorded on the pending answer. {formUrl, token}.
+function hostedForm(p) {
+    const payment = one(P, {paymentId: p.paymentId})
+    const pending = hostedResponse(payment)
+    if (!pending) throw new Error("HOSTED_NOT_PENDING: The payment is not waiting at a hosted page")
+    const gw = gateway(payment.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    if (!/^https:\/\//.test(String(p.returnUrl || ""))) throw new Error("RETURN_URL_REQUIRED: The return address is https")
+    const refId = reference(pending.idempotencyKey)
+    // one page per reference (Shop P6, F85): once the reference has a transaction (paid, declined or held on an earlier
+    // page), no new token is issued, so two pages cannot each take a payment; a search that cannot tell issues none either
+    const existing = referenceTransactions(gw, refId, ms(pending.transactionDate), true)
+    if (existing.problem) throw new Error("HOSTED_FORM_UNAVAILABLE: " + clip(String(existing.problem), 200))
+    if (existing.transactions.length)
+        throw new Error("HOSTED_ALREADY_USED: The payment page was already used for this payment; its result is being confirmed")
+    const transactionRequest = {
+        transactionType:
+            pending.paymentOperationEnumId === "PgoAuthAndCapture" ? "authCaptureTransaction" : "authOnlyTransaction",
+        amount: amountText(payment.amount, payment.amountUomId),
+        currencyCode: payment.amountUomId,
+        order: {invoiceNumber: refId, description: describe(payment)}
+    }
+    if (payment.fromPartyId && String(payment.fromPartyId).length <= REF_LENGTH)
+        transactionRequest.customer = {id: payment.fromPartyId}
+    const setting = [
+        {
+            settingName: "hostedPaymentReturnOptions",
+            settingValue: JSON.stringify({
+                showReceipt: true,
+                url: String(p.returnUrl),
+                urlText: "Continue",
+                cancelUrl: String(p.cancelUrl || p.returnUrl),
+                cancelUrlText: "Cancel"
+            })
+        },
+        {settingName: "hostedPaymentButtonOptions", settingValue: JSON.stringify({text: "Pay"})},
+        {
+            settingName: "hostedPaymentOrderOptions",
+            settingValue: JSON.stringify({show: true, merchantName: clip(p.merchantName || "", 50)})
+        },
+        {
+            settingName: "hostedPaymentPaymentOptions",
+            settingValue: JSON.stringify({cardCodeRequired: true, showCreditCard: true, showBankAccount: false})
+        }
+    ]
+    const sent = send(gw, "getHostedPaymentPageRequest", {refId, transactionRequest, hostedPaymentSettings: {setting}})
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (!result.ok || !sent.data.token)
+        throw new Error("HOSTED_FORM_UNAVAILABLE: " + clip(sent.unknown || sent.refused || result.text || "No form token", 200))
+    call("update#" + R, {paymentGatewayResponseId: pending.paymentGatewayResponseId, hostedFormDate: ec.user.nowTimestamp})
+    return {formUrl: gw.remote.usageCode === "P" ? HOSTED_PAGE.production : HOSTED_PAGE.sandbox, token: String(sent.data.token)}
+}
+// The details of a payment waiting at its hosted page: its transaction found by the attempt's reference, recorded with
+// the provider's amount and network transaction id (F41; stored-credential evidence); none found and no form token still
+// usable, the payment is cancelled (nothing can be paid on that page any more); a search that cannot tell leaves it.
+// A declined transaction is final only once no form token can still be used: until then the payer may try again on the
+// page (or open it again), so the payment stays waiting; after it, the reference's newest transaction decides, so a later
+// approval is never lost behind an earlier decline (Shop P5 review).
+function hostedDetails(gw, payment, pending) {
+    const refId = reference(pending.idempotencyKey)
+    const last = ms(pending.hostedFormDate) ?? ms(pending.transactionDate) ?? 0
+    const tokenUsable = ms(ec.user.nowTimestamp) - last <= (HOSTED_TOKEN_SECONDS + graceSeconds(gw)) * 1000
+    let found = findByReference(gw, refId, ms(pending.transactionDate))
+    if (found.transaction && hostedDeclined.includes(found.transaction.transactionStatus)) {
+        if (tokenUsable) return {}
+        const newest = findByReference(gw, refId, ms(pending.transactionDate), true)
+        if (newest.problem) return {}
+        if (newest.transaction) found = newest
+    }
+    if (found.transaction) {
+        const tx = found.transaction
+        const out = detailsOut(gw, payment, tx, statusFor(payment, tx))
+        if (out.paymentGatewayResponseId)
+            call("update#" + R, {
+                paymentGatewayResponseId: out.paymentGatewayResponseId,
+                amount: tx.authAmount != null ? toDecimal(String(tx.authAmount)) : payment.amount,
+                networkTransId: tx.networkTransId ? clip(String(tx.networkTransId), 60) : null,
+                resultSuccess: ["authorizedPendingCapture"].concat(capturedStatuses).includes(tx.transactionStatus) ? "Y" : "N"
+            })
+        // more than one approval under the reference (two pages paid at once; Shop P6, F85) is an exception, flagged once on
+        // the payment with the other transactions for Accounting (the checkout holds its order), never a plain success
+        if (approvedStatuses.includes(tx.transactionStatus)) flagDuplicates(gw, payment, pending, refId, String(tx.transId))
+        return out
+    }
+    if (found.problem) return {}
+    if (!tokenUsable) return {gatewayStatusId: "PmntCancelled"}
+    return {}
+}
+function flagDuplicates(gw, payment, pending, refId, transId) {
+    if (find(R, {paymentId: payment.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).count() > 0) return
+    const listed = referenceTransactions(gw, refId, ms(pending.transactionDate))
+    if (listed.problem) return
+    const others = listed.transactions.filter(row => approvedStatuses.includes(row.transactionStatus) && row.transId !== transId)
+    if (!others.length) return
+    record(
+        {gw, payment, operationEnumId: "PgoTxDetails", amount: payment.amount},
+        {
+            referenceNum: transId,
+            transactionStatus: "DuplicateApproval",
+            reasonCode: "DUPLICATE_APPROVAL",
+            reasonMessage: clip("Also approved under reference " + refId + ": " + others.map(row => row.transId).join(", "), 255),
+            resultSuccess: "N",
+            resultDeclined: "N"
+        }
+    )
+}
+// store#HostedPaymentProfile (F40): after an approved hosted payment a signed-in buyer asked to keep, the transaction's
+// customer payment profile (when the page made one), else one made from the transaction
+// (createCustomerProfileFromTransactionRequest, onto the party's customer profile when it has one); the method keeps the
+// references and the masked card, and the payment names it.
+function hostedProfile(p) {
+    const payment = one(P, {paymentId: p.paymentId})
+    if (!payment || !["PmntAuthorized", "PmntDelivered", "PmntConfirmed"].includes(payment.statusId) || !payment.paymentRefNum)
+        throw new Error("PAYMENT_NOT_APPROVED: Only an approved hosted payment's card is kept")
+    if (payment.paymentMethodId) return {paymentMethodId: payment.paymentMethodId}
+    const gw = gateway(payment.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    const got = transactionDetails(gw, {transId: payment.paymentRefNum})
+    if (!got.transaction) throw new Error("DETAILS_UNAVAILABLE: " + (got.problem || "not found"))
+    const tx = got.transaction
+    let customerProfileId = tx.profile?.customerProfileId ? String(tx.profile.customerProfileId) : null
+    let paymentProfileId = tx.profile?.customerPaymentProfileId ? String(tx.profile.customerPaymentProfileId) : null
+    if (!customerProfileId || !paymentProfileId) {
+        const existing = customerProfileOf(payment.fromPartyId, gw.id)
+        const body = Object.assign({transId: payment.paymentRefNum}, existing ? {customerProfileId: existing} : {})
+        const sent = send(gw, "createCustomerProfileFromTransactionRequest", body)
+        const result = sent.data ? resultOf(sent.data) : {}
+        if (!result.ok)
+            throw new Error("PROFILE_NOT_STORED: " + clip(sent.unknown || sent.refused || result.text || "not stored", 200))
+        customerProfileId = String(sent.data.customerProfileId || existing || "") || null
+        paymentProfileId = String([].concat(sent.data.customerPaymentProfileIdList || [])[0] || "") || null
+    }
+    if (!customerProfileId || !paymentProfileId) throw new Error("PROFILE_NOT_STORED: No payment profile was made")
+    const card = tx.payment?.creditCard || {}
+    const paymentMethodId = G.createCardMethod(
+        payment.fromPartyId,
+        {paymentGatewayConfigId: gw.id, gatewayCimId: paymentProfileId, gatewayCustomerId: customerProfileId},
+        G.last4Of(card.cardNumber),
+        cardTypes[card.cardType]
+    )
+    call("update#" + P, {paymentId: payment.paymentId, paymentMethodId})
+    return {paymentMethodId}
+}
+
+// ---- The hosted profile page (Shop P6, F40) ----
+const PROFILE_PAGE = {
+    sandbox: "https://test.authorize.net/customer/addPayment",
+    production: "https://accept.authorize.net/customer/addPayment"
+}
+// The party's customer profile at the gateway: its methods' reference, else one made now with the party as its
+// merchantCustomerId (a profile the party already has, E00039, is taken as it is).
+function ensureCustomerProfile(gw, partyId) {
+    const kept = customerProfileOf(partyId, gw.id)
+    if (kept) return kept
+    const sent = send(gw, "createCustomerProfileRequest", {
+        profile: {merchantCustomerId: clip(partyId, REF_LENGTH), description: clip("Party " + partyId, 255)}
+    })
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (result.ok) return String(sent.data.customerProfileId)
+    if (result.code === "E00039") return duplicateId(result.text)
+    throw new Error("PROFILE_NOT_STORED: " + clip(sent.unknown || sent.refused || result.text || "No customer profile", 200))
+}
+// get#HostedProfileForm: a form token of the hosted profile page (getHostedProfilePageRequest) where the payer adds a card
+// to their customer profile, returning to returnUrl; never stored. {formUrl, fields: {token}}.
+function hostedProfileForm(p) {
+    const gw = gateway(p.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    if (!/^https:\/\//.test(String(p.returnUrl || ""))) throw new Error("RETURN_URL_REQUIRED: The return address is https")
+    const customerProfileId = ensureCustomerProfile(gw, p.partyId)
+    const sent = send(gw, "getHostedProfilePageRequest", {
+        customerProfileId,
+        hostedProfileSettings: {
+            setting: [
+                {settingName: "hostedProfileReturnUrl", settingValue: String(p.returnUrl)},
+                {settingName: "hostedProfileReturnUrlText", settingValue: "Continue"},
+                {settingName: "hostedProfileCardCodeRequired", settingValue: "true"}
+            ]
+        }
+    })
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (!result.ok || !sent.data.token)
+        throw new Error("HOSTED_FORM_UNAVAILABLE: " + clip(sent.unknown || sent.refused || result.text || "No form token", 200))
+    return {
+        formUrl: gw.remote.usageCode === "P" ? PROFILE_PAGE.production : PROFILE_PAGE.sandbox,
+        fields: {token: String(sent.data.token)}
+    }
+}
+// sync#CustomerProfile: the party's customer profile read (getCustomerProfileRequest, by its kept reference or the party
+// as merchantCustomerId), each payment profile not kept yet kept as a masked card method. {added}.
+function syncCustomerProfile(p) {
+    const gw = gateway(p.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    const kept = customerProfileOf(p.partyId, gw.id)
+    const sent = send(
+        gw,
+        "getCustomerProfileRequest",
+        kept ? {customerProfileId: kept} : {merchantCustomerId: clip(p.partyId, REF_LENGTH)}
+    )
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (!result.ok) {
+        if (result.code === "E00040") return {added: 0}
+        throw new Error("DETAILS_UNAVAILABLE: " + clip(sent.unknown || sent.refused || result.text || "not read", 200))
+    }
+    const profile = sent.data.profile || {}
+    const customerProfileId = String(profile.customerProfileId || kept || "")
+    let added = 0
+    for (const paymentProfile of [].concat(profile.paymentProfiles || [])) {
+        const paymentProfileId = String(paymentProfile.customerPaymentProfileId || "")
+        if (!paymentProfileId || one(PM, {paymentGatewayConfigId: gw.id, gatewayCimId: paymentProfileId})) continue
+        const card = paymentProfile.payment?.creditCard
+        if (!card) continue
+        G.createCardMethod(
+            p.partyId,
+            {paymentGatewayConfigId: gw.id, gatewayCimId: paymentProfileId, gatewayCustomerId: customerProfileId},
+            G.last4Of(card.cardNumber),
+            cardTypes[card.cardType]
+        )
+        added++
+    }
+    return {added}
 }
 
 // ---- Browser tokenization ----
@@ -784,6 +1122,12 @@ function submitToken(p) {
 const operations = {
     authorize: p => authorize(p, false),
     sale: p => authorize(p, true),
+    authorizeHosted: p => authorizeHosted(p, false),
+    saleHosted: p => authorizeHosted(p, true),
+    hostedForm,
+    hostedProfile,
+    hostedProfileForm,
+    syncCustomerProfile,
     capture,
     release,
     refund,

@@ -365,6 +365,8 @@ function rates(p) {
                     postalContactMechId: segment.destPostalContactMechId,
                     packageInfoList
                 })
+                // a method the store's local rates do not deliver has no rate (impl-commerce P6), so it is left out
+                if (out.rateUnavailable) continue
                 const header = one("mantle.order.OrderHeader", {orderId: orderItem.orderId})
                 add(
                     {

@@ -57,7 +57,8 @@ function getShopContext(p) {
                   }
                 : null
         })(),
-        capabilities: {canBrowse: true, canPurchase: false, signedIn: !!ec.user.userId}
+        // P4: a cart (canUseCart); purchase opens with P5's checkout
+        capabilities: {canBrowse: true, canUseCart: true, canPurchase: false, signedIn: !!ec.user.userId}
     }
 }
 ;({shopOf, getShopContext, execute: (op, p) => ({getShopContext})[op](p || {})})

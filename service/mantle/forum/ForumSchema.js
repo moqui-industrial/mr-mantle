@@ -1062,13 +1062,21 @@
     },
     getCaseIntake: {
         service: 'mantle.request.SupportCaseServices.get#CaseIntake',
-        fields: ['siteId', 'token', 'orderId', 'wikiPageId', 'query'],
+        fields: [
+            'siteId',
+            'token',
+            'orderToken',
+            'orderId',
+            'wikiPageId',
+            'query',
+        ],
     },
     createCustomerCase: {
         service: 'mantle.request.SupportCaseServices.create#CustomerCase',
         fields: [
             'siteId',
             'token',
+            'orderToken',
             'customerPartyId',
             'requestCategoryId',
             'requestTypeEnumId',
@@ -1119,12 +1127,13 @@
     },
     getReturnableOrder: {
         service: 'mantle.order.ReturnPolicyServices.get#ReturnableOrder',
-        fields: ['siteId', 'orderId'],
+        fields: ['siteId', 'orderToken', 'orderId'],
     },
     requestCustomerReturn: {
         service: 'mantle.order.ReturnPolicyServices.request#CustomerReturn',
         fields: [
             'siteId',
+            'orderToken',
             'orderId',
             'lines',
             'customerReference',
@@ -1160,6 +1169,7 @@
         service: 'mantle.order.OrderChangeServices.request#CustomerCancel',
         fields: [
             'siteId',
+            'orderToken',
             'orderId',
             'lines',
             'reason',
@@ -1183,7 +1193,19 @@
     // Shop P2: the themed page's view, the active release a frontend verifies and renders, the site's generation
     getShopPage: {
         service: 'mantle.public.ThemeServices.get#ShopPage',
-        fields: ['siteId', 'pageKind'],
+        // P3: the catalog kinds' inputs
+        fields: [
+            'siteId',
+            'pageKind',
+            'productId',
+            'variantId',
+            'quantity',
+            'productCategoryId',
+            'query',
+            'sort',
+            'cursor',
+            'routePath',
+        ],
     },
     getShopThemeRelease: {
         service: 'mantle.public.ThemeServices.get#ShopThemeRelease',
@@ -1196,5 +1218,365 @@
     getSiteGeneration: {
         service: 'mantle.public.SiteServices.get#SiteGeneration',
         fields: ['siteId'],
+    },
+    // Shop P3: the catalog reads (each answers the site's generation and active releaseId)
+    getShopHome: {
+        service: 'mantle.product.ShopCatalogServices.get#Home',
+        fields: ['siteId'],
+    },
+    getStoreCategories: {
+        service: 'mantle.product.ShopCatalogServices.get#Categories',
+        fields: ['siteId'],
+    },
+    getStoreCategory: {
+        service: 'mantle.product.ShopCatalogServices.get#Category',
+        fields: ['siteId', 'productCategoryId', 'sort', 'cursor', 'limit'],
+    },
+    findProducts: {
+        service: 'mantle.product.ShopCatalogServices.find#Products',
+        fields: [
+            'siteId',
+            'productCategoryId',
+            'query',
+            'sort',
+            'cursor',
+            'limit',
+        ],
+    },
+    searchShop: {
+        service: 'mantle.product.ShopCatalogServices.search#Shop',
+        fields: ['siteId', 'query', 'sort', 'cursor', 'limit'],
+    },
+    getProduct: {
+        service: 'mantle.product.ShopCatalogServices.get#Product',
+        fields: ['siteId', 'productId', 'variantId', 'quantity'],
+    },
+    quoteSelection: {
+        service: 'mantle.product.ShopCatalogServices.quote#Selection',
+        fields: ['siteId', 'productId', 'variantId', 'quantity'],
+    },
+    getStorePage: {
+        service: 'mantle.product.ShopCatalogServices.get#Page',
+        fields: ['siteId', 'routePath'],
+    },
+    getShopSitemap: {
+        service: 'mantle.product.ShopCatalogServices.get#Sitemap',
+        fields: ['siteId'],
+    },
+    // Shop P3 (impl-commerce F75): Commerce P4's live navigation and redirects of a site's Shop mount
+    getSiteNavigation: {
+        service: 'mantle.public.SiteServices.get#SiteNavigation',
+        fields: ['siteId', 'menuKey', 'locale'],
+    },
+    resolveSiteRedirect: {
+        service: 'mantle.public.SiteServices.resolve#SiteRedirect',
+        fields: ['siteId', 'path'],
+    },
+    // Shop P4: the cart (input.token is the presentation session's cart capability; no operation takes an order id)
+    getCart: {
+        service: 'mantle.order.ShopCartServices.get#Cart',
+        fields: ['siteId', 'token'],
+    },
+    addCartItem: {
+        service: 'mantle.order.ShopCartServices.add#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'productId',
+            'variantId',
+            'quantity',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    updateCartItem: {
+        service: 'mantle.order.ShopCartServices.update#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'orderItemSeqId',
+            'quantity',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    removeCartItem: {
+        service: 'mantle.order.ShopCartServices.remove#CartItem',
+        fields: [
+            'siteId',
+            'token',
+            'orderItemSeqId',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    applyPromoCode: {
+        service: 'mantle.order.ShopCartServices.apply#PromoCode',
+        fields: [
+            'siteId',
+            'token',
+            'promoCode',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    removePromoCode: {
+        service: 'mantle.order.ShopCartServices.remove#PromoCode',
+        fields: [
+            'siteId',
+            'token',
+            'promoCode',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    attachCart: {
+        service: 'mantle.order.ShopCartServices.attach#Cart',
+        fields: ['siteId', 'token'],
+    },
+    releaseCart: {
+        service: 'mantle.order.ShopCartServices.release#Cart',
+        fields: ['siteId', 'token'],
+    },
+    // Shop P4 (F61): a product image of a public product, streamed by the frontend
+    getShopProductImage: {
+        service: 'mantle.product.ShopCatalogServices.get#ProductImage',
+        fields: ['siteId', 'productContentId'],
+    }, // Shop P5: checkout and payment (input.token is the session's cart capability; reference and key are the checkout's
+    // return reference and its key, from a provider's return or a refreshed frontend; orderToken is a guest's SalesOrder
+    // OrderView capability). No operation takes an order, price, total, customer, store or status.
+    beginCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.begin#Checkout',
+        fields: ['siteId', 'token'],
+    },
+    getCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.get#Checkout',
+        fields: ['siteId', 'token', 'reference', 'key'],
+    },
+    resumeCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.resume#Checkout',
+        fields: ['siteId', 'token', 'reference', 'key'],
+    },
+    setCheckoutContact: {
+        service: 'mantle.order.ShopCheckoutServices.set#CheckoutContact',
+        fields: [
+            'siteId',
+            'token',
+            'emailAddress',
+            'name',
+            'phone',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    setCheckoutAddresses: {
+        service: 'mantle.order.ShopCheckoutServices.set#CheckoutAddresses',
+        fields: [
+            'siteId',
+            'token',
+            'expectedRevision',
+            'operationId',
+            'contactMechId',
+            'useSuggestion',
+            'toName',
+            'address1',
+            'address2',
+            'city',
+            'stateProvinceGeoId',
+            'postalCode',
+            'countryGeoId',
+            'billingSame',
+            'billingToName',
+            'billingAddress1',
+            'billingAddress2',
+            'billingCity',
+            'billingStateProvinceGeoId',
+            'billingPostalCode',
+            'billingCountryGeoId',
+        ],
+    },
+    getDeliveryOptions: {
+        service: 'mantle.order.ShopCheckoutServices.get#DeliveryOptions',
+        fields: ['siteId', 'token'],
+    },
+    selectDelivery: {
+        service: 'mantle.order.ShopCheckoutServices.select#Delivery',
+        fields: [
+            'siteId',
+            'token',
+            'carrierPartyId',
+            'shipmentMethodEnumId',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    getPaymentOptions: {
+        service: 'mantle.order.ShopCheckoutServices.get#PaymentOptions',
+        fields: ['siteId', 'token'],
+    },
+    selectPayment: {
+        service: 'mantle.order.ShopCheckoutServices.select#Payment',
+        fields: [
+            'siteId',
+            'token',
+            'paymentOptionId',
+            'savePaymentMethod',
+            'operationId',
+        ],
+    },
+    submitCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.submit#Checkout',
+        fields: [
+            'siteId',
+            'token',
+            'expectedRevision',
+            'termsVersion',
+            'acceptTerms',
+            'operationId',
+            'optIns',
+        ],
+    },
+    getCheckoutPaymentResult: {
+        service: 'mantle.order.ShopCheckoutServices.get#CheckoutPaymentResult',
+        fields: ['siteId', 'token', 'reference', 'key', 'returned'],
+    },
+    getCheckoutPaymentForm: {
+        service: 'mantle.order.ShopCheckoutServices.get#CheckoutPaymentForm',
+        fields: ['siteId', 'reference', 'key'],
+    },
+    getOrderConfirmation: {
+        service: 'mantle.order.ShopCheckoutServices.get#OrderConfirmation',
+        fields: ['siteId', 'token', 'reference', 'key', 'orderToken'],
+    },
+    // Shop P6: orders, account and digital delivery (mantle.party.ShopCustomerServices, mantle.product.ShopFulfillmentServices);
+    // a guest's order link is orderToken, never a party id
+    getShopAccount: {
+        service: 'mantle.party.ShopCustomerServices.get#Account',
+        fields: ['siteId'],
+    },
+    findShopOrders: {
+        service: 'mantle.party.ShopCustomerServices.find#Orders',
+        fields: ['siteId', 'orderToken', 'query', 'cursor', 'limit'],
+    },
+    getShopOrder: {
+        service: 'mantle.party.ShopCustomerServices.get#Order',
+        fields: ['siteId', 'orderToken', 'orderId'],
+    },
+    getShopOrderDocument: {
+        service: 'mantle.party.ShopCustomerServices.get#OrderDocument',
+        fields: ['siteId', 'orderToken', 'orderId', 'invoiceId'],
+    },
+    previewReorder: {
+        service: 'mantle.party.ShopCustomerServices.preview#Reorder',
+        fields: ['siteId', 'orderId'],
+    },
+    reorder: {
+        service: 'mantle.party.ShopCustomerServices.reorder#Order',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'orderItemSeqIds',
+            'operationId',
+        ],
+    },
+    getAddresses: {
+        service: 'mantle.party.ShopCustomerServices.get#Addresses',
+        fields: ['siteId'],
+    },
+    storeAddress: {
+        service: 'mantle.party.ShopCustomerServices.store#Address',
+        fields: [
+            'siteId',
+            'contactMechId',
+            'expectedRevision',
+            'purpose',
+            'toName',
+            'address1',
+            'address2',
+            'city',
+            'stateProvinceGeoId',
+            'postalCode',
+            'countryGeoId',
+        ],
+    },
+    endAddress: {
+        service: 'mantle.party.ShopCustomerServices.end#Address',
+        fields: ['siteId', 'contactMechId'],
+    },
+    getPaymentMethods: {
+        service: 'mantle.party.ShopCustomerServices.get#PaymentMethods',
+        fields: ['siteId'],
+    },
+    beginPaymentMethodSetup: {
+        service: 'mantle.party.ShopCustomerServices.begin#PaymentMethodSetup',
+        fields: ['siteId'],
+    },
+    finishPaymentMethodSetup: {
+        service: 'mantle.party.ShopCustomerServices.finish#PaymentMethodSetup',
+        fields: ['siteId', 'setupReference'],
+    },
+    endPaymentMethod: {
+        service: 'mantle.party.ShopCustomerServices.end#PaymentMethod',
+        fields: ['siteId', 'paymentMethodId', 'confirm'],
+    },
+    getDownloads: {
+        service: 'mantle.product.ShopFulfillmentServices.get#Downloads',
+        fields: ['siteId', 'orderToken'],
+    },
+    issueDownload: {
+        service: 'mantle.product.ShopFulfillmentServices.issue#Download',
+        fields: ['siteId', 'orderToken', 'downloadGrantId'],
+    },
+    getShopDownload: {
+        service: 'mantle.product.ShopFulfillmentServices.get#DownloadFile',
+        fields: ['siteId', 'downloadGrantId', 'downloadToken', 'range'],
+    },
+    // Shop P6 (F6): the PASS Account hub and email preferences (mantle.public.AccountHubServices)
+    getAccountHub: {
+        service: 'mantle.public.AccountHubServices.get#AccountHub',
+        fields: ['siteId'],
+    },
+    getEmailPreferences: {
+        service: 'mantle.public.AccountHubServices.get#EmailPreferences',
+        fields: ['siteId', 'token', 'confirm'],
+    },
+    storeEmailPreferences: {
+        service: 'mantle.public.AccountHubServices.store#EmailPreferences',
+        fields: ['siteId', 'token', 'confirm', 'choices'],
+    },
+    applyOneClickUnsubscribe: {
+        service: 'mantle.public.AccountHubServices.apply#OneClickUnsubscribe',
+        fields: ['siteId', 'token'],
+    },
+    // Commerce P9: a product's reviews (mantle.product.ShopCatalogServices over StoreReviews.js): the approved reviews and the
+    // signed-in author's own, a signed-in buyer's review or edit with one photo a call, and a review image by its digest
+    getProductReviews: {
+        service: 'mantle.product.ShopCatalogServices.get#Reviews',
+        fields: ['siteId', 'productId', 'cursor', 'limit'],
+    },
+    submitProductReview: {
+        service: 'mantle.product.ShopCatalogServices.submit#Review',
+        fields: [
+            'siteId',
+            'productId',
+            'productReviewId',
+            'expectedRevision',
+            'rating',
+            'body',
+            'displayChoice',
+            'removeImageSeqIds',
+            'file',
+        ],
+    },
+    getShopReviewImage: {
+        service: 'mantle.product.ShopCatalogServices.get#ReviewImage',
+        fields: ['siteId', 'reviewImage'],
+    },
+    // Commerce P10: a cart recovery link (token is the link's one-time token, never a cart capability): the signed-in
+    // account's cart restored into its session, repriced, its unavailable lines named
+    recoverCart: {
+        service: 'mantle.order.ShopCartServices.recover#Cart',
+        fields: ['siteId', 'token'],
     },
 })
