@@ -139,4 +139,17 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getSitemap", input)</script>
         </actions>
     </service>
+    <!-- Shop P4 (impl-shop F61): a product image's public route -->
+    <service verb="get" noun="ProductImage" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopProductImage: an image (PcntImage* content of a png, jpeg, gif or webp file, in effect for the store) of a product public in the store now, by input.productContentId: result.file (mimeType, filename) and result.location, which the frontend or the authority's transport streams; anything else is NotFound (NOT_AVAILABLE).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").execute("getProductImage", input)</script>
+        </actions>
+    </service>
 </services>

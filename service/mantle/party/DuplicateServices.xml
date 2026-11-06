@@ -1039,6 +1039,13 @@ along with this software (see the LICENSE.md file). If not, see
                 linkCount += moveKeyed("mantle.party.communication.RecordFollower", "recordId", {recordEntityName: "mantle.party.Party"})
                 if (linkCount) ec.message.addMessage(`Moved ${linkCount} record links and followers from Party ${fromPartyId} to ${toPartyId}`)
 
+                // Shop P4 (impl-shop F23): a Shop cart's access follows its party as the order part does, the verified
+                // customer and the guest party alike; the capability stays the one the session holds, so a merge never
+                // gives a cart to anyone, and nothing here matches on an email address
+                cartCount = moveAll("mantle.order.StoreCartAccess", "customerPartyId", "customerPartyId")
+                cartCount += moveAll("mantle.order.StoreCartAccess", "guestPartyId", "guestPartyId")
+                if (cartCount) ec.message.addMessage(`Moved ${cartCount} Shop cart access records from Party ${fromPartyId} to ${toPartyId}`)
+
                 // PartyNotDuplicate: the from Party's decisions become the to Party's (the lower id first); one between the two is
                 // dropped, as they are now one party
                 for (const row of ec.entity.find("mantle.party.PartyNotDuplicate").condition(cf.makeCondition([

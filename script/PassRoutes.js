@@ -225,4 +225,15 @@
     ['GET', 'shop/sitemap', 'getShopSitemap'],
     ['GET', 'site/navigation', 'getSiteNavigation'],
     ['GET', 'site/redirect', 'resolveSiteRedirect'],
+    // Shop P4: the cart
+    ['GET', 'shop/cart', 'getCart'],
+    ['POST', 'shop/cart/items', 'addCartItem'],
+    ['POST', 'shop/cart/items/{orderItemSeqId}/quantity', 'updateCartItem'],
+    ['POST', 'shop/cart/items/{orderItemSeqId}/removal', 'removeCartItem'],
+    ['POST', 'shop/cart/codes', 'applyPromoCode'],
+    ['POST', 'shop/cart/codes/removal', 'removePromoCode'],
+    ['POST', 'shop/cart/attachment', 'attachCart'],
+    ['POST', 'shop/cart/release', 'releaseCart'],
+    // Shop P4 (F61): a product image (a GET with the content id as its query, as the transports' downloads send it)
+    ['GET', 'shop/media', 'getShopProductImage'],
 ]

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop carts' public ownership (mr-pass impl-shop P4; design-shop §4.2, §7.1, §14.2; mantle.order.ShopCartServices,
+    service/mantle/order/ShopCart.js). A cart is an ordinary open OrderHeader; its access row adds who may reach it from a
+    public site: the presentation session's capability (only its digest is kept, ExternalAccess.js tokenDigest), the scope
+    it can never leave (site, mount, store, currency), the verified customer once a signed-in account attaches it, and its
+    activity, expiry and retirement. It keeps no lines or totals of its own; its revision is the order's orderRevision. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="StoreCartAccess" package="mantle.order" cache="never">
+    <description>A public cart's access: the open order, the scope (site, Shop mount, store and currency), the verified
+      customer (a signed-in account's party, empty for a guest, whose order part carries an anonymous guest party), the
+      session capability's digest (rotated at sign-in and sign-out), a one-time recovery token's digest (Commerce P10), the
+      last shopper activity and the expiry it extends, and retirement (revokedDate with its reason, and the cart a merge
+      moved it into). merge#Parties moves customerPartyId and guestPartyId with the party; nothing moves a cart on an email
+      address.</description>
+    <field name="cartAccessId" type="id" is-pk="true"/>
+    <field name="orderId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="customerPartyId" type="id"><description>The verified customer: the signed-in account's party that made or
+      attached the cart; empty for a guest's.</description></field>
+    <field name="guestPartyId" type="id"><description>The anonymous customer party a guest's cart was made with, kept on
+      the order part so the sales commercial revision applies.</description></field>
+    <field name="capabilityDigest" type="text-medium"><description>The digest of the presentation session's capability;
+      the capability itself is never stored.</description></field>
+    <field name="recoveryTokenDigest" type="text-medium"><description>A one-time recovery link's token digest (Commerce
+      P10); empty once spent.</description></field>
+    <field name="recoveryUsedDate" type="date-time"/>
+    <field name="lastActivityDate" type="date-time"><description>The last shopper action (an add, change, removal, code
+      or sign-in); reads and repricing do not touch it.</description></field>
+    <field name="expireDate" type="date-time"/>
+    <field name="rotatedDate" type="date-time"/>
+    <field name="revokedDate" type="date-time"/>
+    <field name="revokeReasonEnumId" type="id"/>
+    <field name="mergedToCartAccessId" type="id"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" title="Customer" related="mantle.party.Party">
+      <key-map field-name="customerPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="Guest" related="mantle.party.Party">
+      <key-map field-name="guestPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="StoreCartRevokeReason" related="moqui.basic.Enumeration">
+      <key-map field-name="revokeReasonEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_CART_DIGEST" unique="true">
+      <index-field name="capabilityDigest"/>
+    </index>
+    <index name="STORE_CART_RECOVERY">
+      <index-field name="recoveryTokenDigest"/>
+    </index>
+    <index name="STORE_CART_ORDER">
+      <index-field name="orderId"/>
+    </index>
+    <index name="STORE_CART_CUSTOMER">
+      <index-field name="customerPartyId"/>
+      <index-field name="siteId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store Cart Revoke Reason" enumTypeId="StoreCartRevokeReason"/>
+      <moqui.basic.Enumeration description="Merged into the account's cart" enumId="ScrMerged" enumTypeId="StoreCartRevokeReason"/>
+      <moqui.basic.Enumeration description="Placed as an order" enumId="ScrPlaced" enumTypeId="StoreCartRevokeReason"/>
+      <moqui.basic.Enumeration description="Expired" enumId="ScrExpired" enumTypeId="StoreCartRevokeReason"/>
+      <moqui.basic.Enumeration description="Cancelled" enumId="ScrCancelled" enumTypeId="StoreCartRevokeReason"/>
+    </seed-data>
+  </entity>
+</entities>

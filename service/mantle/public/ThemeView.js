@@ -52,7 +52,8 @@ const productCard = {
 }
 const shapes = {
     site: {displayName: "value", locale: "value"},
-    shop: {name: "value", baseUrl: "value", currencyUomId: "value", searchUrl: "value", categoriesUrl: "value"},
+    // P4: the cart page's link
+    shop: {name: "value", baseUrl: "value", currencyUomId: "value", searchUrl: "value", categoriesUrl: "value", cartUrl: "value"},
     locale: "value",
     page: {
         kind: "value",
@@ -158,6 +159,18 @@ pages.page = {status: 200, view: (shop, p) => catalog().views.page(p)}
 // the featured and new products, for a section that names them
 sources.featuredProducts = {limit: 12, load: (shop, limit) => catalog().sources.featuredProducts.load(shop, limit)}
 sources.newProducts = {limit: 12, load: (shop, limit) => catalog().sources.newProducts.load(shop, limit)}
+
+// ===== P4: the cart page =====
+// The cart page's view is the store's alone (the same for every shopper, so a frontend may keep it): its lines, totals and
+// forms are the trusted shop.cart component, which PASS makes from the shopper's getCart; view.cart is the mini-cart's
+// count and subtotal, which PASS sets from the same answer.
+pages.cart = {
+    status: 200,
+    view: shop => ({
+        page: {kind: "cart", title: "Cart", canonicalUrl: shop.cartUrl},
+        cart: {itemCount: 0, subtotal: null}
+    })
+}
 
 // ===== the contract =====
 const forbidden = name => {
@@ -267,7 +280,8 @@ function getShopPage(p) {
         baseUrl: base || "/",
         currencyUomId: store.defaultCurrencyUomId || null,
         searchUrl: base + "/Search",
-        categoriesUrl: base + "/Categories"
+        categoriesUrl: base + "/Categories",
+        cartUrl: base + "/Cart"
     }
     // a BCP 47 tag for the page (en_US is en-US)
     const locale = String(store.defaultLocale || site.locale || "en").replace(/_/g, "-")
@@ -294,7 +308,8 @@ function getShopPage(p) {
                     baseUrl: shop.baseUrl,
                     currencyUomId: shop.currencyUomId,
                     searchUrl: shop.searchUrl,
-                    categoriesUrl: shop.categoriesUrl
+                    categoriesUrl: shop.categoriesUrl,
+                    cartUrl: shop.cartUrl
                 },
                 locale,
                 page: {kind, canonicalUrl: base + "/"},

@@ -28,6 +28,11 @@ const ids = {
     noPrice: prefix + "_NOPRICE",
     storePriced: prefix + "_STOREPRICE",
     otherParty: prefix + "_PERSON2",
+    // P4 (F64): a virtual whose variant is priced by it, with a feature extra of the store's organization and another's
+    sized: prefix + "_SIZED",
+    large: prefix + "_SIZED_L",
+    largeFeature: prefix + "_F_LARGE",
+    otherFeature: prefix + "_F_OTHER",
     space: "SHCATPG"
 }
 const state = {}
@@ -172,6 +177,55 @@ spec({
             for (const productId of [ids.plain, ids.draft, ids.virtual, ids.free, ids.noPrice, ids.storePriced])
                 published(ids.store, productId)
             published(ids.store, ids.blue, "PspkExcluded")
+            // P4 (F64): the large variant has no price of its own: its virtual's 20.00 and its distinguishing feature's
+            // 3.00 extra (the store organization's feature); another organization's feature extra is never added
+            product(ids.sized, {productTypeEnumId: "PtVirtual"})
+            product(ids.large)
+            make("mantle.product.ProductAssoc", {
+                productId: ids.sized,
+                toProductId: ids.large,
+                productAssocTypeEnumId: "PatVariant",
+                fromDate: 0
+            })
+            price(ids.sized, "20.00")
+            make("mantle.product.feature.ProductFeature", {
+                productFeatureId: ids.largeFeature,
+                productFeatureTypeEnumId: "PftSize",
+                description: "Large",
+                ownerPartyId: ids.org
+            })
+            make("mantle.product.feature.ProductFeature", {
+                productFeatureId: ids.otherFeature,
+                productFeatureTypeEnumId: "PftColor",
+                description: "Gold",
+                ownerPartyId: ids.otherOrg
+            })
+            for (const [productFeatureId, amount] of [
+                [ids.largeFeature, "3.00"],
+                [ids.otherFeature, "100.00"]
+            ])
+                make("mantle.product.feature.ProductFeatureAppl", {
+                    productId: ids.large,
+                    productFeatureId,
+                    applTypeEnumId: "PfatDistinguishing",
+                    fromDate: 0,
+                    amount
+                })
+            published(ids.store, ids.sized)
+            // P4 (F61): images of a public product (a png and an svg, which is not served) and of a draft
+            for (const [productContentId, productId, location] of [
+                [prefix + "_IMG_PNG", ids.plain, "component://mr-mantle/test/none/plain.png"],
+                [prefix + "_IMG_SVG", ids.plain, "component://mr-mantle/test/none/plain.svg"],
+                [prefix + "_IMG_DRAFT", ids.draft, "component://mr-mantle/test/none/draft.png"]
+            ])
+                make("mantle.product.ProductContent", {
+                    productContentId,
+                    productId,
+                    productContentTypeEnumId: "PcntImageSmall",
+                    contentLocation: location,
+                    description: "A picture",
+                    sequenceNum: 1
+                })
             published(ids.otherStore, ids.other)
             for (const productId of [ids.plain, ids.draft, ids.virtual, ids.other, ids.unpublished])
                 make("mantle.product.category.ProductCategoryMember", {productCategoryId: ids.category, productId, fromDate: 0})
@@ -256,7 +310,8 @@ feature("every read shows only the store's public products and live pages, and a
     }) {
         listed.result.generation == 3
         listed.result.releaseId == null
-        productIdsOf(listed.result.products).sort() == [ids.free, ids.noPrice, ids.plain, ids.storePriced, ids.virtual].sort()
+        productIdsOf(listed.result.products).sort() ==
+            [ids.free, ids.noPrice, ids.plain, ids.sized, ids.storePriced, ids.virtual].sort()
         productIdsOf(category.result.products).sort() == [ids.plain, ids.virtual].sort()
         category.result.category.url == "/shop/categories/" + ids.category + "/catalog-things"
         tree.result.categories.map(node => node.id) == [ids.category]
@@ -343,3 +398,54 @@ feature("a signed-in customer gets its own price row, never another party's; get
         forged.priceAvailable == false
     }
 })
+
+feature("a variant priced by its virtual gets the store's feature extras as the authority's price, not the public's (F64)", {
+    when() {
+        const publicPrice = (() => {
+            logout()
+            try {
+                return ec.service
+                    .sync()
+                    .name("mantle.product.PriceServices.get#ProductPrice")
+                    .parameters({productId: ids.large, productStoreId: ids.store, priceUomId: "USD"})
+                    .call()
+            } finally {
+                login("john.doe")
+            }
+        })()
+        return {quote: read("quote#Selection", {productId: ids.sized, variantId: ids.large}), publicPrice}
+    },
+    then({quote, publicPrice}) {
+        quote.result.unitPrice.amount == "23.00"
+        String(publicPrice.price) == "20"
+    }
+})
+
+feature(
+    "a public product's image is served by its content id, a draft's and an unserved type's not (F61); search text is words (F67)",
+    {
+        when() {
+            return {
+                plain: read("get#Product", {productId: ids.plain}),
+                png: read("get#ProductImage", {productContentId: prefix + "_IMG_PNG"}),
+                svg: read("get#ProductImage", {productContentId: prefix + "_IMG_SVG"}),
+                draft: read("get#ProductImage", {productContentId: prefix + "_IMG_DRAFT"})
+            }
+        },
+        then({plain, png, svg, draft}) {
+            // F67: the visitor's search text reaches the index as words, its query syntax escaped
+            ec.resource
+                .script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
+                .simpleQuery('name:mug* AND (red OR "x")') == 'name\\:mug\\* and \\(red or \\"x\\"\\)'
+            ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").simpleQuery(">10 <a") == " 10  a"
+
+            plain.result.product.image.url == "/shop/media?productContentId=" + prefix + "_IMG_PNG"
+            plain.result.product.image.alt == "A picture"
+            plain.result.product.images.length == 1
+            png.result.file.mimeType == "image/png"
+            png.result.location == "component://mr-mantle/test/none/plain.png"
+            svg.error.includes("NOT_AVAILABLE")
+            draft.error.includes("NOT_AVAILABLE")
+        }
+    }
+)

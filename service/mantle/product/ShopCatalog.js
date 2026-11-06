@@ -155,7 +155,9 @@ const urls = {
     page: (shop, routePath) => shop.base + "/pages/" + routePath,
     home: shop => shop.base + "/",
     categories: shop => shop.base + "/Categories",
-    search: shop => shop.base + "/Search"
+    search: shop => shop.base + "/Search",
+    // P4 (F61): a product image's public route, served after the resolver's check (get#ProductImage)
+    image: (shop, productContentId) => shop.base + "/media?productContentId=" + encodeURIComponent(productContentId)
 }
 const answer = (shop, body) => Object.assign(body, shop.publication)
 
@@ -314,6 +316,34 @@ function variantsOf(shop, virtualIds) {
         if (answers[row.toProductId]) (byVirtual[row.productId] = byVirtual[row.productId] || []).push(answers[row.toProductId])
     return byVirtual
 }
+// ===== P4 (F61): product images =====
+// The image content types a public page shows, the card's first (small, then medium...), and the file types served.
+const imageTypes = ["PcntImageSmall", "PcntImageMedium", "PcntImageLarge", "PcntImageDetail", "PcntImageOriginal"]
+const imageMimeTypes = {png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp"}
+const imageExtension = location => (/\.([A-Za-z0-9]{1,5})$/.exec(String(location || "")) || [])[1]?.toLowerCase() || ""
+// The images of these products in effect now for the store (the store's own rows or rows of no store), of a file type
+// served, by product in type then sequence order: [{productContentId, alt}].
+function imagesOf(shop, productIds) {
+    const out = {}
+    const rows = rowsIn(CONTENT, "productId", productIds)
+        .filter(
+            row =>
+                imageTypes.includes(row.productContentTypeEnumId) &&
+                row.contentLocation &&
+                imageMimeTypes[imageExtension(row.contentLocation)] &&
+                activeAt(row, shop.at) &&
+                (!row.productStoreId || row.productStoreId === shop.productStoreId)
+        )
+        .sort(
+            (a, b) =>
+                imageTypes.indexOf(a.productContentTypeEnumId) - imageTypes.indexOf(b.productContentTypeEnumId) ||
+                (a.sequenceNum ?? 0) - (b.sequenceNum ?? 0) ||
+                String(a.productContentId).localeCompare(String(b.productContentId))
+        )
+    for (const row of rows) (out[row.productId] = out[row.productId] || []).push(row)
+    return out
+}
+const imageView = (shop, row, name) => ({url: urls.image(shop, row.productContentId), alt: text(row.description) || name})
 // Product cards of resolved public answers, in their order: id, name, url, sku, price (a virtual's lowest variant price as
 // "From"), availability band and purchasable.
 function cards(shop, answers) {
@@ -329,6 +359,7 @@ function cards(shop, answers) {
         shop,
         ids.concat(variantIds).filter(id => stockedTypes.includes((products[id] || variantProducts[id])?.productTypeEnumId))
     )
+    const images = imagesOf(shop, ids)
     return answers
         .filter(found => products[found.productId])
         .map(found => {
@@ -364,7 +395,8 @@ function cards(shop, answers) {
                     label: availability.label,
                     purchasable: !!(found.purchasable && availability.purchasable && priced.price.available)
                 },
-                badge: found.badgeText || null
+                badge: found.badgeText || null,
+                image: images[product.productId] ? imageView(shop, images[product.productId][0], name) : null
             }
         })
 }
@@ -528,7 +560,7 @@ function searchShop(p) {
         const out = lib.call("org.moqui.search.SearchServices.search#DataDocuments", {
             indexName: "mantle",
             documentType: "MantleProduct",
-            queryString: query,
+            queryString: simpleQuery(query),
             pageSize: limits.searchHits
         })
         indexed = (out.documentList || []).map(doc => doc.productId || doc._id).filter(id => publishedSet.has(id))
@@ -560,6 +592,14 @@ function searchShop(p) {
         sort
     })
 }
+// The visitor's text as a plain query of its words (impl-shop P4, F67): the index's query syntax (fields, wildcards,
+// ranges, fuzzy and boolean operators, grouping) escaped, so a visitor's text costs what a few words cost. "<" and ">"
+// cannot be escaped in a query_string (a bare ">10" is a range), so they become spaces.
+const simpleQuery = query =>
+    query
+        .replace(/[<>]/g, " ")
+        .replace(/[+\-=&|!(){}\[\]^"~*?:\\/]/g, character => "\\" + character)
+        .replace(/\b(AND|OR|NOT)\b/g, word => word.toLowerCase())
 // The site's live Shop pages whose title has every word of the query.
 function pageMatches(shop, query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
@@ -611,8 +651,10 @@ function getProduct(p) {
         availability: variant.availability
     }))
     const quote = quoteOf(shop, card, variants, p.variantId, p.quantity)
+    const productImages = (imagesOf(shop, [productId])[productId] || []).slice(0, 12).map(row => imageView(shop, row, card.name))
     return answer(shop, {
         product: Object.assign({}, card, {
+            images: productImages,
             slug: slug(card.name),
             description: descriptionHtml ? {$richText: ec.resource.theme.sanitizeRichText(String(descriptionHtml))} : null,
             variants,
@@ -905,7 +947,93 @@ const sources = {
     }
 }
 
+// ===== Shop P4: the cart's offers (ShopCart.js) =====
+// The purchasable product of a selection on a product's page: the product itself, or one of its public variants (an
+// option not listed, or none chosen for a product that has options, is VALUE_INVALID). {productId, parentId, card}.
+function selectionOf(shop, productIdValue, variantIdValue) {
+    const productId = idOf(productIdValue, "productId")
+    const found = merchandising().resolve(shop.store, [productId], shop.at, shop.siteId)[0]
+    if (!found || !found.isPublic) notAvailable("This product")
+    const card = cards(shop, [found])[0]
+    if (!card) notAvailable("This product")
+    const options = variantsOf(shop, [productId])[productId] || []
+    const variantId = text(variantIdValue)
+    if (options.length) {
+        if (!variantId) invalid("variantId", "Choose an option")
+        const option = options.find(found => found.productId === variantId)
+        if (!option) invalid("variantId", "Choose one of the listed options")
+        const variantCard = cards(shop, [option])[0]
+        if (!variantCard) notAvailable("This product")
+        return {productId: variantId, parentId: productId, card: variantCard, parentCard: card}
+    }
+    if (variantId && variantId !== productId) invalid("variantId", "Choose one of the listed options")
+    return {productId, parentId: null, card, parentCard: card}
+}
+// What a cart line's product is offered at now: whether it is still public and purchasable in the store, its card (with
+// the parent product's link and the variant's options), and its unit price at a quantity (the authority's price).
+// {available, card, unitPrice, unit, compareAtPrice, options, url}.
+function offersOf(shop, lines) {
+    const ids = unique(lines.map(line => line.productId))
+    const answers = Object.fromEntries(
+        (ids.length ? merchandising().resolve(shop.store, ids, shop.at, shop.siteId) : []).map(found => [found.productId, found])
+    )
+    const publicAnswers = ids.map(id => answers[id]).filter(found => found && found.isPublic)
+    const byId = Object.fromEntries(cards(shop, publicAnswers).map(card => [card.id, card]))
+    const parents = Object.fromEntries(
+        rowsIn(ASSOC, "toProductId", ids, {productAssocTypeEnumId: "PatVariant"})
+            .filter(row => activeAt(row, shop.at))
+            .map(row => [row.toProductId, row.productId])
+    )
+    const parentIds = unique(Object.values(parents))
+    const parentProducts = Object.fromEntries(rowsIn(PRODUCT, "productId", parentIds).map(row => [row.productId, row]))
+    const parentNames = contentTexts(shop, parentIds, "PcntProductName")
+    const options = featureLabels(
+        shop,
+        ids.filter(id => parents[id])
+    )
+    return lines.map(line => {
+        const card = byId[line.productId] || null
+        const parentId = parents[line.productId]
+        const parentName = parentId ? text(parentNames[parentId]) || parentProducts[parentId]?.productName || parentId : null
+        const url = card ? (parentId ? urls.product(shop, parentId, parentName) : card.url) : null
+        if (!card)
+            return {productId: line.productId, available: false, card: null, url: null, options: options[line.productId] || null}
+        const priced = priceOf(shop, line.productId, line.quantity || 1)
+        return {
+            productId: line.productId,
+            available: !!(card.availability.purchasable && priced.price.available),
+            card,
+            url,
+            options: options[line.productId] || null,
+            unitPrice: priced.price,
+            unit: priced.unit || null,
+            compareAtPrice: priced.compareAtPrice || null
+        }
+    })
+}
+
+// get#ProductImage (F61): an image of a product public in the store now, by its content id ({file, location}; the
+// frontend streams it): only an image type of a served file type, in effect for the store; anything else NOT_AVAILABLE.
+function getProductImage(p) {
+    const shop = shopOf(p)
+    const productContentId = text(p.productContentId)
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(productContentId)) notAvailable("This image")
+    const row = one(CONTENT, {productContentId})
+    const found = row ? merchandising().resolve(shop.store, [row.productId], shop.at, shop.siteId)[0] : null
+    const image =
+        found && found.isPublic
+            ? (imagesOf(shop, [row.productId])[row.productId] || []).find(item => item.productContentId === productContentId)
+            : null
+    if (!image) notAvailable("This image")
+    const extension = imageExtension(image.contentLocation)
+    return {
+        file: {mimeType: imageMimeTypes[extension], filename: productContentId + "." + extension},
+        location: image.contentLocation
+    }
+}
+
 const operations = {
+    getProductImage,
     getHome,
     getCategories,
     getCategory,
@@ -922,6 +1050,15 @@ const operations = {
     slug,
     views,
     sources,
+    // Shop P4: the cart's view of the catalog (ShopCart.js)
+    shopOf,
+    selectionOf,
+    offersOf,
+    quantityOf,
+    money,
+    unavailablePrice,
+    // P4 (F67): the index query of a visitor's text
+    simpleQuery,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop catalog operation " + op)
         return operations[op](parameters || {})
