@@ -170,7 +170,7 @@ function attemptStep(p) {
     const source = one("moqui.basic.Enumeration", {enumId: delivery.sourceEnumId})
     let built
     try {
-        // the source's build in a transaction of its own (Commerce P10, F-P10-1): one that fails is recorded failed here,
+        // the source's build in a transaction of its own (Commerce F127): one that fails is recorded failed here,
         // where before its error left this attempt's transaction unable to record anything
         built = source?.enumCode
             ? buildApart(source.enumCode, {
