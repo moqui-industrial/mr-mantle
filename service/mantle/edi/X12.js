@@ -1370,9 +1370,10 @@ function recordSent(p) {
 
 // retry#Document: an operator's retry with the document's identity kept: a received document in exception is applied
 // again (after its mapping was fixed), a refused one sent is produced again, a produced one whose message is in error is
-// sent again with the same bytes. Needs EDI_ADMIN.
-function retry(p) {
-    if (!ec.user.hasPermission("EDI_ADMIN")) denied("PERMISSION_DENIED", "Retrying an EDI document needs EDI_ADMIN")
+// sent again with the same bytes. Needs EDI_ADMIN, unless a caller that checked its own permission and scope calls it
+// through storeRetry (Commerce's channel operator for a store's partner, StoreChannels.js).
+function retry(p, checked = false) {
+    if (!checked && !ec.user.hasPermission("EDI_ADMIN")) denied("PERMISSION_DENIED", "Retrying an EDI document needs EDI_ADMIN")
     const doc = one(E.DOCUMENT, {ediDocumentId: p.ediDocumentId})
     if (!doc) denied("RECORD_UNAVAILABLE", "No EDI document " + p.ediDocumentId)
     if (doc.directionEnumId === IN && doc.statusId === "EdocException") {
@@ -1461,9 +1462,9 @@ function overdue(p) {
 
 // retry#Receipt: an operator's retry of a receipt left in error (an interchange quarantined while the connection was
 // misconfigured, a document whose step could not be recorded): consumed again from its kept bytes and records, which
-// re-checks its quarantined interchanges and repeats nothing done. Needs EDI_ADMIN.
-function retryReceipt(p) {
-    if (!ec.user.hasPermission("EDI_ADMIN")) denied("PERMISSION_DENIED", "Retrying an EDI receipt needs EDI_ADMIN")
+// re-checks its quarantined interchanges and repeats nothing done. Needs EDI_ADMIN, or storeRetry's caller's own check.
+function retryReceipt(p, checked = false) {
+    if (!checked && !ec.user.hasPermission("EDI_ADMIN")) denied("PERMISSION_DENIED", "Retrying an EDI receipt needs EDI_ADMIN")
     const message = one(E.MESSAGE, {systemMessageId: p.systemMessageId})
     if (!message || message.isOutgoing === "Y") denied("RECORD_UNAVAILABLE", "No EDI receipt " + p.systemMessageId)
     if (!["SmsgError", "SmsgReceived"].includes(message.statusId))
@@ -1498,6 +1499,19 @@ const operations = {
         const was = ec.artifactExecution.disableAuthz()
         try {
             return operations[op](input || {}) || {}
+        } finally {
+            if (!was) ec.artifactExecution.enableAuthz()
+        }
+    },
+    // retry#Document and retry#Receipt for a caller that checked its own permission and the partner's scope (Commerce's
+    // channel operator, StoreChannels.js retry#StoreMessage): the same retry, its identity kept; reachable from scripts
+    // only, never through the services' parameters
+    storeRetry(op, input) {
+        const retries = {retry, retryReceipt}
+        if (!retries[op]) throw new Error("Unknown X12 retry " + op)
+        const was = ec.artifactExecution.disableAuthz()
+        try {
+            return retries[op](input || {}, true) || {}
         } finally {
             if (!was) ec.artifactExecution.enableAuthz()
         }

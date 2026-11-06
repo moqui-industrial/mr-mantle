@@ -1,6 +1,293 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Store channels (design-commerce §9, COM-CHANNEL, COM-FEED): a store's integrations, their messages, retry and channel
+    import (impl-commerce P13, StoreChannels.js), and its feeds and channel health (P14, below). Each staff service checks
+    COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and the store scope (the user's own organizations; a current StoreStaff row's
+    stores, F51); a record outside the scope and a missing one are refused alike (RECORD_UNAVAILABLE). A binding's transport,
+    authentication and credentials are the operator's: no service here takes, changes or returns them, and a message's text
+    is never returned. receive#ChannelOrders and consume#ChannelOrder are the StoreChannelOrders message type's, the API
+    intake behind /rest/sm (the remote authenticated by the endpoint) and a committed import alike. Refusals start with their
+    reason code. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== Integrations and channel import (P13) ===== -->
+    <service verb="find" noun="StoreIntegrations" allow-remote="false">
+        <description>The integrations of the user's stores (or one store): each binding of a registered connector (a SystemMessageRemote with the store and connector, or an EDI partner's connection), with its store, connector, direction, whether its intake is enabled, whether credentials are set (never what they are), its mapping, last success, failures, conflicts and EDI exceptions and a health key (disabled, credentials, failing, conflicts, ok, idle). By connector, enabled (Y or N) and health. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="connectorId"/>
+            <parameter name="enabled"/>
+            <parameter name="health"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="integrations" type="List"/>
+            <parameter name="integrationsCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findStoreIntegrations', context)"/>
+            <set field="integrations" from="found.integrations"/>
+            <set field="integrationsCount" from="found.integrationsCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreConnectors" allow-remote="false">
+        <description>The connectors a store's channel operator may bind: registered (StoreChannelConnector), enabled, implemented by StoreChannels.js and not the EDI administrator's. COMMERCE_CHANNEL_OPERATE.</description>
+        <out-parameters><parameter name="connectors" type="List"/></out-parameters>
+        <actions>
+            <set field="connectors" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('connectorOptions', context).connectors"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreIntegration" allow-remote="false">
+        <description>One integration: the binding as find#StoreIntegrations shows it, its typed mapping parameters with their values, the registered mapping versions and import formats, and for an EDI partner its rejected and quarantined transactions (documents and interchanges, each with its reason and safe error, never its text). COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters><parameter name="systemMessageRemoteId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="integration" type="Map"/>
+            <parameter name="parameterFields" type="List"/>
+            <parameter name="mappingVersions" type="List"/>
+            <parameter name="importFormats" type="List"/>
+            <parameter name="ediDocuments" type="List"/>
+            <parameter name="ediInterchanges" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('getStoreIntegration', context)"/>
+            <set field="integration" from="found.integration"/>
+            <set field="parameterFields" from="found.parameterFields"/>
+            <set field="mappingVersions" from="found.mappingVersions"/>
+            <set field="importFormats" from="found.importFormats"/>
+            <set field="ediDocuments" from="found.ediDocuments"/>
+            <set field="ediInterchanges" from="found.ediInterchanges"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreIntegration" allow-remote="false">
+        <description>Without systemMessageRemoteId, binds a store to a registered connector (productStoreId, connectorId, description, mappingVersion, its typed parameters): a new SystemMessageRemote with its intake stopped and an HMAC signature required until the operator has set its credentials. With one, changes its description, mapping version, typed parameters (customerPartyId: a Customer-role party; salesChannelEnumId) and enabled (Y needs the mapping complete, an authentication method and credentials set: CREDENTIALS_REQUIRED). Never a credential, an endpoint or an authentication method; the store and connector are fixed (STORE_FIXED, CONNECTOR_FIXED); an EDI partner is the EDI administrator's (EDI_MANAGED); expectedLastUpdatedStamp refuses a stale form (STALE_REVISION). The mapping fields are audit-logged. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="connectorId"/>
+            <parameter name="description"/>
+            <parameter name="mappingVersion"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="enabled"/>
+            <parameter name="expectedLastUpdatedStamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="systemMessageRemoteId"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('storeStoreIntegration', context)"/>
+            <set field="systemMessageRemoteId" from="saved.systemMessageRemoteId"/>
+            <set field="message" from="saved.message"/>
+        </actions>
+    </service>
+    <service verb="find" noun="StoreMessages" allow-remote="false">
+        <description>The messages of the user's stores' integrations (or one, systemMessageRemoteId), newest first: by state (failed, conflict, duplicate, applied, waiting), direction (in, out), parent (a receipt's or a batch's orders) and an external or message ID (term); a page at a time. Each row: ID, kind, direction, external ID, state, attempts, received and processed times, the safe first line of its error, its order, the original of a replay or conflict and whether retry#StoreMessages retries it. Never a message's text. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="state"/>
+            <parameter name="direction"/>
+            <parameter name="parentMessageId"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messages" type="List"/>
+            <parameter name="messagesCount" type="Integer"/>
+            <parameter name="messagesPageIndex" type="Integer"/>
+            <parameter name="messagesPageSize" type="Integer"/>
+            <parameter name="messagesPageMaxIndex" type="Integer"/>
+            <parameter name="messagesPageRangeLow" type="Integer"/>
+            <parameter name="messagesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findStoreMessages', context)"/>
+            <set field="messages" from="found.messages"/>
+            <set field="messagesCount" from="found.messagesCount"/>
+            <set field="messagesPageIndex" from="found.messagesPageIndex"/>
+            <set field="messagesPageSize" from="found.messagesPageSize"/>
+            <set field="messagesPageMaxIndex" from="found.messagesPageMaxIndex"/>
+            <set field="messagesPageRangeLow" from="found.messagesPageRangeLow"/>
+            <set field="messagesPageRangeHigh" from="found.messagesPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreMessage" allow-remote="false">
+        <description>One message's safe summary (design §9 MessageDetail): its row as find#StoreMessages shows it, its errors' first lines, a channel order's canonical fields (external ID, placed date, lines with product, quantity and price, shipping, tax, note; never the message's text or anything else the channel sent), what its mapping finds when it was not applied, its order (with orderView, whether the user may open it), the original of a replay or conflict, a receipt's or batch's orders, and an EDI receipt's documents. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters><parameter name="systemMessageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="message" type="Map"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="summary" type="Map"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="order" type="Map"/>
+            <parameter name="original" type="Map"/>
+            <parameter name="children" type="List"/>
+            <parameter name="ediDocuments" type="List"/>
+            <parameter name="orderView" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('getStoreMessage', context)"/>
+            <set field="message" from="found.message"/>
+            <set field="errors" from="found.errors"/>
+            <set field="summary" from="found.summary"/>
+            <set field="findings" from="found.findings"/>
+            <set field="order" from="found.order"/>
+            <set field="original" from="found.original"/>
+            <set field="children" from="found.children"/>
+            <set field="ediDocuments" from="found.ediDocuments"/>
+            <set field="orderView" from="!!found.orderView"/>
+        </actions>
+    </service>
+    <service verb="retry" noun="StoreMessages" allow-remote="false">
+        <description>An operator's retry of failed messages (systemMessageIds) and EDI documents (ediDocumentIds) of one integration, with a reason, each in its own transaction and keeping its identity: a channel order consumed again as the same message (an order already made is never made again), an EDI receipt consumed again from its kept bytes, an EDI document applied or sent again with its controls (X12.js). A conflict is kept as evidence and not retried (CONFLICT_REVIEW), nor a duplicate or an applied one (NOT_RETRYABLE). Keyed by operationKey on PostingOperation: a second submit answers the first result (alreadyApplied). The results name each item. COMMERCE_CHANNEL_OPERATE and the store scope; at most 100 at a time. To be registered as an Admin §14 recovery action when Admin builds it (impl-commerce §7).</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId" required="true"/>
+            <parameter name="systemMessageIds"/>
+            <parameter name="ediDocumentIds"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="retriedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('retryStoreMessages', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="retriedCount" from="found.retriedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+            <set field="message" from="found.message"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="retry" noun="StoreMessage" allow-remote="false">
+        <description>One item of retry#StoreMessages, run in its own transaction and checked again (COMMERCE_CHANNEL_OPERATE and the store scope): a message (systemMessageId) or an EDI document (ediDocumentId) of the integration. ok when it is now applied.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId" required="true"/>
+            <parameter name="systemMessageId"/>
+            <parameter name="ediDocumentId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ok" type="Boolean"/>
+            <parameter name="stateText"/>
+            <parameter name="orderId"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('retryStoreMessage', context)"/>
+            <set field="ok" from="!!found.ok"/>
+            <set field="stateText" from="found.stateText"/>
+            <set field="orderId" from="found.orderId"/>
+            <set field="message" from="found.message"/>
+        </actions>
+    </service>
+
+    <service verb="receive" noun="ChannelOrders" allow-remote="false">
+        <description>The StoreChannelOrders type's receive service (receive#IncomingSystemMessage, behind /rest/sm with the remote authenticated by the endpoint; commit#ChannelImport with its batch as parentMessageId). The remote must be a store's binding of a registered intake connector of this type, its intake enabled (an import's batch needs only the binding). The receipt is kept as it came (an unreadable one in error), then each order of it ({orders:[...]}, a list or one order) its own message by the store, remote, kind and external ID with the hash of its canonical content: new, Received (systemMessageIdList, to consume); a matching replay, Consumed as a duplicate answering the original's order; a conflicting one, Rejected and quarantined with the evidence of what differs.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.receive#SystemMessage"/>
+        <in-parameters><parameter name="parentMessageId"/></in-parameters>
+        <actions>
+            <set field="received" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('receiveChannelOrders', context)"/>
+            <set field="systemMessageIdList" from="received.systemMessageIdList"/>
+            <set field="systemMessageId" from="received.systemMessageId"/>
+        </actions>
+    </service>
+    <service verb="consume" noun="ChannelOrder" allow-remote="false">
+        <description>The StoreChannelOrders type's consume service: one received channel order made through create#Order and create#OrderItem (the store's currency, organization and facility, the binding's customer and sales channel, the channel's prices, its shipping and tax as items, promotions and shipping and tax calculation off) and placed (place#Order; approval is the seller's), linked to its message (orderId, OrderSystemMessage). Refused with the first finding's code (ITEM_UNKNOWN, ITEM_UNAVAILABLE, CURRENCY_MISMATCH, LINE_QUANTITY_INVALID, MAPPING_INCOMPLETE, ...). A message whose order was made answers it.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.consume#SystemMessage"/>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('consumeChannelOrder', context)</script>
+        </actions>
+    </service>
+    <service verb="refuse" noun="ChannelImportPost" allow-remote="false">
+        <description>The StoreChannelImport type's receive service: a batch is made only by prepare#ChannelImport, so a post of this type to the message endpoint is refused.</description>
+        <implements service="org.moqui.impl.SystemMessageServices.receive#SystemMessage"/>
+        <actions>
+            <return error="true" message="IMPORT_NOT_REMOTE: a channel import batch is prepared in Commerce, not posted"/>
+        </actions>
+    </service>
+
+    <service verb="prepare" noun="ChannelImport" allow-remote="false">
+        <description>ChannelImport's ImportSource (design §9): a file (importFile, or importText with fileName) of a registered format (formatEnumId: SciCsv, one row per order line; SciJson, the API's message) for an integration whose connector imports, read (UTF-8, at most 2 MiB and 500 orders; another format or an unreadable file is refused) and kept as a Staged batch, a SystemMessage of type StoreChannelImport (the same file for the same integration answers the batch already staged). Answers get#ChannelImport's preview. No order is made. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters>
+            <parameter name="systemMessageRemoteId" required="true"/>
+            <parameter name="formatEnumId" required="true"/>
+            <parameter name="importFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="importText"/>
+            <parameter name="fileName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="batch" type="Map"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="countsText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('prepareChannelImport', context)"/>
+            <set field="batch" from="found.batch"/>
+            <set field="rows" from="found.rows"/>
+            <set field="counts" from="found.counts"/>
+            <set field="countsText" from="found.countsText"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ChannelImport" allow-remote="false">
+        <description>A channel import batch (design §9 ImportPreview and ImportResult): its integration, store, format, file name, digest and state, who committed it, when and why; while staged, each order's predicted outcome (a new order, a duplicate of one received before or earlier in the file, a conflict and what differs, or the finding it will fail with); once committed, each order's message with its outcome, order and safe error, and whether it is retried. COMMERCE_CHANNEL_OPERATE and the store scope. Admin §11 registers ChannelImport as an import target when it is built (impl-commerce §7).</description>
+        <in-parameters><parameter name="systemMessageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="batch" type="Map"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="countsText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('getChannelImport', context)"/>
+            <set field="batch" from="found.batch"/>
+            <set field="rows" from="found.rows"/>
+            <set field="counts" from="found.counts"/>
+            <set field="countsText" from="found.countsText"/>
+        </actions>
+    </service>
+    <service verb="commit" noun="ChannelImport" allow-remote="false" transaction-timeout="1800">
+        <description>ChannelImport's ImportCommit: the staged batch as previewed (digest; another is BATCH_CHANGED) committed with a reason, its orders received through the API's connector path (receive#ChannelOrders with the batch as parent: deduplicated, replays answered, conflicts quarantined) and each consumed in its own transaction, a failing order not stopping the others; the batch Consumed and the commit recorded (PostingOperation ChannelImport:{batch}, its reason and counts). Committing again answers the outcome (alreadyApplied); a commit that fails before its orders are kept leaves the batch staged, and committing it again keeps no order twice. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters>
+            <parameter name="systemMessageId" required="true"/>
+            <parameter name="digest" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="batch" type="Map"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="countsText"/>
+            <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('commitChannelImport', context)"/>
+            <set field="batch" from="found.batch"/>
+            <set field="rows" from="found.rows"/>
+            <set field="counts" from="found.counts"/>
+            <set field="countsText" from="found.countsText"/>
+            <set field="message" from="found.message"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+
     <!-- Feeds and channel health (P14) below -->
     <!-- impl-commerce P14 (COM-FEED, COM-REPORTS; design-commerce §9 Feeds, FeedDetail, §3 ChannelHealth) over StoreFeeds.js:
         a store's product feeds of registered formats and destinations, their immutable builds over Shop's public catalog

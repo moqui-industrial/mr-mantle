@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- A store's channel integrations and channel import (impl-commerce P13, COM-CHANNEL; design-commerce §9;
+    mantle.product.StoreChannelServices, StoreChannels.js). A binding is a SystemMessageRemote with the store
+    (productStoreId, ProductStoreEntities.xml) and a registered connector: its transport, credentials and keys stay the
+    operator's (set in the System tools, never by a store service, never returned). Messages are SystemMessages: each
+    received channel order its own message, kept by the store, remote, kind (docType) and external ID (messageId) with the
+    hash of its canonical content, so a matching replay answers the original and a conflicting one is kept, rejected, as
+    the evidence. A channel import batch is a SystemMessage of its own (StoreChannelImport) holding the file, Staged until
+    it is committed; its orders are its children (parentMessageId), received through the same connector path as the API. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="StoreChannelConnector" package="mantle.product.store" use="configuration" cache="true">
+        <description>A registered connector a store may be bound through: its message type, the kind of business message it
+            carries, its direction and the mapping versions StoreChannels.js implements. Only a registered, enabled connector
+            with a handler in StoreChannels.js is offered; disabling one stops its intake (the messages are kept).</description>
+        <field name="connectorId" type="id" is-pk="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="systemMessageTypeId" type="id"/>
+        <field name="messageKind" type="text-short"><description>The business message (docType): ChannelOrder; EdiX12 for an
+            EDI partner, whose documents are the EDI services'</description></field>
+        <field name="direction" type="text-short"><description>in, out or both</description></field>
+        <field name="mappingVersion" type="number-integer"><description>The current mapping version a new binding takes</description></field>
+        <field name="managedBy" type="text-short"><description>Empty when a store's channel operator binds it; edi when the
+            binding is the EDI administrator's (an EdiConnection), which Commerce only reads and retries</description></field>
+        <field name="disabled" type="text-indicator"/>
+        <relationship type="one" related="moqui.service.message.SystemMessageType" short-alias="type"/>
+        <seed-data>
+            <!-- the registered connectors are data/StoreChannelSetupData.xml's, after their message types -->
+            <moqui.basic.EnumerationType description="Store channel import format" enumTypeId="StoreChannelImportFormat"/>
+            <moqui.basic.Enumeration enumId="SciCsv" description="Channel orders, CSV (one row per line)" enumTypeId="StoreChannelImportFormat"/>
+            <moqui.basic.Enumeration enumId="SciJson" description="Channel orders, JSON (as the API takes them)" enumTypeId="StoreChannelImportFormat"/>
+
+            <!-- a channel import batch, staged by prepare#ChannelImport and consumed by commit#ChannelImport: a status of
+                its own, so no framework job consumes a batch nobody committed -->
+            <moqui.basic.StatusItem description="Staged" sequenceNum="19" statusId="SmsgStaged" statusTypeId="SystemMessage"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgStaged" toStatusId="SmsgConsuming" transitionName="Consuming"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgConsuming" toStatusId="SmsgStaged" transitionName="Back to Staged"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgStaged" toStatusId="SmsgCancelled" transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+
+    <extend-entity entity-name="SystemMessageRemote" package="moqui.service.message">
+        <field name="storeConnectorId" type="id" enable-audit-log="update"><description>The registered connector a store's
+            binding uses (StoreChannelConnector); with productStoreId it makes the remote a store integration</description></field>
+        <field name="storeMappingVersion" type="number-integer" enable-audit-log="update"/>
+        <field name="storeMappingJson" type="text-long" enable-audit-log="update"><description>The binding's typed mapping
+            parameters (StoreChannels.js connectors' parameters), checked by store#StoreIntegration; never credentials</description></field>
+        <field name="storeDisabled" type="text-indicator" enable-audit-log="update"><description>Y: the store's intake over
+            this binding is stopped (a new binding starts so until the operator has set its credentials)</description></field>
+        <relationship type="one" related="mantle.product.store.StoreChannelConnector" short-alias="storeConnector">
+            <key-map field-name="storeConnectorId" related="connectorId"/></relationship>
+    </extend-entity>
+
+    <extend-entity entity-name="SystemMessage" package="moqui.service.message">
+        <field name="productStoreId" type="id"><description>The store a channel message is of (its binding's), one of the
+            four deduplication keys</description></field>
+        <field name="contentHash" type="text-medium"><description>The hash of a channel message's canonical content: the
+            same external ID with the same hash is a replay, with another a conflict</description></field>
+        <field name="duplicateOfMessageId" type="id"><description>For a replay (Consumed) or a quarantined conflict
+            (Rejected), the original message</description></field>
+        <relationship type="one-nofk" related="mantle.product.store.ProductStore" short-alias="channelStore"/>
+        <relationship type="one-nofk" title="DuplicateOf" related="moqui.service.message.SystemMessage" short-alias="duplicateOf">
+            <key-map field-name="duplicateOfMessageId" related="systemMessageId"/></relationship>
+        <index name="SYS_MSG_CHANNEL"><index-field name="productStoreId"/><index-field name="systemMessageRemoteId"/>
+            <index-field name="docType"/><index-field name="messageId"/></index>
+    </extend-entity>
+</entities>

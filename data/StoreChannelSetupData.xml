@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Store channel integrations (impl-commerce P13, COM-CHANNEL; entity/StoreChannelEntities.xml, StoreChannels.js): the
+    message types of the channel order connector. StoreChannelOrders is the API intake (POST /rest/sm/StoreChannelOrders/
+    {remote}, the remote authenticated by the endpoint): receive#ChannelOrders keeps the receipt and one message per order,
+    deduplicated, and consume#ChannelOrder makes each order in its own transaction. StoreChannelImport is ChannelImport's
+    batch, made only by prepare#ChannelImport: its receive service refuses a post to the endpoint. The registered connectors
+    (StoreChannelConnector) follow their types. -->
+<entity-facade-xml type="seed">
+    <moqui.service.message.SystemMessageType systemMessageTypeId="StoreChannelOrders" description="Store channel orders"
+            contentType="application/json" receiveServiceName="mantle.product.StoreChannelServices.receive#ChannelOrders"
+            consumeServiceName="mantle.product.StoreChannelServices.consume#ChannelOrder"/>
+    <moqui.service.message.SystemMessageType systemMessageTypeId="StoreChannelImport" description="Store channel import batch"
+            receiveServiceName="mantle.product.StoreChannelServices.refuse#ChannelImportPost"/>
+    <!-- the order intake of a marketplace or other channel over the API (/rest/sm/StoreChannelOrders/{remote}) and
+        ChannelImport's files: the canonical channel order (StoreChannels.js canonicalOrder) -->
+    <mantle.product.store.StoreChannelConnector connectorId="ChannelOrders" description="Channel orders (API and import)"
+            systemMessageTypeId="StoreChannelOrders" messageKind="ChannelOrder" direction="in" mappingVersion="1"/>
+    <!-- an EDI trading partner (an ScEdi store's partner remote, plan/payments-shipping-edi.md E1): the connection, profile
+        and transport are the EDI administrator's; Commerce lists its rejected and quarantined transactions and retries
+        them with their identity -->
+    <mantle.product.store.StoreChannelConnector connectorId="EdiX12" description="EDI trading partner (X12)"
+            systemMessageTypeId="EdiX12" messageKind="EdiX12" direction="both" mappingVersion="1" managedBy="edi"/>
+</entity-facade-xml>
