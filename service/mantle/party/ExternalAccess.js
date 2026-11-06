@@ -27,6 +27,8 @@ const records = {
         permissions: ["RECEIVABLE_EDIT"],
         scopes: ["InvoicePay"],
         page: {app: "billing", path: "/InvoicePay?token="},
+        // Shop P6 (design-shop §9 AccountOverview, R-SHP-W06): the customer's own verified account reaches its invoice
+        self: true,
         resolve(recordId) {
             const invoice = one("mantle.account.invoice.Invoice", {invoiceId: recordId})
             if (!invoice || !issuedInvoice.includes(invoice.statusId) || !internal(invoice.fromPartyId)) return null
@@ -147,6 +149,8 @@ const records = {
         scopes: ["OrderView", "Download", "RenewalAction"],
         page: {app: "shop", path: "/Orders/Status?token="},
         self: true,
+        // Shop P6 (F82): the link's site is the order's store's Shop site (a Shop mount targets a store, not the organization)
+        siteTarget: recordId => one("mantle.order.OrderHeader", {orderId: recordId})?.productStoreId || null,
         resolve(recordId) {
             const order = one("mantle.order.OrderHeader", {orderId: recordId})
             if (!order || ["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
@@ -221,7 +225,7 @@ function create(p) {
     })
     // the link: the record's page of the organization's first published site with the app
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
-    const siteId = apps.sitesFor(kind.page.app, record.organizationPartyId)[0]
+    const siteId = apps.sitesFor(kind.page.app, kind.siteTarget ? kind.siteTarget(p.recordId) : record.organizationPartyId)[0]
     const url = siteId ? apps.pageUrl(siteId, kind.page.app, pagePath(kind, scopes) + encodeURIComponent(token)) : null
     return {capabilityId: out.capabilityId, token, url, thruDate, organizationPartyId: record.organizationPartyId}
 }

@@ -1175,6 +1175,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="baseUrl"><description>The site's https root, such as https://example.com</description></parameter>
             <parameter name="mailtoAddress"><description>An address that takes unsubscribe requests by mail, for the
                 List-Unsubscribe mailto; empty leaves it out</description></parameter>
+            <parameter name="siteId"><description>The recipient's PASS site (mr-pass impl-shop P6, X15): the link goes to its
+                Account EmailPreferences page. With none and no baseUrl, a site the party belongs to that mounts Account
+                is used when there is one; else baseUrl's /u/ page as before.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="token"/>
@@ -1224,6 +1227,15 @@ along with this software (see the LICENSE.md file). If not, see
             unsubscribeUrl = `${root.replace(/\/+$/, '')}/u/${token}`
             // RFC 8058: the one-click POST goes to the List-Unsubscribe URL, the page a person opens to choose
             oneClickUrl = unsubscribeUrl
+            // the recipient's PASS site's email preferences page when there is one (Shop P6, X15)
+            const apps = ec.resource.script('component://mr-mantle/service/mantle/public/PublicApps.js')
+            const siteFor = siteId || (baseUrl ? null : Array.from(ec.entity.find('mantle.public.PublicSiteParty').condition('partyId', partyId)
+                    .disableAuthz().list()).map((row) => row.siteId).find((id) => apps.mount(id, 'account')))
+            const pageUrl = siteFor && apps.mount(siteFor, 'account') ? apps.pageUrl(siteFor, 'account', '/EmailPreferences?token=' + encodeURIComponent(token)) : null
+            if (pageUrl) {
+                unsubscribeUrl = pageUrl
+                oneClickUrl = apps.pageUrl(siteFor, 'account', '/EmailPreferences/oneClick?token=' + encodeURIComponent(token))
+            }
             const uris = [`<${oneClickUrl}>`]
             const mailto = String(mailtoAddress || '').trim()
             // one plain address: no display name, brackets, spaces or a query of its own

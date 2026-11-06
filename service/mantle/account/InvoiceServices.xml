@@ -4384,6 +4384,31 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="invoiceIdList" from="created.invoiceIdList"/>
         </actions>
     </service>
+    <service verb="create" noun="FulfillmentInvoice" allow-remote="false">
+        <description>Internal (mr-pass impl-shop P6, F22): the sales invoice of an approved order part on the ordered basis,
+            split from create#InvoiceFromSource for fulfillment's own entry point: StoreItemFulfillment
+            (mantle.product.ShopFulfillmentServices) checks what it fulfills, so no user permission is asked here, and only a
+            sale is invoiced. orderItemSeqIds limits it to those lines and their adjustments (a digital part of a mixed
+            order), each set of lines once. The order's payments are applied as create#EntireOrderPartInvoice applies them.
+            Refuses an order not approved, lines already invoiced (SOURCE_ALREADY_INVOICED) and nothing left to bill; the
+            same operationKey answers the first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="orderItemSeqIds" type="List"/>
+            <parameter name="invoiceDate" type="Timestamp"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="invoiceIdList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="created" from="ec.resource.script('component://mr-mantle/service/mantle/account/Payables.js').execute('fulfillmentInvoice', context)"/>
+            <set field="invoiceId" from="created.invoiceId"/>
+            <set field="invoiceIdList" from="created.invoiceIdList"/>
+        </actions>
+    </service>
     <service verb="request" noun="PayableApproval" allow-remote="false">
         <description>Send a reviewed bill for approval: an incoming bill with lines is received (change#InvoiceState) and
             the BillApproval notification goes to the organization's users who may approve it (INVOICE_APPROVE). Refuses a receivable, a bill that is not

@@ -84,6 +84,17 @@ still be used (15 minutes and the lookup grace), the payment is cancelled. After
 keep, `store#HostedPaymentProfile` takes the transaction's customer payment profile, or makes one from it
 (`createCustomerProfileFromTransactionRequest`).
 
+One page per reference (Shop P6): `get#HostedPaymentForm` searches the reference's transactions first (the unsettled
+lists) and issues no new token once one exists, paid, declined or held, so two pages open at once cannot each take a
+payment; a search that cannot tell issues none. A lookup that finds an approval also lists the reference's transactions
+and, finding another approved one, records a `DUPLICATE_APPROVAL` response naming it (resultSuccess N), which Shop's
+checkout holds the placed order for (OhtPayment), as it does an amount mismatch.
+
+**Hosted profile page** (Shop P6, F40): `get#HostedProfileForm` gives a payer's frontend a form token of
+`getHostedProfilePageRequest` (the customer profile made with the party as `merchantCustomerId` when it has none) with the
+canonical return address; after the page, `sync#CustomerProfile` reads the profile (`getCustomerProfileRequest`, by the
+kept reference or the merchantCustomerId) and keeps each new payment profile as a masked card method.
+
 ## Tests
 
 `test/ext/AuthorizeNetGateway.spec.js` runs the gateway against sanitized provider-shaped answers with the framework's HTTP

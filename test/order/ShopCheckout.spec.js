@@ -268,8 +268,13 @@ feature("a guest checks out a physical item through the hosted page; the return'
         const result = returned(reference, key)
         const replayedAfter = submit(token, view.checkout.revision, "shco-submit-0001")
         const badKey = checkout("get#CheckoutPaymentResult", {reference, key: "x".repeat(40)})
-        const confirmation = checkout("get#OrderConfirmation", {reference, key})
-        const confirmedAgain = checkout("get#OrderConfirmation", {reference, key})
+        // Shop P6 (F85): the reference and key read the order's state only, and issue no order link; the cart's own session
+        // (its placed cart's capability) reads the confirmation and gets the link once
+        const byReference = checkout("get#OrderConfirmation", {reference, key})
+        const checkoutByReference = checkout("get#Checkout", {reference, key})
+        const resumedByReference = checkout("resume#Checkout", {reference, key})
+        const confirmation = checkout("get#OrderConfirmation", {reference, key, token})
+        const confirmedAgain = checkout("get#OrderConfirmation", {token})
         const byOrderToken = checkout("get#OrderConfirmation", {orderToken: confirmation.result?.orderToken})
         const order = one("mantle.order.OrderHeader", {orderId: row.orderId})
         return {
@@ -283,6 +288,9 @@ feature("a guest checks out a physical item through the hosted page; the return'
             replayedAfter,
             result,
             badKey,
+            byReference,
+            checkoutByReference,
+            resumedByReference,
             confirmation,
             confirmedAgain,
             byOrderToken,
@@ -334,6 +342,13 @@ feature("a guest checks out a physical item through the hosted page; the return'
         r.paymentsAfter.length == 1
         r.paymentsAfter[0].statusId == "PmntDelivered"
         r.authorizations.length == 1
+        // the reference and key: the state and the order's reference, nothing of the buyer, no order link, no cart
+        r.byReference.result.confirmation.minimal == true
+        !r.byReference.result.confirmation.lines
+        !r.byReference.result.orderToken
+        r.checkoutByReference.result.checkout.minimal == true
+        !r.checkoutByReference.result.checkout.contact
+        !r.resumedByReference.result.token
         // the confirmation: the order, a guest's order link once (its SalesOrder OrderView capability reads it)
         r.confirmation.result.confirmation.orderId == r.row.orderId
         r.confirmation.result.confirmation.delivery.address.includes("1 Checkout Way")
@@ -343,6 +358,89 @@ feature("a guest checks out a physical item through the hosted page; the return'
         !r.confirmation.result.confirmation.orderUrl.includes(r.confirmation.result.orderToken)
         // the placed cart's capability changes nothing (a new add makes a new cart)
         r.cartAfter.result.token != null
+    }
+})
+
+// Shop P6 (F83, F85): an amount the provider reports that differs is an exception, the order placed and held with its money
+// for Accounting; a signed-in buyer who asked keeps the card through the gateway's hosted profile
+feature("an amount mismatch holds the placed order; a signed-in buyer's kept card is saved after the approval", {
+    when() {
+        const {token, view} = readyCart(ids.book, 1)
+        const submitted = submit(token, view.checkout.revision)
+        const row = checkoutRow(token)
+        // the provider reports an approval of another amount
+        system(() => {
+            call("update#mantle.account.payment.Payment", {
+                paymentId: row.paymentId,
+                statusId: "PmntAuthorized",
+                paymentRefNum: "SHCO-MISMATCH"
+            })
+            call("create#mantle.account.method.PaymentGatewayResponse", {
+                paymentGatewayConfigId: ids.hosted,
+                paymentOperationEnumId: "PgoTxDetails",
+                paymentId: row.paymentId,
+                amount: "99.00",
+                amountUomId: "USD",
+                transactionDate: ec.user.nowTimestamp,
+                resultSuccess: "Y",
+                resultDeclined: "N"
+            })
+        })
+        const result = returned(submitted.result.checkout.reference, submitted.result.returnKey)
+        const holds = list("mantle.order.OrderHoldReason", {orderId: row.orderId})
+        // a signed-in buyer asks to keep the card
+        login("john.doe")
+        const call2 = (name, input) => {
+            ec.message.pushErrors()
+            try {
+                return {
+                    result: ec.service
+                        .sync()
+                        .name(name)
+                        .parameters({input: Object.assign({siteId: ids.site}, input)})
+                        .call().result
+                }
+            } catch (error) {
+                return {error: String(error.message)}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        const added = call2(CART + "add#CartItem", {productId: ids.book, quantity: "1"})
+        const own = added.result.token
+        call2(CHECKOUT + "begin#Checkout", {token: own})
+        call2(CHECKOUT + "set#CheckoutContact", {token: own, name: "John Doe"})
+        const chose = call2(CHECKOUT + "select#Payment", {token: own, paymentOptionId: "PiCreditCard", savePaymentMethod: "true"})
+        const ready = call2(CHECKOUT + "get#Checkout", {token: own}).result
+        const ownSubmitted = call2(CHECKOUT + "submit#Checkout", {token: own, expectedRevision: ready.checkout.revision})
+        const ownRow = checkoutRow(own)
+        system(() =>
+            call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId: ownRow.paymentId, lastCheckDate: null})
+        )
+        login("john.doe")
+        call2(CHECKOUT + "get#CheckoutPaymentResult", {
+            reference: ownSubmitted.result?.checkout.reference,
+            key: ownSubmitted.result?.returnKey
+        })
+        return {
+            result,
+            holds,
+            attempt: one("mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId}),
+            chose,
+            ownPayment: one("mantle.account.payment.Payment", {paymentId: ownRow.paymentId}),
+            ownAfter: one("mantle.order.StoreCheckout", {checkoutId: ownRow.checkoutId})
+        }
+    },
+    then({result, holds, attempt, chose, ownPayment, ownAfter}) {
+        result.result.checkout.state == "completed"
+        holds.some(row => row.holdTypeEnumId == "OhtPayment" && !row.releasedDate)
+        attempt.outcome == "exception"
+        chose.result.checkout.payment.savePaymentMethod == true
+        ownAfter.statusId == "ScoCompleted"
+        ownPayment.paymentMethodId != null
+        one("mantle.account.method.PaymentMethod", {paymentMethodId: ownPayment.paymentMethodId}).description ==
+            "Card ending 1111"
     }
 })
 

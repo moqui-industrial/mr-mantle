@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The PASS Account foundation's email preferences (mr-pass impl-shop P6, F6, X15): a store's cart reminders topic is a
+    contact list of its own (type CART_REMINDER, named by the store's PsstCartReminderList setting), turned on by a signed-in
+    customer's PcpCartReminder consent on it. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.Enumeration enumId="PcpCartReminder" description="Cart Reminders" sequenceNum="5" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="CART_REMINDER" description="Cart reminders" enumTypeId="ContactListType"/>
+    <moqui.basic.Enumeration description="Cart reminders topic list" enumId="PsstCartReminderList" enumTypeId="ProductStoreSettingType"/>
+</entity-facade-xml>

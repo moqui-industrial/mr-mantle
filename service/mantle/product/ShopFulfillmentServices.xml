@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's digital delivery (mr-pass impl-shop P6; design-shop §13.2's D, §8.3 Digital items, §10 Downloads; SHOP-DIGITAL):
+    the PASS operations getDownloads and issueDownload and the protected file read getShopDownload (through
+    pass.Facade.call#Operation, each taking PASS's restricted input map: the site the facade resolved, the guest's order link
+    as orderToken or the signed-in buyer, and the grant), and Mantle's own fulfillment, notice, job and refund services over
+    ShopFulfillment.js. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="Downloads" authenticate="anonymous-all" allow-remote="false">
+        <description>getDownloads (DownloadList): the download grants the guest's order link (its SalesOrder capability with the Download scope: its one order) or the signed-in verified buyer (the self relationship: their own in this store) reaches, each with its product, order, file, version, size, dates and whether it can be downloaded now; never a location. Refuses a visitor with neither (SIGN_IN_REQUIRED) and another store's or another order's link (NOT_AVAILABLE).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").execute("getDownloads", input)</script>
+        </actions>
+    </service>
+    <service verb="issue" noun="Download" authenticate="anonymous-all" allow-remote="false">
+        <description>issueDownload (DownloadAction): a capability of ten minutes (SalesOrder, Download, the grant's order) for one grant the caller reaches that is in effect and fulfilled; the frontend streams the file with it at once (getShopDownload). Rate limited by requester; a revoked, expired or another's grant is NOT_AVAILABLE.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").execute("issueDownload", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="DownloadFile" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopDownload: the download capability and the grant checked again (so a revoked grant or an expired capability reaches nothing, whatever a cache kept), the use counted, and the file's location for the transport to stream (it stays on the server) with its name, type and size, and the byte range asked (range: bytes=start-end).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").execute("getDownloadFile", input)</script>
+        </actions>
+    </service>
+    <service verb="fulfill" noun="ShopOrder" allow-remote="false">
+        <description>The ShopOrderApprovedFulfillDigital SECA and the job: an approved Shop order's plain digital lines
+            (StoreItemFulfillment, each step in a transaction of its own and resumable by its marker): the payment captured,
+            the lines invoiced (create#FulfillmentInvoice), the invoice finalized (its receipt) and paid, the part checked
+            complete, the download grants, then the download-ready notice. Any other order is left as it is.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="fulfilled" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="fulfilled" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('fulfillOrder', context).fulfilled"/>
+        </actions>
+    </service>
+    <service verb="fulfill" noun="StoreItems" allow-remote="false">
+        <description>The fulfill_StoreItems job: the Shop orders whose digital lines are not done and are due a try, each on
+            its own; one that fails is named and the rest go on.</description>
+        <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
+        <out-parameters>
+            <parameter name="orders" type="Integer"/>
+            <parameter name="fulfilled" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('fulfillDue', context)"/>
+            <set field="orders" from="out.orders"/>
+            <set field="fulfilled" from="out.fulfilled"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="run" noun="FulfillmentStep" allow-remote="false">
+        <description>One fulfillment step of an order in its own transaction (called by fulfill#ShopOrder).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").execute("runStep", input)</script>
+        </actions>
+    </service>
+    <service verb="build" noun="DownloadNotice" allow-remote="false">
+        <description>The delivery ledger's source build of the download-ready notice (MessageDeliverySource
+            MdsrcShopDownloads): the order's files and where to download them, made fresh for each attempt (a guest's link
+            with a new SalesOrder capability, OrderView and Download, its token only in the message), or suppress when
+            nothing is left to download.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey" required="true"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('buildNotice', context)"/>
+            <set field="toAddress" from="out.toAddress"/>
+            <set field="bodyParameters" from="out.bodyParameters"/>
+            <set field="suppress" from="out.suppress"/>
+        </actions>
+    </service>
+    <service verb="reconcile" noun="RefundedItem" allow-remote="false">
+        <description>The PaymentRefundedReconcileAccess and ReturnSettledReconcileAccess SECAs (and Accounting's chargeback
+            intake, later): ends the download grants a refund, a return's settlement or a chargeback leaves unpaid: a settled
+            return's digital lines (returnId), a named line, a cancelled line, and every digital line of a Shop order whose
+            payment, less its refunds, no longer covers them (paymentId). Other access is not touched.</description>
+        <in-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="returnId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="reasonEnumId"/>
+        </in-parameters>
+        <out-parameters><parameter name="revoked" type="Integer"/></out-parameters>
+        <actions>
+            <set field="revoked" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('reconcileRefunded', context).revoked"/>
+        </actions>
+    </service>
+    <service verb="check" noun="ApprovedEmail" allow-remote="false">
+        <description>Whether OrderApprovedSendEmail skips an order: a Shop order whose lines are all plain digital (its
+            payment's approval is its approval; the receipt and the download notice follow; design-shop §8.3).</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="skip" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="skip" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('approvedEmailSkipped', context).skip"/>
+        </actions>
+    </service>
+</services>

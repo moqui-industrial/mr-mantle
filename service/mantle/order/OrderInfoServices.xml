@@ -1010,7 +1010,8 @@ along with this software (see the LICENSE.md file). If not, see
                         <script>approveWarnings.push(ec.resource.expand('OrderPlacePartNoShippingAddress', null, {orderPart:orderPart}))</script>
                         <continue/>
                     </if>
-                    <if condition="!('false' === storeSettingList.find((it) =&gt; it.settingTypeEnumId === 'PsstOrdApproveAddrNotValid')?.settingValue)">
+                    <!-- a part with no address (a store that does not ask for one) has none to trust (mr-pass impl-shop P6) -->
+                    <if condition="orderPart.postalContactMechId &amp;&amp; !('false' === storeSettingList.find((it) =&gt; it.settingTypeEnumId === 'PsstOrdApproveAddrNotValid')?.settingValue)">
                         <entity-find-one entity-name="mantle.party.contact.ContactMechPostalAddress" value-field="postalCm">
                             <field-map field-name="contactMechId" from="orderPart.postalContactMechId"/></entity-find-one>
                         <set field="trustLevelEnumId" from="postalCm.trustLevelEnumId || 'CmtlNew'"/>

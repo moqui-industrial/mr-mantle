@@ -50,6 +50,20 @@ const TOKEN_WRITES = [
     'getCheckoutPaymentResult',
     'getCheckoutPaymentForm',
     'getOrderConfirmation',
+    // Shop P6: reads and writes a guest's order link (orderToken) or a list link's token (email preferences) authorizes,
+    // and the Support operations an order link admits (F27); the Support reads with a capability are POSTs (F75)
+    'findShopOrders',
+    'getShopOrder',
+    'getShopOrderDocument',
+    'getDownloads',
+    'issueDownload',
+    'getEmailPreferences',
+    'storeEmailPreferences',
+    'applyOneClickUnsubscribe',
+    'getCaseIntake',
+    'getReturnableOrder',
+    'requestCustomerReturn',
+    'requestOrderCancel',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
@@ -62,6 +76,8 @@ const DOWNLOADS = [
     'getReturnLabel',
     // Shop P4 (F61): a public product image
     'getShopProductImage',
+    // Shop P6: a granted download, streamed with its range
+    'getShopDownload',
 ]
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {
@@ -297,7 +313,7 @@ function run(p) {
     if (DOWNLOADS.includes(operation)) {
         const file = result.attachment || result.export || result.file
         // the file's place stays here; the transport streams it
-        const { location, ...shown } = result
+        const { location, range, ...shown } = result
         return {
             result: shown,
             download: {
@@ -306,6 +322,8 @@ function run(p) {
                 filename: String(file.filename),
                 disposition:
                     file.variant === 'thumbnail' ? 'inline' : 'attachment',
+                // Shop P6: a ranged file's size and the range asked
+                ...(file.ranged ? { size: file.size, range: range || null } : {}),
             },
         }
     }

@@ -1046,6 +1046,13 @@ along with this software (see the LICENSE.md file). If not, see
                 cartCount += moveAll("mantle.order.StoreCartAccess", "guestPartyId", "guestPartyId")
                 if (cartCount) ec.message.addMessage(`Moved ${cartCount} Shop cart access records from Party ${fromPartyId} to ${toPartyId}`)
 
+                // Shop P6 (impl-shop F23): a download grant and its fulfillment follow their recipient as the order does; a merge
+                // is a staff decision or a verified account's own claim, never an email match here
+                let grantCount = moveAll("mantle.product.store.StoreDownloadGrant", "recipientPartyId", "recipientPartyId")
+                grantCount += moveAll("mantle.product.store.StoreItemFulfillment", "recipientPartyId", "recipientPartyId")
+                moveAll("mantle.order.StoreCheckout", "customerPartyId", "customerPartyId")
+                if (grantCount) ec.message.addMessage(`Moved ${grantCount} Shop download records from Party ${fromPartyId} to ${toPartyId}`)
+
                 // PartyNotDuplicate: the from Party's decisions become the to Party's (the lower id first); one between the two is
                 // dropped, as they are now one party
                 for (const row of ec.entity.find("mantle.party.PartyNotDuplicate").condition(cf.makeCondition([

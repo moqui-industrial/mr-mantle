@@ -353,12 +353,51 @@ function findInList(gw, requestName, fields) {
         const result = resultOf(sent.data)
         if (!result.ok) return {problem: (result.code || "") + " " + (result.text || "")}
         const list = [].concat(sent.data.transactions || [])
-        const match = list.find(row => row.invoiceNumber === fields.reference)
+        if (fields.all) fields.all.push(...list.filter(row => row.invoiceNumber === fields.reference))
+        const match = fields.all ? null : list.find(row => row.invoiceNumber === fields.reference)
         if (match) return {transId: String(match.transId)}
         if (list.length < PAGE_LIMIT) return {}
     }
     return {problem: "More than " + MAX_PAGES * PAGE_LIMIT + " transactions to search"}
 }
+// Every transaction of a reference in the lists (unsettled, held for review, and the batches settled since the request):
+// {transactions: [{transId, transactionStatus}]}, or {problem} when a search could not be done (Accept Hosted: two pages
+// open at once can each take a payment under one reference; Shop P6, F85).
+function referenceTransactions(gw, refId, sinceMillis, anyOne = false) {
+    const all = []
+    for (const before of [{status: "pendingApproval"}, {}]) {
+        const found = findInList(gw, "getUnsettledTransactionListRequest", {before, reference: refId, all})
+        if (found.problem) return found
+    }
+    // anyOne: whether there is a transaction at all, so an unsettled one ends the search
+    if (anyOne && all.length)
+        return {transactions: all.map(row => ({transId: String(row.transId), transactionStatus: row.transactionStatus}))}
+    const now = Number(ec.user.nowTimestamp)
+    const first = Math.max(Number(sinceMillis || now) - 86400000, now - SETTLED_DAYS * 86400000)
+    const batches = send(gw, "getSettledBatchListRequest", {
+        includeStatistics: false,
+        firstSettlementDate: utc(first),
+        lastSettlementDate: utc(now)
+    })
+    if (batches.unknown || batches.refused) return {problem: batches.unknown || batches.refused}
+    const batchResult = resultOf(batches.data)
+    if (!batchResult.ok && batchResult.code !== "E00004") return {problem: batchResult.code + " " + batchResult.text}
+    for (const batch of [].concat(batches.data.batchList || [])) {
+        const found = findInList(gw, "getTransactionListRequest", {
+            before: {batchId: String(batch.batchId)},
+            reference: refId,
+            all
+        })
+        if (found.problem) return found
+    }
+    const seen = new Set()
+    return {
+        transactions: all
+            .filter(row => !seen.has(String(row.transId)) && seen.add(String(row.transId)))
+            .map(row => ({transId: String(row.transId), transactionStatus: row.transactionStatus}))
+    }
+}
+const approvedStatuses = ["authorizedPendingCapture", "capturedPendingSettlement", "pendingSettlement", "settledSuccessfully"]
 const utc = millis => {
     const date = new Date(millis)
     const two = n => String(n).padStart(2, "0")
@@ -832,6 +871,12 @@ function hostedForm(p) {
     if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
     if (!/^https:\/\//.test(String(p.returnUrl || ""))) throw new Error("RETURN_URL_REQUIRED: The return address is https")
     const refId = reference(pending.idempotencyKey)
+    // one page per reference (Shop P6, F85): once the reference has a transaction (paid, declined or held on an earlier
+    // page), no new token is issued, so two pages cannot each take a payment; a search that cannot tell issues none either
+    const existing = referenceTransactions(gw, refId, ms(pending.transactionDate), true)
+    if (existing.problem) throw new Error("HOSTED_FORM_UNAVAILABLE: " + clip(String(existing.problem), 200))
+    if (existing.transactions.length)
+        throw new Error("HOSTED_ALREADY_USED: The payment page was already used for this payment; its result is being confirmed")
     const transactionRequest = {
         transactionType:
             pending.paymentOperationEnumId === "PgoAuthAndCapture" ? "authCaptureTransaction" : "authOnlyTransaction",
@@ -896,11 +941,32 @@ function hostedDetails(gw, payment, pending) {
                 networkTransId: tx.networkTransId ? clip(String(tx.networkTransId), 60) : null,
                 resultSuccess: ["authorizedPendingCapture"].concat(capturedStatuses).includes(tx.transactionStatus) ? "Y" : "N"
             })
+        // more than one approval under the reference (two pages paid at once; Shop P6, F85) is an exception, flagged once on
+        // the payment with the other transactions for Accounting (the checkout holds its order), never a plain success
+        if (approvedStatuses.includes(tx.transactionStatus)) flagDuplicates(gw, payment, pending, refId, String(tx.transId))
         return out
     }
     if (found.problem) return {}
     if (!tokenUsable) return {gatewayStatusId: "PmntCancelled"}
     return {}
+}
+function flagDuplicates(gw, payment, pending, refId, transId) {
+    if (find(R, {paymentId: payment.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).count() > 0) return
+    const listed = referenceTransactions(gw, refId, ms(pending.transactionDate))
+    if (listed.problem) return
+    const others = listed.transactions.filter(row => approvedStatuses.includes(row.transactionStatus) && row.transId !== transId)
+    if (!others.length) return
+    record(
+        {gw, payment, operationEnumId: "PgoTxDetails", amount: payment.amount},
+        {
+            referenceNum: transId,
+            transactionStatus: "DuplicateApproval",
+            reasonCode: "DUPLICATE_APPROVAL",
+            reasonMessage: clip("Also approved under reference " + refId + ": " + others.map(row => row.transId).join(", "), 255),
+            resultSuccess: "N",
+            resultDeclined: "N"
+        }
+    )
 }
 // store#HostedPaymentProfile (F40): after an approved hosted payment a signed-in buyer asked to keep, the transaction's
 // customer payment profile (when the page made one), else one made from the transaction
@@ -938,6 +1004,84 @@ function hostedProfile(p) {
     )
     call("update#" + P, {paymentId: payment.paymentId, paymentMethodId})
     return {paymentMethodId}
+}
+
+// ---- The hosted profile page (Shop P6, F40) ----
+const PROFILE_PAGE = {
+    sandbox: "https://test.authorize.net/customer/addPayment",
+    production: "https://accept.authorize.net/customer/addPayment"
+}
+// The party's customer profile at the gateway: its methods' reference, else one made now with the party as its
+// merchantCustomerId (a profile the party already has, E00039, is taken as it is).
+function ensureCustomerProfile(gw, partyId) {
+    const kept = customerProfileOf(partyId, gw.id)
+    if (kept) return kept
+    const sent = send(gw, "createCustomerProfileRequest", {
+        profile: {merchantCustomerId: clip(partyId, REF_LENGTH), description: clip("Party " + partyId, 255)}
+    })
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (result.ok) return String(sent.data.customerProfileId)
+    if (result.code === "E00039") return duplicateId(result.text)
+    throw new Error("PROFILE_NOT_STORED: " + clip(sent.unknown || sent.refused || result.text || "No customer profile", 200))
+}
+// get#HostedProfileForm: a form token of the hosted profile page (getHostedProfilePageRequest) where the payer adds a card
+// to their customer profile, returning to returnUrl; never stored. {formUrl, fields: {token}}.
+function hostedProfileForm(p) {
+    const gw = gateway(p.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    if (!/^https:\/\//.test(String(p.returnUrl || ""))) throw new Error("RETURN_URL_REQUIRED: The return address is https")
+    const customerProfileId = ensureCustomerProfile(gw, p.partyId)
+    const sent = send(gw, "getHostedProfilePageRequest", {
+        customerProfileId,
+        hostedProfileSettings: {
+            setting: [
+                {settingName: "hostedProfileReturnUrl", settingValue: String(p.returnUrl)},
+                {settingName: "hostedProfileReturnUrlText", settingValue: "Continue"},
+                {settingName: "hostedProfileCardCodeRequired", settingValue: "true"}
+            ]
+        }
+    })
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (!result.ok || !sent.data.token)
+        throw new Error("HOSTED_FORM_UNAVAILABLE: " + clip(sent.unknown || sent.refused || result.text || "No form token", 200))
+    return {
+        formUrl: gw.remote.usageCode === "P" ? PROFILE_PAGE.production : PROFILE_PAGE.sandbox,
+        fields: {token: String(sent.data.token)}
+    }
+}
+// sync#CustomerProfile: the party's customer profile read (getCustomerProfileRequest, by its kept reference or the party
+// as merchantCustomerId), each payment profile not kept yet kept as a masked card method. {added}.
+function syncCustomerProfile(p) {
+    const gw = gateway(p.paymentGatewayConfigId)
+    if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    const kept = customerProfileOf(p.partyId, gw.id)
+    const sent = send(
+        gw,
+        "getCustomerProfileRequest",
+        kept ? {customerProfileId: kept} : {merchantCustomerId: clip(p.partyId, REF_LENGTH)}
+    )
+    const result = sent.data ? resultOf(sent.data) : {}
+    if (!result.ok) {
+        if (result.code === "E00040") return {added: 0}
+        throw new Error("DETAILS_UNAVAILABLE: " + clip(sent.unknown || sent.refused || result.text || "not read", 200))
+    }
+    const profile = sent.data.profile || {}
+    const customerProfileId = String(profile.customerProfileId || kept || "")
+    let added = 0
+    for (const paymentProfile of [].concat(profile.paymentProfiles || [])) {
+        const paymentProfileId = String(paymentProfile.customerPaymentProfileId || "")
+        if (!paymentProfileId || one(PM, {paymentGatewayConfigId: gw.id, gatewayCimId: paymentProfileId})) continue
+        const card = paymentProfile.payment?.creditCard
+        if (!card) continue
+        G.createCardMethod(
+            p.partyId,
+            {paymentGatewayConfigId: gw.id, gatewayCimId: paymentProfileId, gatewayCustomerId: customerProfileId},
+            G.last4Of(card.cardNumber),
+            cardTypes[card.cardType]
+        )
+        added++
+    }
+    return {added}
 }
 
 // ---- Browser tokenization ----
@@ -982,6 +1126,8 @@ const operations = {
     saleHosted: p => authorizeHosted(p, true),
     hostedForm,
     hostedProfile,
+    hostedProfileForm,
+    syncCustomerProfile,
     capture,
     release,
     refund,

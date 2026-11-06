@@ -1062,13 +1062,21 @@
     },
     getCaseIntake: {
         service: 'mantle.request.SupportCaseServices.get#CaseIntake',
-        fields: ['siteId', 'token', 'orderId', 'wikiPageId', 'query'],
+        fields: [
+            'siteId',
+            'token',
+            'orderToken',
+            'orderId',
+            'wikiPageId',
+            'query',
+        ],
     },
     createCustomerCase: {
         service: 'mantle.request.SupportCaseServices.create#CustomerCase',
         fields: [
             'siteId',
             'token',
+            'orderToken',
             'customerPartyId',
             'requestCategoryId',
             'requestTypeEnumId',
@@ -1119,12 +1127,13 @@
     },
     getReturnableOrder: {
         service: 'mantle.order.ReturnPolicyServices.get#ReturnableOrder',
-        fields: ['siteId', 'orderId'],
+        fields: ['siteId', 'orderToken', 'orderId'],
     },
     requestCustomerReturn: {
         service: 'mantle.order.ReturnPolicyServices.request#CustomerReturn',
         fields: [
             'siteId',
+            'orderToken',
             'orderId',
             'lines',
             'customerReference',
@@ -1160,6 +1169,7 @@
         service: 'mantle.order.OrderChangeServices.request#CustomerCancel',
         fields: [
             'siteId',
+            'orderToken',
             'orderId',
             'lines',
             'reason',
@@ -1436,5 +1446,106 @@
     getOrderConfirmation: {
         service: 'mantle.order.ShopCheckoutServices.get#OrderConfirmation',
         fields: ['siteId', 'token', 'reference', 'key', 'orderToken'],
+    },
+    // Shop P6: orders, account and digital delivery (mantle.party.ShopCustomerServices, mantle.product.ShopFulfillmentServices);
+    // a guest's order link is orderToken, never a party id
+    getShopAccount: {
+        service: 'mantle.party.ShopCustomerServices.get#Account',
+        fields: ['siteId'],
+    },
+    findShopOrders: {
+        service: 'mantle.party.ShopCustomerServices.find#Orders',
+        fields: ['siteId', 'orderToken', 'query', 'cursor', 'limit'],
+    },
+    getShopOrder: {
+        service: 'mantle.party.ShopCustomerServices.get#Order',
+        fields: ['siteId', 'orderToken', 'orderId'],
+    },
+    getShopOrderDocument: {
+        service: 'mantle.party.ShopCustomerServices.get#OrderDocument',
+        fields: ['siteId', 'orderToken', 'orderId', 'invoiceId'],
+    },
+    previewReorder: {
+        service: 'mantle.party.ShopCustomerServices.preview#Reorder',
+        fields: ['siteId', 'orderId'],
+    },
+    reorder: {
+        service: 'mantle.party.ShopCustomerServices.reorder#Order',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'orderItemSeqIds',
+            'operationId',
+        ],
+    },
+    getAddresses: {
+        service: 'mantle.party.ShopCustomerServices.get#Addresses',
+        fields: ['siteId'],
+    },
+    storeAddress: {
+        service: 'mantle.party.ShopCustomerServices.store#Address',
+        fields: [
+            'siteId',
+            'contactMechId',
+            'expectedRevision',
+            'purpose',
+            'toName',
+            'address1',
+            'address2',
+            'city',
+            'stateProvinceGeoId',
+            'postalCode',
+            'countryGeoId',
+        ],
+    },
+    endAddress: {
+        service: 'mantle.party.ShopCustomerServices.end#Address',
+        fields: ['siteId', 'contactMechId'],
+    },
+    getPaymentMethods: {
+        service: 'mantle.party.ShopCustomerServices.get#PaymentMethods',
+        fields: ['siteId'],
+    },
+    beginPaymentMethodSetup: {
+        service: 'mantle.party.ShopCustomerServices.begin#PaymentMethodSetup',
+        fields: ['siteId'],
+    },
+    finishPaymentMethodSetup: {
+        service: 'mantle.party.ShopCustomerServices.finish#PaymentMethodSetup',
+        fields: ['siteId', 'setupReference'],
+    },
+    endPaymentMethod: {
+        service: 'mantle.party.ShopCustomerServices.end#PaymentMethod',
+        fields: ['siteId', 'paymentMethodId', 'confirm'],
+    },
+    getDownloads: {
+        service: 'mantle.product.ShopFulfillmentServices.get#Downloads',
+        fields: ['siteId', 'orderToken'],
+    },
+    issueDownload: {
+        service: 'mantle.product.ShopFulfillmentServices.issue#Download',
+        fields: ['siteId', 'orderToken', 'downloadGrantId'],
+    },
+    getShopDownload: {
+        service: 'mantle.product.ShopFulfillmentServices.get#DownloadFile',
+        fields: ['siteId', 'downloadGrantId', 'downloadToken', 'range'],
+    },
+    // Shop P6 (F6): the PASS Account hub and email preferences (mantle.public.AccountHubServices)
+    getAccountHub: {
+        service: 'mantle.public.AccountHubServices.get#AccountHub',
+        fields: ['siteId'],
+    },
+    getEmailPreferences: {
+        service: 'mantle.public.AccountHubServices.get#EmailPreferences',
+        fields: ['siteId', 'token'],
+    },
+    storeEmailPreferences: {
+        service: 'mantle.public.AccountHubServices.store#EmailPreferences',
+        fields: ['siteId', 'token', 'choices'],
+    },
+    applyOneClickUnsubscribe: {
+        service: 'mantle.public.AccountHubServices.apply#OneClickUnsubscribe',
+        fields: ['siteId', 'token'],
     },
 })

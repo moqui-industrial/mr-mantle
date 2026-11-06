@@ -656,3 +656,74 @@ feature("a cancel request of an approved order is filed as a proposal, read and 
         r.request.statusId === "ReqCancelled"
     }
 })
+
+// Shop P6 (impl-shop F27; design-customer-service §8 Access): a guest's order link (the SalesOrder OrderView capability)
+// admits the customer services for its one order, as a contact or the self relationship does; the case carries the order's
+// store (impl-commerce F37)
+feature("a guest's order link files a case, a return and a cancel request for its one order; another order is refused", {
+    when() {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        svc("create#mantle.product.store.ProductStore", {
+            productStoreId: prefix + "_STORE",
+            storeName: "Portal spec store",
+            organizationPartyId: org
+        })
+        const shipped = sale(true)
+        const approved = sale(false)
+        for (const orderId of [shipped, approved])
+            svc("update#mantle.order.OrderHeader", {orderId, productStoreId: prefix + "_STORE"})
+        capability("SalesOrder", shipped, "OrderView", token("LinkShipped"))
+        capability("SalesOrder", approved, "OrderView", token("LinkApproved"))
+        const link = token("LinkShipped")
+        const intake = page(null, S + "get#CaseIntake", {orderToken: link})
+        const filed = page(null, S + "create#CustomerCase", {
+            orderToken: link,
+            requestName: "About my order",
+            description: "Where is the second one?",
+            operationId: opId()
+        })
+        const offer = page(null, R + "get#ReturnableOrder", {orderToken: link, orderId: shipped})
+        const seq = offer.order?.lines[0]?.orderItemSeqId
+        const returned = page(null, R + "request#CustomerReturn", {
+            orderToken: link,
+            orderId: shipped,
+            lines: [{orderItemSeqId: seq, quantity: 1, returnReasonEnumId: "RrsnDefective", returnResponseEnumId: "RrspCredit"}],
+            operationId: opId()
+        })
+        const cancelSeq = page(null, S + "get#CaseIntake", {orderToken: token("LinkApproved")}).order?.lines[0]?.orderItemSeqId
+        const cancel = page(null, O + "request#CustomerCancel", {
+            orderToken: token("LinkApproved"),
+            orderId: approved,
+            lines: [{orderItemSeqId: cancelSeq, quantity: 1}],
+            consent: "Y",
+            operationId: opId()
+        })
+        // the link of one order reaches no other, and no link no order
+        const otherOrder = page(null, R + "get#ReturnableOrder", {orderToken: link, orderId: approved})
+        const noLink = page(null, R + "request#CustomerReturn", {orderId: shipped, lines: [], operationId: opId()})
+        return {
+            shipped,
+            intake,
+            filed,
+            request: one("mantle.request.Request", {requestId: filed.requestId}),
+            caseCustomer: rows("mantle.request.RequestParty", {requestId: filed.requestId, roleTypeId: "Customer"})[0]?.partyId,
+            returned,
+            header: one("mantle.order.return.ReturnHeader", {returnId: returned.returnId}),
+            cancel,
+            otherOrder,
+            noLink
+        }
+    },
+    then(r) {
+        r.intake.mode === "orderLink"
+        r.intake.order.orderId === r.shipped
+        r.caseCustomer === customer
+        r.request.productStoreId === prefix + "_STORE"
+        r.request.filedByPartyId == null
+        r.header.statusId === "ReturnRequested"
+        r.cancel.stateText != null
+        r.otherOrder.kind === "NotFound"
+        r.noLink.kind === "AuthenticationRequired"
+    }
+})

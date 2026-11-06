@@ -126,9 +126,9 @@ function requestCustomerCancel(p) {
     const s = portal()
     s.throttle("support-cancel")
     const organizationPartyId = s.served(p.siteId)
-    if (!ec.user.userId) s.signInRequired()
-    const customers = s.actingFor(organizationPartyId)
-    const {order, customer} = orderFor(p.orderId, organizationPartyId, customers)
+    // a signed-in account's customers, or a guest's order link for its one order (Shop P6, F27)
+    const asked = s.askers(p, organizationPartyId)
+    const {order, customer} = orderFor(asked.orderId || p.orderId, organizationPartyId, asked.customers)
     const key = s.operationKey(p)
     const consent = p.consent === true || p.consent === "Y" || p.consent === "true"
     if (!consent) s.fail("Unprocessable", "Confirm that you ask us to cancel these lines")
