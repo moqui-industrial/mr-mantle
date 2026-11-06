@@ -160,6 +160,7 @@ spec({
             users.designer = user("designer", orgA, ["COMMERCE_VIEW", "COMMERCE_THEME_EDIT"])
             users.publisher = user("publisher", orgA, ["COMMERCE_VIEW", "COMMERCE_PUBLISH"])
             users.merchandiser = user("merchandiser", orgA, ["COMMERCE_VIEW", "COMMERCE_MERCHANDISE"])
+            users.lead = user("lead", orgA, ["COMMERCE_VIEW", "COMMERCE_THEME_EDIT", "COMMERCE_PUBLISH"])
             users.outsider = user("outsider", orgB, ["COMMERCE_VIEW", "COMMERCE_THEME_EDIT", "COMMERCE_PUBLISH"])
         })
     },
@@ -295,6 +296,32 @@ feature(
         }
     }
 )
+
+feature("a published page's binding changes only with COMMERCE_PUBLISH and its revision, which advance; a draft's as before", {
+    when() {
+        const before = page(state.pageId)
+        const generationBefore = generation()
+        const change = (username, extra) =>
+            run(username, T + "store#SitePage", Object.assign({sitePageId: state.pageId, seoTitle: "Returns and refunds"}, extra))
+        const designer = change(users.designer, {expectedRevision: before.publicationRevision})
+        const noRevision = change(users.lead, {})
+        const changed = change(users.lead, {expectedRevision: before.publicationRevision})
+        const after = page(state.pageId)
+        const draft = run(users.designer, T + "store#SitePage", {siteId: ids.site, title: "Help", routePath: "help"})
+        const draftChanged = run(users.designer, T + "store#SitePage", {sitePageId: draft.sitePageId, title: "Help centre"})
+        return {before, generationBefore, designer, noRevision, changed, after, draftChanged, generation: generation()}
+    },
+    then(r) {
+        code(r.designer) == "PERMISSION_DENIED"
+        code(r.noRevision) == "REVISION_STALE"
+        r.changed.error == ""
+        r.after.seoTitle == "Returns and refunds"
+        r.after.publicationRevision == r.before.publicationRevision + 1
+        r.generation == r.generationBefore + 1
+        r.draftChanged.error == ""
+        r.draftChanged.generation == null
+    }
+})
 
 feature("a saved version is not live until published, a stale or unknown version is refused, and a withdrawal ends the page", {
     when() {
@@ -584,3 +611,60 @@ feature("a scheduled redirect whose author can no longer sign in fails at its da
         r.resolved.result.url == "/old-b"
     }
 })
+
+feature(
+    "a scheduled menu version or redirect whose window ended before the job reached it fails, WINDOW_PASSED; one due is live",
+    {
+        when() {
+            const past = Date.now() - 60000
+            const version = (fromDate, thruDate) =>
+                system(() =>
+                    make("mantle.public.PublicSiteNavigationVersion", {
+                        navigationId: state.navigationId,
+                        fromDate,
+                        thruDate,
+                        draftRevision: 4,
+                        snapshotText: "[]",
+                        publicationStateEnumId: "SpsScheduled",
+                        publishedByUserId: users.publisher,
+                        publishedDate: past
+                    })
+                )
+            version(past, past + 1000)
+            version(past + 2000, null)
+            const saved = nav(users.merchandiser, {
+                redirect: {oldPath: "/old-e", destinationTypeEnumId: "SdtPath", destinationValue: "/old-b"}
+            })
+            run(users.publisher, T + "publish#SiteNavigation", {
+                siteId: ids.site,
+                redirectId: saved.redirectId,
+                fromDate: Date.now() + 3600000,
+                expectedRevision: saved.revision,
+                operationKey: key()
+            })
+            system(() =>
+                call("update#mantle.public.PublicSiteRedirect", {
+                    redirectId: saved.redirectId,
+                    fromDate: past,
+                    thruDate: past + 1000
+                })
+            )
+            const job = run("john.doe", T + "run#ScheduledSitePublications", {})
+            const versionAt = at =>
+                one("mantle.public.PublicSiteNavigationVersion", {
+                    navigationId: state.navigationId,
+                    fromDate: new Date(at).toISOString()
+                })
+            const redirect = one("mantle.public.PublicSiteRedirect", {redirectId: saved.redirectId})
+            return {job, passed: versionAt(past), due: versionAt(past + 2000), redirect}
+        },
+        then(r) {
+            r.job.error == ""
+            r.passed.publicationStateEnumId == "SpsFailed"
+            r.passed.failureCode == "WINDOW_PASSED"
+            r.due.publicationStateEnumId == "SpsActive"
+            r.redirect.publicationStateEnumId == "SpsFailed"
+            r.redirect.failureCode == "WINDOW_PASSED"
+        }
+    }
+)

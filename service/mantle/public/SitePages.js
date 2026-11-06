@@ -512,7 +512,8 @@ function getSitePageHistory(p) {
 
 // ===== store#SitePage =====
 // store#SitePage: a new page (siteId, title, route, locale, template, policy role, SEO; its text a new page of the store's
-// page space), a page's binding fields (on a published page the change is live and advances the site's generation), or a
+// page space), a page's binding fields (on a published or scheduled page a publication: COMMERCE_PUBLISH and
+// expectedRevision, the publicationRevision advanced, and on a published one the site's generation), or a
 // new version of its text (pageText, versionNote; with baseVersionName a page saved since by someone else is answered
 // conflict, not overwritten). Saving text never changes the live page: publish#SitePage does. COMMERCE_THEME_EDIT.
 function storeSitePage(p) {
@@ -543,8 +544,33 @@ function storeSitePage(p) {
             )
         if (next.pageRole && next.pageRole !== page.pageRole && rows(PAGE, {siteId: page.siteId, pageRole: next.pageRole}).length)
             refuse("ROLE_TAKEN", "The site has a " + policyRoles[next.pageRole] + " page already")
-        call("update#" + PAGE, Object.assign({sitePageId: page.sitePageId, changeReason: stores.reason(p, false)}, values))
-        if (stateOf(page) === "published") generation = advance(page.siteId)
+        // A live or scheduled page's binding is what the site shows (or will at its date): changing it is a publication
+        // (design §1.1), so it takes COMMERCE_PUBLISH and the page's publicationRevision as read, and advances it.
+        const live = stateOf(page) === "published"
+        const update = {sitePageId: page.sitePageId, changeReason: stores.reason(p, false)}
+        if (live || page.scheduledFromDate) {
+            if (!access.has("COMMERCE_PUBLISH"))
+                refuse(
+                    "PERMISSION_DENIED",
+                    "The page is " +
+                        (live ? "published" : "scheduled") +
+                        ": changing its " +
+                        changed.join(", ") +
+                        " needs COMMERCE_PUBLISH"
+                )
+            if (
+                p.expectedRevision == null ||
+                p.expectedRevision === "" ||
+                Number(p.expectedRevision) !== Number(page.publicationRevision || 0)
+            )
+                refuse(
+                    "REVISION_STALE",
+                    "The page's publication changed; its revision is now " + Number(page.publicationRevision || 0)
+                )
+            update.publicationRevision = Number(page.publicationRevision || 0) + 1
+        }
+        call("update#" + PAGE, Object.assign(update, values))
+        if (live) generation = advance(page.siteId)
     }
     let saved = null
     if (given(p, "pageText")) saved = savePageText(page, store, p)
@@ -1651,7 +1677,7 @@ function runScheduledSitePublication(p) {
                 if (routeTaken(page, page.siteId, page.appMountId, page.routePath, page.locale))
                     refuse("ROUTE_TAKEN", "Another page of the site has the route " + page.routePath)
                 const thru = ms(page.scheduledThruDate)
-                if (thru != null && thru <= nowMs()) refuse("WINDOW_PASSED", "Its window ended before it started")
+                windowOpen(thru)
                 return activatePage(
                     page,
                     store,
@@ -1669,7 +1695,10 @@ function runScheduledSitePublication(p) {
         }
     }
     if (p.kind === "menu") {
-        const version = find(NAV_VERSION, {navigationId: p.id, fromDate: p.fromDate}).forUpdate(true).one()
+        // the key's from date as a date-time: a bare number is not one to the database
+        const version = find(NAV_VERSION, {navigationId: p.id, fromDate: new Date(Number(p.fromDate)).toISOString()})
+            .forUpdate(true)
+            .one()
         if (!version || version.publicationStateEnumId !== "SpsScheduled") return {result: {ok: true, skipped: true}}
         const menu = one(NAV, {navigationId: p.id})
         try {
@@ -1677,6 +1706,7 @@ function runScheduledSitePublication(p) {
                 const s = scopeWith(["COMMERCE_PUBLISH"])
                 const {site, mount, store} = siteOf(s, menu.siteId)
                 const ctx = contextOf(site, mount, store)
+                windowOpen(version.thruDate)
                 checkMenu(ctx, lib.json(version.snapshotText, []) || [])
                 return activateMenuVersion(ctx, menu.navigationId, ms(version.fromDate))
             })
@@ -1692,6 +1722,7 @@ function runScheduledSitePublication(p) {
             const s = scopeWith(["COMMERCE_PUBLISH"])
             const {site, mount, store} = siteOf(s, redirect.siteId)
             const ctx = contextOf(site, mount, store)
+            windowOpen(redirect.thruDate)
             checkRedirect(ctx, redirect)
             call("update#" + REDIRECT, {redirectId: redirect.redirectId, publicationStateEnumId: "SpsActive"})
             return advance(site.siteId)
@@ -1700,6 +1731,11 @@ function runScheduledSitePublication(p) {
     } catch (error) {
         return {result: refused(p, error)}
     }
+}
+// A scheduled page, menu version or redirect whose window ended before the job reached it is refused, not made live.
+function windowOpen(thruDate) {
+    const thru = ms(thruDate)
+    if (thru != null && thru <= nowMs()) refuse("WINDOW_PASSED", "Its window ended before it started")
 }
 // A scheduled item's refusal recorded on it (the store's readiness lists it; what is live stays): {ok: false, code, message}.
 // A refusal can come with error messages (an author who can no longer sign in), which would stop the record's write, so
