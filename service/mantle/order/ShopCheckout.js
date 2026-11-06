@@ -1701,6 +1701,10 @@ const operations = {
 }
 ;({
     limits,
+    // Shop P8 (ShopOperations.js): a checkout's attempt refreshed and placed (a stuck placement's retry), and the Payment
+    // hold of a placed order (a second approval found by the sweep)
+    refreshAttempt: (siteId, checkoutId) => refreshAttempt({siteId}, checkoutId, "job"),
+    holdPayment,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop checkout operation " + op)
         return operations[op](parameters || {})

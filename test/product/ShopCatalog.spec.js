@@ -216,7 +216,9 @@ spec({
             for (const [productContentId, productId, location] of [
                 [prefix + "_IMG_PNG", ids.plain, "component://mr-mantle/test/none/plain.png"],
                 [prefix + "_IMG_SVG", ids.plain, "component://mr-mantle/test/none/plain.svg"],
-                [prefix + "_IMG_DRAFT", ids.draft, "component://mr-mantle/test/none/draft.png"]
+                [prefix + "_IMG_DRAFT", ids.draft, "component://mr-mantle/test/none/draft.png"],
+                // Shop P8 (F75): a location of another scheme is never read
+                [prefix + "_IMG_FILE", ids.plain, "file:///etc/plain.png"]
             ])
                 make("mantle.product.ProductContent", {
                     productContentId,
@@ -429,21 +431,29 @@ feature(
                 plain: read("get#Product", {productId: ids.plain}),
                 png: read("get#ProductImage", {productContentId: prefix + "_IMG_PNG"}),
                 svg: read("get#ProductImage", {productContentId: prefix + "_IMG_SVG"}),
-                draft: read("get#ProductImage", {productContentId: prefix + "_IMG_DRAFT"})
+                draft: read("get#ProductImage", {productContentId: prefix + "_IMG_DRAFT"}),
+                // Shop P8 (F75): the link's generation; only the current one's answer may be kept by a shared cache
+                generation: String(ec.entity.find("mantle.public.PublicSite").condition("siteId", ids.site).disableAuthz().one().generation),
+                fileScheme: read("get#ProductImage", {productContentId: prefix + "_IMG_FILE"})
             }
         },
-        then({plain, png, svg, draft}) {
+        then({plain, png, svg, draft, generation, fileScheme}) {
             // F67: the visitor's search text reaches the index as words, its query syntax escaped
             ec.resource
                 .script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
                 .simpleQuery('name:mug* AND (red OR "x")') == 'name\\:mug\\* and \\(red or \\"x\\"\\)'
             ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").simpleQuery(">10 <a") == " 10  a"
 
-            plain.result.product.image.url == "/shop/media?productContentId=" + prefix + "_IMG_PNG"
+            plain.result.product.image.url == "/shop/media?productContentId=" + prefix + "_IMG_PNG&v=" + generation
             plain.result.product.image.alt == "A picture"
             plain.result.product.images.length == 1
             png.result.file.mimeType == "image/png"
             png.result.location == "component://mr-mantle/test/none/plain.png"
+            png.result.file.cacheControl == "no-store"
+            read("get#ProductImage", {productContentId: prefix + "_IMG_PNG", v: generation}).result.file.cacheControl ==
+                "public, max-age=60"
+            read("get#ProductImage", {productContentId: prefix + "_IMG_PNG", v: "1"}).result.file.cacheControl == "no-store"
+            fileScheme.error.includes("NOT_AVAILABLE")
             svg.error.includes("NOT_AVAILABLE")
             draft.error.includes("NOT_AVAILABLE")
         }

@@ -328,6 +328,8 @@ function run(p) {
                     file.variant === 'thumbnail' ? 'inline' : 'attachment',
                 // Shop P6: a ranged file's size and the range asked
                 ...(file.ranged ? { size: file.size, range: range || null } : {}),
+                // Shop P8 (F75): a public product image of the current generation may be kept by a shared cache
+                ...(file.cacheControl === 'public, max-age=60' ? { cacheControl: file.cacheControl } : {}),
             },
         }
     }

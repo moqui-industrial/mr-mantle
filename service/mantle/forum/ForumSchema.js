@@ -1341,7 +1341,8 @@
     // Shop P4 (F61): a product image of a public product, streamed by the frontend
     getShopProductImage: {
         service: 'mantle.product.ShopCatalogServices.get#ProductImage',
-        fields: ['siteId', 'productContentId'],
+        // Shop P8 (F75): v, the generation the image's link was made at (a shared cache keeps only the current one's)
+        fields: ['siteId', 'productContentId', 'v'],
     }, // Shop P5: checkout and payment (input.token is the session's cart capability; reference and key are the checkout's
     // return reference and its key, from a provider's return or a refreshed frontend; orderToken is a guest's SalesOrder
     // OrderView capability). No operation takes an order, price, total, customer, store or status.

@@ -449,7 +449,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="alreadyApplied" from="!!sent.alreadyApplied"/>
         </actions>
     </service>
-    <service verb="run" noun="CartRecovery" allow-remote="false">
+    <service verb="run" noun="CartRecovery" allow-remote="false" operation="commerce.recovery.run">
         <description>The run_CartRecovery job: for each store with recovery enabled (or the ones named), its signed-in carts
             idle past the delay within the recovery window, each in its own transaction (queue#CartRecovery); one that
             fails is logged and named, and the rest go on. A store that has not enabled recovery is never read.</description>

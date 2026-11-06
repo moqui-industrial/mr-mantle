@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's operations (mr-pass impl-shop P8; design-shop §7.1, §8.4, §17.1; ShopOperations.js): the run_ShopOperations job
+    (expired carts retired through the order path once nothing of their money is unresolved, F74; recent hosted references
+    searched once for a later second approval, F95) and the staff resolution of a stuck placement (impl-commerce F108). Each
+    job service names its business operation for the framework Monitor (docs/tools/Monitoring.md). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="run" noun="ShopOperations" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>The run_ShopOperations job: retire#ExpiredCarts, then sweep#HostedReferences, each on its own; a part that
+            fails is named and the next one runs. Each cart, guest party and checkout is its own transaction (each its own
+            Monitor operation).</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="carts" type="Map"/>
+            <parameter name="references" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopOperations.js').execute('runShopOperations', {limit:limit})"/>
+            <set field="carts" from="out.carts"/>
+            <set field="references" from="out.references"/>
+        </actions>
+    </service>
+    <service verb="retire" noun="ExpiredCarts" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>Each open cart whose access expired, oldest first, cancelled through the order path (cancel#Order) once no
+            checkout waits for a payment or placement, no payment attempt is unsettled and no payment took money; its access
+            retired (ScrExpired) and an unsubmitted checkout expired. The guest party of a cart retired or merged lately is
+            retired (disabled, never deleted) when it has nothing else: no account, no order but cancelled ones, no completed
+            checkout. Placed and paid records are never touched.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="retired" type="Integer"/>
+            <parameter name="waiting" type="Integer"/>
+            <parameter name="guests" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopOperations.js').execute('retireExpiredCarts', {limit:limit})"/>
+            <set field="retired" from="out.retired"/>
+            <set field="waiting" from="out.waiting"/>
+            <set field="guests" from="out.guests"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="sweep" noun="HostedReferences" authenticate="anonymous-all" allow-remote="false" transaction="ignore">
+        <description>The Shop checkouts completed in the last days whose payment's gateway can search its reference again
+            (gatewayCapabilities' duplicateCheckService), each searched once after its last form token can no longer be used;
+            a second approval found holds the placed order (OhtPayment, released with PAYMENT_HOLD_RELEASE).</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checked" type="Integer"/>
+            <parameter name="flagged" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopOperations.js').execute('sweepHostedReferences', {limit:limit})"/>
+            <set field="checked" from="out.checked"/>
+            <set field="flagged" from="out.flagged"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="run" noun="Step" authenticate="anonymous-all" allow-remote="false" operation="shop.operations.step">
+        <description>Internal to ShopOperations.js, always called in a transaction of its own: one cart's retirement, a guest
+            party's, a placed order's Payment hold, a stuck placement's retry or its cancellation after a refund
+            (input.step).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopOperations.js").execute("runStep", input)</script>
+        </actions>
+    </service>
+    <service verb="resolve" noun="StuckPlacement" allow-remote="false" operation="shop.placement.resolve" operation-ref="orderId">
+        <description>impl-commerce F108: a cart whose Shop checkout waits for placement with its payment kept (refused
+            ORDER_CHANGED or past its tries), resolved by staff: action retry (the tries reset and the placement run again; the
+            answer says whether it was placed) or refund (the payment released when only authorized, else refunded, through
+            release#SinglePayment or refund#SinglePayment with the resolution's operation key, then the checkout cancelled
+            naming who and why, the cart's access retired and the open order cancelled through the order path; nothing changes
+            when the provider does not confirm). COMMERCE_ORDER_VIEW, COMMERCE_PLACEMENT_RESOLVE and the store's scope; an
+            operationKey (a retry answers the first result, alreadyApplied) and a reason. A cart with no placement waiting is
+            NOT_STUCK.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resolved" type="Boolean"/>
+            <parameter name="stateText"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopOperations.js').execute('resolveStuckPlacement', context)"/>
+            <set field="resolved" from="!!out.resolved"/>
+            <set field="stateText" from="out.stateText"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+</services>
