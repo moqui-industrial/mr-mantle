@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The Shop app's checkout and payment (mr-pass impl-shop P5; design-shop §13.2's X, §6 Checkout, PaymentResult and
+    OrderConfirmation, §7.2-§7.3, §8): PASS operations through pass.Facade.call#Operation, each taking PASS's restricted
+    input map (the site the facade resolved, the session's cart capability as token, or the checkout's reference and key
+    from a provider's return, and the shopper's contact, address, delivery and payment choices, the revision and terms
+    version they saw, and an operation id) and answering a declared result (CheckoutView, the payment's result, the
+    confirmation). Over Mantle's order, payment and gateway services and Accounting's payment attempts
+    (ShopCheckout.js); the jobs and the capture check are Mantle's own. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="begin" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+        <description>beginCheckout: the cart's checkout, made when there is none (the store's checkout policy as it is now, the account's contact for a signed-in buyer), else the current one. An empty cart or a line that cannot be bought is refused (VALUE_INVALID, ITEM_UNAVAILABLE); a store that takes account checkouts only refuses a guest (SIGN_IN_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("beginCheckout", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+        <description>getCheckout: the CheckoutView of the checkout the cart reaches (or its reference and key, or a placed cart's capability): each step's values and whether it is done, the lines and totals, the terms, what changed at the last freeze and the payment's progress. NotFound without one.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getCheckout", input)</script>
+        </actions>
+    </service>
+    <service verb="resume" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+        <description>resumeCheckout: a submitted checkout's attempt asked again; one that resolved without a payment opens the checkout to change, and a frontend that reached it by its reference and key gets a new cart capability (result.token). A pending or unknown attempt is answered as it is.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("resumeCheckout", input)</script>
+        </actions>
+    </service>
+    <service verb="set" noun="CheckoutContact" authenticate="anonymous-all" allow-remote="false">
+        <description>setCheckoutContact: the buyer's email address, name and phone (the store's phone policy); a guest's go on the cart's guest party, an account's email is the account's. VALUE_INVALID names its field; a submitted checkout is CHECKOUT_PENDING.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("setCheckoutContact", input)</script>
+        </actions>
+    </service>
+    <service verb="set" noun="CheckoutAddresses" authenticate="anonymous-all" allow-remote="false">
+        <description>setCheckoutAddresses: the delivery address (its fields, an own saved address of the signed-in buyer, or the carrier's offered correction) on the order part and the billing address (the same, or its own fields), the tax recalculated; the store's destinations limit the country. Requires expectedRevision (STALE_REVISION).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("setCheckoutAddresses", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="DeliveryOptions" authenticate="anonymous-all" allow-remote="false">
+        <description>getDeliveryOptions: the current delivery quotes for the delivery address (get#StoreShippingOptions with rates); a method with no quote is not offered. A cart with nothing to deliver needs none.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getDeliveryOptions", input)</script>
+        </actions>
+    </service>
+    <service verb="select" noun="Delivery" authenticate="anonymous-all" allow-remote="false">
+        <description>selectDelivery: one of the current quotes (carrierPartyId, shipmentMethodEnumId) put on the order with its charge and the tax; one no longer offered is QUOTE_EXPIRED. Requires expectedRevision.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("selectDelivery", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="PaymentOptions" authenticate="anonymous-all" allow-remote="false">
+        <description>getPaymentOptions: the store's hosted payment options for what is due now (none when nothing is due).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getPaymentOptions", input)</script>
+        </actions>
+    </service>
+    <service verb="select" noun="Payment" authenticate="anonymous-all" allow-remote="false">
+        <description>selectPayment: one of the options (paymentOptionId); a signed-in buyer may ask to keep the card (savePaymentMethod), saved after an approved payment.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("selectPayment", input)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+        <description>submitCheckout: a ready checkout at the revision (expectedRevision) and terms version (termsVersion, acceptTerms) the shopper saw is frozen under the order's lock and committed with its promised payment and payment attempt, then authorized through the store's hosted gateway; a change found at the freeze is REVIEW_REQUIRED (Conflict) with the change kept for the shopper, a submitted checkout answers its attempt again (one order, one payment), and nothing due skips the gateway. The return key is in the first answer only.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("submitCheckout", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="CheckoutPaymentResult" authenticate="anonymous-all" allow-remote="false">
+        <description>getCheckoutPaymentResult: the attempt's outcome, looked up at the provider while pending (at most every few seconds), and the one placement once it is approved; reached by the cart, the reference and key, or a placed cart's capability. What a browser brings back from the provider is never read.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getCheckoutPaymentResult", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="CheckoutPaymentForm" authenticate="anonymous-all" allow-remote="false">
+        <description>getCheckoutPaymentForm: for a pending attempt whose provider page takes a posted token (Authorize.Net Accept Hosted), a fresh form address and token from the gateway on each call, never stored, for the frontend's relay to post at once.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getCheckoutPaymentForm", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="OrderConfirmation" authenticate="anonymous-all" allow-remote="false">
+        <description>getOrderConfirmation: a completed checkout's order, after placement only, reached by the reference and key, a placed cart's capability, the signed-in customer or the guest's SalesOrder OrderView capability (orderToken); a guest reaching it first by the checkout gets that capability once (result.orderToken). The order page address for its QR is the signed-in page, never a token.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getOrderConfirmation", input)</script>
+        </actions>
+    </service>
+    <service verb="run" noun="Step" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal to ShopCheckout.js, always called in a transaction of its own: one step of a checkout's freeze,
+            authorization, outcome, placement, a placement's failure, a lookup's count or expiry (input.step), so each commits
+            or rolls back alone and no provider is asked while the checkout, cart or order is locked.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("runStep", input)</script>
+        </actions>
+    </service>
+    <service verb="reconcile" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+        <description>The reconcile_StoreCheckouts job: each Shop checkout attempt due for a lookup (bounded backoff, oldest
+            first) asked of its provider and its outcome applied, and each checkout waiting for placement placed (at most five
+            tries), each in its own transactions; one that fails is named and the rest go on.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="200"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checked" type="Integer"/>
+            <parameter name="resolved" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopCheckout.js')
+                .execute('reconcileCheckouts', {limit:limit})"/>
+            <set field="checked" from="out.checked"/>
+            <set field="resolved" from="out.resolved"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="expire" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+        <description>The expire_StoreCheckouts job: checkouts never submitted past their expiry are expired, each in its own
+            transaction; a submitted one is the reconciliation's.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer" default="500"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="expired" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopCheckout.js')
+                .execute('expireCheckouts', {limit:limit})"/>
+            <set field="expired" from="out.expired"/>
+        </actions>
+    </service>
+    <service verb="check" noun="CaptureOutcome" authenticate="anonymous-all" allow-remote="false">
+        <description>Called by the ShopCheckoutCaptureHold SECA after capture#SinglePayment: a capture of a Shop checkout's
+            payment that was declined or refused after its order was placed holds the order (OhtPayment, released with
+            PAYMENT_HOLD_RELEASE). Any other payment, or a capture still pending or unknown, is left alone.</description>
+        <in-parameters>
+            <parameter name="paymentId"/>
+            <parameter name="paymentGatewayResponseId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="held" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/ShopCheckout.js')
+                .execute('checkCaptureOutcome', {paymentId:paymentId, paymentGatewayResponseId:paymentGatewayResponseId})"/>
+            <set field="held" from="!!out.held"/>
+        </actions>
+    </service>
+</services>

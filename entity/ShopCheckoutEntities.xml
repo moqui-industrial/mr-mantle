@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's checkout coordination (mr-pass impl-shop P5; design-shop §6 Checkout, §7.2-§7.3, §8, §14.2;
+    mantle.order.ShopCheckoutServices, service/mantle/order/ShopCheckout.js). A checkout coordinates one cart (its
+    StoreCartAccess and open OrderHeader) through contact, addresses, delivery, payment and review to one placement. The
+    lines, prices, adjustments, payments and order status stay Mantle's; the checkout keeps what the shopper chose, the
+    snapshot frozen before any provider call, the payment of its current attempt (Accounting's PortalPaymentAttempt, purpose
+    PapShopCheckout) and the placement's intent and outcome. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="StoreCheckout" package="mantle.order" cache="never">
+    <description>One checkout of a cart: its state (StoreCheckout status), the store policy it began under, the buyer's
+      contact, the order part's delivery and billing addresses, the delivery quote it chose (carrier, method, amount, the
+      order revision it was quoted at and its expiry), the payment option, the terms page version shown, and once
+      submitted the snapshot of what is charged (its hash and the frozen orderRevision), the payment of its current
+      attempt, the return reference's key digest (the narrow capability a provider's return and a refreshed frontend use),
+      the placement's intent and outcome, and the guest's order capability. One unresolved submission per frozen
+      revision.</description>
+    <field name="checkoutId" type="id" is-pk="true"/>
+    <field name="cartAccessId" type="id"/>
+    <field name="orderId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="statusId" type="id"/>
+    <field name="customerPartyId" type="id"><description>The order part's customer: the signed-in account's party, else
+      the cart's guest party.</description></field>
+    <field name="accountCheckout" type="text-indicator"><description>Y when a signed-in account began it.</description></field>
+    <field name="policyJson" type="text-long"><description>The store's checkout policy (StoreCheckout.js checkoutPolicy)
+      when the checkout began.</description></field>
+    <field name="contactEmail" type="text-medium"/>
+    <field name="contactName" type="text-medium"/>
+    <field name="contactPhone" type="text-short"/>
+    <field name="emailContactMechId" type="id"/>
+    <field name="shippingContactMechId" type="id"/>
+    <field name="billingContactMechId" type="id"/>
+    <field name="addressSuggestionId" type="id"><description>A carrier's corrected address offered for the delivery
+      address (validate#PostalAddress), never applied unless the shopper takes it.</description></field>
+    <field name="carrierPartyId" type="id"/>
+    <field name="shipmentMethodEnumId" type="id"/>
+    <field name="quoteAmount" type="currency-amount"/>
+    <field name="quoteRevision" type="number-integer"/>
+    <field name="quoteExpireDate" type="date-time"/>
+    <field name="paymentInstrumentEnumId" type="id"/>
+    <field name="paymentGatewayConfigId" type="id"/>
+    <field name="savePaymentMethod" type="text-indicator"><description>A signed-in buyer asked to keep the card (a
+      profile is saved after an approved hosted payment).</description></field>
+    <field name="termsSitePageId" type="id"/>
+    <field name="termsVersion" type="id"/>
+    <field name="termsAcceptedDate" type="date-time"/>
+    <field name="frozenRevision" type="number-integer"/>
+    <field name="snapshotJson" type="text-long"><description>What is charged, frozen under the order's lock before any
+      provider call: lines, adjustments, delivery, tax and total.</description></field>
+    <field name="snapshotHash" type="text-medium"/>
+    <field name="frozenDate" type="date-time"/>
+    <field name="dueAmount" type="currency-amount"/>
+    <field name="paymentId" type="id"><description>The payment of the current attempt.</description></field>
+    <field name="returnReference" type="id"><description>The reference a provider's return and the result page carry
+      (with its key).</description></field>
+    <field name="returnKeyDigest" type="text-medium"/>
+    <field name="placementIntentDate" type="date-time"><description>Recorded, and committed, before place#Order is
+      called; recovery reads the order's status.</description></field>
+    <field name="placementTries" type="number-integer"/>
+    <field name="placedDate" type="date-time"/>
+    <field name="reviewJson" type="text-long"><description>What changed at the last freeze (a price, a quote, the tax,
+      an item no longer offered, a promotion past its limit, the terms), which the shopper reviews before submitting
+      again.</description></field>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="orderCapabilityId" type="id"><description>The guest's SalesOrder OrderView capability (ExternalAccess),
+      issued once at the first confirmation.</description></field>
+    <field name="expireDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <field name="completedDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.order.StoreCartAccess"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.account.payment.Payment"/>
+    <relationship type="one" title="StoreCheckout" related="moqui.basic.StatusItem">
+      <key-map field-name="statusId"/>
+    </relationship>
+    <index name="STORE_CHECKOUT_CART">
+      <index-field name="cartAccessId"/>
+      <index-field name="statusId"/>
+    </index>
+    <index name="STORE_CHECKOUT_ORDER">
+      <index-field name="orderId"/>
+    </index>
+    <index name="STORE_CHECKOUT_STATE">
+      <index-field name="statusId"/>
+      <index-field name="expireDate"/>
+    </index>
+    <index name="STORE_CHECKOUT_REF" unique="true">
+      <index-field name="returnReference"/>
+    </index>
+    <seed-data>
+      <!-- design-shop §7.2's typed states, beside (never instead of) the order's and the payment's -->
+      <moqui.basic.StatusType description="Store checkout" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Editing" sequenceNum="1" statusId="ScoEditing" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Ready" sequenceNum="2" statusId="ScoReady" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Review required" sequenceNum="3" statusId="ScoReviewRequired" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Payment pending" sequenceNum="4" statusId="ScoPaymentPending" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Placement pending" sequenceNum="5" statusId="ScoPlacementPending" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Completed" sequenceNum="6" statusId="ScoCompleted" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Expired" sequenceNum="7" statusId="ScoExpired" statusTypeId="StoreCheckout"/>
+      <moqui.basic.StatusItem description="Cancelled" sequenceNum="8" statusId="ScoCancelled" statusTypeId="StoreCheckout"/>
+      <!-- a submitted checkout returns to Ready only when its attempt resolved without a payment; a placed one never moves -->
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoReady" transitionName="Ready"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoEditing" transitionName="Edit"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoReviewRequired" transitionName="Review"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoReviewRequired" transitionName="Review"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoEditing" transitionName="Edit"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoReady" transitionName="Ready"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoPaymentPending" transitionName="Submit"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoPaymentPending" transitionName="Submit"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoPaymentPending" transitionName="Submit"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoPlacementPending" transitionName="Submit free"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoPlacementPending" transitionName="Submit free"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoPlacementPending" transitionName="Submit free"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPaymentPending" toStatusId="ScoPlacementPending" transitionName="Paid"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPaymentPending" toStatusId="ScoReady" transitionName="Not paid"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPlacementPending" toStatusId="ScoCompleted" transitionName="Placed"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoExpired" transitionName="Expire"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoExpired" transitionName="Expire"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoExpired" transitionName="Expire"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoCancelled" transitionName="Cancel"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoCancelled" transitionName="Cancel"/>
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoCancelled" transitionName="Cancel"/>
+    </seed-data>
+  </entity>
+</entities>

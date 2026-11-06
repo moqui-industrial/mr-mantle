@@ -1332,5 +1332,109 @@
     getShopProductImage: {
         service: 'mantle.product.ShopCatalogServices.get#ProductImage',
         fields: ['siteId', 'productContentId'],
+    }, // Shop P5: checkout and payment (input.token is the session's cart capability; reference and key are the checkout's
+    // return reference and its key, from a provider's return or a refreshed frontend; orderToken is a guest's SalesOrder
+    // OrderView capability). No operation takes an order, price, total, customer, store or status.
+    beginCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.begin#Checkout',
+        fields: ['siteId', 'token'],
+    },
+    getCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.get#Checkout',
+        fields: ['siteId', 'token', 'reference', 'key'],
+    },
+    resumeCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.resume#Checkout',
+        fields: ['siteId', 'token', 'reference', 'key'],
+    },
+    setCheckoutContact: {
+        service: 'mantle.order.ShopCheckoutServices.set#CheckoutContact',
+        fields: [
+            'siteId',
+            'token',
+            'emailAddress',
+            'name',
+            'phone',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    setCheckoutAddresses: {
+        service: 'mantle.order.ShopCheckoutServices.set#CheckoutAddresses',
+        fields: [
+            'siteId',
+            'token',
+            'expectedRevision',
+            'operationId',
+            'contactMechId',
+            'useSuggestion',
+            'toName',
+            'address1',
+            'address2',
+            'city',
+            'stateProvinceGeoId',
+            'postalCode',
+            'countryGeoId',
+            'billingSame',
+            'billingToName',
+            'billingAddress1',
+            'billingAddress2',
+            'billingCity',
+            'billingStateProvinceGeoId',
+            'billingPostalCode',
+            'billingCountryGeoId',
+        ],
+    },
+    getDeliveryOptions: {
+        service: 'mantle.order.ShopCheckoutServices.get#DeliveryOptions',
+        fields: ['siteId', 'token'],
+    },
+    selectDelivery: {
+        service: 'mantle.order.ShopCheckoutServices.select#Delivery',
+        fields: [
+            'siteId',
+            'token',
+            'carrierPartyId',
+            'shipmentMethodEnumId',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    getPaymentOptions: {
+        service: 'mantle.order.ShopCheckoutServices.get#PaymentOptions',
+        fields: ['siteId', 'token'],
+    },
+    selectPayment: {
+        service: 'mantle.order.ShopCheckoutServices.select#Payment',
+        fields: [
+            'siteId',
+            'token',
+            'paymentOptionId',
+            'savePaymentMethod',
+            'operationId',
+        ],
+    },
+    submitCheckout: {
+        service: 'mantle.order.ShopCheckoutServices.submit#Checkout',
+        fields: [
+            'siteId',
+            'token',
+            'expectedRevision',
+            'termsVersion',
+            'acceptTerms',
+            'operationId',
+        ],
+    },
+    getCheckoutPaymentResult: {
+        service: 'mantle.order.ShopCheckoutServices.get#CheckoutPaymentResult',
+        fields: ['siteId', 'token', 'reference', 'key', 'returned'],
+    },
+    getCheckoutPaymentForm: {
+        service: 'mantle.order.ShopCheckoutServices.get#CheckoutPaymentForm',
+        fields: ['siteId', 'reference', 'key'],
+    },
+    getOrderConfirmation: {
+        service: 'mantle.order.ShopCheckoutServices.get#OrderConfirmation',
+        fields: ['siteId', 'token', 'reference', 'key', 'orderToken'],
     },
 })

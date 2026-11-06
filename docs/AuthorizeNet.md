@@ -70,10 +70,19 @@ kept. The page makes a new `operationId` for each attempt (after a decline or an
 attempt is answered from its first response and sends nothing; so does a submit while an earlier one is pending. A browser's "paid" is not proof of payment: the state comes
 from the gateway response, and an unknown one is looked up.
 
-**Accept Hosted** is the alternative when the merchant wants Authorize.Net to host the whole payment page:
-`getHostedPaymentPageRequest` gives a form token for the payment's amount, the browser goes to Authorize.Net's page, and
-the result comes back by webhook and lookup, never from the return URL. It is not built here; it would be a hosted
-gateway (`returnUrl`, a pending response with `redirectUrl`) on the same details and webhook paths.
+**Accept Hosted** (mr-pass impl-shop P5) hosts the whole payment page at Authorize.Net. Configure a gateway with
+`authorizeHosted#Payment` (an authorization, captured later) or `authorizeAndCaptureHosted#Payment` (a sale) as its
+authorization service. Authorizing sends nothing: the payment waits at the hosted page (a response with
+`transactionStatus` `HostedPending` and no result). Each visit of the payer's frontend asks `get#HostedPaymentForm` for a
+fresh form token (`getHostedPaymentPageRequest`: the amount, the attempt's 20-character reference in `refId` and
+`order.invoiceNumber`, the canonical return and cancel addresses, the receipt shown, the merchant's name) and posts it to
+`accept.authorize.net` (`test.authorize.net` for a sandbox connection); the token is never stored, only when it was issued.
+The return carries no result: the return, the webhook and the poll only look the payment up, finding its transaction by
+the reference (a webhook with no `merchantReferenceId` is matched by the transaction's invoice number). The found
+transaction's amount and `networkTransId` are kept on its details response. When nothing is found and no issued token can
+still be used (15 minutes and the lookup grace), the payment is cancelled. After an approved payment its payer asked to
+keep, `store#HostedPaymentProfile` takes the transaction's customer payment profile, or makes one from it
+(`createCustomerProfileFromTransactionRequest`).
 
 ## Tests
 

@@ -1431,6 +1431,19 @@ const readinessChecks = [
                     .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
                     .readiness[definition.key](store)
         })
+    ),
+    // Shop P5: Shop's checkout takes payment through a hosted provider page (design-shop §8.1: an unsupported flow fails
+    // readiness rather than fall back), and its reconciliation jobs run (F13)
+    ...[
+        {key: "hostedPayment", area: "payments", label: "Hosted payment page"},
+        {key: "checkoutJobs", area: "payments", label: "Payment reconciliation", severity: "warning"}
+    ].map(definition =>
+        Object.assign({fix: "checkout"}, definition, {
+            check: store =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+                    .readiness[definition.key](store)
+        })
     )
 ]
 // The findings for a store: each check's result, a check that fails to answer named not ready (failure tolerance).

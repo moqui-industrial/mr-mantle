@@ -172,6 +172,21 @@ pages.cart = {
     })
 }
 
+// ===== P5: the checkout page =====
+// As the cart's: the store's view only; the steps, forms, totals and payment are the trusted shop.checkout component,
+// which PASS makes from the shopper's getCheckout.
+pages.checkout = {
+    status: 200,
+    view: shop => ({
+        page: {
+            kind: "checkout",
+            title: "Checkout",
+            canonicalUrl: shop.cartUrl ? shop.cartUrl.replace(/\/Cart$/, "/Checkout") : null
+        },
+        cart: {itemCount: 0, subtotal: null}
+    })
+}
+
 // ===== the contract =====
 const forbidden = name => {
     const lower = String(name).toLowerCase()

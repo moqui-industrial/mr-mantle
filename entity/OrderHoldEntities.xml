@@ -52,6 +52,11 @@ along with this software (see the LICENSE.md file). If not, see
                     enumCode="PURCHASE_HOLD_RELEASE"/>
             <moqui.basic.Enumeration enumId="OhtManual" enumTypeId="OrderHoldType" sequenceNum="4" description="Manual"
                     enumCode="ORDER_APPROVE"/>
+            <!-- a payment exception after placement (design-shop §8.2, X4; mr-pass impl-shop P5, F15): a capture that
+                failed, or an amount or account mismatch the reconciliation found; placed by the payment reconciliation
+                only, released by Accounting's payment operator (treasury) -->
+            <moqui.basic.Enumeration enumId="OhtPayment" enumTypeId="OrderHoldType" sequenceNum="5" description="Payment"
+                    enumCode="PAYMENT_HOLD_RELEASE"/>
         </seed-data>
     </entity>
 </entities>

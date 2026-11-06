@@ -115,12 +115,19 @@ function loaded(row) {
 }
 const requireCart = (shop, token) => cartOf(shop, token) || notAvailable()
 // A cart whose payment is in progress (a payment of the order not voided, cancelled or declined) is not changed or merged
-// until its checkout is resolved (design-shop §7.1; P5's checkout records add to this).
+// until its checkout is resolved (design-shop §7.1); P5: nor one whose checkout is submitted (its payment pending, or its
+// placement under way, also with nothing to pay).
+const submittedCheckoutStatuses = ["ScoPaymentPending", "ScoPlacementPending"]
 const pendingCheckout = cart =>
     find("mantle.account.payment.Payment", {orderId: cart.row.orderId})
         .condition("statusId", "not-in", settledPaymentStatuses)
+        .count() > 0 ||
+    find("mantle.order.StoreCheckout", {cartAccessId: cart.row.cartAccessId})
+        .condition("statusId", "in", submittedCheckoutStatuses)
         .count() > 0
 function editable(cart) {
+    // under the order's lock, so a checkout's freeze (which takes it) and this change come one after the other (Shop P5)
+    find("mantle.order.OrderHeader", {orderId: cart.row.orderId}).forUpdate(true).one()
     if (pendingCheckout(cart))
         refuse("Conflict", "CHECKOUT_PENDING", "This cart has a payment in progress. Finish or cancel it first")
 }
@@ -677,6 +684,16 @@ const operations = {
 }
 ;({
     limits,
+    // P5: what Shop's checkout (ShopCheckout.js) reaches a cart by, and shows of it
+    shopOf,
+    cartOf,
+    loaded,
+    view,
+    revisionOf,
+    productLines,
+    pendingCheckout,
+    rotate,
+    digest,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop cart operation " + op)
         return operations[op](parameters || {})

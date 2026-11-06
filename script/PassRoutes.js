@@ -225,8 +225,8 @@
     ['GET', 'shop/sitemap', 'getShopSitemap'],
     ['GET', 'site/navigation', 'getSiteNavigation'],
     ['GET', 'site/redirect', 'resolveSiteRedirect'],
-    // Shop P4: the cart
-    ['GET', 'shop/cart', 'getCart'],
+    // Shop P4: the cart; P5 (F75): its read carries the cart capability, so it is a POST, never a query parameter
+    ['POST', 'shop/cart/view', 'getCart'],
     ['POST', 'shop/cart/items', 'addCartItem'],
     ['POST', 'shop/cart/items/{orderItemSeqId}/quantity', 'updateCartItem'],
     ['POST', 'shop/cart/items/{orderItemSeqId}/removal', 'removeCartItem'],
@@ -236,4 +236,19 @@
     ['POST', 'shop/cart/release', 'releaseCart'],
     // Shop P4 (F61): a product image (a GET with the content id as its query, as the transports' downloads send it)
     ['GET', 'shop/media', 'getShopProductImage'],
+    // Shop P5: checkout and payment; every read carries a capability (the cart's, a checkout's key, an order link's), so
+    // each is a POST (F75)
+    ['POST', 'shop/checkout', 'beginCheckout'],
+    ['POST', 'shop/checkout/view', 'getCheckout'],
+    ['POST', 'shop/checkout/resumption', 'resumeCheckout'],
+    ['POST', 'shop/checkout/contact', 'setCheckoutContact'],
+    ['POST', 'shop/checkout/addresses', 'setCheckoutAddresses'],
+    ['POST', 'shop/checkout/delivery/options', 'getDeliveryOptions'],
+    ['POST', 'shop/checkout/delivery', 'selectDelivery'],
+    ['POST', 'shop/checkout/payment/options', 'getPaymentOptions'],
+    ['POST', 'shop/checkout/payment', 'selectPayment'],
+    ['POST', 'shop/checkout/submission', 'submitCheckout'],
+    ['POST', 'shop/checkout/result', 'getCheckoutPaymentResult'],
+    ['POST', 'shop/checkout/payment/form', 'getCheckoutPaymentForm'],
+    ['POST', 'shop/orders/confirmation', 'getOrderConfirmation'],
 ]
