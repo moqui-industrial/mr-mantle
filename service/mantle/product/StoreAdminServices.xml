@@ -170,8 +170,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="StoreParty" allow-remote="false">
         <description>A staff member of the store from a date (a person who works for the store's organization, in a staff
             role: StoreStaff), or their row ended. A current StoreStaff row limits that person to their stores; it grants no
-            permission. Refuses another role (ROLE_NOT_STAFF), never writing a customer's row, and someone outside the
-            organization (PARTY_UNAVAILABLE).</description>
+            permission. Refuses another role (ROLE_NOT_STAFF), never writing a customer's row, someone outside the
+            organization (PARTY_UNAVAILABLE) and a store-limited staff member, whose own limit these rows are (STORE_LIMITED).</description>
         <implements service="mantle.product.StoreAdminServices.define#DatedParameters"/>
         <in-parameters>
             <parameter name="partyId" required="true"/>

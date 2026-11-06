@@ -188,15 +188,18 @@ feature("a store-limited staff member works only their stores: the others of the
                 settingValue: "Two"
             }),
             start: run(users.limited, A + "store#Store", {storeName: "Limited", organizationPartyId: orgA}),
+            // ending their own staff row would widen them to every store of the organization
+            endOwn: run(users.limited, A + "store#StoreParty", {productStoreId: ids.store, partyId: users.limited, end: true}),
             manager: run(users.manager, A + "find#Stores", {term: "store admin"})
         }
     },
-    then({found, own, second, save, start, manager}) {
+    then({found, own, second, save, start, endOwn, manager}) {
         found.stores.map(row => row.productStoreId) == [ids.store]
         own.error == ""
         code(second) == "RECORD_UNAVAILABLE"
         code(save) == "RECORD_UNAVAILABLE"
         code(start) == "STORE_LIMITED"
+        code(endOwn) == "STORE_LIMITED"
         manager.stores.length == 3
     }
 })

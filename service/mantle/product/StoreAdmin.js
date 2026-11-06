@@ -639,6 +639,9 @@ function storeStoreFacility(p) {
 }
 function storeStoreParty(p) {
     const s = scope("edit")
+    // a staff row is the limit itself: a store-limited member who ended or dated their own (or a colleague's) row would widen
+    // it to every store of the organization, and one who added a manager would limit them
+    if (s.storeLimit) denied("STORE_LIMITED", "A store-limited staff member does not assign store staff")
     const store = storeOf(s, p.productStoreId)
     const roleTypeId = p.roleTypeId || "StoreStaff"
     if (!Object.hasOwn(staffRoles, roleTypeId)) denied("ROLE_NOT_STAFF", "Only a staff role is set here")
