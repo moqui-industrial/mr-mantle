@@ -2,7 +2,7 @@
 // worklist leaves out carts and carries its Payment hold and cancellation badges, a stuck Shop placement is listed (impl-shop
 // F85); carts with their abandoned and stuck states; returns and cases by the store of their orders; a customer list that is
 // no party directory; the permission, the other organization and a store-limited staff member refused another store of
-// the same organization (F51), an order of the store vended by another organization (F-P8-8); Order again a new open order at
+// the same organization (F51), an order of the store vended by another organization (F113); Order again a new open order at
 // today's price with no payment copied (F43), once per operation key, a stale revision refused.
 // Standalone: spec-local organizations, stores, users, customers and records made directly. Run:
 // ./moq test mr-mantle --spec StoreOperations
@@ -21,7 +21,7 @@ const ids = {
     placed: prefix + "_O1",
     placed2: prefix + "_O2",
     otherOrder: prefix + "_OB",
-    // an order of store A vended by organization B (F-P8-8: not A's)
+    // an order of store A vended by organization B (F113: not A's)
     foreign: prefix + "_OF",
     cart: prefix + "_C1",
     stuck: prefix + "_C2",
