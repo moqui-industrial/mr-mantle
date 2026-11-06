@@ -28,7 +28,8 @@ function shopOf(siteId) {
     return {site, mount, store}
 }
 /* getShopContext: the site, mount, store, locale, currency, active theme release and capabilities a Shop page needs. The
- * active release is P2's (PublicThemeBinding); purchase opens with P4 and P5. */
+ * active release is the mount's PublicThemeBinding (P2: {releaseId, manifestDigest, engine, viewApiVersion}, null when
+ * none is published); purchase opens with P4 and P5. */
 function getShopContext(p) {
     const {site, mount, store} = shopOf(p.siteId)
     return {
@@ -43,7 +44,19 @@ function getShopContext(p) {
         store: {productStoreId: store.productStoreId, name: store.storeName || store.productStoreId},
         locale: store.defaultLocale || site.locale || "en",
         currency: store.defaultCurrencyUomId || null,
-        release: null,
+        release: (() => {
+            const active = ec.resource
+                .script("component://mr-mantle/service/mantle/public/Themes.js")
+                .activeRelease(site.siteId, mount.appMountId)
+            return active
+                ? {
+                      releaseId: active.releaseId,
+                      manifestDigest: active.manifestDigest,
+                      engine: active.engine,
+                      viewApiVersion: active.viewApiVersion
+                  }
+                : null
+        })(),
         capabilities: {canBrowse: true, canPurchase: false, signedIn: !!ec.user.userId}
     }
 }

@@ -18,7 +18,7 @@ along with this software (see the LICENSE.md file). If not, see
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="ShopContext" authenticate="anonymous-all" allow-remote="false">
         <description>getShopContext (impl-shop P1): the published site, its Shop mount, the store the mount targets, the locale,
-            currency, active theme release (none until P2) and capabilities. A site not published, a missing or disabled Shop
+            currency, active theme release (the mount's PublicThemeBinding, null when none) and capabilities. A site not published, a missing or disabled Shop
             mount and a store gone or not an internal organization's are all NotFound (NOT_AVAILABLE).</description>
         <in-parameters>
             <parameter name="input" type="Map"/>

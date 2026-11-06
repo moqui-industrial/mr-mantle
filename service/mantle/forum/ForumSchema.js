@@ -1180,4 +1180,21 @@
         service: 'mantle.product.ShopCatalogServices.get#ShopContext',
         fields: ['siteId'],
     },
+    // Shop P2: the themed page's view, the active release a frontend verifies and renders, the site's generation
+    getShopPage: {
+        service: 'mantle.public.ThemeServices.get#ShopPage',
+        fields: ['siteId', 'pageKind'],
+    },
+    getShopThemeRelease: {
+        service: 'mantle.public.ThemeServices.get#ShopThemeRelease',
+        fields: ['siteId', 'releaseId'],
+    },
+    getShopThemeFiles: {
+        service: 'mantle.public.ThemeServices.get#ShopThemeFiles',
+        fields: ['siteId', 'releaseId', 'paths'],
+    },
+    getSiteGeneration: {
+        service: 'mantle.public.SiteServices.get#SiteGeneration',
+        fields: ['siteId'],
+    },
 })

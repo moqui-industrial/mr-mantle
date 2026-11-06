@@ -287,4 +287,18 @@
       <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('findSubscriptionBindings',input || {})</script>
     </actions>
   </service>
+  <!-- Shop P2 (impl-shop F43): the anonymous generation read a frontend keys its caches by -->
+  <service verb="get" noun="SiteGeneration" authenticate="anonymous-all" allow-remote="false">
+    <description>getSiteGeneration: a published site's publication generation and its Shop mount's active theme release
+      (releaseId and manifest digest, null when none); nothing personal, so a frontend may cache it. NotFound otherwise.</description>
+    <in-parameters>
+      <parameter name="input" type="Map"/>
+    </in-parameters>
+    <out-parameters>
+      <parameter name="result" type="Map"/>
+    </out-parameters>
+    <actions>
+      <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getSiteGeneration", input)</script>
+    </actions>
+  </service>
 </services>

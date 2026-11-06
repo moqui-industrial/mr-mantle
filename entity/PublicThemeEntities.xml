@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop themes and their releases (mr-pass impl-shop P2, design-shop §12.2 and §12.5; mantle.public.ThemeServices,
+    service/mantle/public/Themes.js). A theme is a store's editable package of files, kept as dbresource:// versions under
+    its one package root; a release is an immutable manifest that pins each file's version and digest; a binding is the
+    release a site's app mount shows. Commerce P5's editors write drafts through ThemeServices, never these rows. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="PublicTheme" package="mantle.public">
+    <description>A store's theme: its draft is the current text of the files under packageRoot. draftRevision counts the
+      draft's saves (each save checks it); the last validation's digest and outcome are kept for publish.</description>
+    <field name="themeId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"><description>The store whose staff may edit and publish it.</description></field>
+    <field name="name" type="text-medium"/>
+    <field name="engine" type="id"/>
+    <field name="packageRoot" type="text-medium"><description>dbresource://mantle/public/theme/{themeId}, never from a request.</description></field>
+    <field name="starterKey" type="text-medium"><description>The starter package it was copied from (component/name).</description></field>
+    <field name="sourceReleaseId" type="id"><description>The release it was copied from, when it started from one.</description></field>
+    <field name="draftRevision" type="number-integer"/>
+    <field name="validationDigest" type="text-medium"/>
+    <field name="validatedRevision" type="number-integer"/>
+    <field name="validationOk" type="text-indicator"/>
+    <field name="validatedDate" type="date-time"/>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <index name="PASS_THEME_STORE">
+      <index-field name="productStoreId"/>
+    </index>
+  </entity>
+  <entity entity-name="PublicThemeRelease" package="mantle.public">
+    <description>An immutable release of a theme: manifestText (JSON: the files with versions and digests, the section and
+      block schemas, the global settings, the templates' composition, the engine, renderer and view API versions and the
+      validation digest) and its SHA-256, manifestDigest. Written once by publish#Theme; never updated.</description>
+    <field name="releaseId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="releaseSeq" type="number-integer"/>
+    <field name="name" type="text-medium"/>
+    <field name="engine" type="id"/>
+    <field name="rendererVersion" type="number-integer"/>
+    <field name="viewApiVersion" type="number-integer"/>
+    <field name="validationDigest" type="text-medium"/>
+    <field name="manifestDigest" type="text-medium"/>
+    <field name="manifestText" type="text-very-long"/>
+    <field name="draftRevision" type="number-integer"><description>The draft's revision the release was made from.</description></field>
+    <field name="createdByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicTheme"/>
+    <index name="PASS_THEME_RELEASE_SEQ" unique="true">
+      <index-field name="themeId"/>
+      <index-field name="releaseSeq"/>
+    </index>
+  </entity>
+  <entity entity-name="PublicThemeReleaseFile" package="mantle.public">
+    <description>A file a release pins: its path in the package, the dbresource version and the SHA-256 of its text.</description>
+    <field name="releaseId" type="id" is-pk="true"/>
+    <field name="filePath" type="text-medium" is-pk="true"/>
+    <field name="versionName" type="id"/>
+    <field name="digest" type="text-medium"/>
+    <field name="fileSize" type="number-integer"/>
+    <field name="contentType" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicThemeRelease"/>
+  </entity>
+  <entity entity-name="PublicThemeBinding" package="mantle.public">
+    <description>The active release of a site's app mount (design-shop §12.5): each publish or restore replaces releaseId
+      in one transaction with the site's generation, checked by revision. releaseId and activation are audit-logged, so
+      the binding's history is the activation record.</description>
+    <field name="siteId" type="id" is-pk="true"/>
+    <field name="appMountId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="releaseId" type="id" enable-audit-log="true"/>
+    <field name="activation" type="id" enable-audit-log="true"><description>publish or restore</description></field>
+    <field name="revision" type="number-integer"/>
+    <field name="siteGeneration" type="number-integer"><description>The site's generation the switch advanced to.</description></field>
+    <field name="activatedDate" type="date-time"/>
+    <field name="activatedByUserId" type="id-long"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" related="mantle.public.PublicSiteApp"/>
+    <relationship type="one" related="mantle.public.PublicThemeRelease"/>
+  </entity>
+</entities>
