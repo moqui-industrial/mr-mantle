@@ -200,6 +200,10 @@ along with this software (see the LICENSE.md file). If not, see
                             disable-authz="true"/>
                 </then>
                 <else>
+                    <!-- an organization's first own preferences start from those it inherited, so settings that name a few
+                        fields keep its currency, costing and fiscal year (find#PartyAcctgPreference reads the own row whole) -->
+                    <set field="preferenceValues" from="Object.assign(policy.pick(policy.map(inheritedPreference),
+                            preferenceFields.filter(field => field !== 'errorGlJournalId')), preferenceValues)"/>
                     <service-call name="create#mantle.ledger.config.PartyAcctgPreference" in-map="preferenceValues"
                             disable-authz="true"/>
                 </else>

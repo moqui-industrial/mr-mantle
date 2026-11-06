@@ -420,6 +420,9 @@ feature("a rolled-up organization inherits its configuration: it is not set up f
                 dueDate: day(9), openAmount: "10"}]
         })
         const readiness = setup("check#Readiness", {organizationPartyId: child})
+        const own = one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: child})
+        // its first own preferences, naming one flag, start from the parent's: the base currency stays
+        setup("store#Preferences", {organizationPartyId: child, settings: {returnSettlementRequired: "Y"}, changeReason: "Spec flag"})
         return {
             status,
             preview,
@@ -427,7 +430,8 @@ feature("a rolled-up organization inherits its configuration: it is not set up f
             stored,
             unguarded,
             row: code => readiness.readinessRows.find(row => row.code == code),
-            own: one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: child}),
+            own,
+            firstOwn: one("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: child}),
             run: rows("mantle.ledger.config.AccountingSetupRun", {organizationPartyId: child})[0]
         }
     },
@@ -444,6 +448,8 @@ feature("a rolled-up organization inherits its configuration: it is not set up f
         r.row("WIP_TRANSFER").status == "ok"
         r.row("CHART").status == "ok"
         r.row("POSTING_GUARD").status == "blocker"
+        r.firstOwn.returnSettlementRequired == "Y"
+        r.firstOwn.baseCurrencyUomId == "USD"
     }
 })
 
