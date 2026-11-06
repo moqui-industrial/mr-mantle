@@ -20,7 +20,7 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="ProductStore" package="mantle.product.store" short-alias="productStores" cache="true">
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="storeName" type="text-medium"/>
-        <field name="organizationPartyId" type="id">
+        <field name="organizationPartyId" type="id" enable-audit-log="true">
             <description>The Organization Party that Orders, Invoices, GL transactions, etc will be associated with.</description></field>
 
         <field name="inventoryFacilityId" type="id" enable-audit-log="true"/>
@@ -40,7 +40,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="insurancePackageThreshold" type="currency-amount">
             <description>If total cost of items in a package is above this amount buy insurance on that package</description></field>
 
-        <field name="autoApproveDelay" type="number-integer"><description>Minimum time in minutes to wait before trying to auto-approve;
+        <field name="autoApproveDelay" type="number-integer" enable-audit-log="true"><description>Minimum time in minutes to wait before trying to auto-approve;
             defaults to 0 which means auto-approve immediately (via SECA rule), otherwise delayed auto-approve handled with service job</description></field>
 
         <field name="storeDomain" type="text-short"><description>Store domain for use in emails</description></field>
@@ -51,12 +51,14 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="blogDataDocumentId" type="id"><description>Warning: this field to be deprecated in favor a ProductStoreDataDocument entity with a typeEnumId of PsdtBlog. The dataDocumentId to use for search of blog entries</description></field>
         <field name="productDataDocumentId" type="id"><description>Warning: this field to be deprecated in favor of a ProductStoreDataDocument entity with a typeEnumId of PsdtProduct. The dataDocumentId to use for product search</description></field>
 
-        <field name="defaultLocale" type="text-short"/>
-        <field name="defaultCurrencyUomId" type="id"/>
-        <field name="defaultSalesChannelEnumId" type="id"/>
+        <!-- the policy fields are audit-logged with the user and reason (impl-commerce P2, §2): organization, currency, locale,
+            channel, approval delay and the tax gateway; StoreAdminServices.store#Store sets the reason -->
+        <field name="defaultLocale" type="text-short" enable-audit-log="true"/>
+        <field name="defaultCurrencyUomId" type="id" enable-audit-log="true"/>
+        <field name="defaultSalesChannelEnumId" type="id" enable-audit-log="true"/>
 
         <field name="requireCustomerRole" type="text-indicator"/>
-        <field name="taxGatewayConfigId" type="id"/>
+        <field name="taxGatewayConfigId" type="id" enable-audit-log="true"/>
         <field name="systemMessageRemoteId" type="id"><description>
             Reference to the SystemMessageRemote record for the remote system this store is for such as a separate, integrated ecommerce app.
             Note that SystemMessageRemote is extended with a productStoreId so that other SystemMessageRemotes know which store they are for (if applicable).
@@ -242,6 +244,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Tell-A-Friend" enumId="PsetTellAFriend" enumTypeId="ProductStoreEmailType"/>
             <moqui.basic.Enumeration description="Gift Card Purchase" enumId="PsetGiftCardPurchase" enumTypeId="ProductStoreEmailType"/>
             <moqui.basic.Enumeration description="Gift Card Reload" enumId="PsetGiftCardReload" enumTypeId="ProductStoreEmailType"/>
+            <!-- Commerce's notices (impl-commerce P2, F16), each sent by its phase: cart recovery (P10), subscription renewal (Shop
+                P7, P12), review request (P9) -->
+            <moqui.basic.Enumeration description="Cart Recovery" enumId="PsetCartRecovery" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Subscription Renewal" enumId="PsetSubscriptionRenewal" enumTypeId="ProductStoreEmailType"/>
+            <moqui.basic.Enumeration description="Review Request" enumId="PsetReviewRequest" enumTypeId="ProductStoreEmailType"/>
         </seed-data>
     </entity>
     <entity entity-name="ProductStoreFacility" package="mantle.product.store">
@@ -272,9 +279,11 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
     <entity entity-name="ProductStorePaymentGateway" package="mantle.product.store">
+        <!-- not dated (impl-commerce F15): the binding's key fields are audit-logged on create and change; a delete is not
+            logged, so the service that removes one (CheckoutSettings, P6) records it -->
         <field name="productStoreId" type="id" is-pk="true"/>
-        <field name="paymentInstrumentEnumId" type="id" is-pk="true"/>
-        <field name="paymentGatewayConfigId" type="id"/>
+        <field name="paymentInstrumentEnumId" type="id" is-pk="true" enable-audit-log="true"/>
+        <field name="paymentGatewayConfigId" type="id" enable-audit-log="true"/>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" title="PaymentInstrument" related="moqui.basic.Enumeration" short-alias="paymentInstrument">
             <key-map field-name="paymentInstrumentEnumId"/></relationship>
@@ -428,9 +437,11 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="defaultTradeTermEnumId"/></relationship>
     </entity>
     <entity entity-name="ProductStoreShipOption" package="mantle.product.store">
+        <!-- not dated (impl-commerce F15): the binding's key fields are audit-logged on create; a delete is not logged, so the
+            service that removes one (CheckoutSettings, P6) records it -->
         <field name="productStoreId" type="id" is-pk="true"/>
-        <field name="carrierPartyId" type="id" is-pk="true"/>
-        <field name="shipmentMethodEnumId" type="id" is-pk="true"/>
+        <field name="carrierPartyId" type="id" is-pk="true" enable-audit-log="true"/>
+        <field name="shipmentMethodEnumId" type="id" is-pk="true" enable-audit-log="true"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="markupPercent" type="number-decimal"/>
         <field name="markupAmount" type="currency-amount"/>
@@ -563,6 +574,11 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="storeGroupTypeEnumId"/></relationship>
         <seed-data>
             <moqui.basic.EnumerationType description="Product Store Group Type" enumTypeId="ProductStoreGroupType"/>
+            <!-- impl-commerce P2 (F13): groups select stores for reports and bulk work; they share no settings -->
+            <moqui.basic.Enumeration description="Reporting" enumId="PsgtReporting" enumTypeId="ProductStoreGroupType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Region" enumId="PsgtRegion" enumTypeId="ProductStoreGroupType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Brand" enumId="PsgtBrand" enumTypeId="ProductStoreGroupType" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Sales channel" enumId="PsgtChannel" enumTypeId="ProductStoreGroupType" sequenceNum="4"/>
         </seed-data>
     </entity>
     <entity entity-name="ProductStoreGroupMember" package="mantle.product.store">
