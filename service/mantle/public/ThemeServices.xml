@@ -495,4 +495,431 @@
             <set field="result" from="out.result"/>
         </actions>
     </service>
+    <!-- ===== authoring (Commerce P5; ThemeAuthoring.js, design-commerce §5) =====
+        COMMERCE_VIEW and the store's scope for each; COMMERCE_THEME_EDIT for a draft's identity, composition, settings,
+        assets, translations and template assignment; COMMERCE_THEME_CODE for source files. Every save takes the draft
+        revision it read (expectedRevision, REVISION_STALE otherwise) and is refused when the adapter finds an error in the
+        file it changes (THEME_SOURCE_INVALID, with file and line), leaving the draft as it was. -->
+    <service verb="find" noun="Themes" allow-remote="false">
+        <description>The themes of the user's stores (or one store), by name or id: store, engine, draft revision, validation state (valid, invalid, changed since validation, not validated), the sites it is live on and its latest release; state live or draft narrows them. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="state"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="themes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('findThemes', context)"/>
+            <set field="themes" from="out.themes"/>
+        </actions>
+    </service>
+    <service verb="import" noun="Theme" allow-remote="false">
+        <description>A new theme of a store from a package: files (path to text, a binary asset's base64) or packageFile (a staged .tar.gz location the caller scanned). Draft only, never validated or published here. Refuses a Liquid or other engine (ENGINE_UNSUPPORTED), a file that is not a theme file such as a script (FILE_KIND_REFUSED), a path outside the package (INVALID_PATH), a package over its bounds (PACKAGE_TOO_LARGE) and one without theme.json (MANIFEST_REQUIRED); each image or font is checked as store#ThemeAsset checks an upload (type, size, the scanner). COMMERCE_THEME_EDIT and the store's scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="name"/>
+            <parameter name="files" type="Map"/>
+            <parameter name="packageFile"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="themeId"/>
+            <parameter name="name"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="fileCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('importTheme', context)"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="name" from="out.name"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="fileCount" from="out.fileCount"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeDraft" allow-remote="false">
+        <description>A draft's name and description (ThemeIdentity); the engine stays the package's. COMMERCE_THEME_EDIT and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="name" required="true"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="themeId"/>
+            <parameter name="draftRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeDraft', context)"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeComposition" allow-remote="false">
+        <description>What ThemeEditor shows of a draft: its templates with their sections in order (type, settings, blocks, hidden, the required components each places), the section and block types with their settings schemas, the global settings and their schema, the page kinds and the draft revision. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="theme" type="Map"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="pageKinds" type="List"/>
+            <parameter name="templates" type="List"/>
+            <parameter name="sectionTypes" type="List"/>
+            <parameter name="blockTypes" type="List"/>
+            <parameter name="globalSettings" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeComposition', context)"/>
+            <set field="theme" from="out.theme"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="pageKinds" from="out.pageKinds"/>
+            <set field="templates" from="out.templates"/>
+            <set field="sectionTypes" from="out.sectionTypes"/>
+            <set field="blockTypes" from="out.blockTypes"/>
+            <set field="globalSettings" from="out.globalSettings"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeComposition" allow-remote="false">
+        <description>A template's sections and their order (Composition: add, move, duplicate, hide or remove sections and blocks), replacing the template's: stable section and block ids, each section a type of the draft (UNKNOWN_SECTION), an existing id keeping its type (SECTION_TYPE_CHANGED), the order naming each once (ORDER_INVALID); a section placing a required purchase, cart, checkout or search component is never removed or hidden from its page (REQUIRED_COMPONENT). COMMERCE_THEME_EDIT and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="template" required="true"/>
+            <parameter name="composition" type="Map" required="true"/>
+            <parameter name="versionNote"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="template"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeComposition', context)"/>
+            <set field="template" from="out.template"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeSettings" allow-remote="false">
+        <description>Setting values (SectionSettings, ThemeSettings): with no template the global settings (config/settings.json), else a template section's (sectionId) or one of its blocks' (blockId). Each must be a setting of the schema (UNKNOWN_SETTING); null removes a value so its default applies; the adapter checks the types. COMMERCE_THEME_EDIT and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="template"/>
+            <parameter name="sectionId"/>
+            <parameter name="blockId"/>
+            <parameter name="settings" type="Map" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="template"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeSettings', context)"/>
+            <set field="template" from="out.template"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeAssets" allow-remote="false">
+        <description>A draft's assets (ThemeAssets): path, media type, size, digest, whether binary, and the files that name it. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assets" type="List"/>
+            <parameter name="draftRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeAssets', context)"/>
+            <set field="assets" from="out.assets"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeAsset" allow-remote="false">
+        <description>A draft asset added or replaced under assets/ (UploadAsset): a stylesheet or SVG as text (an SVG cleaned to the safe set) or an image or font (png, jpg, gif, webp, woff2) as an uploaded file or base64, whose leading bytes match its type (ASSET_TYPE_MISMATCH), within its size (ASSET_TOO_LARGE) and clean by pass_scanner_service (SCANNER_UNAVAILABLE, ASSET_REFUSED). COMMERCE_THEME_EDIT and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="path" required="true"/>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="assetFile" type="Object"/>
+            <parameter name="contentBase64"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="path"/>
+            <parameter name="replaced" type="Boolean"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeAsset', context)"/>
+            <set field="path" from="out.path"/>
+            <set field="replaced" from="out.replaced"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeTranslations" allow-remote="false">
+        <description>A draft's texts of a locale (Translations): its locales, and each key with the locale's text and the default locale's as the fallback. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="locale"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="locales" type="List"/>
+            <parameter name="locale"/>
+            <parameter name="fallbackLocale"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="entries" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeTranslations', context)"/>
+            <set field="locales" from="out.locales"/>
+            <set field="locale" from="out.locale"/>
+            <set field="fallbackLocale" from="out.fallbackLocale"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="entries" from="out.entries"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeTranslations" allow-remote="false">
+        <description>A locale's texts by key (an empty text removes the key, so the fallback shows); needs no source permission. COMMERCE_THEME_EDIT and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="locale" required="true"/>
+            <parameter name="entries" type="Map" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="locale"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeTranslations', context)"/>
+            <set field="locale" from="out.locale"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="assign" noun="ThemeTemplate" allow-remote="false">
+        <description>An alternate template for a page (targetKind page, sitePageId; through store#SitePage, so a published page's change needs COMMERCE_PUBLISH and expectedRevision, its publicationRevision) or a published product (targetKind product, productId; through store#StoreProduct, COMMERCE_MERCHANDISE): the key must be a template of the target's kind in the theme's draft (TEMPLATE_UNKNOWN); empty goes back to the default. COMMERCE_THEME_EDIT.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="targetKind" required="true"/>
+            <parameter name="sitePageId"/>
+            <parameter name="productId"/>
+            <parameter name="templateKey"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="targetKind"/>
+            <parameter name="targetId"/>
+            <parameter name="templateKey"/>
+            <parameter name="publicationRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('assignThemeTemplate', context)"/>
+            <set field="targetKind" from="out.targetKind"/>
+            <set field="targetId" from="out.targetId"/>
+            <set field="templateKey" from="out.templateKey"/>
+            <set field="publicationRevision" from="out.publicationRevision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeFile" allow-remote="false">
+        <description>One source file of a draft (Source, FileSchema): its text, version, digest, the schema of a section or block, and the adapter's findings in it. COMMERCE_THEME_CODE.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="path" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="path"/>
+            <parameter name="text"/>
+            <parameter name="binary" type="Boolean"/>
+            <parameter name="versionName"/>
+            <parameter name="digest"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="schemaPath"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeFile', context)"/>
+            <set field="path" from="out.path"/>
+            <set field="text" from="out.text"/>
+            <set field="binary" from="out.binary"/>
+            <set field="versionName" from="out.versionName"/>
+            <set field="digest" from="out.digest"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="schemaPath" from="out.schemaPath"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ThemeFile" allow-remote="false">
+        <description>A source file's new text (Source, FileSchema): the file must be in the draft and a text file; a file the adapter finds an error in (a script, an event handler, an executable URL, an ec name, bad JSON) is refused with its file and line (THEME_SOURCE_INVALID); a baseDigest other than the file's is REVISION_STALE. The active release is unchanged. COMMERCE_THEME_CODE and the draft revision.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="path" required="true"/>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="baseDigest"/>
+            <parameter name="versionNote"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="path"/>
+            <parameter name="digest"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('storeThemeFile', context)"/>
+            <set field="path" from="out.path"/>
+            <set field="digest" from="out.digest"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="change" noun="ThemeFile" allow-remote="false">
+        <description>Adds, renames or removes a draft source file (FileOperation, operation add, rename or remove; toPath for rename): a new file is one of the package's kinds of text file (FILE_KIND_REFUSED), at a free path (FILE_EXISTS); theme.json and the settings stay (FILE_REQUIRED), the page kinds' templates (TEMPLATE_REQUIRED) and a section placing a required component (REQUIRED_COMPONENT); a file others name only with confirmDependents (HAS_DEPENDENTS names them). COMMERCE_THEME_CODE, the draft revision and changeReason.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="expectedRevision" type="Integer" required="true"/>
+            <parameter name="operation" required="true"/>
+            <parameter name="path" required="true"/>
+            <parameter name="toPath"/>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="confirmDependents" type="Boolean"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="operation"/>
+            <parameter name="path"/>
+            <parameter name="toPath"/>
+            <parameter name="dependents" type="List"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="diagnostics" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('changeThemeFile', context)"/>
+            <set field="operation" from="out.operation"/>
+            <set field="path" from="out.path"/>
+            <set field="toPath" from="out.toPath"/>
+            <set field="dependents" from="out.dependents"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="diagnostics" from="out.diagnostics"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeBindings" allow-remote="false">
+        <description>Where a theme is used (Bindings): each site whose Shop mount sells its store, with the active release, whether it is this theme's, its revision and preview host; and the store's pages and products with an alternate template, each said to be in the draft or not. COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sites" type="List"/>
+            <parameter name="resources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeBindings', context)"/>
+            <set field="sites" from="out.sites"/>
+            <set field="resources" from="out.resources"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemeHistory" allow-remote="false">
+        <description>A theme's releases (sequence, author, date, digests, the release before, the sites it is active on) and its store's sites' activations (the binding's audit log); with a path its draft versions and the line diff of a release's pinned version (releaseId, else the latest) against the draft (RevisionDiff; a source file needs COMMERCE_THEME_CODE). COMMERCE_VIEW.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="path"/>
+            <parameter name="releaseId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="releases" type="List"/>
+            <parameter name="activations" type="List"/>
+            <parameter name="versions" type="List"/>
+            <parameter name="diff" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemeHistory', context)"/>
+            <set field="releases" from="out.releases"/>
+            <set field="activations" from="out.activations"/>
+            <set field="versions" from="out.versions"/>
+            <set field="diff" from="out.diff"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ThemePreview" allow-remote="false">
+        <description>A preview of a theme's draft on a site's Shop mount (PreviewContext): its page kind and the product, category or page (sitePageId) it shows, for the user and twenty minutes, on the site's preview host. The site must sell the theme's store (THEME_STORE_MISMATCH) and have a preview host (NO_PREVIEW_HOST). Answers the host and the path, which carries the preview's token (kept only as its digest). COMMERCE_THEME_EDIT, COMMERCE_THEME_CODE or COMMERCE_THEME_PUBLISH.</description>
+        <in-parameters>
+            <parameter name="themeId" required="true"/>
+            <parameter name="siteId" required="true"/>
+            <parameter name="pageKind"/>
+            <parameter name="targetId"/>
+            <parameter name="locale"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="previewId"/>
+            <parameter name="previewHost"/>
+            <parameter name="previewPath"/>
+            <parameter name="pageKind"/>
+            <parameter name="expireDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('createThemePreview', context)"/>
+            <set field="previewId" from="out.previewId"/>
+            <set field="previewHost" from="out.previewHost"/>
+            <set field="previewPath" from="out.previewPath"/>
+            <set field="pageKind" from="out.pageKind"/>
+            <set field="expireDateText" from="out.expireDateText"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PreviewHost" authenticate="anonymous-all" allow-remote="false">
+        <description>Whether a host of a site is the site's theme preview host (PublicSiteHost PshkPreview): PASS's route and shell refuse every other route on it. Anonymous.</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="hostname" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="preview" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getPreviewHost', context)"/>
+            <set field="preview" from="out.preview"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ThemePreviewPage" authenticate="anonymous-all" allow-remote="false">
+        <description>The preview of a token on its site's preview host (impl-commerce F54, design-shop §12.6): the draft's files, its page kind and template, the view (the store's public data when the site is published, else the sample view; a cart, checkout or account always synthetic) and sources. Not Found for an unknown or expired token, another site or host, an actor who can no longer sign in, or a theme that is gone. Writes nothing, sends nothing. Anonymous; called in process by PASS on the authority only.</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="hostname" required="true"/>
+            <parameter name="token" required="true"/>
+            <parameter name="assetPath"><description>An asset under assets/: only it is answered (asset), not the page.</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="previewId"/>
+            <parameter name="themeId"/>
+            <parameter name="pageKind"/>
+            <parameter name="template"/>
+            <parameter name="sample" type="Boolean"/>
+            <parameter name="files" type="Map"/>
+            <parameter name="view" type="Map"/>
+            <parameter name="references" type="Map"/>
+            <parameter name="media" type="Map"/>
+            <parameter name="sources" type="Map"/>
+            <parameter name="asset" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getThemePreviewPage', context)"/>
+            <set field="asset" from="out.asset"/>
+            <set field="previewId" from="out.previewId"/>
+            <set field="themeId" from="out.themeId"/>
+            <set field="pageKind" from="out.pageKind"/>
+            <set field="template" from="out.template"/>
+            <set field="sample" from="out.sample"/>
+            <set field="files" from="out.files"/>
+            <set field="view" from="out.view"/>
+            <set field="references" from="out.references"/>
+            <set field="media" from="out.media"/>
+            <set field="sources" from="out.sources"/>
+        </actions>
+    </service>
 </services>

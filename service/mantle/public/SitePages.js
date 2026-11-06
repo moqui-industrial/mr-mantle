@@ -136,10 +136,20 @@ function localeOf(value) {
     if (!localePattern.test(locale)) refuse("VALUE_INVALID", "Choose a locale such as en or en_US")
     return locale
 }
-function templateOf(value) {
+function templateOf(value, site, mount, store) {
     const key = text(value)
     if (!key) return null
     if (!templatePattern.test(key)) refuse("VALUE_INVALID", "A template key has lower-case letters, digits, . _ and -")
+    // Commerce P5 (F77): a page template of the site's active release or of a draft of the store's themes
+    if (
+        site &&
+        (key.split(".")[0] !== "page" ||
+            !ec.resource
+                .script("component://mr-mantle/service/mantle/public/ThemeAuthoring.js")
+                .knownTemplates(site.siteId, mount?.appMountId, store?.productStoreId)
+                .has(key))
+    )
+        refuse("TEMPLATE_UNKNOWN", "The site's themes have no page template " + key)
     return key
 }
 function roleOf(value) {
@@ -528,7 +538,7 @@ function storeSitePage(p) {
     }
     if (given(p, "routePath")) values.routePath = routeOf(p.routePath)
     if (given(p, "locale")) values.locale = localeOf(p.locale)
-    if (given(p, "templateKey")) values.templateKey = templateOf(p.templateKey)
+    if (given(p, "templateKey")) values.templateKey = templateOf(p.templateKey, site, mount, store)
     if (given(p, "pageRole")) values.pageRole = roleOf(p.pageRole)
     if (given(p, "seoTitle")) values.seoTitle = textOf(p.seoTitle, 255, "An SEO title")
     if (given(p, "seoDescription")) values.seoDescription = textOf(p.seoDescription, 500, "An SEO description")
@@ -599,7 +609,7 @@ function createSitePage(s, p) {
         locale,
         title,
         pageRole,
-        templateKey: templateOf(p.templateKey),
+        templateKey: templateOf(p.templateKey, site, mount, store),
         seoTitle: textOf(p.seoTitle, 255, "An SEO title"),
         seoDescription: textOf(p.seoDescription, 500, "An SEO description"),
         socialImageUrl: imageUrlOf(p.socialImageUrl)

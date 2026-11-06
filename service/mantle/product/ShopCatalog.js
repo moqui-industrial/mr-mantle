@@ -864,7 +864,9 @@ const views = {
                 socialImageUrl: found.socialImageUrl,
                 policyRole: found.policyRole,
                 policyVersion: found.policyVersion,
-                locale: found.locale
+                locale: found.locale,
+                // Commerce P5 (F77): the page's alternate template, which ThemeView renders with (never in the theme's view)
+                templateKey: found.templateKey
             }
         }
     }

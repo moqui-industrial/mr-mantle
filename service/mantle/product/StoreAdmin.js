@@ -539,7 +539,7 @@ function getStoreSites(p) {
     const sites = mounts.map(mount => {
         const site = one("mantle.public.PublicSite", {siteId: mount.siteId})
         const hosts = rows("mantle.public.PublicSiteHost", {siteId: mount.siteId})
-        const canonical = hosts.find(host => host.canonical === "Y")
+        const canonical = hosts.find(host => host.canonical === "Y" && host.hostKindEnumId !== "PshkPreview")
         return {
             siteId: mount.siteId,
             siteName: site?.name || mount.siteId,
@@ -1327,7 +1327,11 @@ const readinessChecks = [
         check: store => {
             const mounts = shopMounts([store.productStoreId])[store.productStoreId] || []
             if (!mounts.length) return null
-            const hostless = mounts.filter(mount => !one("mantle.public.PublicSiteHost", {siteId: mount.siteId, canonical: "Y"}))
+            // a preview host (Commerce P5, F54) is never the site's address
+            const hostless = mounts.filter(mount => {
+                const host = one("mantle.public.PublicSiteHost", {siteId: mount.siteId, canonical: "Y"})
+                return !host || host.hostKindEnumId === "PshkPreview"
+            })
             return hostless.length
                 ? {ready: false, message: "No canonical host for " + hostless.map(mount => mount.siteId).join(", ")}
                 : {ready: true, message: "Every site has its address"}
