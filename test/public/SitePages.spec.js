@@ -18,7 +18,8 @@ const ids = {
     site: prefix + "_SITE",
     otherSite: prefix + "_OSITE",
     product: prefix + "_PUBLIC",
-    draft: prefix + "_DRAFT"
+    draft: prefix + "_DRAFT",
+    category: prefix + "_CAT"
 }
 const users = {}
 const state = {}
@@ -144,6 +145,18 @@ spec({
                 })
             // the one product the store publishes; the draft has no publication
             make("mantle.product.store.ProductStoreProduct", {productStoreId: ids.store, productId: ids.product})
+            // a browse root of the store, for a menu's category item
+            make("mantle.product.category.ProductCategory", {
+                productCategoryId: ids.category,
+                categoryName: "Pages shelf",
+                ownerPartyId: orgA
+            })
+            make("mantle.product.store.ProductStoreCategory", {
+                productStoreId: ids.store,
+                productCategoryId: ids.category,
+                storeCategoryTypeEnumId: "PsctBrowseRoot",
+                fromDate: 0
+            })
             users.designer = user("designer", orgA, ["COMMERCE_VIEW", "COMMERCE_THEME_EDIT"])
             users.publisher = user("publisher", orgA, ["COMMERCE_VIEW", "COMMERCE_PUBLISH"])
             users.merchandiser = user("merchandiser", orgA, ["COMMERCE_VIEW", "COMMERCE_MERCHANDISE"])
@@ -412,6 +425,7 @@ feature(
             const product = item("Public product", "SdtProduct", ids.product, 0)
             const page = item("Returns", "SdtPage", state.pageId, 1)
             const external = item("Partner", "SdtExternal", "https://partner.example.com/x", 2)
+            const category = item("Shelf", "SdtCategory", ids.category, 3)
             const redirect = (oldPath, destinationTypeEnumId, destinationValue) =>
                 nav(users.merchandiser, {redirect: {oldPath, destinationTypeEnumId, destinationValue}})
             const toApi = redirect("/old-api", "SdtPath", "/api/v1")
@@ -434,6 +448,7 @@ feature(
                 product,
                 page,
                 external,
+                category,
                 toApi,
                 fromReserved,
                 offSite,
@@ -454,6 +469,7 @@ feature(
             r.product.draftRevision == 1
             r.page.draftRevision == 2
             r.external.draftRevision == 3
+            r.category.draftRevision == 4
             code(r.toApi) == "PATH_RESERVED"
             code(r.fromReserved) == "PATH_RESERVED"
             code(r.offSite) == "REDIRECT_OFF_SITE"
@@ -473,7 +489,7 @@ feature(
             const merchandiserPublishes = run(users.merchandiser, T + "publish#SiteNavigation", {
                 siteId: ids.site,
                 navigationId: state.navigationId,
-                expectedRevision: 3,
+                expectedRevision: 4,
                 operationKey: key()
             })
             const notLive = run(null, SS + "get#SiteNavigation", {input: {siteId: ids.site}})
@@ -482,7 +498,7 @@ feature(
             const menu = run(users.publisher, T + "publish#SiteNavigation", {
                 siteId: ids.site,
                 navigationId: state.navigationId,
-                expectedRevision: 3,
+                expectedRevision: 4,
                 operationKey: key()
             })
             const navigation = run(null, SS + "get#SiteNavigation", {input: {siteId: ids.site, locale: "en-US"}})
@@ -515,16 +531,56 @@ feature(
             code(r.merchandiserPublishes) == "PERMISSION_DENIED"
             r.notLive.result.navigation == []
             r.menu.state == "published"
-            r.navigation.result.navigation.map(i => i.label) == ["Public product", "Returns", "Partner"]
+            r.navigation.result.navigation.map(i => i.label) == ["Public product", "Returns", "Partner", "Shelf"]
             r.navigation.result.navigation[0].url.startsWith("/products/" + ids.product + "/")
             r.navigation.result.navigation[1].url == "/pages/returns"
+            r.navigation.result.navigation[3].url == "/categories/" + ids.category + "/pages-shelf"
             r.redirect.state == "published"
             r.resolved.result.url == "/old-b"
             r.resolved.result.status == 301
             code(r.unconfirmed) == "PAGE_REFERENCED"
             r.confirmed.result.state == "withdrawn"
-            r.without.result.navigation.map(i => i.label) == ["Public product", "Partner"]
+            r.without.result.navigation.map(i => i.label) == ["Public product", "Partner", "Shelf"]
             r.after == r.before + 4
         }
     }
 )
+
+feature("a scheduled redirect whose author can no longer sign in fails at its date with a finding, and is published again", {
+    when() {
+        const later = Date.now() + 3600000
+        const saved = nav(users.merchandiser, {
+            redirect: {oldPath: "/old-d", destinationTypeEnumId: "SdtPath", destinationValue: "/old-b"}
+        })
+        const scheduled = run(users.publisher, T + "publish#SiteNavigation", {
+            siteId: ids.site,
+            redirectId: saved.redirectId,
+            fromDate: later,
+            expectedRevision: saved.revision,
+            operationKey: key()
+        })
+        const account = disabled => system(() => call("update#moqui.security.UserAccount", {userId: users.publisher, disabled}))
+        system(() => call("update#mantle.public.PublicSiteRedirect", {redirectId: saved.redirectId, fromDate: Date.now() - 1000}))
+        account("Y")
+        const job = run("john.doe", T + "run#ScheduledSitePublications", {})
+        account("N")
+        const failed = one("mantle.public.PublicSiteRedirect", {redirectId: saved.redirectId})
+        // its from date has passed: published again it is live from now
+        const again = run(users.publisher, T + "publish#SiteNavigation", {
+            siteId: ids.site,
+            redirectId: saved.redirectId,
+            expectedRevision: failed.revision,
+            operationKey: key()
+        })
+        const resolved = run(null, SS + "resolve#SiteRedirect", {input: {siteId: ids.site, path: "/old-d"}})
+        return {scheduled, job, failed, again, resolved}
+    },
+    then(r) {
+        r.scheduled.state == "scheduled"
+        r.job.error == ""
+        r.failed.publicationStateEnumId == "SpsFailed"
+        r.failed.failureCode == "AUTHOR_UNAVAILABLE"
+        r.again.state == "published"
+        r.resolved.result.url == "/old-b"
+    }
+})

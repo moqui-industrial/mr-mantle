@@ -250,7 +250,9 @@ function pageSpaceOf(store, create) {
     return one(SPACE, {wikiSpaceId})
 }
 // The user's update right on a page space for one wiki write: a WikiSpaceUser allowUpdate row for the call, put back as
-// it was after it (in the same transaction, which a failure rolls back anyway).
+// it was after it, all in the caller's transaction. The row is never committed (the transaction ends with it removed, or
+// rolls back), so no other request of the user, as in Commons Knowledge, sees the right; WikiPageAccess reads the row
+// without the entity cache.
 function withSpaceUpdate(wikiSpaceId, action) {
     const userId = ec.user.userId
     if (!userId) refuse("PERMISSION_DENIED", "A signed-in user writes a page")
@@ -272,7 +274,7 @@ function withSpaceUpdate(wikiSpaceId, action) {
         return action()
     } finally {
         if (!had) {
-            if (row) call("update#" + SPACE_USER, {wikiSpaceId, userId, allowUpdate: row.allowUpdate || "N"})
+            if (row) call("update#" + SPACE_USER, {wikiSpaceId, userId, allowUpdate: row.allowUpdate ?? null})
             else call("delete#" + SPACE_USER, {wikiSpaceId, userId})
         }
     }
@@ -879,13 +881,13 @@ function checkDestination(ctx, typeEnumId, rawValue, forRedirect = false) {
         return {url: base + "/products/" + value + "/" + slug(answer.productName), label: answer.productName}
     }
     if (typeEnumId === "SdtCategory") {
-        const tree = Array.from(
-            call("mantle.product.StoreMerchandisingServices.get#StoreCategories", {productStoreId: ctx.store.productStoreId})
-                .tree || []
-        )
-        const node = tree.find(row => row.productCategoryId === value)
-        if (!node) refuse("DESTINATION_NOT_PUBLIC", "Category " + value + " is not one of the store's categories")
-        return {url: base + "/categories/" + value + "/" + slug(node.categoryName), label: node.categoryName}
+        // the store's tree now, read directly: live reads are anonymous, where get#StoreCategories (COMMERCE_VIEW) refuses
+        const category = merchandising().storeTree(ctx.store.productStoreId, nowMs()).has(value)
+            ? one("mantle.product.category.ProductCategory", {productCategoryId: value})
+            : null
+        if (!category) refuse("DESTINATION_NOT_PUBLIC", "Category " + value + " is not one of the store's categories")
+        const name = category.categoryName || value
+        return {url: base + "/categories/" + value + "/" + slug(name), label: name}
     }
     if (typeEnumId === "SdtPage") {
         const page = one(PAGE, {sitePageId: value})
@@ -915,12 +917,17 @@ function checkDestination(ctx, typeEnumId, rawValue, forRedirect = false) {
     if (privatePath.test(path)) refuse("PRIVATE_LINK", "The address " + value + " is a private BOSS address")
     return {url: value, label: match[1]}
 }
-// The live url of a destination, or null when it is no longer public (live reads intersect current publication).
+// The live url of a destination, or null when it is no longer public (live reads intersect current publication). A
+// refusal's error messages stay in their own frame, so one item that is not public never fails the visitor's read.
 function liveUrl(ctx, typeEnumId, value) {
+    ec.message.pushErrors()
     try {
         return checkDestination(ctx, typeEnumId, value).url
     } catch (error) {
         return null
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
     }
 }
 
@@ -1338,8 +1345,10 @@ function publishSiteNavigation(p) {
         ? {kind: "redirect", row: redirectOf(ctx, p.redirectId, true)}
         : {kind: "menu", row: menuOf(ctx, p.navigationId, true)}
     const revisionNow = Number((target.kind === "menu" ? target.row.draftRevision : target.row.revision) || 0)
-    const fromDate =
-        action === "publish" ? fromDateOf(p.fromDate ?? (target.kind === "redirect" ? target.row.fromDate : null)) : null
+    // a redirect keeps the from date of its draft while it is still to come; one that has passed (a draft published late, a
+    // failed scheduled one published again) is now
+    const draftFrom = target.kind === "redirect" && ms(target.row.fromDate) > nowMs() ? target.row.fromDate : null
+    const fromDate = action === "publish" ? fromDateOf(p.fromDate ?? draftFrom) : null
     const thruDate =
         action === "publish"
             ? thruDateOf(p.thruDate ?? (target.kind === "redirect" ? target.row.thruDate : null), fromDate)
@@ -1418,8 +1427,10 @@ function publishMenu(ctx, menu, action, fromDate, thruDate, reason) {
     }
     const items = itemsOf(menu)
     checkMenu(ctx, items)
-    // a later schedule replaces one still waiting
-    for (const waiting of rows(NAV_VERSION, {navigationId: menu.navigationId, publicationStateEnumId: "SpsScheduled"}))
+    // a later schedule replaces one still waiting, and one that failed at its date (which the store's readiness lists)
+    for (const waiting of rows(NAV_VERSION, {navigationId: menu.navigationId}).filter(row =>
+        ["SpsScheduled", "SpsFailed"].includes(row.publicationStateEnumId)
+    ))
         call("update#" + NAV_VERSION, {
             navigationId: menu.navigationId,
             fromDate: waiting.fromDate,
@@ -1588,8 +1599,17 @@ function runScheduledSitePublications(p) {
             const out = lib.probe("mantle.public.ThemeServices.run#ScheduledSitePublication", item)
             results.push(Object.assign({}, item, out.result || {}))
         } catch (error) {
+            // its transaction could not commit (a refusal that marked it for rollback): the refusal is recorded here, so
+            // the item is not tried again every minute and the store's readiness names it
             ec.logger.error("Scheduled publication of " + item.kind + " " + item.id + " was not run: " + error.message)
-            results.push(Object.assign({}, item, {ok: false, code: "NOT_RUN", message: error.message}))
+            const code = lib.reasonCode(error) || "PUBLICATION_FAILED"
+            try {
+                recordFailure(item, code, error.message)
+            } catch (recordError) {
+                ec.message.clearErrors()
+                ec.logger.error("The failure of " + item.kind + " " + item.id + " was not recorded: " + recordError.message)
+            }
+            results.push(Object.assign({}, item, {ok: false, code, message: error.message}))
         }
     }
     return {
@@ -1645,17 +1665,7 @@ function runScheduledSitePublication(p) {
             })
             return {result: {ok: true, generation}}
         } catch (error) {
-            const code = lib.reasonCode(error) || "PUBLICATION_FAILED"
-            call("update#" + PAGE, {
-                sitePageId: page.sitePageId,
-                failureCode: code,
-                failureMessage: String(error.message)
-                    .replace(/^[A-Z_]+: /, "")
-                    .slice(0, 255),
-                failureDate: nowMs()
-            })
-            ec.logger.warn("Scheduled publication of page " + page.sitePageId + " refused: " + error.message)
-            return {result: {ok: false, code, message: error.message}}
+            return {result: refused(p, error)}
         }
     }
     if (p.kind === "menu") {
@@ -1672,18 +1682,7 @@ function runScheduledSitePublication(p) {
             })
             return {result: {ok: true, generation}}
         } catch (error) {
-            const code = lib.reasonCode(error) || "PUBLICATION_FAILED"
-            call("update#" + NAV_VERSION, {
-                navigationId: p.id,
-                fromDate: version.fromDate,
-                publicationStateEnumId: "SpsFailed",
-                failureCode: code,
-                failureMessage: String(error.message)
-                    .replace(/^[A-Z_]+: /, "")
-                    .slice(0, 255)
-            })
-            ec.logger.warn("Scheduled publication of menu " + p.id + " refused: " + error.message)
-            return {result: {ok: false, code, message: error.message}}
+            return {result: refused(Object.assign({}, p, {fromDate: version.fromDate}), error)}
         }
     }
     const redirect = find(REDIRECT, {redirectId: p.id}).forUpdate(true).one()
@@ -1699,18 +1698,40 @@ function runScheduledSitePublication(p) {
         })
         return {result: {ok: true, generation}}
     } catch (error) {
-        const code = lib.reasonCode(error) || "PUBLICATION_FAILED"
-        call("update#" + REDIRECT, {
-            redirectId: redirect.redirectId,
+        return {result: refused(p, error)}
+    }
+}
+// A scheduled item's refusal recorded on it (the store's readiness lists it; what is live stays): {ok: false, code, message}.
+// A refusal can come with error messages (an author who can no longer sign in), which would stop the record's write, so
+// they are cleared first; the job records it again in its own transaction when this one cannot commit.
+function refused(item, error) {
+    const code = lib.reasonCode(error) || "PUBLICATION_FAILED"
+    ec.message.clearErrors()
+    recordFailure(item, code, error.message)
+    ec.logger.warn("Scheduled publication of " + item.kind + " " + item.id + " refused: " + error.message)
+    return {ok: false, code, message: error.message}
+}
+function recordFailure(item, code, message) {
+    const failureMessage = String(message || code)
+        .replace(/^[A-Z_]+: /, "")
+        .slice(0, 255)
+    if (item.kind === "page")
+        call("update#" + PAGE, {sitePageId: item.id, failureCode: code, failureMessage, failureDate: nowMs()})
+    else if (item.kind === "menu")
+        call("update#" + NAV_VERSION, {
+            navigationId: item.id,
+            fromDate: item.fromDate,
             publicationStateEnumId: "SpsFailed",
             failureCode: code,
-            failureMessage: String(error.message)
-                .replace(/^[A-Z_]+: /, "")
-                .slice(0, 255)
+            failureMessage
         })
-        ec.logger.warn("Scheduled publication of redirect " + p.id + " refused: " + error.message)
-        return {result: {ok: false, code, message: error.message}}
-    }
+    else
+        call("update#" + REDIRECT, {
+            redirectId: item.id,
+            publicationStateEnumId: "SpsFailed",
+            failureCode: code,
+            failureMessage
+        })
 }
 // The failed scheduled publications of a store's sites, for its readiness (read only).
 function failedPublications(siteIds) {

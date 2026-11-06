@@ -64,7 +64,8 @@ const shapes = {
         policyRole: "value",
         policyVersion: "value"
     },
-    navigation: [Object.assign({children: [link]}, link)],
+    // a menu has at most three levels (SitePages.js menuLimits)
+    navigation: [Object.assign({children: [Object.assign({children: [link]}, link)]}, link)],
     product: Object.assign({images: [image]}, productCard),
     category: {id: "value", name: "value", url: "value", description: "rich", image},
     productList: [productCard],
