@@ -1277,7 +1277,9 @@ function revokeLine(orderId, orderItemSeqId) {
         // a refund of an automatic contract's latest term (its paid-through dropped) ends its renewal at the new paid-through
         // date, so a refunded buyer is never charged again; the buyer subscribes again to start over (Shop F112, the lead's
         // decision). A renewal whose payment is already in flight is left to settle.
-        const dropped = (paid || nowMs()) < (ms(contract.paidThroughDate) ?? 0)
+        // (P12 review R1: every term refunded counts as dropped, also on a past-due contract whose paid-through had passed;
+        // its paid-through moving to now must not open a new period to claim)
+        const dropped = paid < (ms(contract.paidThroughDate) ?? 0)
         if (dropped && renewable(contract))
             stopRenewal(one(CONTRACT, {contractId}), "Renewal ended: the latest paid term was refunded", false)
     }

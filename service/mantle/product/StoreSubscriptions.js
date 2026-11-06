@@ -14,7 +14,7 @@
  *   ProductSubscriptionResource rows with their resources' handlers read only; a change ends the row in effect and starts
  *   the next, so it applies to later purchases (each Subscription keeps its own terms); only a resource whose handler
  *   services are installed; removing one with live subscriptions refused naming the count. Edits need
- *   COMMERCE_SUBSCRIPTION_MANAGE and the product in one of the user's stores.
+ *   COMMERCE_SUBSCRIPTION_MANAGE and the product sold in the user's stores only (PRODUCT_SHARED when another sells it).
  * - find#RecurringOffers: CheckoutSettings' RecurringPolicy (COMMERCE_VIEW and the store), saved through store#RecurringOffer.
  * Every operation checks COMMERCE_VIEW and StoreAdmin.js's store scope (the user's organizations; a store-limited staff
  * member's own stores); a record outside it and a missing one are refused alike (RECORD_UNAVAILABLE). Reads below the
@@ -120,16 +120,25 @@ function contractOf(s, contractId, forUpdate = false) {
         denied("RECORD_UNAVAILABLE", "Subscription " + text(contractId) + " is not available")
     return row
 }
-// A product the user may bind to paid access: in the assortment of one of their stores.
+// A product the user may bind to paid access: in the current or coming assortment of one of their stores, and of no store
+// outside their scope, since its paid access is the product's own and every store selling it grants what it says (P12
+// review R2: a store-limited member, or another organization sharing the product, never changes a store they do not work).
 function productOf(s, productId) {
     const product = text(productId) ? one("mantle.product.Product", {productId: text(productId)}) : null
-    const inStore =
-        !!product &&
-        s.storeIds.length > 0 &&
-        find("mantle.product.store.ProductStoreProduct", {productId: product.productId})
-            .condition("productStoreId", "in", s.storeIds)
-            .count() > 0
-    if (!inStore) denied("RECORD_UNAVAILABLE", "Product " + text(productId) + " is not available")
+    const storeIds = product
+        ? rows("mantle.product.store.ProductStoreProduct", {productId: product.productId})
+              .filter(row => row.publicationKindEnumId !== "PspkExcluded" && (row.thruDate == null || ms(row.thruDate) > nowMs()))
+              .map(row => row.productStoreId)
+        : []
+    if (!storeIds.some(storeId => s.storeIds.includes(storeId)))
+        denied("RECORD_UNAVAILABLE", "Product " + text(productId) + " is not available")
+    if (storeIds.some(storeId => !s.storeIds.includes(storeId)))
+        denied(
+            "PRODUCT_SHARED",
+            "Product " +
+                product.productId +
+                " is also sold in a store you do not work; its paid access is changed by staff of all its stores"
+        )
     return product
 }
 
@@ -423,7 +432,7 @@ function getProductPaidAccess(p) {
 // terms changed (the row in effect ended now and its successor started, so only later purchases take them; a row not yet
 // started is changed in place), or a row ended (ended). Only a resource whose handlers are installed (RESOURCE_UNAVAILABLE);
 // one current row a resource (RESOURCE_BOUND); ending one with live subscriptions refused naming the count
-// (SUBSCRIPTIONS_LIVE). COMMERCE_SUBSCRIPTION_MANAGE and the product in one of the user's stores.
+// (SUBSCRIPTIONS_LIVE). COMMERCE_SUBSCRIPTION_MANAGE and the product sold in the user's stores only (productOf).
 function storeProductSubscriptionResource(p) {
     const s = scope("manage")
     const product = productOf(s, p.productId)
@@ -437,8 +446,8 @@ function storeProductSubscriptionResource(p) {
                   .forUpdate(true)
                   .one()
             : null
-    if (p.fromDate != null && p.fromDate !== "" && !existing && (yes(p.ended) || yes(p.change)))
-        denied("RECORD_UNAVAILABLE", "That paid access row is not available")
+    // a change or an end names its row (review R3: an end without one was a script error)
+    if (!existing && (yes(p.ended) || yes(p.change))) denied("RECORD_UNAVAILABLE", "That paid access row is not available")
     if (yes(p.ended)) {
         const live = liveCount(product.productId, subscriptionResourceId)
         if (live)
@@ -478,7 +487,9 @@ function storeProductSubscriptionResource(p) {
         call("update#" + PSR, Object.assign({fromDate: existing.fromDate}, key, values))
         return {productId: product.productId, subscriptionResourceId, fromDate: ms(existing.fromDate)}
     }
-    const fromDate = existing ? ec.user.nowTimestamp : dateParam(p.newFromDate, "the start") || ec.user.nowTimestamp
+    // one instant ends the row in effect and starts its successor, so no purchase falls between them (review R5)
+    const now = ec.user.nowTimestamp
+    const fromDate = existing ? now : dateParam(p.newFromDate, "the start") || now
     if (values.thruDate && ms(values.thruDate) <= ms(fromDate)) denied("VALUE_INVALID", "The end comes after the start")
     const others = rows(PSR, key).filter(
         row => (!existing || ms(row.fromDate) !== ms(existing.fromDate)) && (lib.active(row) || (ms(row.fromDate) ?? 0) > nowMs())
@@ -490,7 +501,7 @@ function storeProductSubscriptionResource(p) {
         )
     if (existing) {
         if (!lib.active(existing)) denied("VALUE_INVALID", "That paid access row has ended; add a new one")
-        call("update#" + PSR, Object.assign({fromDate: existing.fromDate, thruDate: ec.user.nowTimestamp}, key))
+        call("update#" + PSR, Object.assign({fromDate: existing.fromDate, thruDate: now}, key))
     }
     call("create#" + PSR, Object.assign({fromDate}, key, values))
     return {productId: product.productId, subscriptionResourceId, fromDate: ms(fromDate)}

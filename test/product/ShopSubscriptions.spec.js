@@ -1195,3 +1195,136 @@ feature(
         }
     }
 )
+
+feature("P12 review: refunding a past-due contract's only term ends its renewal; no new period is claimed (R1)", {
+    when() {
+        const contractId = prefix + "_PASTDUE"
+        const ended = new Date(Number(ec.user.nowTimestamp) - 2 * 86400000)
+        system(() => {
+            make(SUB + "SubscriptionResource", {subscriptionResourceId: prefix + "_RES_P", description: "Plain access"})
+            make("mantle.order.OrderHeader", {
+                orderId: prefix + "_PBASE",
+                statusId: "OrderApproved",
+                currencyUomId: "USD",
+                orderPurposeEnumId: "OrpRecurringTemplate",
+                recurCronExpression: "0 0 2 * * ?",
+                entryDate: ec.user.nowTimestamp
+            })
+            make("mantle.order.OrderHeader", {
+                orderId: prefix + "_PORD",
+                statusId: "OrderCompleted",
+                currencyUomId: "USD",
+                entryDate: ec.user.nowTimestamp
+            })
+            make("mantle.order.OrderPart", {
+                orderId: prefix + "_PORD",
+                orderPartSeqId: "01",
+                vendorPartyId: ids.org,
+                customerPartyId: ids.buyer,
+                statusId: "OrderCompleted"
+            })
+            make("mantle.order.OrderItem", {
+                orderId: prefix + "_PORD",
+                orderItemSeqId: "01",
+                orderPartSeqId: "01",
+                itemTypeEnumId: "ItemProduct",
+                productId: ids.product,
+                quantity: 1,
+                unitAmount: 12
+            })
+            make(SUB + "StoreRecurringContract", {
+                contractId,
+                productStoreId: ids.store,
+                customerPartyId: ids.buyer,
+                productId: ids.product,
+                priceAmount: "12.00",
+                currencyUomId: "USD",
+                autoRenew: "Y",
+                stateEnumId: "ScsPastDue",
+                baseOrderId: prefix + "_PBASE",
+                paidThroughDate: ended,
+                nextRenewalDate: ended,
+                revision: 1,
+                createdDate: ec.user.nowTimestamp
+            })
+            make(SUB + "Subscription", {
+                subscriptionId: prefix + "_PSUB",
+                subscriptionResourceId: prefix + "_RES_P",
+                subscriberPartyId: ids.buyer,
+                productId: ids.product,
+                orderId: prefix + "_PORD",
+                orderItemSeqId: "01",
+                resourceInstanceId: contractId,
+                fromDate: new Date(Number(ended) - 30 * 86400000),
+                thruDate: ended
+            })
+            make(SUB + "StoreRenewalOccurrence", {
+                occurrenceId: prefix + "_POCC",
+                contractId,
+                periodStartDate: ended,
+                stateEnumId: "SrsRetry",
+                attemptCount: 1,
+                nextRetryDate: new Date(Number(ec.user.nowTimestamp) + 86400000),
+                createdDate: ec.user.nowTimestamp
+            })
+            make("mantle.product.store.StoreItemFulfillment", {
+                fulfillmentId: prefix + "_PFUL",
+                orderId: prefix + "_PORD",
+                orderItemSeqId: "01",
+                orderPartSeqId: "01",
+                productId: ids.product,
+                productStoreId: ids.store
+            })
+        })
+        system(() =>
+            call("mantle.product.ShopFulfillmentServices.reconcile#RefundedItem", {
+                orderId: prefix + "_PORD",
+                orderItemSeqId: "01",
+                reasonEnumId: "SdrChargeback"
+            })
+        )
+        system(() => call(R + "dispatch#Renewal", {baseOrderId: prefix + "_PBASE"}))
+        return {
+            sub: one(SUB + "Subscription", {subscriptionId: prefix + "_PSUB"}),
+            contract: one(SUB + "StoreRecurringContract", {contractId}),
+            occurrences: occurrences(contractId)
+        }
+    },
+    then(r) {
+        r.sub.accessRevokedDate != null
+        r.contract.stateEnumId == "ScsCancelled" && r.contract.nextRenewalDate == null
+        r.occurrences.length == 1 && r.occurrences[0].stateEnumId == "SrsCancelled"
+    }
+})
+
+feature("P12 review: a product also sold in a store outside the user's scope is not theirs to edit (R2)", {
+    when() {
+        // the product joins the second store's assortment: the operator works both, the limited member the second only
+        system(() =>
+            make(S + "ProductStoreProduct", {
+                productStoreId: prefix + "_STORE2",
+                productId: ids.product,
+                fromDate: 0,
+                publicationKindEnumId: "PspkPublished"
+            })
+        )
+        const limited = asStaff(staffIds.limited, R + "get#ProductPaidAccess", {productId: ids.product})
+        const limitedEdit = asStaff(staffIds.limited, R + "store#ProductSubscriptionResource", {
+            productId: ids.product,
+            subscriptionResourceId: ids.resource
+        })
+        const operator = asStaff(staffIds.operator, R + "get#ProductPaidAccess", {productId: ids.product})
+        const noRow = asStaff(staffIds.operator, R + "store#ProductSubscriptionResource", {
+            productId: ids.product,
+            subscriptionResourceId: ids.resource,
+            ended: "Y"
+        })
+        return {limited, limitedEdit, operator, noRow}
+    },
+    then(r) {
+        r.limited.canEdit == false && r.limited.terms.length > 0
+        code(r.limitedEdit) == "PRODUCT_SHARED"
+        r.operator.canEdit == true
+        code(r.noRow) == "RECORD_UNAVAILABLE"
+    }
+})

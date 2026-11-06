@@ -223,7 +223,7 @@
         </actions>
     </service>
     <service verb="store" noun="ProductSubscriptionResource" allow-remote="false">
-        <description>PaidAccess's one editor of what a product grants (X16): a subscription resource bound to the product (from newFromDate, now by default), a row's terms changed (the row in effect, by its fromDate, ended now and its successor started, so a change applies to later purchases; a row not yet started changed in place) or ended (ended). Only a resource whose handler services are installed (RESOURCE_UNAVAILABLE; the handlers are its component's, never edited here); one current row a resource (RESOURCE_BOUND); ending one with live subscriptions refused naming the count (SUBSCRIPTIONS_LIVE). COMMERCE_SUBSCRIPTION_MANAGE and the product in one of the user's stores.</description>
+        <description>PaidAccess's one editor of what a product grants (X16): a subscription resource bound to the product (from newFromDate, now by default), a row's terms changed (the row in effect, by its fromDate, ended now and its successor started, so a change applies to later purchases; a row not yet started changed in place) or ended (ended). Only a resource whose handler services are installed (RESOURCE_UNAVAILABLE; the handlers are its component's, never edited here); one current row a resource (RESOURCE_BOUND); ending one with live subscriptions refused naming the count (SUBSCRIPTIONS_LIVE). COMMERCE_SUBSCRIPTION_MANAGE and the product sold in the user's stores only: one also in a store outside their scope is PRODUCT_SHARED (P12 review R2).</description>
         <in-parameters>
             <parameter name="productId" required="true"/>
             <parameter name="subscriptionResourceId" required="true"/>
