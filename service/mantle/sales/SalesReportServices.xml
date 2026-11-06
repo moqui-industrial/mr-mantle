@@ -182,7 +182,9 @@ along with this software (see the LICENSE.md file). If not, see
             salesOrderSummaryList.push(ordersAverage)
             salesOrderSummaryList.push(ordersTotal)
             // a store-scoped reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
-            if (readScope.costWithheld) for (const line of salesOrderSummaryList) { line.productCostTotal = null; line.costPercent = null }
+            // (ordersThis/Last/Prior too: with maPeriods they may be trimmed from the list)
+            if (readScope.costWithheld) for (const line of salesOrderSummaryList.concat([ordersThis, ordersLast, ordersPrior]))
+                if (line) { line.productCostTotal = null; line.costPercent = null }
         ]]></script></actions>
     </service>
 
@@ -371,7 +373,9 @@ along with this software (see the LICENSE.md file). If not, see
             salesInvoiceSummaryList.push(invoicesAverage)
             salesInvoiceSummaryList.push(invoicesTotal)
             // a store-scoped reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
-            if (readScope.costWithheld) for (const line of salesInvoiceSummaryList) { line.productCostTotal = null; line.costPercent = null; line.costPercentMa = null }
+            // (invoicesThis/Last/Prior too: with maPeriods they may be trimmed from the list)
+            if (readScope.costWithheld) for (const line of salesInvoiceSummaryList.concat([invoicesThis, invoicesLast, invoicesPrior]))
+                if (line) { line.productCostTotal = null; line.costPercent = null; line.costPercentMa = null }
         ]]></script></actions>
     </service>
 
