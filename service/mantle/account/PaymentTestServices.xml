@@ -286,6 +286,38 @@ along with this software (see the LICENSE.md file). If not, see
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
+    <service verb="hostedPendingOrApprove" noun="PaymentAuthorization">
+        <description>A demo store's card gateway for both of Mantle's paths (Shop P5 review, F-SP5-4): a payment with a payment
+            method (an order placed in Mantle or Accounting) is approved as alwaysApprove does; one without (a Shop
+            checkout's, whose payer pays on the provider's page) waits at the hosted page as hostedPending does.</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <if condition="payment.paymentMethodId">
+                <service-call name="mantle.account.PaymentTestServices.alwaysApprove#PaymentAuthorization" in-map="context" out-map="context"/>
+                <else>
+                    <service-call name="mantle.account.PaymentTestServices.hostedPending#PaymentAuthorization" in-map="context" out-map="context"/>
+                </else>
+            </if>
+        </actions>
+    </service>
+    <service verb="hostedOnlyApprove" noun="PaymentDetails">
+        <description>The details of hostedPendingOrApprove's gateway (Shop P5 review, F-SP5-4): a payment that waited at the
+            hosted page is approved as alwaysApprove#PaymentDetails does; any other payment is answered with nothing (no
+            response, no change), as a gateway with no details service.</description>
+        <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>
+        <actions>
+            <entity-find entity-name="mantle.account.method.PaymentGatewayResponse" list="hostedList" limit="1">
+                <econdition field-name="paymentId"/>
+                <econdition field-name="paymentOperationEnumId" operator="not-equals" value="PgoTxDetails"/>
+                <order-by field-name="-transactionDate"/>
+                <order-by field-name="-paymentGatewayResponseId"/>
+            </entity-find>
+            <if condition="hostedList.length &gt; 0 &amp;&amp; String(hostedList[0].referenceNum || '').startsWith('TEST-HOSTED-')">
+                <service-call name="mantle.account.PaymentTestServices.alwaysApprove#PaymentDetails" in-map="context" out-map="context"/>
+            </if>
+        </actions>
+    </service>
     <service verb="alwaysPending" noun="PaymentDetails">
         <description>Answers that the gateway has not decided yet: no status, so the payment stays as it is.</description>
         <implements service="mantle.account.PaymentServices.get#PaymentGatewayDetails"/>

@@ -944,6 +944,7 @@ function submitCheckout(p) {
     const frozen = step("freeze", {
         siteId: shop.siteId,
         checkoutId: checkout.checkoutId,
+        expectedRevision: request.revision,
         termsVersion: request.termsVersion,
         quote: quote
             ? {
@@ -956,6 +957,12 @@ function submitCheckout(p) {
         returnKeyDigest: digest(returnKey)
     })
     if (frozen.error) raise(frozen)
+    // another submit froze it first (two tabs, a double click): its attempt again, without this request's key, whose digest
+    // was not kept (a page keeping it would lose the first submit's key)
+    if (frozen.result.already) {
+        const result = refreshAttempt(shop, checkout.checkoutId, "page")
+        return view(reload(reached), Object.assign({alreadySubmitted: true}, result))
+    }
     if (frozen.result.reviewRequired) {
         const after = view(reload(reached))
         const first = after.checkout.review[0]
@@ -978,6 +985,9 @@ function freeze(p) {
     const checkout = checkoutRow(p.checkoutId, true)
     const order = find("mantle.order.OrderHeader", {orderId: checkout.orderId}).forUpdate(true).one()
     if (!editableStatuses.includes(checkout.statusId)) return {paymentId: checkout.paymentId || null, already: true}
+    // the revision the shopper reviewed, again under the lock: a cart change that raced the submit is reviewed first
+    if (text(p.expectedRevision) !== String(carts().revisionOf(order)))
+        refuse("Conflict", "STALE_REVISION", "Your cart changed in another window. Review it and try again")
     const shop = Object.assign(shopOf({siteId: p.siteId}), {
         customerPartyId: checkout.accountCheckout === "Y" ? checkout.customerPartyId : null
     })
@@ -1178,6 +1188,13 @@ function placeStep(p) {
     if (!checkout || checkout.statusId !== "ScoPlacementPending") return {statusId: checkout?.statusId}
     const order = orderOf(checkout.orderId)
     if (!placedStatuses.includes(order.statusId)) {
+        // only the order that was frozen and paid for is placed: one changed since (a staff edit, a raced cart write) is
+        // left for staff with its payment kept
+        if (
+            (checkout.frozenRevision != null && carts().revisionOf(order) !== Number(checkout.frozenRevision)) ||
+            !grandTotal(order.orderId).eq(dec(checkout.dueAmount))
+        )
+            throw new Error("ORDER_CHANGED: The order changed after its checkout was submitted")
         if (!checkout.placementIntentDate)
             call("update#" + C, {checkoutId: checkout.checkoutId, placementIntentDate: ec.user.nowTimestamp})
         attempts().asAttempt(checkout.paymentId, () => call("mantle.order.OrderServices.place#Order", {orderId: order.orderId}))
@@ -1319,6 +1336,10 @@ function getCheckoutPaymentForm(p) {
     if (checkout.statusId !== "ScoPaymentPending" || !checkout.paymentId) notAvailable()
     const payment = one(P, {paymentId: checkout.paymentId})
     if (attempts().stateOf(payment) !== "pending" || !attempts().providerAction(payment.paymentId)?.form) notAvailable()
+    // the page charges the payment's amount, which Mantle moves with the order part's total (handle#OrderPartChange): one
+    // no longer the frozen amount (the order changed after the submit) opens no page
+    if (!dec(payment.amount).eq(dec(checkout.dueAmount)))
+        refuse("Conflict", "ORDER_CHANGED", "This order changed after it was submitted. Contact the store")
     const config = one("mantle.account.method.PaymentGatewayConfig", {paymentGatewayConfigId: payment.paymentGatewayConfigId})
     const of = config ? settings().gatewayCapabilities[config.paymentGatewayTypeEnumId] : null
     const service = of ? of(config).hostedFormService : null
@@ -1368,6 +1389,9 @@ function getOrderConfirmation(p) {
     const order = orderOf(checkout.orderId)
     const part = partOf(checkout.orderId)
     let orderToken = null
+    // issued once: two first reads (two tabs) are serialized on the checkout's lock, and the second issues none
+    if (checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId && via !== "orderToken")
+        checkout = checkoutRow(checkout.checkoutId, true)
     if (checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId && via !== "orderToken") {
         const created = externalAccess().create({
             recordType: "SalesOrder",

@@ -380,8 +380,10 @@ const utc = millis => {
 // The transaction Mantle sent with this reference: by transrefId, then the unsettled transactions' invoice numbers,
 // then those of the batches settled since the request. {transaction}, {notFound} when none has it, {problem} when a
 // search could not be done.
-function findByReference(gw, refId, sinceMillis) {
-    const direct = transactionDetails(gw, {transrefId: refId})
+function findByReference(gw, refId, sinceMillis, newest = false) {
+    // newest: the lists only, whose newest transaction with the reference comes first (Accept Hosted, where a payer may
+    // try again on the page after a decline, so one reference can have several transactions)
+    const direct = newest ? {} : transactionDetails(gw, {transrefId: refId})
     if (direct.transaction && (!direct.transaction.order?.invoiceNumber || direct.transaction.order.invoiceNumber === refId))
         return direct
     // the unsettled list leaves out transactions held for review, which pendingApproval lists
@@ -768,6 +770,8 @@ function consumeWebhook(p) {
 
 // A form token lives 15 minutes at Authorize.Net; after it (and the lookup's grace) no payment can be made with one.
 const HOSTED_TOKEN_SECONDS = 15 * 60
+// The transaction statuses of a payer's refused try on the hosted page (paymentStatus's PmntDeclined).
+const hostedDeclined = ["declined", "failedReview"]
 const HOSTED_PAGE = {
     sandbox: "https://test.authorize.net/payment/payment",
     production: "https://accept.authorize.net/payment/payment"
@@ -868,8 +872,20 @@ function hostedForm(p) {
 // The details of a payment waiting at its hosted page: its transaction found by the attempt's reference, recorded with
 // the provider's amount and network transaction id (F41; stored-credential evidence); none found and no form token still
 // usable, the payment is cancelled (nothing can be paid on that page any more); a search that cannot tell leaves it.
+// A declined transaction is final only once no form token can still be used: until then the payer may try again on the
+// page (or open it again), so the payment stays waiting; after it, the reference's newest transaction decides, so a later
+// approval is never lost behind an earlier decline (Shop P5 review).
 function hostedDetails(gw, payment, pending) {
-    const found = findByReference(gw, reference(pending.idempotencyKey), ms(pending.transactionDate))
+    const refId = reference(pending.idempotencyKey)
+    const last = ms(pending.hostedFormDate) ?? ms(pending.transactionDate) ?? 0
+    const tokenUsable = ms(ec.user.nowTimestamp) - last <= (HOSTED_TOKEN_SECONDS + graceSeconds(gw)) * 1000
+    let found = findByReference(gw, refId, ms(pending.transactionDate))
+    if (found.transaction && hostedDeclined.includes(found.transaction.transactionStatus)) {
+        if (tokenUsable) return {}
+        const newest = findByReference(gw, refId, ms(pending.transactionDate), true)
+        if (newest.problem) return {}
+        if (newest.transaction) found = newest
+    }
     if (found.transaction) {
         const tx = found.transaction
         const out = detailsOut(gw, payment, tx, statusFor(payment, tx))
@@ -883,9 +899,7 @@ function hostedDetails(gw, payment, pending) {
         return out
     }
     if (found.problem) return {}
-    const last = ms(pending.hostedFormDate) ?? ms(pending.transactionDate) ?? 0
-    if (ms(ec.user.nowTimestamp) - last > (HOSTED_TOKEN_SECONDS + graceSeconds(gw)) * 1000)
-        return {gatewayStatusId: "PmntCancelled"}
+    if (!tokenUsable) return {gatewayStatusId: "PmntCancelled"}
     return {}
 }
 // store#HostedPaymentProfile (F40): after an approved hosted payment a signed-in buyer asked to keep, the transaction's

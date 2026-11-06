@@ -371,6 +371,37 @@ feature("a changed price gives reviewRequired with the change; the submit at the
     }
 })
 
+// Shop P5 review: the order placed is the one frozen and paid for
+feature("an order changed after its submit is not placed; its approved payment is kept for staff", {
+    when() {
+        const {token, view} = readyCart(ids.book, 1)
+        const submitted = submit(token, view.checkout.revision)
+        const row = checkoutRow(token)
+        const line = system(() => list("mantle.order.OrderItem", {orderId: row.orderId, productId: ids.book})[0])
+        system(() =>
+            call("mantle.order.OrderServices.update#OrderItem", {
+                orderId: row.orderId,
+                orderItemSeqId: line.orderItemSeqId,
+                quantity: 2
+            })
+        )
+        const result = returned(submitted.result.checkout.reference, submitted.result.returnKey)
+        const after = checkoutRow(token)
+        return {
+            result,
+            after,
+            order: one("mantle.order.OrderHeader", {orderId: row.orderId}),
+            payment: one("mantle.account.payment.Payment", {paymentId: row.paymentId})
+        }
+    },
+    then({result, after, order, payment}) {
+        result.result.checkout.state == "placementPending"
+        after.failureCode == "ORDER_CHANGED"
+        order.statusId == "OrderOpen"
+        payment.statusId == "PmntAuthorized" || payment.statusId == "PmntDelivered"
+    }
+})
+
 feature("an unknown provider outcome stays unknown across lookups; a resubmit makes no new attempt or key", {
     when() {
         const {token, view} = readyCart(ids.book, 1)

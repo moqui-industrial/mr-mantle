@@ -126,6 +126,8 @@ const pendingCheckout = cart =>
         .condition("statusId", "in", submittedCheckoutStatuses)
         .count() > 0
 function editable(cart) {
+    // under the order's lock, so a checkout's freeze (which takes it) and this change come one after the other (Shop P5)
+    find("mantle.order.OrderHeader", {orderId: cart.row.orderId}).forUpdate(true).one()
     if (pendingCheckout(cart))
         refuse("Conflict", "CHECKOUT_PENDING", "This cart has a payment in progress. Finish or cancel it first")
 }

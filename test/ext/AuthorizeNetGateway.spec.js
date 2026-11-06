@@ -944,6 +944,47 @@ feature("Accept Hosted: the payment waits at its page, a form token per visit, a
     }
 })
 
+// Shop P5 review: Accept Hosted lets the payer try again on the page after a decline, so a decline found while a form
+// token can still be used leaves the payment waiting, and after it the reference's newest transaction decides.
+feature("Accept Hosted: a decline is final only once no form token can be used, and a later approval wins", {
+    when() {
+        const paymentId = cardPayment(31, "ANET_SPEC_HOSTED")
+        const returnUrl = "https://shop.example.test/Checkout/return?ref=2&key=" + "k".repeat(40)
+        const auth = call(P + "authorize#SinglePayment", {paymentId, operationKey: "anet-h-2", returnUrl})
+        const pending = response(auth.paymentGatewayResponseId)
+        const reference = pending.idempotencyKey.slice(0, 20)
+        answer("getHostedPaymentPageRequest", {token: "spec-form-token-2", messages: ok})
+        call(A + "get#HostedPaymentForm", {paymentId, returnUrl, merchantName: "Spec Store"})
+        const declined = details("60310", "declined", {order: {invoiceNumber: reference}, authAmount: 31, responseCode: 2})
+        answer("transrefId", declined)
+        call(P + "get#SinglePaymentGatewayDetails", {paymentId})
+        const during = payment(paymentId)
+        // the token's time is over: the decline found again, and the newest transaction of the reference, approved
+        call("update#mantle.account.method.PaymentGatewayResponse", {
+            paymentGatewayResponseId: pending.paymentGatewayResponseId,
+            hostedFormDate: new Date(Date.now() - 20 * 60000)
+        })
+        answer("transrefId", declined)
+        answer("pendingApproval", {messages: noRecords})
+        answer("getUnsettledTransactionListRequest", {
+            transactions: [
+                {transId: "60311", invoiceNumber: reference, transactionStatus: "authorizedPendingCapture"},
+                {transId: "60310", invoiceNumber: reference, transactionStatus: "declined"}
+            ],
+            totalNumInResultSet: 2,
+            messages: ok
+        })
+        answer('"transId":"60311"', details("60311", "authorizedPendingCapture", {order: {invoiceNumber: reference}, authAmount: 31}))
+        call(P + "get#SinglePaymentGatewayDetails", {paymentId})
+        return {during, after: payment(paymentId)}
+    },
+    then({during, after}) {
+        during.statusId == "PmntPromised" && during.paymentRefNum == null
+        after.statusId == "PmntAuthorized"
+        after.paymentRefNum == "60311"
+    }
+})
+
 feature("no card number, browser token or secret is in a gateway response or a system message", {
     when() {
         // its own payment, kept card and notification, so the check stands alone

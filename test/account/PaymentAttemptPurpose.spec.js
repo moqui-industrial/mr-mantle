@@ -321,3 +321,49 @@ feature(
         }
     }
 )
+
+// Shop P5 review (F-SP5-4): the demo store's card gateway serves both paths: a payment with a payment method approved at
+// once (Mantle's and Accounting's orders, as TEST_APPROVE), one without waiting at the hosted page and approved by its
+// lookup; the lookup answers nothing for any other payment
+feature("the hosted-or-approve test gateway approves a payment with a method and hosts one without", {
+    when() {
+        make("mantle.account.method.PaymentGatewayConfig", {
+            paymentGatewayConfigId: prefix + "_EITHER",
+            paymentGatewayTypeEnumId: "PgtTest",
+            authorizeServiceName: T + "hostedPendingOrApprove#PaymentAuthorization",
+            captureServiceName: T + "alwaysApprove#PaymentCapture",
+            detailsServiceName: T + "hostedOnlyApprove#PaymentDetails"
+        })
+        const methodId = make("mantle.account.method.PaymentMethod", {
+            paymentMethodTypeEnumId: "PmtCreditCard",
+            ownerPartyId: ids.customer
+        }).paymentMethodId
+        const withMethod = payment({paymentGatewayConfigId: prefix + "_EITHER", paymentMethodId: methodId})
+        const hosted = payment({paymentGatewayConfigId: prefix + "_EITHER"})
+        const P = "mantle.account.PaymentServices."
+        sys(P + "authorize#SinglePayment", {paymentId: withMethod, operationKey: prefix + "-either-1"})
+        sys(P + "authorize#SinglePayment", {
+            paymentId: hosted,
+            operationKey: prefix + "-either-2",
+            returnUrl: "https://shop.example.test/Checkout/return?ref=1"
+        })
+        const waiting = one("mantle.account.payment.Payment", {paymentId: hosted})
+        sys(P + "get#SinglePaymentGatewayDetails", {paymentId: withMethod})
+        sys(P + "get#SinglePaymentGatewayDetails", {paymentId: hosted})
+        return {
+            approved: one("mantle.account.payment.Payment", {paymentId: withMethod}),
+            lookups: list("mantle.account.method.PaymentGatewayResponse", {
+                paymentId: withMethod,
+                paymentOperationEnumId: "PgoTxDetails"
+            }),
+            waiting,
+            after: one("mantle.account.payment.Payment", {paymentId: hosted})
+        }
+    },
+    then({approved, lookups, waiting, after}) {
+        approved.statusId == "PmntAuthorized"
+        lookups.length == 0
+        waiting.statusId == "PmntPromised"
+        after.statusId == "PmntDelivered"
+    }
+})
