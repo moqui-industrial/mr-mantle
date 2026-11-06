@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Feeds and channel health (P14) below -->
+    <!-- impl-commerce P14 (COM-FEED, COM-REPORTS; design-commerce §9 Feeds, FeedDetail, §3 ChannelHealth) over StoreFeeds.js:
+        a store's product feeds of registered formats and destinations, their immutable builds over Shop's public catalog
+        projection, publication of a complete build, the Shop site's feed path (getShopFeed), the feed job and channel health.
+        The staff services need COMMERCE_CHANNEL_OPERATE (with COMMERCE_VIEW) in the store's scope. -->
+    <service verb="find" noun="StoreFeeds" allow-remote="false">
+        <description>The feeds of the user's stores (Feeds; FeedFind's store, site, format and state: current by default,
+            ended or all), each with its format, destination, public path, schedule, active build, latest and last complete
+            build (rows, skips, errors, failure) and revision.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="siteId"/>
+            <parameter name="formatEnumId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feeds" type="List"/>
+            <parameter name="feedsCount" type="Integer"/>
+            <parameter name="feedsPageIndex" type="Integer"/>
+            <parameter name="feedsPageSize" type="Integer"/>
+            <parameter name="feedsPageMaxIndex" type="Integer"/>
+            <parameter name="feedsPageRangeLow" type="Integer"/>
+            <parameter name="feedsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('findStoreFeeds', context)"/>
+            <set field="feeds" from="out.feeds"/>
+            <set field="feedsCount" from="out.feedsCount"/>
+            <set field="feedsPageIndex" from="out.feedsPageIndex"/>
+            <set field="feedsPageSize" from="out.feedsPageSize"/>
+            <set field="feedsPageMaxIndex" from="out.feedsPageMaxIndex"/>
+            <set field="feedsPageRangeLow" from="out.feedsPageRangeLow"/>
+            <set field="feedsPageRangeHigh" from="out.feedsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreFeed" allow-remote="false">
+        <description>One feed of the user's stores (FeedDetail's FeedConfig) with its newest builds (FeedBuilds; limit, 20 by
+            default, at most 50), never an artifact. Another store's is RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="productStoreFeedId" required="true"/>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feed" type="Map"/>
+            <parameter name="builds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('getStoreFeed', context)"/>
+            <set field="feed" from="out.feed"/>
+            <set field="builds" from="out.builds"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreFeed" allow-remote="false">
+        <description>A new feed of a store (NewFeed), a change to one at its revision (FeedConfig: STALE_REVISION naming the
+            current one) or one ended (ended Y). Only a registered format (FORMAT_UNREGISTERED) and destination
+            (DESTINATION_UNREGISTERED); the site's Shop must sell from the store (SITE_INVALID); the locale and currency are
+            the store's (VALUE_INVALID); the key is unique among the site's current feeds (FEED_KEY_TAKEN). A change of site,
+            key, format or category clears the active build.</description>
+        <in-parameters>
+            <parameter name="productStoreFeedId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="siteId"/>
+            <parameter name="feedName"/>
+            <parameter name="feedKey"/>
+            <parameter name="formatEnumId"/>
+            <parameter name="destinationEnumId"/>
+            <parameter name="locale"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="includeImages"/>
+            <parameter name="includeUnavailable"/>
+            <parameter name="scheduleEnumId"/>
+            <parameter name="ended"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="productStoreFeedId"/>
+            <parameter name="ended" type="Boolean"/>
+            <parameter name="activeCleared" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('storeStoreFeed', context)"/>
+            <set field="productStoreFeedId" from="out.productStoreFeedId"/>
+            <set field="ended" from="!!out.ended"/>
+            <set field="activeCleared" from="!!out.activeCleared"/>
+        </actions>
+    </service>
+    <service verb="build" noun="StoreFeed" allow-remote="false">
+        <description>Build a feed now (FeedPreview's Build), in its own transaction (run#StoreFeedBuild): a complete build
+            of Shop's public projection at the site's generation, with its rows, skips (each product and why) and errors; a
+            fatal problem (SITE_UNAVAILABLE, HOST_REQUIRED) is recorded as a failed build and the active build is left as it
+            was. The build is not published.</description>
+        <in-parameters>
+            <parameter name="productStoreFeedId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feedBuildId"/>
+            <parameter name="failed" type="Boolean"/>
+            <parameter name="build" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('buildStoreFeed', context)"/>
+            <set field="feedBuildId" from="out.feedBuildId"/>
+            <set field="failed" from="out.failed"/>
+            <set field="build" from="out.build"/>
+        </actions>
+    </service>
+    <service verb="run" noun="StoreFeedBuild" authenticate="false" allow-remote="false">
+        <description>One build of a feed in the caller's transaction (build#StoreFeed's and the feed job's step; a signed-in
+            caller is checked as build#StoreFeed checks), published when publish is Y and it has no errors. A fatal problem is
+            thrown for the caller to record.</description>
+        <in-parameters>
+            <parameter name="productStoreFeedId" required="true"/>
+            <parameter name="publish"/>
+            <parameter name="scheduled"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feedBuildId"/>
+            <parameter name="published" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('runStoreFeedBuild', context)"/>
+            <set field="feedBuildId" from="out.feedBuildId"/>
+            <set field="published" from="out.published"/>
+        </actions>
+    </service>
+    <service verb="get" noun="FeedBuild" allow-remote="false">
+        <description>A build (FeedBuilds, FeedPreview, PublishFeed): its dates, generation, rows, skips with product names,
+            errors, artifact digest and size, the sample rows of the public projection, and whether it can be published now
+            (complete, of the feed's format, not active, every product still public: withdrawn names the ones that are
+            not); with withArtifact Y its artifact (the operator's download).</description>
+        <in-parameters>
+            <parameter name="feedBuildId" required="true"/>
+            <parameter name="withArtifact"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="build" type="Map"/>
+            <parameter name="skips" type="List"/>
+            <parameter name="errors" type="List"/>
+            <parameter name="sample" type="List"/>
+            <parameter name="artifactText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('getFeedBuild', context)"/>
+            <set field="build" from="out.build"/>
+            <set field="skips" from="out.skips"/>
+            <set field="errors" from="out.errors"/>
+            <set field="sample" from="out.sample"/>
+            <set field="artifactText" from="out.artifactText || null"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="StoreFeed" allow-remote="false">
+        <description>Make a complete build the feed's active one (PublishFeed), at the feed's revision (STALE_REVISION) with an
+            operation key (PostingOperation StoreFeedPublish: a retry answers the first result). Refuses a failed build
+            (BUILD_INCOMPLETE), one of another format (BUILD_OUTDATED) and one with a product withdrawn since it was built
+            (BUILD_STALE).</description>
+        <in-parameters>
+            <parameter name="productStoreFeedId" required="true"/>
+            <parameter name="feedBuildId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="feedBuildId"/>
+            <parameter name="generation" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('publishStoreFeed', context)"/>
+            <set field="feedBuildId" from="out.feedBuildId"/>
+            <set field="generation" from="out.generation"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ChannelHealth" allow-remote="false">
+        <description>Channel health (design-commerce §3 ChannelHealth) of the user's stores (one, several or all) for a period
+            (fromDate, thruDate; the last 30 days by default, at most two years, PERIOD_INVALID): by store, remote and message
+            type the messages received (processed, failed, retried, last success; never a payload, address or credential), and
+            each current feed's last complete build with its rows and skips, its failed builds in the period, the latest
+            failure and whether serving is blocked by a withdrawal; totals (attention: message errors and failing feeds).</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messages" type="List"/>
+            <parameter name="feeds" type="List"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('getChannelHealth', context)"/>
+            <set field="messages" from="out.messages"/>
+            <set field="feeds" from="out.feeds"/>
+            <set field="totals" from="out.totals"/>
+            <set field="truncated" from="out.truncated"/>
+            <set field="fromDate" from="out.fromDate"/>
+            <set field="thruDate" from="out.thruDate"/>
+        </actions>
+    </service>
+    <service verb="run" noun="StoreFeeds" authenticate="false" allow-remote="false" transaction-timeout="1800">
+        <description>The run_StoreFeeds job: each current feed on an hourly or daily schedule whose interval has passed, built
+            in its own transaction (run#StoreFeedBuild) and published when complete with no errors; a failure is recorded as a
+            failed build of that feed and the others go on.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueCount" type="Integer"/>
+            <parameter name="builtCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="results" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreFeeds.js').execute('runStoreFeeds', context)"/>
+            <set field="dueCount" from="out.dueCount"/>
+            <set field="builtCount" from="out.builtCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+            <set field="results" from="out.results"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ShopFeed" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopFeed: the active build of a current feed of the site's Shop by input.feedKey and input.extension
+            (the format's), served only while every product in it is public at the site's current generation; anything else
+            is NotFound (FEED_UNAVAILABLE). result.content, contentType, digest, generation, builtGeneration, builtDate.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/StoreFeeds.js").execute("getShopFeed", input)</script>
+        </actions>
+    </service>
+</services>
