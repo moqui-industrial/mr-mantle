@@ -373,6 +373,47 @@ feature(
                 list("mantle.order.OrderHeader", {productStoreId: ids.storeA, externalId: "E2"}).length !== 1
             )
                 problems.push("a second submit did not answer the first")
+            // an order unreadable as it came (its external ID too long) is kept failed and never made by a retry (review R2)
+            const bad = {
+                externalId: "X".repeat(61),
+                items: [{lineId: "1", productId: ids.product, quantity: "1", unitAmount: "10.00"}]
+            }
+            deliver(ids.remoteA2, [bad])
+            const unreadable = list(SM, {systemMessageRemoteId: ids.remoteA2, statusId: "SmsgError", docType: "ChannelOrder"})[0]
+            const badRetry = run(users.operator, I + "retry#StoreMessages", {
+                systemMessageRemoteId: ids.remoteA2,
+                systemMessageIds: unreadable?.systemMessageId,
+                reason: "Check",
+                operationKey: prefix + "-retry-bad"
+            })
+            if (!unreadable || Array.from(badRetry.results || [])[0]?.reasonCode !== "NOT_RETRYABLE")
+                problems.push("an unreadable order retried: " + JSON.stringify(badRetry).slice(0, 200))
+            if (list("mantle.order.OrderHeader", {productStoreId: ids.storeA2}).length !== 1)
+                problems.push("store A2 has an order beyond E1")
+            // the API's intake refuses a stopped binding and one whose authentication was removed (the default stays HMAC)
+            const receive = () =>
+                code(
+                    run("john.doe", I + "receive#ChannelOrders", {
+                        systemMessageTypeId: "StoreChannelOrders",
+                        systemMessageRemoteId: ids.remoteA2,
+                        messageText: JSON.stringify({orders: [order("E9", ids.product)]})
+                    })
+                )
+            const remoteA2 = changes =>
+                system(() =>
+                    call(
+                        "update#moqui.service.message.SystemMessageRemote",
+                        Object.assign({systemMessageRemoteId: ids.remoteA2}, changes)
+                    )
+                )
+            remoteA2({storeDisabled: "Y"})
+            const stopped = receive()
+            remoteA2({storeDisabled: "N", messageAuthEnumId: "SmatNone"})
+            const anonymous = receive()
+            remoteA2({messageAuthEnumId: "SmatHmacSha256"})
+            if (stopped !== "BINDING_DISABLED" || anonymous !== "BINDING_UNAUTHENTICATED")
+                problems.push("intake through a stopped or unauthenticated binding: " + stopped + ", " + anonymous)
+            if (messageOf(ids.remoteA2, "E9").length) problems.push("a refused intake kept an order")
             return {problems: problems.join("\n")}
         },
         then(r) {

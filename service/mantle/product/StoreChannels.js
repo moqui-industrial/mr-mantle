@@ -276,7 +276,8 @@ function retryable(m) {
     if (m.duplicateOfMessageId || m.orderId) return false
     const failed = m.statusId === "SmsgError" || (m.statusId === "SmsgReceived" && Number(m.failCount || 0) > 0)
     if (!failed) return false
-    if (m.systemMessageTypeId === ORDER_TYPE) return m.docType === ORDER_KIND && m.isOutgoing !== "Y"
+    // a channel order kept without its canonical content (unreadable as it came: no external ID, no hash) is never made
+    if (m.systemMessageTypeId === ORDER_TYPE) return m.docType === ORDER_KIND && m.isOutgoing !== "Y" && !!m.contentHash
     if (m.systemMessageTypeId === "EdiX12") return m.isOutgoing !== "Y" || m.statusId === "SmsgError"
     return false
 }
@@ -1112,11 +1113,17 @@ function receiveChannelOrders(p) {
 // transaction (consume#ReceivedSystemMessage's), refused with its mapping's finding codes. A message whose order was made
 // answers it: retrying never makes a second order.
 function consumeChannelOrder(p) {
-    const m = one(MESSAGE, {systemMessageId: p.systemMessageId})
+    // locked for this consume's transaction: a concurrent consume of the same message (the framework's job, a retry, a
+    // second commit of a batch) waits, then finds its order and answers it, so one message never makes two orders
+    const m = p.systemMessageId ? find(MESSAGE, {systemMessageId: p.systemMessageId}).forUpdate(true).one() : null
     if (!m) denied("RECORD_UNAVAILABLE", "No message " + p.systemMessageId)
     if (m.orderId) return {}
     if (m.docType !== ORDER_KIND || m.duplicateOfMessageId)
         denied("NOT_AN_ORDER", "Message " + m.systemMessageId + " is not a channel order to make")
+    // only a canonical order (kept with its external ID and hash, so deduplicated) is made; one kept as it came, unreadable,
+    // holds the channel's raw text
+    if (!m.contentHash || !m.messageId)
+        denied("ORDER_UNREADABLE", "Message " + m.systemMessageId + " was not readable as a channel order")
     const b = bindingOf(one(REMOTE, {systemMessageRemoteId: m.systemMessageRemoteId}))
     if (!b.remote || !b.handler?.intake || b.productStoreId !== m.productStoreId)
         denied("BINDING_UNAVAILABLE", "Message " + m.systemMessageId + "'s integration is not available")
