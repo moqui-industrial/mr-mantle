@@ -1092,9 +1092,23 @@ function findStoreRequests(p) {
     return Object.assign(lib.pageList(requestRows(ids), p, "requests"), {truncated: ids.length >= limits.ids})
 }
 // a case of the user's stores
+// a case of the user's stores, checked on the case itself (the lists' rule: its store, a link to a store order, or a store's
+// support queue)
 function storeRequest(s, requestId) {
-    if (!requestId || !requestIdsOf(s.storeIds, null).includes(requestId)) unavailable("Case", requestId)
-    return one(REQUEST, {requestId})
+    const request = requestId ? one(REQUEST, {requestId}) : null
+    const isCase = !!request && !!one("mantle.request.support.CaseProfile", {requestId})
+    const ofStore = () =>
+        s.storeIds.includes(request.productStoreId) ||
+        rows("mantle.request.RequestRecord", {requestId, recordEntityName: ORDER}).some(link =>
+            s.storeIds.includes(one(ORDER, {orderId: link.recordId})?.productStoreId)
+        ) ||
+        (!!request.requestCategoryId &&
+            rowsIn("mantle.product.store.ProductStoreSetting", "productStoreId", s.storeIds, {
+                settingTypeEnumId: "PsstCheckoutSupportQueue",
+                settingValue: request.requestCategoryId
+            }).some(row => lib.active(row)))
+    if (!isCase || !ofStore()) unavailable("Case", requestId)
+    return request
 }
 // get#StoreRequest (RequestDetail's Commerce branch): a case of the user's stores, read only, with its conversation (its
 // messages and internal notes, newest first); Customer Service works it.
