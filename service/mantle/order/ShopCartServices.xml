@@ -113,4 +113,18 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("releaseCart", input)</script>
         </actions>
     </service>
+
+    <!-- Commerce P10: the cart recovery link (CartRecovery.js) -->
+    <service verb="recover" noun="Cart" authenticate="anonymous-all" allow-remote="false">
+        <description>recoverCart (a token write: the recovery link's one-time token, input.token): the signed-in account whose cart it is spends it; the cart's capability is rotated into the session (result.token), its lines repriced and the ones that cannot be bought now named (unavailableItems). A visitor is SIGN_IN_REQUIRED and the token kept; a spent, expired, replaced or revoked token, or another account's, is NOT_AVAILABLE.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/CartRecovery.js").execute("recoverCart", input)</script>
+        </actions>
+    </service>
 </services>

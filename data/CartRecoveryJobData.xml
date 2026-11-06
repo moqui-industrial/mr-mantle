@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Cart recovery's job (impl-commerce P10): every ten minutes, the carts of the stores that enabled recovery idle past their
+    delay, each in its own transaction; a store that has not enabled it is never read. -->
+<entity-facade-xml type="seed-initial">
+    <moqui.service.job.ServiceJob jobName="run_CartRecovery" description="Send cart recovery for stores that enabled it"
+            serviceName="mantle.order.StoreOperationsServices.run#CartRecovery" cronExpression="0 0/10 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Cart recovery (impl-commerce P10; design-commerce §6 CartDetail, §8 RecoveryPolicy): the RecoveryPolicy's dated store
+    setting types (enabled, the inactivity delay in minutes, the sender, the most sends a cart gets, the recovery window in
+    days), the ledger source whose build makes each message and its one-time link, and the job that raises one abandonment
+    event per cart and inactivity window for the stores that enabled recovery (nothing is sent for any other store). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.Enumeration description="Cart recovery enabled" enumId="PsstRecoveryEnabled" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Cart recovery delay (minutes)" enumId="PsstRecoveryDelay" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Cart recovery sender" enumId="PsstRecoverySender" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Cart recovery most sends" enumId="PsstRecoveryMaxSends" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration description="Cart recovery window (days)" enumId="PsstRecoveryRetention" enumTypeId="ProductStoreSettingType"/>
+    <moqui.basic.Enumeration enumId="MdsrcCartRecovery" description="Cart recovery" sequenceNum="3"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.StoreOperationsServices.build#CartRecovery"/>
+</entity-facade-xml>

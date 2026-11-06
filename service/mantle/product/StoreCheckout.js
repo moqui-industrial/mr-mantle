@@ -1034,7 +1034,14 @@ const optionSources = {
             value: row.uomId,
             label: row.uomId + " · " + (row.description || "")
         }))
-    }
+    },
+    // P10 (F118): the store organization's current lists a news opt-in may name (never a topic's list)
+    newsLists: store =>
+        rows("mantle.marketing.contact.ContactList", {ownerPartyId: store.organizationPartyId})
+            .filter(row => !["CART_REMINDER", "REVIEW_REQUEST"].includes(row.contactListTypeEnumId))
+            .filter(row => !row.archivedDate || ms(row.archivedDate) > nowMs())
+            .slice(0, choiceLimit)
+            .map(row => ({value: row.contactListId, label: row.contactListName || row.contactListId}))
 }
 // find#CheckoutOptions: the options of a checkout form's drop-down, the values its save accepts.
 function findCheckoutOptions(p) {
@@ -1217,6 +1224,9 @@ const operations = {
     settingAt,
     // Shop P5: the live page rule for the terms page a checkout shows
     livePage,
+    // P10 (CartRecovery.js): a policy table's dated settings read and saved, as the checkout policy's are
+    settingsOf,
+    storeSettings,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown checkout operation " + op)
         return operations[op](parameters || {})

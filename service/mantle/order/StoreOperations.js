@@ -16,8 +16,8 @@
 //   placements (a placementPending checkout refused ORDER_CHANGED or past its tries: the order is still open, so it opens as
 //   a cart; impl-shop F85); RecurringTemplate bases are left out once Shop P7 marks them;
 // - carts: OrderOpen store orders with the shopper's activity (StoreCartAccess.lastActivityDate, never lastUpdatedStamp)
-//   and their Shop checkout's phase; abandoned is inactive past the store's delay (an hour until Commerce P10's
-//   RecoveryPolicy sets it) with no live checkout; a cart staff made (Order again) has no shopper activity;
+//   and their Shop checkout's phase; abandoned is inactive past the store's delay (its RecoveryPolicy's, Commerce P10, an
+//   hour by default) with no live checkout; a cart staff made (Order again) has no shopper activity;
 // - returns: ReturnHeaders by the store of their source order lines (StoreReturnItemView);
 // - customers: the parties with an order or a signed-in cart in the user's stores, never a party directory;
 // - requests: support cases by Request.productStoreId (Customer Service's contactCase sets it from the order's store, the
@@ -48,7 +48,7 @@ const limits = {
     detail: 50,
     // Home's recent orders
     recent: 8,
-    // a cart is abandoned after this long without shopper activity (until Commerce P10's RecoveryPolicy sets the store's)
+    // a cart is abandoned after this long without shopper activity unless the store's RecoveryPolicy (Commerce P10) sets it
     abandonMinutes: 60,
     // a Shop placement past this many tries waits for staff (ShopCheckout.js limits.placementTries)
     placementTries: 5,
@@ -64,7 +64,11 @@ const voidPaymentStatuses = ["PmntCancelled", "PmntVoid", "PmntDeclined"]
 const deliveryExceptions = ["MdsFailed", "MdsUncertain", "MdsRetry"]
 // each delivery-ledger source's event key to the order it is about (Shop P6's download notice; P9's review requests and
 // P10's recovery add theirs)
-const deliveryOrders = {MdsrcShopDownloads: key => /^shopDownloads:(.+)$/.exec(String(key || ""))?.[1] || null}
+const deliveryOrders = {
+    MdsrcShopDownloads: key => /^shopDownloads:(.+)$/.exec(String(key || ""))?.[1] || null,
+    // P10: a cart's recovery (cartRecovery:{orderId}:{window})
+    MdsrcCartRecovery: key => /^cartRecovery:([^:]+):/.exec(String(key || ""))?.[1] || null
+}
 // the attention filters of the order worklist, each a set of order ids
 const attentionFilters = {
     paymentHold: storeIds => heldOrderIds(storeIds, "OhtPayment"),
@@ -598,10 +602,23 @@ function reorderStoreOrder(p) {
 }
 
 // ===== carts =====
+// The store's abandonment delay: its RecoveryPolicy's (Commerce P10), an hour by default; read once a store per call (facts).
+function delayMinutes(facts, productStoreId) {
+    if (Object.hasOwn(facts.delays, productStoreId)) return facts.delays[productStoreId]
+    let minutes = limits.abandonMinutes
+    try {
+        minutes = ec.resource.script("component://mr-mantle/service/mantle/order/CartRecovery.js").delayOf(productStoreId)
+    } catch (error) {
+        ec.logger.warn("Cart recovery delay of store " + productStoreId + " not read: " + error.message)
+    }
+    facts.delays[productStoreId] = minutes
+    return minutes
+}
 function cartFacts(orderIds) {
     return {
         access: rowsIn(CART, "orderId", orderIds),
-        checkouts: rowsIn(CHECKOUT, "orderId", orderIds)
+        checkouts: rowsIn(CHECKOUT, "orderId", orderIds),
+        delays: {}
     }
 }
 function cartRow(order, facts) {
@@ -613,7 +630,7 @@ function cartRow(order, facts) {
         .sort((a, b) => (ms(b.createdDate) ?? 0) - (ms(a.createdDate) ?? 0))[0]
     const activityMs = ms(access?.lastActivityDate)
     const live = !!checkout && liveCheckoutStatuses.includes(checkout.statusId)
-    const abandoned = activityMs != null && !live && nowMs() - activityMs > limits.abandonMinutes * 60000
+    const abandoned = activityMs != null && !live && nowMs() - activityMs > delayMinutes(facts, order.productStoreId) * 60000
     const customerIds = customersOf(order.orderId)
     // a guest's cart (no signed-in account) shows no invented identity
     const signedIn = !!access?.customerPartyId
@@ -1335,6 +1352,10 @@ const operations = {
     storeCallRecords
 }
 ;({
+    // Commerce P10 (CartRecovery.js): the store scope and a cart of it, and a delivery's row as Commerce shows it
+    scope,
+    storeOrder,
+    deliveryRow,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store operation " + op)
         return operations[op](parameters || {})

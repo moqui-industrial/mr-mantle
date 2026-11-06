@@ -710,4 +710,54 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="options" from="found.options"/>
         </actions>
     </service>
+
+    <!-- Commerce P10: RecoveryPolicy (CartRecovery.js), with F118's checkout opt-ins and news list -->
+    <service verb="get" noun="CartRecoveryPolicy" allow-remote="false">
+        <description>A store's RecoveryPolicy (design-commerce §8): whether recovery is on (nothing is sent until it is), the
+            inactivity delay, the sender (built-in recovery), the most sends a cart gets, the recovery window and the
+            PsetCartRecovery binding, each a dated setting with its default and a later change; and (F118) the checkout's
+            optional emails (PsstCheckoutOptIns) and the news list (PsstNewsList). COMMERCE_VIEW and the store scope.</description>
+        <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="values" type="Map"/>
+            <parameter name="view" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('getRecoveryPolicy', context)"/>
+            <set field="values" from="found.values"/>
+            <set field="view" from="found.view"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CartRecoveryPolicy" allow-remote="false">
+        <description>The RecoveryPolicy from a date (now when empty, never past): enabled (true or false), delayMinutes (15 to
+            43200), sender (builtin), maxSends (1 to 5), retentionDays (1 to 365), and (F118) checkoutOptIns (none, or some
+            of reviewRequests, cartReminders, news) and newsListId (a current list of the store's organization). Each changed
+            field is a dated setting ending the one it replaces; an empty one ends its setting (its default applies); a field
+            not given is left. A change needs its reason. COMMERCE_STORE_EDIT and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="enabled"/>
+            <parameter name="delayMinutes"/>
+            <parameter name="sender"/>
+            <parameter name="maxSends"/>
+            <parameter name="retentionDays"/>
+            <parameter name="checkoutOptIns"/>
+            <parameter name="newsListId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="changed" type="List"/></out-parameters>
+        <actions>
+            <script><![CDATA[
+                // a field not given (null) is left as it is; an empty one ends its setting
+                const given = {}
+                for (const name of ['productStoreId', 'enabled', 'delayMinutes', 'sender', 'maxSends', 'retentionDays',
+                        'checkoutOptIns', 'newsListId', 'fromDate', 'changeReason'])
+                    if (context[name] != null) given[name] = context[name]
+                changed = ec.resource.script('component://mr-mantle/service/mantle/order/CartRecovery.js').execute('storeRecoveryPolicy', given).changed
+            ]]></script>
+        </actions>
+    </service>
 </services>
