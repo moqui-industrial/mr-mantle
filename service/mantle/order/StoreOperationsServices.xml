@@ -518,4 +518,36 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="suppress" from="built.suppress"/>
         </actions>
     </service>
+    <!-- Commerce P11 (COM-REPORTS, StoreReports.js): the report definition's query that Commerce's Reports screen reads -->
+    <service verb="get" noun="CartRecoverySummary" allow-remote="false">
+        <description>The cart recovery funnel of the user's stores (design-commerce §3 CartRecovery) for the Shop carts opened in the period, by store and currency: opened, placed, abandoned (sent a reminder, idle past the store's delay in no live checkout, or recovered), of those signed in, recovery sends (a suppressed one left out), delivered, recovered orders (the link used at or after the cart's latest send and the order placed, F130) and their value; totals per currency. An open cart is never an order; RecurringTemplate bases are left out once Shop P7 marks them (F112). COMMERCE_VIEW and the store scope (RECORD_UNAVAILABLE outside it), PERIOD_INVALID.</description>
+        <in-parameters>
+            <parameter name="productStoreIds" type="List"><description>The stores, each in the user's store scope; empty, every
+                one of theirs</description><parameter name="productStoreId"/></parameter>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"><description>The period's start; 30 days before its end when empty</description></parameter>
+            <parameter name="thruDate" type="Timestamp"><description>The period's end (exclusive); now when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"/>
+            <parameter name="totals" type="List"><description>One row per currency, never summed across currencies</description></parameter>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="periodText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreReports.js').execute('cartRecoverySummary', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="totals" from="found.totals"/>
+            <set field="truncated" from="found.truncated"/>
+            <set field="productStoreIds" from="found.productStoreIds"/>
+            <set field="fromDate" from="found.fromDate"/>
+            <set field="thruDate" from="found.thruDate"/>
+            <set field="asOf" from="found.asOf"/>
+            <set field="periodText" from="found.periodText"/>
+        </actions>
+    </service>
 </services>

@@ -29,4 +29,30 @@
         <alias name="orderId" entity-alias="OHDR"/>
         <alias name="productStoreId" entity-alias="OHDR"/>
     </view-entity>
+    <view-entity entity-name="StoreOrderHoldView" package="mantle.order">
+        <description>An order's hold reason with the order's store (Commerce P11, F114), so a store's open holds are found in
+            the query rather than among every store's.</description>
+        <member-entity entity-alias="OHRS" entity-name="mantle.order.OrderHoldReason"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="OHRS">
+            <key-map field-name="orderId"/></member-entity>
+        <alias name="orderHoldReasonId" entity-alias="OHRS"/>
+        <alias name="orderId" entity-alias="OHRS"/>
+        <alias name="holdTypeEnumId" entity-alias="OHRS"/>
+        <alias name="releasedDate" entity-alias="OHRS"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
+    <view-entity entity-name="StoreOrderChangeView" package="mantle.request">
+        <description>An order change request (Customer Service's, F37) with its order's store (Commerce P11, F114), so a
+            store's open cancel requests are found in the query rather than among every store's.</description>
+        <member-entity entity-alias="RQST" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="RQST">
+            <key-map field-name="orderId"/></member-entity>
+        <alias name="requestId" entity-alias="RQST"/>
+        <alias name="requestTypeEnumId" entity-alias="RQST"/>
+        <alias name="orderChangeKindEnumId" entity-alias="RQST"/>
+        <alias name="statusId" entity-alias="RQST"/>
+        <alias name="changeAppliedDate" entity-alias="RQST"/>
+        <alias name="orderId" entity-alias="OHDR"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
 </entities>

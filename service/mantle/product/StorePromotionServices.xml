@@ -363,4 +363,37 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="locked" from="found.locked"/>
         </actions>
     </service>
+    <!-- Commerce P11 (COM-REPORTS, StoreReports.js): the report definition's query that Commerce's Reports screen reads -->
+    <service verb="get" noun="PromotionUseSummary" allow-remote="false">
+        <description>Promotion use of the user's stores (design-commerce §3 PromotionUse) placed in the period, by promotion, code and currency: orders, uses, the discount, the net sales of those orders (product lines less discounts) and the uses left of a promotion's or code's total limit; totals per currency (an order counted once). COMMERCE_VIEW and the store scope; a promotion outside it RECORD_UNAVAILABLE; PERIOD_INVALID.</description>
+        <in-parameters>
+            <parameter name="productStoreIds" type="List"><description>The stores, each in the user's store scope; empty, every
+                one of theirs</description><parameter name="productStoreId"/></parameter>
+            <parameter name="productStoreId"/>
+            <parameter name="fromDate" type="Timestamp"><description>The period's start; 30 days before its end when empty</description></parameter>
+            <parameter name="thruDate" type="Timestamp"><description>The period's end (exclusive); now when empty</description></parameter>
+            <parameter name="storePromotionId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"/>
+            <parameter name="totals" type="List"><description>One row per currency, never summed across currencies</description></parameter>
+            <parameter name="truncated" type="Boolean"/>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="periodText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreReports.js').execute('promotionUseSummary', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="totals" from="found.totals"/>
+            <set field="truncated" from="found.truncated"/>
+            <set field="productStoreIds" from="found.productStoreIds"/>
+            <set field="fromDate" from="found.fromDate"/>
+            <set field="thruDate" from="found.thruDate"/>
+            <set field="asOf" from="found.asOf"/>
+            <set field="periodText" from="found.periodText"/>
+        </actions>
+    </service>
 </services>

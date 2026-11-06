@@ -167,18 +167,15 @@ function openHolds(orderIds) {
 }
 function heldOrderIds(storeIds, holdTypeEnumId) {
     if (!storeIds.length) return []
-    let query = find(HOLD).condition("releasedDate", "is-null", null).selectField("orderId").distinct(true).limit(limits.ids)
+    // the store is in the query (F114): the first 500 of every store's holds would miss some of these stores'
+    let query = find("mantle.order.StoreOrderHoldView")
+        .condition("releasedDate", "is-null", null)
+        .condition("productStoreId", "in", storeIds)
+        .selectField("orderId")
+        .distinct(true)
+        .limit(limits.ids)
     if (holdTypeEnumId) query = query.condition("holdTypeEnumId", holdTypeEnumId)
-    const ids = Array.from(query.list()).map(row => row.orderId)
-    return ids.length
-        ? Array.from(
-              find(ORDER)
-                  .condition("orderId", "in", ids)
-                  .condition("productStoreId", "in", storeIds)
-                  .selectField("orderId")
-                  .list()
-          ).map(row => row.orderId)
-        : []
+    return Array.from(query.list()).map(row => row.orderId)
 }
 // open order changes that cancel (Customer Service's proposals, F37), by order
 function cancelRequests(orderIds) {
@@ -188,25 +185,19 @@ function cancelRequests(orderIds) {
 }
 function cancelRequestOrderIds(storeIds) {
     if (!storeIds.length) return []
-    const ids = unique(
+    // the store is in the query (F114), as heldOrderIds
+    return unique(
         Array.from(
-            find(REQUEST, {requestTypeEnumId: "RqtOrderChange", orderChangeKindEnumId: "OckCancel"})
+            find("mantle.request.StoreOrderChangeView", {requestTypeEnumId: "RqtOrderChange", orderChangeKindEnumId: "OckCancel"})
                 .condition("statusId", "not-in", closedRequestStatuses)
                 .condition("changeAppliedDate", "is-null", null)
+                .condition("productStoreId", "in", storeIds)
                 .selectField("orderId")
+                .distinct(true)
                 .limit(limits.ids)
                 .list()
         ).map(row => row.orderId)
     )
-    return ids.length
-        ? Array.from(
-              find(ORDER)
-                  .condition("orderId", "in", ids)
-                  .condition("productStoreId", "in", storeIds)
-                  .selectField("orderId")
-                  .list()
-          ).map(row => row.orderId)
-        : []
 }
 // a Shop placement waiting for staff: placementPending with an approved payment, refused ORDER_CHANGED or past its tries
 // (impl-shop F85); the job no longer retries it
@@ -343,8 +334,16 @@ function findStoreOrders(p) {
     const page = lib.page(orderQuery(s, p, storeIds), p, "orders", orderQuery(s, p, storeIds).count())
     return Object.assign({}, page, {orders: shape(page.rows), rows: undefined, truncated: false})
 }
+// RecurringTemplate bases (F112) are never a store's orders: Shop P7 marks them (Sales' RecurringTemplate marker, X5), and
+// the condition goes here, in the one function the order worklist and the store reports (StoreReports.js) call. Until a
+// base is marked nothing is left out.
+function withoutRecurringBases(query) {
+    return query
+}
 function orderQuery(s, p, storeIds) {
-    let query = s.own(find(ORDER).condition("productStoreId", "in", storeIds).condition("statusId", "!=", "OrderOpen"))
+    let query = withoutRecurringBases(
+        s.own(find(ORDER).condition("productStoreId", "in", storeIds).condition("statusId", "!=", "OrderOpen"))
+    )
     if (text(p.term)) query = query.condition(termCondition(["orderId", "orderName", "externalId", "displayId"], text(p.term)))
     if (p.statusId) query = query.condition("statusId", p.statusId)
     if (p.fromDate) query = query.condition("placedDate", ">=", p.fromDate)
@@ -1356,6 +1355,9 @@ const operations = {
     scope,
     storeOrder,
     deliveryRow,
+    // P11 (StoreReports.js): the placed statuses and the RecurringTemplate bases' condition (F112)
+    placedStatuses,
+    withoutRecurringBases,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store operation " + op)
         return operations[op](parameters || {})
