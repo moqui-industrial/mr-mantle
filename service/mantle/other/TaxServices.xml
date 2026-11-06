@@ -71,6 +71,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <description>The rate version applied, from a local rate.</description></parameter>
                 <parameter name="taxableAmount" type="BigDecimal"/>
                 <parameter name="taxPercentage" type="BigDecimal"/>
+            <parameter name="nonDeductiblePercentage" type="BigDecimal"/>
                 <parameter name="exactTaxAmount" type="BigDecimal"/>
                 <parameter name="taxRoundingAmount" type="BigDecimal"/>
                 <parameter name="exemptReason">
@@ -103,7 +104,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-delete-by-condition entity-name="mantle.order.OrderItem">
                 <econdition field-name="orderId"/>
                 <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
-                <econdition field-name="itemTypeEnumId" operator="in" value="ItemSalesTax,ItemVatTax"/>
+                <econdition field-name="itemTypeEnumId" operator="in" value="ItemSalesTax,ItemVatTax,ItemVatTaxTotal"/>
             </entity-delete-by-condition>
 
             <!-- build the parameters for the calculate#SalesTax interface -->
@@ -168,20 +169,29 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- add tax child OrderItems to db -->
                 <iterate list="taxResults" entry="taxResult">
                     <if condition="taxResult.taxAmount == null || toDecimal(taxResult.taxAmount).isZero()"><continue/></if>
-                    <set field="orderItem" from="orderItemList.find((it) =&gt; it.orderItemSeqId == taxResult.itemId)"/>
-                    <if condition="orderItem == null">
-                        <log level="warn" message="In calculate#OrderSalesTax got back entry with invalid orderItemSeqId ${taxResult.itemId} for order ${orderId}, skipping"/>
-                        <continue/>
-                    </if>
-                    <set field="taxAmount" from="toDecimal(taxResult.taxAmount).setScale(3, 'HALF_UP')"/>
                     <entity-find-one entity-name="mantle.other.tax.TaxAuthority" value-field="taxAuthority" cache="true">
                         <field-map field-name="taxAuthorityId" from="taxResult.taxAuthorityId"/></entity-find-one>
+                    <set field="taxAmount" from="toDecimal(taxResult.taxAmount).setScale(3, 'HALF_UP')"/>
                     <set field="itemDescription" value="${taxAuthority?.description ? taxAuthority.description + ' ' : ''}${taxResult.taxName||''}"/>
-                    <service-call name="create#mantle.order.OrderItem" out-map="context"
-                            in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId, parentItemSeqId:taxResult.itemId,
-                                itemTypeEnumId:'ItemSalesTax', quantity:((taxResult.taxQuantity != null &amp;&amp; !toDecimal(taxResult.taxQuantity).isZero()) ? taxResult.taxQuantity : orderItem.quantity),
-                                unitAmount:taxAmount, sourcePercentage:toDecimal(taxResult.taxRate).multiply(100),
-                                taxAuthorityId:taxResult.taxAuthorityId, itemDescription:itemDescription}"/>
+                    <if condition="taxAuthority?.taxAuthorityRateTypeEnumId == 'TartVatTax' || taxResult.isVat"><then>
+                        <!-- VAT tax item grouped by rate bucket -->
+                        <service-call name="create#mantle.order.OrderItem" out-map="context"
+                                in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId,
+                                    itemTypeEnumId:(taxResult.itemTypeEnumId || 'ItemVatTaxTotal'), quantity:1,
+                                    unitAmount:taxAmount, sourcePercentage:toDecimal(taxResult.taxRate).multiply(100),
+                                    taxAuthorityId:taxResult.taxAuthorityId, itemDescription:itemDescription}"/>
+                    </then><else>
+                        <set field="orderItem" from="orderItemList.find((it) =&gt; it.orderItemSeqId == taxResult.itemId)"/>
+                        <if condition="orderItem == null">
+                            <log level="warn" message="In calculate#OrderSalesTax got back entry with invalid orderItemSeqId ${taxResult.itemId} for order ${orderId}, skipping"/>
+                            <continue/>
+                        </if>
+                        <service-call name="create#mantle.order.OrderItem" out-map="context"
+                                in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId, parentItemSeqId:taxResult.itemId,
+                                    itemTypeEnumId:'ItemSalesTax', quantity:((taxResult.taxQuantity != null &amp;&amp; !toDecimal(taxResult.taxQuantity).isZero()) ? taxResult.taxQuantity : orderItem.quantity),
+                                    unitAmount:taxAmount, sourcePercentage:toDecimal(taxResult.taxRate).multiply(100),
+                                    taxAuthorityId:taxResult.taxAuthorityId, itemDescription:itemDescription}"/>
+                    </else></if>
                 </iterate>
             </iterate>
         </actions>
@@ -267,6 +277,49 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="rows" from="simulated.rows"/>
             <set field="reasonCode" from="simulated.reasonCode"/>
             <set field="message" from="simulated.message"/>
+        </actions>
+    </service>
+    <service verb="calculate" noun="NonDeductibleTax">
+        <description>Calculate non-deductible VAT amount for a purchase item (fixed asset or expense).
+            Uses nonDeductiblePercentage directly if provided, or from the taxAuthorityRateId, or from product.notDeductibleTaxCode.</description>
+        <in-parameters>
+            <parameter name="productId"/>
+            <parameter name="itemTotal" required="true" type="BigDecimal"/>
+            <parameter name="taxPercentage" type="BigDecimal"/>
+            <parameter name="nonDeductiblePercentage" type="BigDecimal"/>
+            <parameter name="taxAuthorityRateId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="taxPercentage" type="BigDecimal"/>
+            <parameter name="nonDeductiblePercentage" type="BigDecimal"/>
+            <parameter name="nonDeductibleTaxAmount" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <if condition="productId">
+                <entity-find-one entity-name="mantle.product.Product" value-field="product" cache="true">
+                    <field-map field-name="productId"/></entity-find-one>
+            </if>
+            <if condition="taxPercentage == null &amp;&amp; product?.taxCode">
+                <set field="taxPercentage" from="toDecimal(product.taxCode)"/>
+            </if>
+            <if condition="taxAuthorityRateId">
+                <entity-find-one entity-name="mantle.other.tax.TaxAuthorityRate" value-field="taxAuthorityRate" cache="true">
+                    <field-map field-name="taxAuthorityRateId"/></entity-find-one>
+                <if condition="taxPercentage == null">
+                    <set field="taxPercentage" from="taxAuthorityRate?.taxPercentage"/>
+                </if>
+                <if condition="nonDeductiblePercentage == null">
+                    <set field="nonDeductiblePercentage" from="taxAuthorityRate?.nonDeductiblePercentage"/>
+                </if>
+            </if>
+            <if condition="nonDeductiblePercentage == null &amp;&amp; product?.notDeductibleTaxCode">
+                <set field="nonDeductiblePercentage" from="toDecimal(product.notDeductibleTaxCode)"/>
+            </if>
+            <set field="taxPercentage" from="taxPercentage != null ? toDecimal(taxPercentage) : toDecimal(0)"/>
+            <set field="nonDeductiblePercentage" from="nonDeductiblePercentage != null ? toDecimal(nonDeductiblePercentage) : toDecimal(0)"/>
+            <set field="taxRate" from="taxPercentage.divide(100)"/>
+            <set field="nonDeductibleTaxRate" from="nonDeductiblePercentage.divide(100)"/>
+            <set field="nonDeductibleTaxAmount" from="toDecimal(itemTotal).multiply(taxRate).multiply(nonDeductibleTaxRate).setScale(2, 'HALF_UP')"/>
         </actions>
     </service>
 
@@ -404,6 +457,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productStoreId"/>
             <parameter name="productCategoryId"/>
             <parameter name="taxPercentage" type="BigDecimal"/>
+            <parameter name="nonDeductiblePercentage" type="BigDecimal"/>
             <parameter name="taxShipping"/>
             <parameter name="minItemPrice" type="BigDecimal"/>
             <parameter name="minPurchase" type="BigDecimal"/>
@@ -447,7 +501,8 @@ along with this software (see the LICENSE.md file). If not, see
                     organizationPartyId:organizationPartyId,
                     productStoreId:(replaced ? replaced.productStoreId : productStoreId) || null,
                     productCategoryId:(replaced ? replaced.productCategoryId : productCategoryId) || null,
-                    taxPercentage:taxPercentage, taxShipping:taxShipping || replaced?.taxShipping || 'N',
+                    taxPercentage:taxPercentage, nonDeductiblePercentage:nonDeductiblePercentage ?? replaced?.nonDeductiblePercentage ?? null,
+                    taxShipping:taxShipping || replaced?.taxShipping || 'N',
                     minItemPrice:minItemPrice ?? replaced?.minItemPrice ?? null,
                     minPurchase:minPurchase ?? replaced?.minPurchase ?? null,
                     fromDate:fromDate || ec.user.nowTimestamp, thruDate:thruDate || null,

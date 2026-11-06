@@ -691,6 +691,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="taxCalculated" type="text-indicator"><description>Y for a tax line a tax gateway calculated
             (calculate#InvoiceSalesTax), which a new calculation replaces; manual tax lines are left as they
             are.</description></field>
+        <field name="nonDeductiblePercentage" type="number-decimal"><description>Percentage of VAT that is non-deductible.</description></field>
+        <field name="nonDeductibleAmount" type="currency-precise"><description>Amount of VAT that is non-deductible.</description></field>
 
         <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
         <relationship type="one-nofk" title="Parent" related="mantle.account.invoice.InvoiceItem" short-alias="parent">

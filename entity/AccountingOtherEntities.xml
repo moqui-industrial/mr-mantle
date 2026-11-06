@@ -288,6 +288,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="minPurchase" type="currency-amount"/>
         <field name="taxShipping" type="text-indicator"><description>Y to tax shipping lines.</description></field>
         <field name="taxPercentage" type="number-decimal" enable-audit-log="update"/>
+        <field name="nonDeductiblePercentage" type="number-decimal" enable-audit-log="update"/>
         <field name="fromDate" type="date-time" enable-audit-log="update"/>
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="description" type="text-medium"/>

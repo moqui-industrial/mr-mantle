@@ -9,7 +9,7 @@ const {find, one, rows, call, denied, active, ms} = lib
 const RATE = "mantle.other.tax.TaxAuthorityRate"
 const AUTHORITY_PARTY = "mantle.other.tax.TaxAuthorityParty"
 const ITEM = "mantle.account.invoice.InvoiceItem"
-const taxTypes = ["ItemSalesTax", "ItemVatTax"]
+const taxTypes = ["ItemSalesTax", "ItemVatTax", "ItemVatTaxTotal"]
 const addressPurposes = ["PostalShippingDest", "PostalBilling", "PostalPrimary"]
 
 function productItemTypes() {
@@ -141,7 +141,7 @@ function local(p) {
                 "in",
                 authorities.map(row => row.taxAuthorityId)
             )
-            .condition("rateTypeEnumId", "TarSalesTax")
+            .condition("rateTypeEnumId", "in", ["TarSalesTax", "TarVatTax"])
             .list()
     ).filter(row => (!row.organizationPartyId || organizations.includes(row.organizationPartyId)) && active(row, date))
     const results = []
@@ -152,6 +152,8 @@ function local(p) {
               )
             : null
         const effective = rates.filter(row => row.taxAuthorityId === authority.taxAuthorityId)
+        const isVatAuthority = authority.taxAuthorityRateTypeEnumId === "TartVatTax"
+        const vatBuckets = new Map()
         for (const item of items) {
             const rate = rateFor(authority, effective, item, p, date, categoriesOf(item.productId, date))
             if (!rate) continue
@@ -165,23 +167,52 @@ function local(p) {
                         : exemption
                           ? "Exempt" + (exemption.partyTaxId ? " (" + exemption.partyTaxId + ")" : "")
                           : null
-            const taxable = item.taxable
-            const percentage = toDecimal(rate.taxPercentage ?? 0)
-            const exact = reason ? toDecimal(0) : taxable.multiply(percentage).divide(toDecimal(100))
+            const isVat = isVatAuthority || rate.rateTypeEnumId === "TarVatTax"
+            if (isVat && !reason) {
+                const key = rate.taxAuthorityRateId || (authority.taxAuthorityId + "_" + (rate.taxPercentage ?? 0))
+                if (!vatBuckets.has(key)) vatBuckets.set(key, {rate, taxableAmount: toDecimal(0)})
+                const bucket = vatBuckets.get(key)
+                bucket.taxableAmount = bucket.taxableAmount.add(item.taxable)
+            } else {
+                const taxable = item.taxable
+                const percentage = toDecimal(rate.taxPercentage ?? 0)
+                const exact = reason ? toDecimal(0) : taxable.multiply(percentage).divide(toDecimal(100))
+                const rounded = round(exact)
+                results.push({
+                    itemId: item.itemId,
+                    taxQuantity: toDecimal(1),
+                    taxAmount: rounded,
+                    taxRate: percentage.divide(toDecimal(100)),
+                    taxAuthorityId: authority.taxAuthorityId,
+                    taxName: authority.description || authority.taxAuthorityId,
+                    taxAuthorityRateId: rate.taxAuthorityRateId,
+                    taxableAmount: taxable,
+                    taxPercentage: percentage,
+                    exactTaxAmount: exact,
+                    taxRoundingAmount: rounded.subtract(exact),
+                    exemptReason: reason
+                })
+            }
+        }
+        for (const [key, bucket] of vatBuckets.entries()) {
+            const percentage = toDecimal(bucket.rate.taxPercentage ?? 0)
+            const exact = bucket.taxableAmount.multiply(percentage).divide(toDecimal(100))
             const rounded = round(exact)
             results.push({
-                itemId: item.itemId,
+                isVat: true,
+                itemId: "VAT_" + key,
+                itemTypeEnumId: "ItemVatTaxTotal",
                 taxQuantity: toDecimal(1),
                 taxAmount: rounded,
                 taxRate: percentage.divide(toDecimal(100)),
                 taxAuthorityId: authority.taxAuthorityId,
-                taxName: authority.description || authority.taxAuthorityId,
-                taxAuthorityRateId: rate.taxAuthorityRateId,
-                taxableAmount: taxable,
+                taxName: (authority.description || authority.taxAuthorityId) + " " + percentage + "%",
+                taxAuthorityRateId: bucket.rate.taxAuthorityRateId,
+                taxableAmount: bucket.taxableAmount,
                 taxPercentage: percentage,
                 exactTaxAmount: exact,
                 taxRoundingAmount: rounded.subtract(exact),
-                exemptReason: reason
+                exemptReason: null
             })
         }
     }
@@ -287,8 +318,8 @@ function invoice(p) {
     const wanted = Array.from(out.taxResults || [])
         .filter(result => result.taxAmount != null && !toDecimal(result.taxAmount).isZero())
         .map(result => ({
-            parentItemSeqId: result.itemId,
-            itemTypeEnumId: "ItemSalesTax",
+            parentItemSeqId: result.isVat ? null : result.itemId,
+            itemTypeEnumId: result.isVat ? (result.itemTypeEnumId || "ItemVatTaxTotal") : "ItemSalesTax",
             quantity: toDecimal(result.taxQuantity ?? 1),
             amount: ec.l10n.roundCurrency(toDecimal(result.taxAmount), currency),
             taxAuthorityId: result.taxAuthorityId,
@@ -298,7 +329,7 @@ function invoice(p) {
                 result.taxPercentage ?? (result.taxRate != null ? toDecimal(result.taxRate).multiply(toDecimal(100)) : null),
             taxRoundingAmount: result.taxRoundingAmount ?? null,
             taxCalculated: "Y",
-            description: (result.taxName || "Sales") + " tax"
+            description: (result.taxName || (result.isVat ? "VAT" : "Sales")) + " tax"
         }))
     const taxTotal = wanted.reduce((sum, line) => sum.add(line.quantity.multiply(line.amount)), toDecimal(0))
     const same =

@@ -110,6 +110,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- ==== create entries for invoice items ==== -->
 
             <set field="invoiceTotal" from="toDecimal(0)"/>
+            <set field="nonDeductibleTaxTotal" from="toDecimal(0)"/>
             <iterate list="invoiceItemList" entry="invoiceItem">
                 <!-- skip adjustment items, handle later -->
                 <if condition="invoiceItem.isAdjustment == 'Y'"><continue/></if>
@@ -276,30 +277,85 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <!-- entry for to Party (purchase invoice) -->
                 <if condition="toPartyAcctgPreference != null">
-                    <!-- use InvoiceItem.overrideGlAccountId if specified -->
-                    <set field="itemGlAccountId" from="invoiceItem.overrideGlAccountId"/>
-                    <!-- use InvoiceItemGlAccount setting (by itemTypeEnumId), or just get itemGlAccountTypeEnumId -->
-                    <if condition="!itemGlAccountId"><then>
+                    <entity-find-one entity-name="moqui.basic.Enumeration" value-field="itemTypeEnum" cache="true">
+                        <field-map field-name="enumId" from="invoiceItem.itemTypeEnumId"/></entity-find-one>
+                    <set field="isVatItem" from="invoiceItem.itemTypeEnumId == 'ItemVatTax' || itemTypeEnum?.parentEnumId == 'ItemVatTax'"/>
+                    <if condition="!isVatItem">
+                        <!-- calculate non-deductible VAT on purchase item (asset or expense) -->
+                        <set field="nonDeductibleAmount" from="null"/>
+                        <if condition="invoiceItem.nonDeductibleAmount != null">
+                            <set field="nonDeductibleAmount" from="toDecimal(invoiceItem.nonDeductibleAmount)"/>
+                        <else-if condition="invoiceItem.nonDeductiblePercentage != null || invoiceItem.taxAuthorityRateId || invoiceItem.productId">
+                            <service-call name="mantle.other.TaxServices.calculate#NonDeductibleTax"
+                                    in-map="{productId:invoiceItem.productId, itemTotal:itemTotal,
+                                        taxPercentage:invoiceItem.taxPercentage,
+                                        nonDeductiblePercentage:invoiceItem.nonDeductiblePercentage,
+                                        taxAuthorityRateId:invoiceItem.taxAuthorityRateId}"
+                                    out-map="nonDeductibleOut"/>
+                            <set field="nonDeductibleAmount" from="nonDeductibleOut?.nonDeductibleTaxAmount"/>
+                        </else-if></if>
+                        <if condition="nonDeductibleAmount != null &amp;&amp; !toDecimal(nonDeductibleAmount).isZero()">
+                            <set field="itemTotal" from="itemTotal.add(nonDeductibleAmount)"/>
+                            <set field="nonDeductibleTaxTotal" from="nonDeductibleTaxTotal.add(nonDeductibleAmount)"/>
+                        </if>
+
+                        <!-- use InvoiceItem.overrideGlAccountId if specified -->
+                        <set field="itemGlAccountId" from="invoiceItem.overrideGlAccountId"/>
+                        <!-- use InvoiceItemGlAccount setting (by itemTypeEnumId), or just get itemGlAccountTypeEnumId -->
+                        <if condition="!itemGlAccountId"><then>
+                            <service-call name="mantle.ledger.InvoiceAutoPostServices.get#InvoiceItemGlAccount"
+                                    in-map="{acctgTransTypeEnumId:toAcctgTrans.acctgTransTypeEnumId,
+                                        organizationPartyId:toAcctgTrans.organizationPartyId,
+                                        otherPartyId:toAcctgTrans.otherPartyId, itemTypeEnumId:invoiceItem.itemTypeEnumId,
+                                        productId:invoiceItem.productId, assetId:invoiceItem.assetId,
+                                        taxAuthorityId:invoiceItem.taxAuthorityId, direction:'I'}"
+                                    out-map="invoiceItemGlAccountOut" out-map-add-to-existing="false"/>
+                            <set field="itemGlAccountId" from="invoiceItemGlAccountOut?.glAccountId"/>
+                            <set field="itemGlAccountTypeEnumId" from="invoiceItemGlAccountOut?.glAccountTypeEnumId"/>
+                        </then><else>
+                            <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
+                                <field-map field-name="glAccountId" from="itemGlAccountId"/></entity-find-one>
+                            <set field="itemGlAccountTypeEnumId" from="glAccount?.glAccountTypeEnumId"/>
+                        </else></if>
+                        <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
+
+                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                                    debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId})"/>
+                    </if>
+                </if>
+            </iterate>
+
+            <!-- entry for VAT Tax for purchase invoice (toPartyAcctgPreference) -->
+            <if condition="toPartyAcctgPreference != null">
+                <set field="vatTaxTotal" from="toDecimal(0)"/>
+                <iterate list="invoiceItemList" entry="invItem">
+                    <if condition="invItem.isAdjustment == 'Y'"><continue/></if>
+                    <entity-find-one entity-name="moqui.basic.Enumeration" value-field="invItemTypeEnum" cache="true">
+                        <field-map field-name="enumId" from="invItem.itemTypeEnumId"/></entity-find-one>
+                    <if condition="invItem.itemTypeEnumId == 'ItemVatTax' || invItemTypeEnum?.parentEnumId == 'ItemVatTax'">
+                        <set field="lineVat" from="toDecimal(invItem.quantity ?? 1).multiply(invItem.amount ?? 0).setScale(2, 'HALF_UP')"/>
+                        <set field="vatTaxTotal" from="vatTaxTotal.add(lineVat)"/>
+                    </if>
+                </iterate>
+                <if condition="!vatTaxTotal.isZero()">
+                    <set field="recoverableVat" from="vatTaxTotal.subtract(nonDeductibleTaxTotal)"/>
+                    <if condition="!recoverableVat.isZero()">
                         <service-call name="mantle.ledger.InvoiceAutoPostServices.get#InvoiceItemGlAccount"
                                 in-map="{acctgTransTypeEnumId:toAcctgTrans.acctgTransTypeEnumId,
                                     organizationPartyId:toAcctgTrans.organizationPartyId,
-                                    otherPartyId:toAcctgTrans.otherPartyId, itemTypeEnumId:invoiceItem.itemTypeEnumId,
-                                    productId:invoiceItem.productId, assetId:invoiceItem.assetId, direction:'I'}"
-                                out-map="invoiceItemGlAccountOut" out-map-add-to-existing="false"/>
-                        <set field="itemGlAccountId" from="invoiceItemGlAccountOut?.glAccountId"/>
-                        <set field="itemGlAccountTypeEnumId" from="invoiceItemGlAccountOut?.glAccountTypeEnumId"/>
-                    </then><else>
-                        <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="glAccount" cache="true">
-                            <field-map field-name="glAccountId" from="itemGlAccountId"/></entity-find-one>
-                        <set field="itemGlAccountTypeEnumId" from="glAccount?.glAccountTypeEnumId"/>
-                    </else></if>
-                    <if condition="!itemGlAccountId"><set field="useErrorJournal" from="true"/></if>
-
-                    <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
-                            in-map="Object.assign({}, entryCommonMap, {amount:itemTotal, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
-                                debitCreditFlag:'D', glAccountTypeEnumId:itemGlAccountTypeEnumId, glAccountId:itemGlAccountId})"/>
+                                    otherPartyId:toAcctgTrans.otherPartyId, itemTypeEnumId:'ItemVatTax',
+                                    direction:'I'}"
+                                out-map="vatGlAccountOut" out-map-add-to-existing="false"/>
+                        <set field="vatGlAccountId" from="vatGlAccountOut?.glAccountId"/>
+                        <set field="vatGlAccountTypeEnumId" from="vatGlAccountOut?.glAccountTypeEnumId"/>
+                        <if condition="!vatGlAccountId"><set field="useErrorJournal" from="true"/></if>
+                        <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
+                                in-map="{amount:recoverableVat, acctgTransId:toAcctgTrans.acctgTransId, acctgTrans:toAcctgTrans,
+                                    debitCreditFlag:'D', glAccountTypeEnumId:vatGlAccountTypeEnumId, glAccountId:vatGlAccountId}"/>
+                    </if>
                 </if>
-            </iterate>
+            </if>
 
             <!-- ==== create balancing entry ==== -->
 
@@ -704,9 +760,12 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </if>
 
+            <entity-find-one entity-name="moqui.basic.Enumeration" value-field="itemTypeEnum" cache="true">
+                <field-map field-name="enumId" from="itemTypeEnumId"/></entity-find-one>
+
             <!-- a tax line posts to the organization's account for its authority -->
             <if condition="!glAccountId &amp;&amp; taxAuthorityId &amp;&amp;
-                    ['ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId)">
+                    (itemTypeEnumId == 'ItemSalesTax' || itemTypeEnumId == 'ItemVatTax' || itemTypeEnum?.parentEnumId == 'ItemVatTax')">
                 <entity-find entity-name="mantle.ledger.config.TaxAuthorityGlAccount" list="taxAuthorityGlAccountList"
                         cache="true">
                     <econdition field-name="taxAuthorityId"/>
@@ -724,6 +783,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <econditions combine="or"><econdition field-name="direction"/><econdition field-name="direction" value="E"/></econditions>
                 </entity-find>
                 <set field="glAccountId" from="itemTypeGlAccountList[0]?.glAccountId"/>
+            </if>
+            <if condition="!glAccountId &amp;&amp; itemTypeEnum?.parentEnumId">
+                <entity-find entity-name="mantle.ledger.config.ItemTypeGlAccount" list="parentItemTypeGlAccountList" cache="true">
+                    <econdition field-name="organizationPartyId" operator="in" from="orgPartyIdList"/>
+                    <econdition field-name="itemTypeEnumId" from="itemTypeEnum.parentEnumId"/>
+                    <econditions combine="or"><econdition field-name="direction"/><econdition field-name="direction" value="E"/></econditions>
+                </entity-find>
+                <set field="glAccountId" from="parentItemTypeGlAccountList[0]?.glAccountId"/>
             </if>
 
             <if condition="glAccountId">
