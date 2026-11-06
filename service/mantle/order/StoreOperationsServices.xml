@@ -93,18 +93,22 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="reorder" noun="StoreOrder" allow-remote="false">
-        <description>Order again (design §10, R-COM-W04): a new open order of the same store and customer with a placed order's product lines, through clone#Order with copyPayment false (no payment is copied), each line repriced at today's price (recalc#OrderPartItemAmounts: the clone keeps each item's unitAmount, F43), then its promotions, shipping and tax (handle#OrderMajorChange). Nothing is placed or charged. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <description>Order again (design §10, R-COM-W04): a new open order of the same store and customer with a placed order's product lines, through clone#Order with copyPayment false (no payment is copied), each line repriced at today's price (recalc#OrderPartItemAmounts: the clone keeps each item's unitAmount, F43), then its promotions, shipping and tax (handle#OrderMajorChange). Nothing is placed or charged. Keyed by operationKey on PostingOperation: a retry or a second submit answers the first new order; orderRevision, when given, is the order's revision the user saw (a stale one is refused STALE_REVISION naming the current). COMMERCE_ORDER_VIEW and the store scope.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderRevision" type="Integer"/>
         </in-parameters>
         <out-parameters>
             <parameter name="orderId"/>
             <parameter name="baseOrderId"/>
             <parameter name="totalText"/>
             <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('reorderStoreOrder', context)"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
             <set field="orderId" from="found.orderId"/>
             <set field="baseOrderId" from="found.baseOrderId"/>
             <set field="totalText" from="found.totalText"/>

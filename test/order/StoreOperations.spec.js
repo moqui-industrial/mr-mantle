@@ -2,7 +2,8 @@
 // worklist leaves out carts and carries its Payment hold and cancellation badges, a stuck Shop placement is listed (impl-shop
 // F85); carts with their abandoned and stuck states; returns and cases by the store of their orders; a customer list that is
 // no party directory; the permission, the other organization and a store-limited staff member refused another store of
-// the same organization (F51); Order again a new open order at today's price with no payment copied (F43).
+// the same organization (F51), an order of the store vended by another organization (F-P8-8); Order again a new open order at
+// today's price with no payment copied (F43), once per operation key, a stale revision refused.
 // Standalone: spec-local organizations, stores, users, customers and records made directly. Run:
 // ./moq test mr-mantle --spec StoreOperations
 const O = "mantle.order.StoreOperationsServices."
@@ -20,6 +21,8 @@ const ids = {
     placed: prefix + "_O1",
     placed2: prefix + "_O2",
     otherOrder: prefix + "_OB",
+    // an order of store A vended by organization B (F-P8-8: not A's)
+    foreign: prefix + "_OF",
     cart: prefix + "_C1",
     stuck: prefix + "_C2",
     return1: prefix + "_R1",
@@ -185,6 +188,7 @@ spec({
             order(ids.placed, ids.storeA, orgA, ids.customer, "OrderApproved")
             order(ids.placed2, ids.storeA2, orgA, ids.customer2, "OrderPlaced")
             order(ids.otherOrder, ids.storeB, orgB, ids.customer, "OrderApproved")
+            order(ids.foreign, ids.storeA, orgB, ids.customer, "OrderApproved")
             order(ids.cart, ids.storeA, orgA, ids.customer, "OrderOpen")
             order(ids.stuck, ids.storeA, orgA, ids.customer, "OrderOpen")
             // the placed order's authorized payment (never copied by Order again), its Payment hold and a cancel request
@@ -276,6 +280,7 @@ feature(
                 reader: run(users.reader, O + "find#StoreOrders", {}),
                 other: run(users.other, O + "find#StoreOrders", {pageSize: 100}),
                 otherDetail: run(users.other, O + "get#StoreOrder", {orderId: ids.placed}),
+                foreignDetail: run(users.operator, O + "get#StoreOrder", {orderId: ids.foreign}),
                 staff: run(users.staff, O + "find#StoreOrders", {pageSize: 100}),
                 staffDetail: run(users.staff, O + "get#StoreOrder", {orderId: ids.placed2}),
                 staffStore: run(users.staff, O + "find#StoreOrders", {productStoreId: ids.storeA2}),
@@ -299,6 +304,7 @@ feature(
             code(r.reader) == "PERMISSION_DENIED"
             idsOf(r.other.orders, "orderId") == [ids.otherOrder]
             code(r.otherDetail) == "RECORD_UNAVAILABLE"
+            code(r.foreignDetail) == "RECORD_UNAVAILABLE"
             idsOf(r.staff.orders, "orderId") == [ids.placed]
             code(r.staffDetail) == "RECORD_UNAVAILABLE"
             code(r.staffStore) == "RECORD_UNAVAILABLE"
@@ -354,16 +360,32 @@ feature("carts, returns, cases and customers are the stores' own: abandoned and 
     }
 })
 
-feature("Order again makes a new open order of the same store at today's price, with no payment copied", {
+feature("Order again makes a new open order of the same store at today's price, with no payment copied, once per key", {
     when() {
-        const out = run(users.operator, O + "reorder#StoreOrder", {orderId: ids.placed})
+        const key = prefix + "_REORDER_" + Date.now()
+        const revision = Number(list("mantle.order.OrderHeader", {orderId: ids.placed})[0].orderRevision ?? 1)
+        const out = run(users.operator, O + "reorder#StoreOrder", {
+            orderId: ids.placed,
+            operationKey: key,
+            orderRevision: revision
+        })
         return {
             out,
+            retry: run(users.operator, O + "reorder#StoreOrder", {
+                orderId: ids.placed,
+                operationKey: key,
+                orderRevision: revision
+            }),
+            stale: run(users.operator, O + "reorder#StoreOrder", {
+                orderId: ids.placed,
+                operationKey: key + "_S",
+                orderRevision: revision + 5
+            }),
             header: out.orderId ? list("mantle.order.OrderHeader", {orderId: out.orderId})[0] : null,
             items: out.orderId ? list("mantle.order.OrderItem", {orderId: out.orderId}) : [],
             payments: out.orderId ? list("mantle.account.payment.Payment", {orderId: out.orderId}) : [],
-            other: run(users.other, O + "reorder#StoreOrder", {orderId: ids.placed}),
-            cart: run(users.operator, O + "reorder#StoreOrder", {orderId: ids.cart})
+            other: run(users.other, O + "reorder#StoreOrder", {orderId: ids.placed, operationKey: key + "_O"}),
+            cart: run(users.operator, O + "reorder#StoreOrder", {orderId: ids.cart, operationKey: key + "_C"})
         }
     },
     then(r) {
@@ -372,6 +394,9 @@ feature("Order again makes a new open order of the same store at today's price, 
         r.header.productStoreId == ids.storeA
         r.items.filter(item => item.productId == ids.product).map(item => Number(String(item.unitAmount))) == [10]
         r.payments == []
+        r.retry.orderId == r.out.orderId
+        r.retry.alreadyApplied == true
+        code(r.stale) == "STALE_REVISION"
         code(r.other) == "RECORD_UNAVAILABLE"
         code(r.cart) == "RECORD_UNAVAILABLE"
     }

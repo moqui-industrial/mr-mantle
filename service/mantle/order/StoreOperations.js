@@ -51,7 +51,9 @@ const limits = {
     // a cart is abandoned after this long without shopper activity (until Commerce P10's RecoveryPolicy sets the store's)
     abandonMinutes: 60,
     // a Shop placement past this many tries waits for staff (ShopCheckout.js limits.placementTries)
-    placementTries: 5
+    placementTries: 5,
+    // the store orders vended by other organizations left out (F-P8-8; there should be few or none)
+    foreign: 2000
 }
 const placedStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderSent", "OrderCompleted", "OrderHold"]
 const closedRequestStatuses = ["ReqCompleted", "ReqCancelled", "ReqDraft"]
@@ -115,7 +117,29 @@ function scope(need = "orders") {
     s.storeIds = Array.from(stores.storeQuery(s).selectField("productStoreId").orderBy("productStoreId").list()).map(
         row => row.productStoreId
     )
+    // an order of the user's stores vended by an organization not theirs is not theirs either (F-P8-8, as Commerce's record
+    // check and Customer Service's order scope): such orders are left out of every list and refused as records
+    s.foreign = foreignOrderIds(s)
+    s.own = (query, field = "orderId") => (s.foreign.length ? query.condition(field, "not-in", s.foreign) : query)
+    s.owned = orderId => !!orderId && !s.foreign.includes(orderId)
     return s
+}
+// the orders of the user's stores with a part vended by another organization (none for a user of every organization)
+function foreignOrderIds(s) {
+    if (!s.organizationPartyIds || !s.storeIds.length) return []
+    const found = Array.from(
+        find("mantle.order.OrderHeaderAndPart")
+            .condition("productStoreId", "in", s.storeIds)
+            .condition("vendorPartyId", "is-not-null", null)
+            .condition("vendorPartyId", "not-in", s.organizationPartyIds)
+            .selectField("orderId")
+            .distinct(true)
+            .limit(limits.foreign)
+            .list()
+    ).map(row => row.orderId)
+    if (found.length >= limits.foreign)
+        ec.logger.warn("Store operations: more than " + limits.foreign + " store orders vended by other organizations")
+    return unique(found)
 }
 // the stores a list is of: one the user works (refused otherwise) or all of theirs
 function storesFor(s, productStoreId) {
@@ -126,7 +150,7 @@ const unavailable = (kind, id) => denied("RECORD_UNAVAILABLE", kind + " " + (id 
 // a store order (or, with cart, an open one) of the user's stores
 function storeOrder(s, orderId, cart) {
     const order = orderId ? one(ORDER, {orderId}) : null
-    if (!order || !order.productStoreId || !s.storeIds.includes(order.productStoreId))
+    if (!order || !order.productStoreId || !s.storeIds.includes(order.productStoreId) || !s.owned(order.orderId))
         unavailable(cart ? "Cart" : "Order", orderId)
     if ((order.statusId === "OrderOpen") !== !!cart) unavailable(cart ? "Cart" : "Order", orderId)
     return order
@@ -300,23 +324,23 @@ function findStoreOrders(p) {
     const s = scope()
     const storeIds = storesFor(s, p.productStoreId)
     if (p.attention && !Object.hasOwn(attentionFilters, p.attention)) denied("VALUE_INVALID", "Unknown filter " + p.attention)
-    if (p.attention === "stuck") return stuckOrders(storeIds, p)
+    if (p.attention === "stuck") return stuckOrders(s, storeIds, p)
     const shape = list => {
         const ids = list.map(order => order.orderId)
         const facts = {holds: openHolds(ids), cancels: cancelRequests(ids)}
         return list.map(order => orderRow(order, facts))
     }
     if (p.payment) {
-        const candidates = Array.from(orderQuery(p, storeIds).limit(limits.ids).list())
+        const candidates = Array.from(orderQuery(s, p, storeIds).limit(limits.ids).list())
         const shaped = shape(candidates).filter(row => row.paymentKey === p.payment)
         return Object.assign(lib.pageList(shaped, p, "orders"), {truncated: candidates.length >= limits.ids})
     }
     // a find is used up by count(), so the page is a second find (F69)
-    const page = lib.page(orderQuery(p, storeIds), p, "orders", orderQuery(p, storeIds).count())
+    const page = lib.page(orderQuery(s, p, storeIds), p, "orders", orderQuery(s, p, storeIds).count())
     return Object.assign({}, page, {orders: shape(page.rows), rows: undefined, truncated: false})
 }
-function orderQuery(p, storeIds) {
-    let query = find(ORDER).condition("productStoreId", "in", storeIds).condition("statusId", "!=", "OrderOpen")
+function orderQuery(s, p, storeIds) {
+    let query = s.own(find(ORDER).condition("productStoreId", "in", storeIds).condition("statusId", "!=", "OrderOpen"))
     if (text(p.term)) query = query.condition(termCondition(["orderId", "orderName", "externalId", "displayId"], text(p.term)))
     if (p.statusId) query = query.condition("statusId", p.statusId)
     if (p.fromDate) query = query.condition("placedDate", ">=", p.fromDate)
@@ -335,8 +359,8 @@ function orderQuery(p, storeIds) {
     return query.orderBy("-placedDate").orderBy("-entryDate").orderBy("orderId")
 }
 // the stuck placements as order rows (each still an open order with its payment kept; it opens as a cart)
-function stuckOrders(storeIds, p) {
-    const checkouts = stuckCheckouts(storeIds)
+function stuckOrders(s, storeIds, p) {
+    const checkouts = stuckCheckouts(storeIds).filter(row => s.owned(row.orderId))
     const ids = checkouts.map(row => row.orderId)
     const orders = rowsIn(ORDER, "orderId", ids)
     const facts = {holds: openHolds(ids), cancels: []}
@@ -450,6 +474,7 @@ function getStoreOrder(p) {
                 ", "
             ),
             currencyUomId,
+            orderRevision: order.orderRevision ?? 1,
             // Order again: a submitted order of a customer, not cancelled or rejected
             canReorder: placedStatuses.includes(order.statusId) && !!header.customerPartyId && items.some(item => item.productId)
         }),
@@ -524,6 +549,15 @@ function findStoreDeliveries(p) {
 function reorderStoreOrder(p) {
     const s = scope()
     const order = storeOrder(s, p.orderId, false)
+    // keyed by its operation (a double submit or retry answers the first new order) and named by the order's revision
+    const op = lib.operation(p, "StoreReorder", one(STORE, {productStoreId: order.productStoreId})?.organizationPartyId || null, {
+        orderId: order.orderId
+    })
+    const again = lib.previous(op)
+    if (again) return again
+    const revision = order.orderRevision ?? 1
+    if (p.orderRevision != null && p.orderRevision !== "" && Number(p.orderRevision) !== Number(revision))
+        denied("STALE_REVISION", "Order " + order.orderId + " changed since; its current revision is " + revision)
     if (!placedStatuses.includes(order.statusId)) denied("ORDER_NOT_PLACED", "Order " + order.orderId + " was not placed")
     if (!customersOf(order.orderId).length) denied("CUSTOMER_REQUIRED", "Order " + order.orderId + " has no customer")
     const cloned = call("mantle.order.OrderServices.clone#Order", {
@@ -542,16 +576,25 @@ function reorderStoreOrder(p) {
         // the clone's promotion lines are recomputed, never copied
         for (const item of rows(ITEM, {orderId, orderPartSeqId: part.orderPartSeqId, isPromo: "Y"}))
             call("mantle.order.OrderServices.delete#OrderItem", {orderId, orderItemSeqId: item.orderItemSeqId})
+        // what was cancelled is not ordered again: a line cancelled in full is dropped, the rest carry what was kept
+        for (const item of rows(ITEM, {orderId, orderPartSeqId: part.orderPartSeqId})) {
+            if (!num(item.quantityCancelled)) continue
+            const kept = num(item.quantity) - num(item.quantityCancelled)
+            if (kept <= 0) call("mantle.order.OrderServices.delete#OrderItem", {orderId, orderItemSeqId: item.orderItemSeqId})
+            else call("update#" + ITEM, {orderId, orderItemSeqId: item.orderItemSeqId, quantity: kept, quantityCancelled: null})
+        }
         call("mantle.order.OrderServices.recalc#OrderPartItemAmounts", {orderId, orderPartSeqId: part.orderPartSeqId})
         call("mantle.order.OrderServices.handle#OrderMajorChange", {orderId, orderPartSeqId: part.orderPartSeqId})
     }
     const made = one(ORDER, {orderId})
-    return {
+    const answer = {
         orderId,
         baseOrderId: order.orderId,
         totalText: moneyText(made.grandTotal ?? 0, made.currencyUomId),
         message: "Order " + orderId + " is a new open order of order " + order.orderId + "'s lines at today's prices"
     }
+    lib.complete(op, ORDER, orderId, answer)
+    return answer
 }
 
 // ===== carts =====
@@ -612,7 +655,7 @@ function cartRow(order, facts) {
 function findStoreCarts(p) {
     const s = scope()
     const storeIds = storesFor(s, p.productStoreId)
-    let query = find(ORDER, {statusId: "OrderOpen"}).condition("productStoreId", "in", storeIds)
+    let query = s.own(find(ORDER, {statusId: "OrderOpen"}).condition("productStoreId", "in", storeIds))
     if (text(p.term)) query = query.condition(termCondition(["orderId", "orderName"], text(p.term)))
     if (p.customerPartyId)
         query = query.condition(
@@ -699,7 +742,7 @@ function getStoreCart(p) {
 function findStoreReturns(p) {
     const s = scope()
     const storeIds = storesFor(s, p.productStoreId)
-    let query = find("mantle.order.return.StoreReturnItemView").condition("productStoreId", "in", storeIds)
+    let query = s.own(find("mantle.order.return.StoreReturnItemView").condition("productStoreId", "in", storeIds))
     if (p.statusId) query = query.condition("statusId", p.statusId)
     if (p.customerPartyId) query = query.condition("customerPartyId", p.customerPartyId)
     if (text(p.term)) query = query.condition(termCondition(["returnId", "orderId"], text(p.term)))
@@ -745,7 +788,7 @@ function getStoreReturn(p) {
     const header = p.returnId ? one("mantle.order.return.ReturnHeader", {returnId: p.returnId}) : null
     const items = header ? rows("mantle.order.return.ReturnItem", {returnId: header.returnId}) : []
     const orders = rowsIn(ORDER, "orderId", unique(items.map(item => item.orderId)))
-    if (!header || !orders.length || !orders.every(order => s.storeIds.includes(order.productStoreId)))
+    if (!header || !orders.length || !orders.every(order => s.storeIds.includes(order.productStoreId) && s.owned(order.orderId)))
         unavailable("Return", p.returnId)
     const names = lib.partyNames([header.customerPartyId])
     return {
@@ -783,10 +826,11 @@ function getStoreReturn(p) {
 // ===== customers =====
 // A customer is the store's when it is the customer of an order or the account of a signed-in cart in the user's stores
 // (one of them, when given); an internal organization never is.
-function customerStoreIds(partyId, storeIds) {
+function customerStoreIds(s, partyId, storeIds) {
     if (!partyId || !storeIds.length) return []
     const ordered = Array.from(
-        find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId})
+        s
+            .own(find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId}))
             .condition("productStoreId", "in", storeIds)
             .selectField("productStoreId")
             .distinct(true)
@@ -833,7 +877,8 @@ function findStoreCustomers(p) {
     const storeIds = storesFor(s, p.productStoreId)
     if (!storeIds.length) return lib.pageList([], p, "customers")
     const fromOrders = Array.from(
-        find("mantle.order.OrderHeaderAndPart")
+        s
+            .own(find("mantle.order.OrderHeaderAndPart"))
             .condition("productStoreId", "in", storeIds)
             .condition("customerPartyId", "is-not-null", null)
             .selectField("customerPartyId")
@@ -864,7 +909,8 @@ function findStoreCustomers(p) {
         .filter(partyId => names[partyId])
         .map(partyId => {
             const orders = Array.from(
-                find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId})
+                s
+                    .own(find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId}))
                     .condition("productStoreId", "in", storeIds)
                     .orderBy("-entryDate")
                     .limit(limits.detail)
@@ -897,11 +943,12 @@ function getStoreCustomer(p) {
     const s = scope()
     const partyId = text(p.customerPartyId)
     const party = partyId ? one("mantle.party.Party", {partyId}) : null
-    const storeIds = party && !isInternal(partyId) ? customerStoreIds(partyId, s.storeIds) : []
+    const storeIds = party && !isInternal(partyId) ? customerStoreIds(s, partyId, s.storeIds) : []
     if (!party || party.disabled === "Y" || !storeIds.length) unavailable("Customer", partyId)
     const names = lib.partyNames([partyId])
     const orders = Array.from(
-        find(ORDER)
+        s
+            .own(find(ORDER))
             .condition("productStoreId", "in", storeIds)
             .condition(
                 "orderId",
@@ -958,10 +1005,11 @@ function getStoreCustomer(p) {
             .limit(5)
             .list()
     ).map(row => row.infoString)
-    const requests = requestRows(requestIdsOf(storeIds, partyId).slice(0, limits.detail))
+    const requests = requestRows(requestIdsOf(s, storeIds, partyId).slice(0, limits.detail))
     const returnIds = unique(
         Array.from(
-            find("mantle.order.return.StoreReturnItemView", {customerPartyId: partyId})
+            s
+                .own(find("mantle.order.return.StoreReturnItemView", {customerPartyId: partyId}))
                 .condition("productStoreId", "in", storeIds)
                 .selectField("returnId")
                 .distinct(true)
@@ -1001,13 +1049,14 @@ function getStoreCustomer(p) {
 // ===== requests =====
 // The support cases of the stores: Request.productStoreId, linked to one of their orders, or filed in a store's checkout
 // support queue (PsstCheckoutSupportQueue), optionally of one customer; ids only, at most limits.ids.
-function requestIdsOf(storeIds, customerPartyId) {
+function requestIdsOf(s, storeIds, customerPartyId) {
     if (!storeIds.length) return []
     const byStore = Array.from(
         find(REQUEST).condition("productStoreId", "in", storeIds).selectField("requestId").limit(limits.ids).list()
     ).map(row => row.requestId)
     const byOrder = Array.from(
-        find("mantle.request.StoreRequestOrderView", {recordEntityName: ORDER})
+        s
+            .own(find("mantle.request.StoreRequestOrderView", {recordEntityName: ORDER}))
             .condition("productStoreId", "in", storeIds)
             .selectField("requestId")
             .distinct(true)
@@ -1081,7 +1130,7 @@ function requestRows(requestIds) {
 function findStoreRequests(p) {
     const s = scope()
     const storeIds = storesFor(s, p.productStoreId)
-    let ids = requestIdsOf(storeIds, p.customerPartyId || null)
+    let ids = requestIdsOf(s, storeIds, p.customerPartyId || null)
     if (ids.length && (text(p.term) || p.state !== "all" || p.statusId)) {
         let query = find(REQUEST).condition("requestId", "in", ids)
         if (text(p.term)) query = query.condition(termCondition(["requestId", "requestName"], text(p.term)))
@@ -1099,8 +1148,8 @@ function storeRequest(s, requestId) {
     const isCase = !!request && !!one("mantle.request.support.CaseProfile", {requestId})
     const ofStore = () =>
         s.storeIds.includes(request.productStoreId) ||
-        rows("mantle.request.RequestRecord", {requestId, recordEntityName: ORDER}).some(link =>
-            s.storeIds.includes(one(ORDER, {orderId: link.recordId})?.productStoreId)
+        rows("mantle.request.RequestRecord", {requestId, recordEntityName: ORDER}).some(
+            link => s.owned(link.recordId) && s.storeIds.includes(one(ORDER, {orderId: link.recordId})?.productStoreId)
         ) ||
         (!!request.requestCategoryId &&
             rowsIn("mantle.product.store.ProductStoreSetting", "productStoreId", s.storeIds, {
@@ -1162,7 +1211,7 @@ function getStoreWorkSummary(p) {
     const storeIds = storesFor(s, p.productStoreId)
     const count = (conditions, extra) => {
         if (!storeIds.length) return 0
-        let query = find(ORDER, conditions).condition("productStoreId", "in", storeIds)
+        let query = s.own(find(ORDER, conditions).condition("productStoreId", "in", storeIds))
         if (extra) query = extra(query)
         return Number(query.count())
     }
@@ -1177,10 +1226,10 @@ function getStoreWorkSummary(p) {
         }
     }
     each("toApprove", () => count({statusId: "OrderPlaced"}))
-    each("paymentHolds", () => heldOrderIds(storeIds, "OhtPayment").length)
+    each("paymentHolds", () => heldOrderIds(storeIds, "OhtPayment").filter(s.owned).length)
     each("toFulfill", () => count({statusId: "OrderApproved"}))
     each("openCarts", () => count({statusId: "OrderOpen"}))
-    each("stuckPlacements", () => stuckCheckouts(storeIds).length)
+    each("stuckPlacements", () => stuckCheckouts(storeIds).filter(row => s.owned(row.orderId)).length)
     each("noticeExceptions", () =>
         storeIds.length
             ? Number(
@@ -1194,7 +1243,8 @@ function getStoreWorkSummary(p) {
     each("unpaid", () => {
         if (!storeIds.length) return 0
         const recent = Array.from(
-            find(ORDER)
+            s
+                .own(find(ORDER))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "in", ["OrderPlaced", "OrderApproved", "OrderSent", "OrderHold", "OrderProcessing"])
                 .orderBy("-placedDate")
@@ -1214,7 +1264,8 @@ function getStoreWorkSummary(p) {
     let recentOrders = []
     if (s.canOrders && storeIds.length) {
         const list = Array.from(
-            find(ORDER)
+            s
+                .own(find(ORDER))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "!=", "OrderOpen")
                 .orderBy("-placedDate")
@@ -1236,7 +1287,8 @@ function storeCallRecords(p) {
     const partyIds = unique(Array.from(p.partyIds || []))
     if (!partyIds.length || !s.storeIds.length) return {records: []}
     const orders = Array.from(
-        find("mantle.order.OrderHeaderAndPart")
+        s
+            .own(find("mantle.order.OrderHeaderAndPart"))
             .condition("customerPartyId", "in", partyIds)
             .condition("productStoreId", "in", s.storeIds)
             .condition("statusId", "in", [
