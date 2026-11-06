@@ -206,4 +206,6 @@
     ['POST', 'support/order-cancel', 'requestOrderCancel'],
     ['GET', 'support/order-cancel', 'getOrderCancelRequest'],
     ['POST', 'support/order-cancel/withdrawal', 'withdrawOrderCancel'],
+    // Shop P1
+    ['GET', 'shop/context', 'getShopContext'],
 ]

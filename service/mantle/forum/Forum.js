@@ -2105,6 +2105,9 @@ methods.storeMounts = (p) => {
             'css',
             'libs',
             'images',
+            // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
+            'static',
+            'assets',
             'Login',
             'SecondFactor',
             'PasswordReset',
@@ -2116,6 +2119,9 @@ methods.storeMounts = (p) => {
             'u',
             'cal',
             'r',
+            'sw.js',
+            'manifest.webmanifest',
+            'WebPush',
         ]
     for (const h of hosts) {
         if (!isOperator())
@@ -2150,13 +2156,25 @@ methods.storeMounts = (p) => {
             reserved.includes(m.pathPrefix.split('/')[1])
         )
             invalid('Invalid or reserved mount')
+        // one root app per site, Forum or Shop: two at '/' overlap below
         if (m.pathPrefix === '/' && !app.root)
-            invalid('Only Forum may mount at root')
+            invalid('ROOT_NOT_ALLOWED[pathPrefix]: Only Forum or Shop may mount at root')
+        if (
+            app.onePerSite &&
+            mounts.slice(0, i).concat(kept).some((other) => other.app === m.app)
+        )
+            invalid('MOUNT_TAKEN[app]: A site has one ' + m.app + ' mount')
         if (app.target) {
             if (!isOperator())
                 fail('Unauthorized', 'App targets require an operator')
             if (!m.targetId || !registry.targets[app.target](m.targetId))
-                invalid('Choose the ' + app.target + ' the ' + m.app + ' app serves')
+                invalid(
+                    'TARGET_INVALID[targetId]: Choose the ' +
+                        (app.target === 'productStore' ? 'store' : app.target) +
+                        ' the ' +
+                        m.app +
+                        ' app serves',
+                )
         } else if (m.targetId) invalid('The ' + m.app + ' app takes no target')
         for (const other of mounts.slice(0, i).concat(kept)) {
             if (
@@ -2690,6 +2708,27 @@ methods.markNotifications = (p) => {
         }
     return { marked: true }
 }
+/* The site's brand values from PublicSite.theme (a small JSON object; Shop P1, F7), which the PASS shell shows on a site's
+   Account, Billing and Support pages: only six-digit hex colors and a local path or https logo, the rest left out. */
+function siteBrand(theme) {
+    let raw
+    try {
+        raw = theme ? JSON.parse(String(theme)) : null
+    } catch (error) {
+        return null
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const brand = {}
+    for (const k of ['primaryColor', 'backgroundColor', 'textColor', 'surfaceColor'])
+        if (/^#[0-9a-fA-F]{6}$/.test(String(raw[k] || ''))) brand[k] = raw[k]
+    if (
+        typeof raw.logoUrl === 'string' &&
+        raw.logoUrl.length <= 500 &&
+        /^(https:\/\/[^\s<>"'()\\]+|\/(?!\/)[^\s<>"'()\\]*)$/.test(raw.logoUrl)
+    )
+        brand.logoUrl = raw.logoUrl
+    return Object.keys(brand).length ? brand : null
+}
 methods.getSiteInfo = (p) => {
     const s = site(p.siteId)
     if (
@@ -2751,6 +2790,9 @@ methods.getSiteInfo = (p) => {
                   'handle displayName',
               )
             : null,
+        // Shop P1 (F7): the brand values and the page where members manage a paid subscription
+        brand: siteBrand(s.theme),
+        subscriptionUrl: s.subscriptionUrl || null,
     }
 }
 function recordMailboxPost(postId) {

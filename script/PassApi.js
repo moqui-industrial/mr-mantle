@@ -21,6 +21,7 @@ const TOKEN_WRITES = [
     'rateArticle',
     'addReturnEvidence',
     'withdrawCustomerReturn',
+    // Shop P1: none yet; P4 adds the cart writes
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

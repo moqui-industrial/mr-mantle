@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The Shop app's public reads (mr-pass impl-shop; design-shop §13.2's K): PASS operations through pass.Facade.call#Operation,
+    each taking PASS's restricted input map with the site the facade resolved and answering a declared result. P1 the context
+    (ShopContext.js); P3 the catalog reads. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="ShopContext" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopContext (impl-shop P1): the published site, its Shop mount, the store the mount targets, the locale,
+            currency, active theme release (none until P2) and capabilities. A site not published, a missing or disabled Shop
+            mount and a store gone or not an internal organization's are all NotFound (NOT_AVAILABLE).</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopContext.js").execute("getShopContext", input)</script>
+        </actions>
+    </service>
+</services>

@@ -1175,4 +1175,9 @@
         service: 'mantle.order.OrderChangeServices.withdraw#CustomerCancel',
         fields: ['siteId', 'requestId', 'expectedRevision', 'reason'],
     },
+    // Shop P1: the Shop app's trusted context
+    getShopContext: {
+        service: 'mantle.product.ShopCatalogServices.get#ShopContext',
+        fields: ['siteId'],
+    },
 })

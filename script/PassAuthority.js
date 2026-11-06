@@ -24,6 +24,7 @@ const TOKEN_WRITES = [
     'rateArticle',
     'addReturnEvidence',
     'withdrawCustomerReturn',
+    // Shop P1: none yet; P4 adds the cart writes
 ]
 /* Operations answered as a file (download: the result's location stays here, the transport streams it). */
 const DOWNLOADS = ['getAttachment', 'getExport', 'getCaseFile', 'getReturnLabel']
@@ -70,6 +71,43 @@ const MESSAGES = {
     422: 'Invalid request fields',
     429: 'Too many requests',
 }
+/* The reasons a refusal may name to a frontend (design-shop §7.3; impl-shop P1, F4): a service's message starts with its
+   code, Mantle's "CODE: text" (EntityLib's denied) or "CODE[field]: text" for a field's; the envelope answers the code's
+   camelCase form when it is listed here, and nothing else of an unlisted one. */
+const REASONS = [
+    'notAvailable',
+    'signInRequired',
+    'accessDenied',
+    'staleRevision',
+    'reviewRequired',
+    'quoteExpired',
+    'paymentDeclined',
+    'rateLimited',
+    'providerUnavailable',
+    // Shop P1: the operator's mount refusals
+    'mountTaken',
+    'rootNotAllowed',
+    'targetInvalid',
+]
+const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
+const camel = (code) =>
+    /^[A-Z]/.test(code)
+        ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
+        : code
+/* A refusal's first line as {reason, field, text}: the listed reason its code names (else null) and its text without the
+   code. */
+function refusal(message) {
+    // a refusal that crossed service calls reads "Error: Error: CODE: text"
+    const line = String(message || '')
+        .split('\n')[0]
+        .replace(/^(?:Error: )+/, '')
+    const m = CODED.exec(line)
+    if (!m) return { reason: null, field: null, text: line }
+    const reason = REASONS.includes(camel(m[1])) ? camel(m[1]) : null
+    // an unlisted lower-case word is the text's own, not a code
+    if (!reason && /^[a-z]/.test(m[1])) return { reason: null, field: null, text: line }
+    return { reason, field: reason ? m[2] || null : null, text: m[3] }
+}
 const fail = (kind, message) => {
     const e = new Error(message)
     e.moquiErrorKind = kind
@@ -104,10 +142,18 @@ function envelope(error) {
             String(error?.message || 'Request failed').split('\n')[0],
     )
     ec.message.clearErrors()
+    // the refusal's reason, and for a request's own fault (Unprocessable, Conflict) its text, as a local page shows them
+    // (F4, Purchasing F170); any other kind keeps its fixed message
+    const { reason, field, text } = refusal(error?.message)
+    const own = (kind === 'Unprocessable' || kind === 'Conflict') && text
     return {
         code: kind,
-        message: MESSAGES[status] || 'Authority temporarily unavailable',
-        fieldErrors: [],
+        reason,
+        message: own
+            ? text.slice(0, 300)
+            : MESSAGES[status] || 'Authority temporarily unavailable',
+        fieldErrors:
+            field && own ? [{ field, reason, message: text.slice(0, 300) }] : [],
         correlationId,
         status,
     }
@@ -287,4 +333,4 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
         return { result }
     })
 }
-;({ handle, envelope, ACCOUNT_ACTIONS, SSO_ACTIONS })
+;({ handle, envelope, refusal, REASONS, ACCOUNT_ACTIONS, SSO_ACTIONS })
