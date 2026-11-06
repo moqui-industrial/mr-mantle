@@ -90,6 +90,13 @@ const REASONS = [
     'targetInvalid',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
+/* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or
+   service name, a location. A nested call's failure reaches the message facade, and so an Unprocessable, with such text;
+   the envelope keeps its fixed message for it, and the log has the detail. */
+const INTERNAL =
+    /:\/\/|\w#\w|\b(?:sql|database|constraint|exception|TypeError|ReferenceError|SyntaxError|RangeError|InternalError)\b|is not a function|is not defined|cannot read propert/i
+const QUALIFIED = /\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+\.[A-Z]\w*/
+const internal = (text) => INTERNAL.test(text) || QUALIFIED.test(text)
 const camel = (code) =>
     /^[A-Z]/.test(code)
         ? code.toLowerCase().replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase())
@@ -145,7 +152,10 @@ function envelope(error) {
     // the refusal's reason, and for a request's own fault (Unprocessable, Conflict) its text, as a local page shows them
     // (F4, Purchasing F170); any other kind keeps its fixed message
     const { reason, field, text } = refusal(error?.message)
-    const own = (kind === 'Unprocessable' || kind === 'Conflict') && text
+    const own =
+        (kind === 'Unprocessable' || kind === 'Conflict') &&
+        text &&
+        !internal(text)
     return {
         code: kind,
         reason,
@@ -333,4 +343,4 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
         return { result }
     })
 }
-;({ handle, envelope, refusal, REASONS, ACCOUNT_ACTIONS, SSO_ACTIONS })
+;({ handle, envelope, refusal, internal, REASONS, ACCOUNT_ACTIONS, SSO_ACTIONS })

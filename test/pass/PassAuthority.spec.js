@@ -267,10 +267,13 @@ feature("a refusal's listed reason, its field and the text of a request's own fa
             field: refused("Unprocessable", "TARGET_INVALID[targetId]: Choose the store the shop app serves"),
             unlisted: refused("Unprocessable", "STORE_LIMITED: A store-limited staff member does not start stores"),
             hidden: refused("NotFound", "NOT_AVAILABLE: Store PASS_X of ORG_Y is closed"),
-            plain: refused("Unauthorized", "secret detail")
+            plain: refused("Unauthorized", "secret detail"),
+            // a nested call's failure in the message facade is an Unprocessable too; its text stays in the log
+            internal: refused("Unprocessable", "Error creating mantle.order.OrderItem: error returned from database: duplicate key"),
+            script: refused("Conflict", "TypeError: cannot read property 'x' of undefined")
         }
     },
-    then({concealed, stale, field, unlisted, hidden, plain}) {
+    then({concealed, stale, field, unlisted, hidden, plain, internal, script}) {
         concealed.error.code == "NotFound"
         concealed.error.reason == "notAvailable"
         concealed.error.message == "Resource not found"
@@ -286,5 +289,7 @@ feature("a refusal's listed reason, its field and the text of a request's own fa
         !hidden.message.includes("PASS_X")
         plain.reason == null
         plain.message == "Action is not permitted"
+        internal.message == "Invalid request fields"
+        script.message == "State changed; reload and compare"
     }
 })
