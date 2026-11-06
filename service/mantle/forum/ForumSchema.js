@@ -1183,7 +1183,19 @@
     // Shop P2: the themed page's view, the active release a frontend verifies and renders, the site's generation
     getShopPage: {
         service: 'mantle.public.ThemeServices.get#ShopPage',
-        fields: ['siteId', 'pageKind'],
+        // P3: the catalog kinds' inputs
+        fields: [
+            'siteId',
+            'pageKind',
+            'productId',
+            'variantId',
+            'quantity',
+            'productCategoryId',
+            'query',
+            'sort',
+            'cursor',
+            'routePath',
+        ],
     },
     getShopThemeRelease: {
         service: 'mantle.public.ThemeServices.get#ShopThemeRelease',
@@ -1196,5 +1208,58 @@
     getSiteGeneration: {
         service: 'mantle.public.SiteServices.get#SiteGeneration',
         fields: ['siteId'],
+    },
+    // Shop P3: the catalog reads (each answers the site's generation and active releaseId)
+    getShopHome: {
+        service: 'mantle.product.ShopCatalogServices.get#Home',
+        fields: ['siteId'],
+    },
+    getStoreCategories: {
+        service: 'mantle.product.ShopCatalogServices.get#Categories',
+        fields: ['siteId'],
+    },
+    getStoreCategory: {
+        service: 'mantle.product.ShopCatalogServices.get#Category',
+        fields: ['siteId', 'productCategoryId', 'sort', 'cursor', 'limit'],
+    },
+    findProducts: {
+        service: 'mantle.product.ShopCatalogServices.find#Products',
+        fields: [
+            'siteId',
+            'productCategoryId',
+            'query',
+            'sort',
+            'cursor',
+            'limit',
+        ],
+    },
+    searchShop: {
+        service: 'mantle.product.ShopCatalogServices.search#Shop',
+        fields: ['siteId', 'query', 'sort', 'cursor', 'limit'],
+    },
+    getProduct: {
+        service: 'mantle.product.ShopCatalogServices.get#Product',
+        fields: ['siteId', 'productId', 'variantId', 'quantity'],
+    },
+    quoteSelection: {
+        service: 'mantle.product.ShopCatalogServices.quote#Selection',
+        fields: ['siteId', 'productId', 'variantId', 'quantity'],
+    },
+    getStorePage: {
+        service: 'mantle.product.ShopCatalogServices.get#Page',
+        fields: ['siteId', 'routePath'],
+    },
+    getShopSitemap: {
+        service: 'mantle.product.ShopCatalogServices.get#Sitemap',
+        fields: ['siteId'],
+    },
+    // Shop P3 (impl-commerce F75): Commerce P4's live navigation and redirects of a site's Shop mount
+    getSiteNavigation: {
+        service: 'mantle.public.SiteServices.get#SiteNavigation',
+        fields: ['siteId', 'menuKey', 'locale'],
+    },
+    resolveSiteRedirect: {
+        service: 'mantle.public.SiteServices.resolve#SiteRedirect',
+        fields: ['siteId', 'path'],
     },
 })

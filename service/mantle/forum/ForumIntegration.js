@@ -364,33 +364,25 @@
     /* ---- Support and discussion links (design §13.2-13.4) ---- */
     const activeLinks = (fields) =>
         rows(S + 'PublicDiscussionLink', { ...fields, detachedAt: null })
-    /* A product is public on a site only while a store mounted on the site carries it within its sales dates. */
+    /* A product is public on a site only while the site's Shop mount sells it: the store the enabled `shop` mount targets,
+       where Commerce P3's resolver answers it public now (its publication row or its virtual's, sellable, in the store's
+       view tree; impl-shop P3, F28). */
     function productPublic(siteId, productId) {
-        const product = one('mantle.product.Product', { productId })
-        if (!product) return false
-        const t = millis(now())
-        if (
-            (product.salesIntroductionDate &&
-                millis(product.salesIntroductionDate) > t) ||
-            (product.salesDiscontinuationDate &&
-                millis(product.salesDiscontinuationDate) <= t)
+        const mount = rows(S + 'PublicSiteApp', { siteId, app: 'shop' }).find(
+            (row) => row.enabled === 'Y' && !!row.targetId,
         )
-            return false
-        return rows(S + 'PublicSiteApp', { siteId, app: 'store' }).some(
-            (mount) =>
-                mount.enabled !== 'N' &&
-                !!mount.targetId &&
-                // the store's current publication row (dated, impl-commerce P3); an exclusion is not a carry
-                rows('mantle.product.store.ProductStoreProduct', {
-                    productStoreId: mount.targetId,
-                    productId,
-                }).some(
-                    (row) =>
-                        row.publicationKindEnumId !== 'PspkExcluded' &&
-                        (row.fromDate == null || millis(row.fromDate) <= t) &&
-                        (row.thruDate == null || millis(row.thruDate) > t),
-                ),
-        )
+        const store = mount
+            ? one('mantle.product.store.ProductStore', {
+                  productStoreId: mount.targetId,
+              })
+            : null
+        if (!store) return false
+        const found = ec.resource
+            .script(
+                'component://mr-mantle/service/mantle/product/StoreMerchandising.js',
+            )
+            .resolve(store, [productId], millis(now()), siteId)[0]
+        return !!found && found.isPublic
     }
     /* Internal staff who moderate the topic: the only people who see or make case links. */
     const caseStaff = (a) => a.canModerate && internalParty(me())

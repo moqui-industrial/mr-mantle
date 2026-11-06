@@ -33,7 +33,8 @@ const contractKeys = [
 // finite number, boolean or null; "rich" a sanitized rich text ({$richText}) or a string; an object names its fields; a
 // one-element array is a list of that shape. Later phases append fields here for their page kinds (P3 the catalog's,
 // P4 the cart's, P5 checkout's, P6 the account's); a field not named never reaches a theme.
-const price = {amount: "value", currencyUomId: "value", display: "value"}
+// P3: available is false for a price that is not set (told apart from a zero one)
+const price = {amount: "value", currencyUomId: "value", display: "value", available: "value"}
 const link = {label: "value", url: "value"}
 const image = {url: "value", alt: "value", width: "value", height: "value"}
 const productCard = {
@@ -44,12 +45,14 @@ const productCard = {
     description: "rich",
     price,
     compareAtPrice: price,
-    availability: {label: "value", purchasable: "value"},
-    image
+    availability: {label: "value", purchasable: "value", code: "value"},
+    image,
+    // P3: the publication row's badge text
+    badge: "value"
 }
 const shapes = {
     site: {displayName: "value", locale: "value"},
-    shop: {name: "value", baseUrl: "value", currencyUomId: "value"},
+    shop: {name: "value", baseUrl: "value", currencyUomId: "value", searchUrl: "value", categoriesUrl: "value"},
     locale: "value",
     page: {
         kind: "value",
@@ -62,12 +65,54 @@ const shapes = {
         // accepted terms version)
         socialImageUrl: "value",
         policyRole: "value",
-        policyVersion: "value"
+        policyVersion: "value",
+        // P3: the catalog pages' paging, sort and search state, a search's matching Shop pages and a page's locale
+        nextUrl: "value",
+        sort: "value",
+        resultState: "value",
+        contentResults: [link],
+        locale: "value"
     },
     // a menu has at most three levels (SitePages.js menuLimits)
     navigation: [Object.assign({children: [Object.assign({children: [link]}, link)]}, link)],
-    product: Object.assign({images: [image]}, productCard),
-    category: {id: "value", name: "value", url: "value", description: "rich", image},
+    // P3: a product's public variants with their options, the selection and its quote (unit price and total)
+    product: Object.assign(
+        {
+            images: [image],
+            slug: "value",
+            variants: [
+                {
+                    id: "value",
+                    name: "value",
+                    options: "value",
+                    sku: "value",
+                    price,
+                    availability: {label: "value", purchasable: "value", code: "value"}
+                }
+            ],
+            selectedVariantId: "value",
+            quantity: "value",
+            quote: {quantity: "value", unitPrice: price, total: price, purchasable: "value", label: "value"}
+        },
+        productCard
+    ),
+    // P3: a category's subcategories (two levels), the Categories page's tree
+    category: {
+        id: "value",
+        name: "value",
+        url: "value",
+        description: "rich",
+        image,
+        children: [
+            {
+                id: "value",
+                name: "value",
+                url: "value",
+                description: "value",
+                children: [{id: "value", name: "value", url: "value", description: "value"}]
+            }
+        ]
+    },
     productList: [productCard],
     cart: {itemCount: "value", subtotal: price},
     checkout: {},
@@ -94,13 +139,25 @@ const maxItems = 200
 // The pages the live path renders in P2, each with its projection: the store's home (no catalog until P3, so an empty
 // product list) and the not-found page.
 const pages = {
-    home: {status: 200, view: () => ({productList: []})},
+    // P3: the store's featured products (ShopCatalog.js views)
+    home: {status: 200, view: (shop, p) => catalog().views.home(p)},
     "not-found": {status: 404, view: () => ({})}
 }
 // Approved dynamic sources (design-shop §12.3): name -> {limit, load(shop, limit), shape} answering rows, projected
 // through the descriptor's shape (a list of shapes.productList's cards when it names none). Each page loads
 // each source its template names once (one batch, never one call per card); P3 adds the catalog's.
 const sources = {}
+
+// ===== P3: the catalog's page kinds and sources (ShopCatalog.js) =====
+const catalog = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
+// the Categories page (no productCategoryId) and a category's products
+pages.category = {status: 200, view: (shop, p) => catalog().views.category(p)}
+pages.product = {status: 200, view: (shop, p) => catalog().views.product(p)}
+pages.search = {status: 200, view: (shop, p) => catalog().views.search(p)}
+pages.page = {status: 200, view: (shop, p) => catalog().views.page(p)}
+// the featured and new products, for a section that names them
+sources.featuredProducts = {limit: 12, load: (shop, limit) => catalog().sources.featuredProducts.load(shop, limit)}
+sources.newProducts = {limit: 12, load: (shop, limit) => catalog().sources.newProducts.load(shop, limit)}
 
 // ===== the contract =====
 const forbidden = name => {
@@ -208,7 +265,9 @@ function getShopPage(p) {
         productStoreId: store.productStoreId,
         name: store.storeName || store.productStoreId,
         baseUrl: base || "/",
-        currencyUomId: store.defaultCurrencyUomId || null
+        currencyUomId: store.defaultCurrencyUomId || null,
+        searchUrl: base + "/Search",
+        categoriesUrl: base + "/Categories"
     }
     // a BCP 47 tag for the page (en_US is en-US)
     const locale = String(store.defaultLocale || site.locale || "en").replace(/_/g, "-")
@@ -222,7 +281,13 @@ function getShopPage(p) {
         Object.assign(
             {
                 site: {displayName: site.name || site.siteId, locale: String(site.locale || "en").replace(/_/g, "-")},
-                shop: {name: shop.name, baseUrl: shop.baseUrl, currencyUomId: shop.currencyUomId},
+                shop: {
+                    name: shop.name,
+                    baseUrl: shop.baseUrl,
+                    currencyUomId: shop.currencyUomId,
+                    searchUrl: shop.searchUrl,
+                    categoriesUrl: shop.categoriesUrl
+                },
                 locale,
                 page: {kind, canonicalUrl: base + "/"},
                 navigation: mainNavigation(site.siteId, locale)

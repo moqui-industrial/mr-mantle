@@ -55,7 +55,10 @@ function context(p) {
     }
     if (out.direction === "purchase" && (!out.vendorPartyId || !internal(out.customerPartyId)))
         throw new Error("Purchase prices need an external supplier and an internal buyer")
-    out.traceAllowed = !!p.explain && read(out.direction)
+    // Shop's catalog prices as the authority for its routed store and signed-in customer (impl-shop P3, F18): only
+    // get#StoreProductPrice sets this, in its own script (no service declares it, so no caller's input can)
+    out.storeAuthority = p.storeAuthority === true && !!out.productStoreId && out.direction === "sales"
+    out.traceAllowed = !!p.explain && !out.storeAuthority && read(out.direction)
     out.priceTrace = []
     out.priceWarnings = []
     return out
@@ -67,6 +70,15 @@ function readable(row, c) {
     if (row.priceTypeEnumId === "PptAverage" && !read(c.direction, true)) return false
     const d = internal(row.vendorPartyId) ? "sales" : row.vendorPartyId ? "purchase" : "sales"
     if (d !== c.direction) return false
+    // The store's authority (get#StoreProductPrice): the public rows, the store organization's and the customer's own;
+    // never an agreement's, an average cost or another party's.
+    if (c.storeAuthority)
+        return (
+            row.priceTypeEnumId !== "PptAverage" &&
+            !row.agreementId &&
+            (!row.vendorPartyId || row.vendorPartyId === c.vendorPartyId) &&
+            (!row.customerPartyId || (!!c.customerPartyId && row.customerPartyId === c.customerPartyId))
+        )
     // A purchase context never falls back to a public sales row. Anonymous users see only public, unscoped sale prices.
     if (!ec.user.userId)
         return !row.vendorPartyId && !row.customerPartyId && !row.agreementId && row.priceTypeEnumId !== "PptAverage"

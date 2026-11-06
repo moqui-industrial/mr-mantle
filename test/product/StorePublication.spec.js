@@ -117,7 +117,7 @@ spec({
                 [ids.other, orgB]
             ])
                 make(S + "ProductStore", {productStoreId: storeId, storeName: "Publication " + storeId, organizationPartyId: org})
-            make("mantle.public.PublicSite", {siteId: ids.site, name: "Publication site", state: "enabled", generation: 0})
+            make("mantle.public.PublicSite", {siteId: ids.site, name: "Publication site", state: "published", generation: 0})
             make("mantle.public.PublicSiteApp", {
                 siteId: ids.site,
                 appMountId: "shop",
@@ -230,12 +230,16 @@ feature(
             // the public products only
             const anonymous = run(null, M + "get#StorePublication", {
                 productStoreId: ids.store,
-                productIds: [ids.red, ids.blue]
+                productIds: [ids.red, ids.blue],
+                siteId: ids.site
             })
-            const anonymousList = run(null, M + "get#StorePublication", {productStoreId: ids.store})
+            const anonymousList = run(null, M + "get#StorePublication", {productStoreId: ids.store, siteId: ids.site})
+            // Shop P3 (impl-shop F50): the public names the site
+            const anonymousNoSite = run(null, M + "get#StorePublication", {productStoreId: ids.store, productIds: [ids.red]})
             return {
                 anonymous,
                 anonymousList,
+                anonymousNoSite,
                 merchandiser,
                 other,
                 noReason,
@@ -255,6 +259,7 @@ feature(
         then({
             anonymous,
             anonymousList,
+            anonymousNoSite,
             merchandiser,
             other,
             noReason,
@@ -299,6 +304,7 @@ feature(
             Object.keys(byId(anonymous.products, ids.blue)).sort() == ["isPublic", "productId", "purchasable"]
             anonymousList.products.every(answer => answer.isPublic) == true
             !anonymousList.products.some(answer => answer.productId === ids.blue)
+            code(anonymousNoSite) == "SITE_REQUIRED"
         }
     }
 )

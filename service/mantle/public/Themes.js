@@ -50,7 +50,9 @@ const pageKinds = [
 const requiredComponents = {
     "shop.productPurchase": ["product"],
     "shop.cart": ["cart"],
-    "shop.checkout": ["checkout"]
+    "shop.checkout": ["checkout"],
+    // P3: the search form (a theme has no <form>)
+    "shop.search": ["search"]
 }
 // The engines and versions this authority publishes for (design-shop §12.7: readiness blocks unsupported versions).
 const renderers = {"js-fancy": {rendererVersion: 1, viewApiVersions: [1]}}

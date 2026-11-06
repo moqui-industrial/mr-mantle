@@ -104,7 +104,9 @@ function packageFiles(heading) {
             "<section><h1>${section.settings.heading} ${shop.name}</h1>" +
             '<#if page.kind == "product">${components["shop.productPurchase"]}</#if>' +
             '<#if page.kind == "cart">${components["shop.cart"]}</#if>' +
-            '<#if page.kind == "checkout">${components["shop.checkout"]}</#if></section>',
+            '<#if page.kind == "checkout">${components["shop.checkout"]}</#if>' +
+            // Shop P3: the search form
+            '<#if page.kind == "search">${components["shop.search"]}</#if></section>',
         "sections/main.schema.json": JSON.stringify({
             name: "Main",
             settings: [{id: "heading", type: "text", default: "Welcome"}]
