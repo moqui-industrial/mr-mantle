@@ -196,14 +196,17 @@ along with this software (see the LICENSE.md file). If not, see
         <description>For tax and other government authorities in any domain (sales/VAT, income, labor, etc)</description>
         <field name="taxAuthorityId" type="id" is-pk="true"/>
         <field name="taxAuthorityTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="taxAuthorityRateTypeEnumId" type="id" enable-audit-log="update"/>
         <field name="description" type="text-medium" enable-audit-log="update"/>
         <field name="taxAuthGeoId" type="id" enable-audit-log="update"/>
         <field name="taxAuthPartyId" type="id" enable-audit-log="update"/>
         <field name="requireTaxIdForExemption" type="text-indicator" enable-audit-log="update"/>
         <field name="taxIdFormatPattern" type="text-medium" enable-audit-log="update"/>
         <field name="includeTaxInPrice" type="text-indicator"><description>This is mainly for VAT tax authorities</description></field>
-        <relationship type="one" title="TaxAuthorityType" related="moqui.basic.Enumeration">
+        <relationship type="one" title="TaxAuthorityType" related="moqui.basic.Enumeration" short-alias="taxAuthorityType">
             <key-map field-name="taxAuthorityTypeEnumId"/></relationship>
+        <relationship type="one" title="TaxAuthorityRateType" related="moqui.basic.Enumeration" short-alias="taxAuthorityRateType">
+            <key-map field-name="taxAuthorityRateTypeEnumId"/></relationship>
         <relationship type="one" title="TaxAuth" related="moqui.basic.Geo">
             <key-map field-name="taxAuthGeoId"/></relationship>
         <relationship type="one" title="TaxAuth" related="mantle.party.Party">
@@ -215,6 +218,12 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="TatCounty" description="County/Parish/Borough" enumTypeId="TaxAuthorityType"/>
             <moqui.basic.Enumeration enumId="TatCity" description="City" enumTypeId="TaxAuthorityType"/>
             <!-- use TatCounty or TatCity instead: <moqui.basic.Enumeration enumId="TatLocal" description="Local" enumTypeId="TaxAuthorityType"/> -->
+
+            <!-- Tax Authority Rate Type -->
+            <moqui.basic.EnumerationType description="Tax Authority Rate Type" enumTypeId="TaxAuthorityRateType"/>
+            <moqui.basic.Enumeration enumId="TartSalesTax" description="Sales Tax" enumTypeId="TaxAuthorityRateType"/>
+            <moqui.basic.Enumeration enumId="TartVatTax" description="Vat Tax" enumTypeId="TaxAuthorityRateType"/>
+            <moqui.basic.Enumeration enumId="TartGstTax" description="Gst Tax" enumTypeId="TaxAuthorityRateType"/>
         </seed-data>
     </entity>
     <entity entity-name="TaxAuthorityAssoc" package="mantle.other.tax">
@@ -244,15 +253,24 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="TaxAuthorityParty" package="mantle.other.tax">
         <field name="partyId" type="id" is-pk="true"/>
         <field name="taxAuthorityId" type="id" is-pk="true"/>
+        <field name="taxSystemEnumId" type="id" enable-audit-log="update"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="partyTaxId" type="text-short" enable-audit-log="update"/>
         <field name="isExempt" type="text-indicator" enable-audit-log="update"/>
+        <field name="exemptionCode" type="text-short" enable-audit-log="update"/>
         <field name="isNexus" type="text-indicator" enable-audit-log="update">
             <description>If Party has a sufficient presence in the area to have to charge tax set to Y.</description>
         </field>
-        <relationship type="one" related="mantle.party.Party"/>
-        <relationship type="one" related="mantle.other.tax.TaxAuthority"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.other.tax.TaxAuthority" short-alias="taxAuthority"/>
+        <relationship type="one" title="TaxSystem" related="moqui.basic.Enumeration" short-alias="taxSystem">
+            <key-map field-name="taxSystemEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Tax System" enumTypeId="TaxSystem"/>
+            <!-- Tax system / RegimeFiscale for Italy companies -->
+            <moqui.basic.Enumeration enumId="TsOrdinary" enumCode="RF01" description="Ordinary" enumTypeId="TaxSystem"/>
+        </seed-data>
     </entity>
     <entity entity-name="TaxAuthorityRate" package="mantle.other.tax">
         <description>A dated rate of a tax authority, the local tax gateway's rule (calculate#SalesTaxLocal). A change starts

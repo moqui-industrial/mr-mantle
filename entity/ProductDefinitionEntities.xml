@@ -59,6 +59,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="taxable" type="text-indicator"><description>Set to N to not charge sales tax (ie defaults to Y)</description></field>
         <field name="taxCode" type="text-short"><description>A code representing the tax category of the product,
             passed to the tax calculation gateway.</description></field>
+        <field name="notDeductibleTaxCode" type="text-short"><description>A tax code representing the vat tax non-deductibility category of the product,
+            used for the calculation of accounting transactions relating to vat tax.</description></field>
         <field name="returnable" type="text-indicator"/>
 
         <field name="amountUomId" type="id"/>
@@ -98,6 +100,8 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="many" title="To" related="mantle.product.ProductAssoc" short-alias="toAssocs">
             <key-map field-name="productId" related="toProductId"/></relationship>
         <relationship type="many" related="mantle.product.ProductContent" short-alias="contents">
+            <key-map field-name="productId"/></relationship>
+        <relationship type="many" related="mantle.product.WikiPageProduct" short-alias="wikis">
             <key-map field-name="productId"/></relationship>
         <relationship type="many" related="mantle.product.ProductDimension" short-alias="dimensions">
             <key-map field-name="productId"/></relationship>
@@ -173,6 +177,20 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- NOTE: only minimal default product classes for those used in code, others vary widely by industry and company;
                 for example 'bike' and 'car' might be classifications for certain companies while for others 'car' isn't adequate
                 and needs to be more specific like 'economy car', 'compact car', 'mid-size car', etc -->
+
+            <!-- Product Tax Category -->
+            <moqui.basic.EnumerationType description="Tax Category" enumTypeId="TaxCategory"/>
+            <moqui.basic.Enumeration description="Vat Tax 22%" enumId="TcVAT22" enumCode="22" optionValue="22" sequenceNum="10" enumTypeId="TaxCategory"/>
+            <moqui.basic.Enumeration description="Vat Tax 10%" enumId="TcVAT10" enumCode="10" optionValue="10" sequenceNum="20" enumTypeId="TaxCategory"/>
+            <moqui.basic.Enumeration description="Vat Tax 5%" enumId="TcVAT5" enumCode="5" optionValue="5" sequenceNum="30" enumTypeId="TaxCategory"/>
+            <moqui.basic.Enumeration description="Vat Tax 4%" enumId="TcVAT4" enumCode="4" optionValue="4" sequenceNum="40" enumTypeId="TaxCategory"/>
+
+            <!-- Tax Non-Deductibility Category for Mixed-Use Products -->
+            <moqui.basic.EnumerationType description="Tax Non-Deductibility Category" enumTypeId="TaxNonDeductibilityCategory"/>
+            <moqui.basic.Enumeration description="Deductible Vat Tax" enumId="VtNdC0" enumCode="0" optionValue="0" sequenceNum="10" enumTypeId="TaxNonDeductibilityCategory"/>
+            <moqui.basic.Enumeration description="40% Non-deductible Vat Tax" enumId="VtNdC40" enumCode="40" optionValue="40" sequenceNum="20" enumTypeId="TaxNonDeductibilityCategory"/>
+            <moqui.basic.Enumeration description="50% Non-deductible Vat Tax" enumId="VtNdC50" enumCode="50" optionValue="50" sequenceNum="30" enumTypeId="TaxNonDeductibilityCategory"/>
+            <moqui.basic.Enumeration description="Non-deductible Vat Tax" enumId="VtNdC100" enumCode="100" optionValue="100" sequenceNum="40" enumTypeId="TaxNonDeductibilityCategory"/>
         </seed-data>
 
         <master>
@@ -188,6 +206,7 @@ along with this software (see the LICENSE.md file). If not, see
             <detail relationship="assocs"><detail relationship="type"/><detail relationship="toProduct"/></detail>
             <detail relationship="toAssocs"><detail relationship="type"/><detail relationship="product"/></detail>
             <detail relationship="contents"/>
+            <detail relationship="wikis"/>
             <detail relationship="dimensions"/>
             <detail relationship="geos"><detail relationship="geo"/></detail>
             <detail relationship="identifications"><detail relationship="type"/></detail>
@@ -392,6 +411,13 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
 
+    <entity entity-name="WikiPageProduct" package="mantle.product" cache="never">
+        <field name="wikiPageId" type="id" is-pk="true"/>
+        <field name="productId" type="id" is-pk="true"/>
+        <relationship type="one" related="moqui.resource.wiki.WikiPage"/>
+        <relationship type="one" related="mantle.product.Product"/>
+    </entity>
+
     <!-- TODO: deprecate by ProductUomDimension, will require data migration -->
     <entity entity-name="ProductDimension" package="mantle.product">
         <description>WARNING: to be deprecated by mantle.product.ProductUomDimension</description>
@@ -492,6 +518,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="URL Slug" enumId="PidtUrlSlug"  enumTypeId="ProductIdentificationType"/>
             <!-- see https://en.wikipedia.org/wiki/Harmonized_Tariff_Schedule_of_the_United_States and https://hts.usitc.gov/ -->
             <moqui.basic.Enumeration description="HTS (Tariff)" enumId="PidtHts"  enumTypeId="ProductIdentificationType"/>
+            <moqui.basic.Enumeration description="Common Procurement Vocabulary Code (CPV)" enumId="PidtCpv"  enumTypeId="ProductIdentificationType"/>
+            <moqui.basic.Enumeration description="Integrated Tariff of the European Communities Code (TARIC)" enumId="PidtTaric"  enumTypeId="ProductIdentificationType"/>
+            <moqui.basic.Enumeration description="Serial Shipping Container Code (SSC)" enumId="PidtSsc"  enumTypeId="ProductIdentificationType"/>
         </seed-data>
     </entity>
     <entity entity-name="ProductOtherIdentification" package="mantle.product">
@@ -834,6 +863,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Footer" enumId="PcctFooter" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Meta-Keywords" enumId="PcctMetaKeywords" enumTypeId="ProductCategoryContentType"/>
             <moqui.basic.Enumeration description="Meta-Description" enumId="PcctMetaDescription" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Small" enumId="PcctImageSmall" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Medium" enumId="PcctImageMedium" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Large" enumId="PcctImageLarge" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Detail" enumId="PcctImageDetail" enumTypeId="ProductCategoryContentType"/>
+            <moqui.basic.Enumeration description="Image - Original" enumId="PcctImageOriginal" enumTypeId="ProductCategoryContentType"/>
         </seed-data>
     </entity>
     <entity entity-name="ProductCategoryParty" package="mantle.product.category">

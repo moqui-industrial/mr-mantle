@@ -479,6 +479,10 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="I-766" enumId="PtidI766" enumTypeId="PartyIdType"/>
             <moqui.basic.Enumeration description="I-94" enumId="PtidI94" enumTypeId="PartyIdType"/>
             <moqui.basic.Enumeration description="I-94A" enumId="Ptid94A" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="E-Invoice Exchange System Code - SDI" enumId="PtidExchSysCode" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Economic Operator Registration and Identification Code - EORI Number" enumId="PtidEORICode" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Economic and Administrative Index - REA" enumId="PtidREA" enumTypeId="PartyIdType"/>
+            <moqui.basic.Enumeration description="Registration Number of the Professional Roll" enumId="PtidProRollRegNumber" enumTypeId="PartyIdType"/>
         </seed-data>
     </entity>
     <entity entity-name="PartyNote" package="mantle.party">
@@ -556,6 +560,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Sales Affiliate" enumId="PrtSalesAffiliate" enumTypeId="PartyRelationshipType"/>
             <moqui.basic.Enumeration description="Spouse" enumId="PrtSpouse" enumTypeId="PartyRelationshipType"/>
             <moqui.basic.Enumeration description="Supplier" enumId="PrtSupplier" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Tax Representative" enumId="PrtTaxRepresentative" enumTypeId="PartyRelationshipType"/>
+            <moqui.basic.Enumeration description="Billing Intermediary or Invoice Issuer" enumId="PrtBillingIntermediary" enumTypeId="PartyRelationshipType"/>
 
             <moqui.basic.StatusType description="Party Relationship" statusTypeId="PartyRelationship"/>
         </seed-data>
@@ -633,6 +639,9 @@ along with this software (see the LICENSE.md file). If not, see
             <mantle.party.RoleType description="Human Resources Manager" roleTypeId="HumanResourcesManager"/>
             <mantle.party.RoleType description="Inventory Manager" roleTypeId="InventoryManager"/>
             <mantle.party.RoleType description="Manager" roleTypeId="Manager"/>
+            <mantle.party.RoleType description="Analyst" roleTypeId="Analyst"/>
+            <mantle.party.RoleType description="Controller" roleTypeId="Controller"/>
+            <mantle.party.RoleType description="Auditor" roleTypeId="Auditor"/>
             <mantle.party.RoleType description="Operator" roleTypeId="Operator"/>
             <mantle.party.RoleType description="Order Clerk" roleTypeId="OrderClerk"/>
             <mantle.party.RoleType description="Packer" roleTypeId="Packer"/>
@@ -665,6 +674,13 @@ along with this software (see the LICENSE.md file). If not, see
             <mantle.party.RoleType description="System Architect" roleTypeId="SysArchitect"/>
             <mantle.party.RoleType description="UI Designer" roleTypeId="UiDesigner"/>
 
+            <mantle.party.RoleType description="Signer" roleTypeId="Signer"/>
+            <mantle.party.RoleType description="Approver" roleTypeId="Approver"/>
+            <mantle.party.RoleType description="Acceptor" roleTypeId="Acceptor"/>
+            <mantle.party.RoleType description="Certified Recipient" roleTypeId="CertifiedRecipient"/>
+            <mantle.party.RoleType description="Form Filler" roleTypeId="FormFiller"/>
+            <mantle.party.RoleType description="Delegator" roleTypeId="Delegator"/>
+
 
             <moqui.basic.Enumeration description="Person Roles" enumId="RgpPerson" enumTypeId="RoleGroup"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Accountant"/>
@@ -686,6 +702,9 @@ along with this software (see the LICENSE.md file). If not, see
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Packer"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Picker"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="ProductionManager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Analyst"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Auditor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Controller"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Receiver"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="Reporter"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpPerson" roleTypeId="SalesRepresentative"/>
@@ -819,6 +838,13 @@ along with this software (see the LICENSE.md file). If not, see
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="OrgInternal"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="Employee"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpDirect" roleTypeId="BadActor"/>
+
+            <!-- Budget Roles -->
+            <moqui.basic.Enumeration description="Budget Roles" enumId="RgpBudget" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpBudget" roleTypeId="Assignee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpBudget" roleTypeId="Manager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpBudget" roleTypeId="Auditor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpBudget" roleTypeId="Controller"/>
         </seed-data>
     </entity>
 
@@ -1014,6 +1040,14 @@ along with this software (see the LICENSE.md file). If not, see
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Customer"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Employee"/>
             <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Supplier"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Administrator"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Manager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Signer"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Approver"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Acceptor"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="CertifiedRecipient"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="FormFiller"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpAgreement" roleTypeId="Delegator"/>
         </seed-data>
     </entity>
     <entity entity-name="AgreementAddendum" package="mantle.party.agreement">
@@ -1049,6 +1083,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             <moqui.basic.Enumeration description="Alternate" enumId="AatAlternate" enumTypeId="AgreementAssocType"/>
             <moqui.basic.Enumeration description="Addendum" enumId="AatAddendum" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Upgrade" enumId="AatUpgrade" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Replacement" enumId="AatReplacement" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Amendment" enumId="AatAmendment" enumTypeId="AgreementAssocType"/>
+            <moqui.basic.Enumeration description="Restatement" enumId="AatRestatement" enumTypeId="AgreementAssocType"/>
         </seed-data>
     </entity>
     <entity entity-name="AgreementContent" package="mantle.party.agreement">
@@ -1507,6 +1545,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="CmtDomainName" description="Internet Domain Name" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
             <moqui.basic.Enumeration enumId="CmtWebAddress" description="Web URL/Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
             <moqui.basic.Enumeration enumId="CmtWebForm" description="Web Form" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
+            <moqui.basic.Enumeration enumId="CmtCertifiedEmailAddress" description="Certified Email Address" parentEnumId="CmtElectronicAddress" enumTypeId="ContactMechType"/>
 
             <!-- NOTE: this is not an Enumeration because we need to track the contactMechTypeEnumId as applicable -->
             <CommunicationEventType communicationEventTypeId="Email" description="Email" contactMechTypeEnumId="CmtEmailAddress"/>

@@ -540,6 +540,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="US IRS Form 990-PF" enumId="TxfUsIrs990PF" sequenceNum="5" enumTypeId="TaxForm"/>
             <moqui.basic.Enumeration description="US IRS Form 990-T" enumId="TxfUsIrs990T" sequenceNum="6" enumTypeId="TaxForm"/>
             <moqui.basic.Enumeration description="US IRS Form 1040" enumId="TxfUsIrs1040" sequenceNum="7" enumTypeId="TaxForm"/>
+            <moqui.basic.Enumeration description="IT IRS Form F24" enumId="TxfItIrs24" sequenceNum="8" enumTypeId="TaxForm"/>
 
             <!-- Payroll Tax Forms -->
             <moqui.basic.EnumerationType description="Payroll Tax Form" enumTypeId="PayrollTaxForm"/>

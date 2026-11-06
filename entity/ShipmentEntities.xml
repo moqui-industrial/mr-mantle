@@ -28,6 +28,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="shipmentId" type="id" is-pk="true"/>
         <field name="shipmentTypeEnumId" type="id"/>
         <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="referenceNumber" type="text-medium" enable-audit-log="true">
+            <description>Vendor or other shipment number.</description></field>
 
         <field name="fromPartyId" type="id" enable-audit-log="update"/>
         <field name="toPartyId" type="id" enable-audit-log="update"/>
@@ -120,10 +122,25 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Outgoing" enumId="ShpTpOutgoing" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Sales Return" parentEnumId="ShpTpIncoming" enumId="ShpTpSalesReturn" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Sales Shipment" parentEnumId="ShpTpOutgoing" enumId="ShpTpSales" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Gift" parentEnumId="ShpTpOutgoing" enumId="ShpTpGift" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Private Use of Goods or Services, Self-Supply" parentEnumId="ShpTpOutgoing" enumId="ShpTpSelfSupply" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Purchase Shipment" parentEnumId="ShpTpIncoming" enumId="ShpTpPurchase" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Purchase Return" parentEnumId="ShpTpOutgoing" enumId="ShpTpPurchaseReturn" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Drop Shipment" enumId="ShpTpDrop" enumTypeId="ShipmentType"/>
             <moqui.basic.Enumeration description="Transfer" enumId="ShpTpTransfer" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Consignment Stock" parentEnumId="ShpTpTransfer" enumId="ShpTpConsignmentStock" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Consignment Stock Return" parentEnumId="ShpTpTransfer" enumId="ShpTpConsignmentStockReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Subcontracting" parentEnumId="ShpTpTransfer" enumId="ShpTpSubcontracting" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Return from Subcontracting" parentEnumId="ShpTpTransfer" enumId="ShpTpSubcontractingReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Loan for Use" parentEnumId="ShpTpTransfer" enumId="ShpTpLoanForUse" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Loan for Use Return" parentEnumId="ShpTpTransfer" enumId="ShpTpLoanForUseReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Repair" parentEnumId="ShpTpTransfer" enumId="ShpTpRepair" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Return from Repair" parentEnumId="ShpTpTransfer" enumId="ShpTpRepairReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Maintenance" parentEnumId="ShpTpTransfer" enumId="ShpTpMaintenance" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Return from Maintenance" parentEnumId="ShpTpTransfer" enumId="ShpTpMaintenanceReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Goods Under Approval/View" parentEnumId="ShpTpTransfer" enumId="ShpTpGoodsUnderView" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Goods Under Approval/View Return" parentEnumId="ShpTpTransfer" enumId="ShpTpGoodsUnderViewReturn" enumTypeId="ShipmentType"/>
+            <moqui.basic.Enumeration description="Sample" parentEnumId="ShpTpTransfer" enumId="ShpTpSample" enumTypeId="ShipmentType"/>
 
             <!-- Shipment Status -->
             <moqui.basic.StatusType description="Shipment Status" statusTypeId="Shipment"/>

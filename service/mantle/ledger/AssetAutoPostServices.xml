@@ -95,7 +95,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetReceipt.shipmentId &amp;&amp; assetTypeGlAccount?.transferGlAccountId">
                 <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment">
                     <field-map field-name="shipmentId" from="assetReceipt.shipmentId"/></entity-find-one>
-                <if condition="shipment?.shipmentTypeEnumId == 'ShpTpTransfer'">
+                <set field="shipmentTypeEnum" from="shipment?.'ShipmentType#moqui.basic.Enumeration'"/>
+                <if condition="shipmentTypeEnum?.enumId == 'ShpTpTransfer' || shipmentTypeEnum?.parentEnumId == 'ShpTpTransfer'">
                     <set field="receiptGlAccountId" from="assetTypeGlAccount.transferGlAccountId"/></if>
             </if>
             <!-- if not specifically configured look for a default account -->
@@ -313,7 +314,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="assetIssuance.shipmentId &amp;&amp; assetTypeGlAccount?.transferGlAccountId">
                 <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment">
                     <field-map field-name="shipmentId" from="assetIssuance.shipmentId"/></entity-find-one>
-                <if condition="shipment?.shipmentTypeEnumId == 'ShpTpTransfer'">
+                <set field="shipmentTypeEnum" from="shipment?.'ShipmentType#moqui.basic.Enumeration'"/>
+                <if condition="shipmentTypeEnum?.enumId == 'ShpTpTransfer' || shipmentTypeEnum?.parentEnumId == 'ShpTpTransfer'">
                     <set field="issuanceGlAccountId" from="assetTypeGlAccount.transferGlAccountId"/></if>
             </if>
             <!-- if not specifically configured look for a default account -->

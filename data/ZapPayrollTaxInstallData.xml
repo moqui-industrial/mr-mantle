@@ -460,4 +460,12 @@ along with this software (see the LICENSE.md file). If not, see
         <details flatAmount="-300"/>
     </mantle.humanres.employment.PayrollAdjustment>
     -->
+
+    <!-- ========== Italy ========== -->
+    <mantle.party.Party partyId="ItaRa" partyTypeEnumId="PtyOrganization">
+        <mantle.party.Organization organizationName="Italian Revenue Agency"/>
+        <mantle.party.PartyRole roleTypeId="OrgTaxAuthority"/>
+    </mantle.party.Party>
+    <mantle.other.tax.TaxAuthority taxAuthorityId="ItaRa" description="Italian Revenue Agency" taxAuthGeoId="ITA"
+            taxAuthPartyId="ItaRa" taxAuthorityTypeEnumId="TatFederal" taxAuthorityRateTypeEnumId="TartVatTax"/>
 </entity-facade-xml>
