@@ -315,7 +315,11 @@ function invoice(p) {
 // base, rounding and exemption, or the reason it cannot be calculated. Writes nothing.
 function simulate(p) {
     const scope = policy.organization(p, "read")
-    const organizationPartyId = scope.organizationPartyId
+    return sample(scope.organizationPartyId, p)
+}
+// The sample sale's tax for an organization (and its store) the caller has checked: simulate#SalesTax after its Accounting
+// read check, and Commerce's store tax preview (StoreCheckout.js) after its store check (impl-commerce P6).
+function sample(organizationPartyId, p) {
     const date = p.taxDate || ec.user.nowTimestamp
     const config = gateway(organizationPartyId, p.productStoreId)
     const currency = p.currencyUomId || policy.preference(organizationPartyId).baseCurrencyUomId
@@ -379,6 +383,7 @@ function simulate(p) {
 
 const operations = {local, invoice, simulate}
 ;({
+    sample,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales tax operation " + op)
         return operations[op](parameters)

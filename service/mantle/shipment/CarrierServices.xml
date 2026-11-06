@@ -602,7 +602,8 @@ along with this software (see the LICENSE.md file). If not, see
                                     shipmentMethodEnumId:curCarrierMethod.shipmentMethodEnumId,
                                     postalContactMechId:postalContactMechId, packageInfoList:packageInfoList}"/>
                         <!-- <log message="${shippingGatewayConfigId} - ${shippingGatewayConfig.getOrderRateServiceName} singleOut ${singleOut}"/> -->
-                        <script>shippingRateInfoList.push(Object.assign({}, singleOut, {carrierPartyId:curCarrierMethod.carrierPartyId,
+                        <!-- a method the store's local rates do not deliver has no rate (impl-commerce P6), so it is left out -->
+                        <script>if (!singleOut.rateUnavailable) shippingRateInfoList.push(Object.assign({}, singleOut, {carrierPartyId:curCarrierMethod.carrierPartyId,
                                 shipmentMethodEnumId:curCarrierMethod.shipmentMethodEnumId}))</script>
                     </iterate>
                 </if>
@@ -974,8 +975,13 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========================= -->
 
     <service verb="get" noun="OrderShippingRateLocal">
-        <description>Estimate shipping costs locally using rules</description>
+        <description>Estimate shipping costs locally using rules: a store's local rates when it has any (impl-commerce P6,
+            mantle.product.StoreAdminServices.get#StoreShippingRateLocal), else zero for a part with shipped items.</description>
         <implements service="mantle.shipment.CarrierServices.get#OrderShippingRate"/>
+        <out-parameters>
+            <parameter name="rateUnavailable" type="Boolean"><description>True when the store's local rates deliver nothing
+                for the part (no rate matches): there is no charge, not a free one.</description></parameter>
+        </out-parameters>
         <actions>
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>
@@ -1023,8 +1029,25 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </iterate>
 
+            <!-- impl-commerce P6 (F20): a store with local rates (ProductStoreShippingRate in effect now or later) is rated by
+                them: the matching rate's charge, or no delivery (no rate, no item, rateUnavailable) when none matches, never a
+                free one; a store with no rates keeps the default below (zero) -->
+            <set field="storeRate" from="null"/>
+            <if condition="orderHeader?.productStoreId &amp;&amp; !itemCount.isZero()">
+                <service-call name="mantle.product.StoreAdminServices.get#StoreShippingRateLocal" out-map="storeRate"
+                        out-map-add-to-existing="false" in-map="{productStoreId:orderHeader.productStoreId, orderId:orderId,
+                            orderPartSeqId:orderPartSeqId, carrierPartyId:carrierPartyId, shipmentMethodEnumId:shipmentMethodEnumId,
+                            geoIdSet:geoIdSet}"/>
+                <if condition="!storeRate?.rated"><set field="storeRate" from="null"/></if>
+            </if>
+            <if condition="storeRate != null &amp;&amp; !storeRate.available">
+                <set field="rateUnavailable" from="true"/>
+                <message type="warning">No local shipping rate of store ${orderHeader.productStoreId} delivers order part ${orderId}:${orderPartSeqId} by ${carrierPartyId} ${shipmentMethodEnumId}</message>
+                <return/>
+            </if>
+
             <if condition="!itemCount.isZero()">
-                <set field="shippingTotal" from="toDecimal(0)"/>
+                <set field="shippingTotal" from="storeRate != null ? toDecimal(storeRate.shippingTotal) : toDecimal(0)"/>
 
                 <log level="info" message="Calculated shippingTotal [${shippingTotal}] order part [${orderId}:${orderPartSeqId}] carrier [${carrierPartyId}] method [${shipmentMethodEnumId}] address [${postalContactMechId}] geos [${geoIdSet}] items [${itemCount}] quantity [${totalQuantity}] weight [${totalWeight}]"/>
 

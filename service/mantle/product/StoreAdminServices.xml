@@ -426,4 +426,288 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="options" from="found.options"/>
         </actions>
     </service>
+
+    <!-- ===== the checkout part (impl-commerce P6, COM-CHECKOUT; design-commerce §8 CheckoutSettings; StoreCheckout.js) =====
+        COMMERCE_VIEW reads, COMMERCE_STORE_EDIT changes, in the store's scope. The checkout policy is dated ProductStoreSetting
+        types (§4, F14); a binding's removal records its own audit row with the user and reason (F61). -->
+    <service verb="get" noun="CheckoutSettings" allow-remote="false">
+        <description>A store's checkout settings: the policy (each field's value, whether it is the default, a change waiting
+            from a later date), ship options, shipping gateways (the carrier account masked), local rates (in effect, later and
+            ended), payment gateways with whether the organization still enables them and their capabilities (hosted checkout,
+            saved methods, off-session), tax (gateway, display, origin), and whether the user may change them.</description>
+        <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="store" type="Map"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="shipOptions" type="List"/>
+            <parameter name="shippingGateways" type="List"/>
+            <parameter name="rates" type="List"/>
+            <parameter name="rated" type="Boolean"/>
+            <parameter name="paymentGateways" type="List"/>
+            <parameter name="tax" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('getCheckoutSettings', context)"/>
+            <set field="store" from="found.store"/>
+            <set field="policy" from="found.policy"/>
+            <set field="shipOptions" from="found.shipOptions"/>
+            <set field="shippingGateways" from="found.shippingGateways"/>
+            <set field="rates" from="found.rates"/>
+            <set field="rated" from="found.rated"/>
+            <set field="paymentGateways" from="found.paymentGateways"/>
+            <set field="tax" from="found.tax"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CheckoutPolicy" allow-remote="false">
+        <description>The checkout policy from a date (now when empty, never past): guest or account checkout (either, account,
+            guest), destinations (countries or zones), stock disclosure (hidden, availability, backorder), whether buyers
+            accept the site's Terms page, the purchase contact's phone (hidden, optional, required) and the support queue (one
+            of the queues the store organization offers, as create#CustomerCase accepts no other: QUEUE_NOT_OFFERED). Each
+            changed field is a dated setting ending the one it replaces; an empty one ends its setting (its default applies).
+            A change needs its reason.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="accountMode"/>
+            <parameter name="destinations"/>
+            <parameter name="stockDisclosure"/>
+            <parameter name="termsRequired"/>
+            <parameter name="contactPhone"/>
+            <parameter name="supportQueueId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="changed" type="List"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeCheckoutPolicy', context)"/>
+            <set field="changed" from="saved.changed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ShippingOption" allow-remote="false">
+        <description>A carrier's method the store offers (a CarrierShipmentMethod; StoreServices.create#StoreShippingOption),
+            its order and markup changed, or removed with a reason recorded in the store's History.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="shipmentMethodEnumId" required="true"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="markupPercent"/>
+            <parameter name="markupAmount"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeShippingOption', context)"/>
+            <set field="removed" from="saved.removed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreShippingGateway" allow-remote="false">
+        <description>The shipping gateway that rates a carrier's deliveries for the store, one approved for the carrier
+            (Mantle's local gateway, or one serving the carrier: ShippingGatewayCarrier; GATEWAY_NOT_APPROVED otherwise), with
+            its billing and insurance defaults; a changed gateway needs its reason, a removal records its own.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="shippingGatewayConfigId"/>
+            <parameter name="billingType"/>
+            <parameter name="billingAccount"/>
+            <parameter name="billingZip"/>
+            <parameter name="billingCountry"/>
+            <parameter name="insurancePercent"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeStoreShippingGateway', context)"/>
+            <set field="removed" from="saved.removed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreShippingRate" allow-remote="false">
+        <description>A local shipping rate (ProductStoreShippingRate): a destination zone, optionally a carrier and method, a
+            weight band in a unit and a value band (lower bound inclusive, upper exclusive: BAND_INVALID when not ordered), the
+            charge in a currency (the store's by default), a priority (lowest first, 10 by default), from a date (now when
+            empty, never past). Rates of the same priority whose zone, method, bands and dates overlap are refused
+            (RATE_OVERLAP). With shippingRateId: a change of a rate in effect ends it and starts its successor from the date,
+            one not started changes in place; end ends it (or withdraws one not started). A change or end of a rate in effect
+            needs its reason.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="shippingRateId"/>
+            <parameter name="geoId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="fromWeight"/>
+            <parameter name="thruWeight"/>
+            <parameter name="weightUomId"/>
+            <parameter name="fromAmount"/>
+            <parameter name="thruAmount"/>
+            <parameter name="shippingAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="priority"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="shippingRateId"/>
+            <parameter name="previousRateId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeStoreShippingRate', context)"/>
+            <set field="shippingRateId" from="saved.shippingRateId"/>
+            <set field="previousRateId" from="saved.previousRateId"/>
+            <set field="ended" from="saved.ended"/>
+        </actions>
+    </service>
+    <service verb="simulate" noun="StoreShipping" allow-remote="false">
+        <description>What each of the store's ship options charges a sample cart (its value and weight) going to a sample
+            address (its geos as get#PostalAddressGeoIdSet reads an address: county, state or province, country, postal
+            code): the local rate chosen, or no delivery, for a carrier on a local gateway of a store
+            with rates; Mantle's local default (nothing) for a store with none; the carrier's own gateway otherwise. Writes
+            nothing.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="countryGeoId"/>
+            <parameter name="stateProvinceGeoId"/>
+            <parameter name="countyGeoId"/>
+            <parameter name="postalCodeGeoId"/>
+            <parameter name="amount"/>
+            <parameter name="weight"/>
+            <parameter name="weightUomId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rated" type="Boolean"/>
+            <parameter name="geoIds" type="List"/>
+            <parameter name="quotes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="simulated" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('simulateStoreShipping', context)"/>
+            <set field="rated" from="simulated.rated"/>
+            <set field="geoIds" from="simulated.geoIds"/>
+            <set field="quotes" from="simulated.quotes"/>
+        </actions>
+    </service>
+    <service verb="get" noun="StoreShippingRateLocal" authenticate="false" allow-remote="false">
+        <description>The local rating rule of CarrierServices.get#OrderShippingRateLocal (impl-commerce F20): for a store with a
+            local rate in effect now or later (rated), the order part's charge by the rate that matches its geos, carrier and
+            method, currency, weight and value, or available false when none does (no delivery, never free). A store with no
+            rates is not rated, and the local gateway keeps its default. Reads only; no permission, as order flows call it.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId" required="true"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="shipmentMethodEnumId"/>
+            <parameter name="geoIdSet" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rated" type="Boolean"/>
+            <parameter name="available" type="Boolean"/>
+            <parameter name="shippingTotal" type="BigDecimal"/>
+            <parameter name="shippingRateId"/>
+        </out-parameters>
+        <actions>
+            <set field="rateOut" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('getStoreShippingRateLocal', context)"/>
+            <set field="rated" from="rateOut.rated"/>
+            <set field="available" from="rateOut.available"/>
+            <set field="shippingTotal" from="rateOut.shippingTotal"/>
+            <set field="shippingRateId" from="rateOut.shippingRateId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StorePaymentGateway" allow-remote="false">
+        <description>The payment gateway that takes an instrument's payments for the store: only one of the store
+            organization's enabled, current PaymentGatewayOrganization rows (Z4; GATEWAY_NOT_ENABLED otherwise). A changed
+            gateway needs its reason (audit-logged), a removal records its own.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="paymentInstrumentEnumId" required="true"/>
+            <parameter name="paymentGatewayConfigId"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeStorePaymentGateway', context)"/>
+            <set field="removed" from="saved.removed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="StoreTax" allow-remote="false">
+        <description>The store's tax: its gateway (one that calculates sales tax; store#Store's policy field, with its reason
+            and revision), and from a date its display (exclusive, inclusive) and origin (one of its current facilities).</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="taxGatewayConfigId"/>
+            <parameter name="taxDisplay"/>
+            <parameter name="taxOriginFacilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedLastUpdatedStamp" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="changed" type="List"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('storeStoreTax', context)"/>
+            <set field="changed" from="saved.changed"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="StoreTax" allow-remote="false">
+        <description>The tax the store's gateway charges a sample sale (an amount, quantity and shipping going to a destination
+            geo), simulate#SalesTax's calculation for a user who reads the store: each authority's rate, base and tax, or why
+            it cannot be calculated, and how the store's display shows it. Writes nothing.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="destinationGeoId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="quantity"/>
+            <parameter name="amount"/>
+            <parameter name="shippingAmount"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="gatewayName"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="taxDisplay"/>
+            <parameter name="taxTotalText"/>
+            <parameter name="displayText"/>
+        </out-parameters>
+        <actions>
+            <set field="previewed" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('previewStoreTax', context)"/>
+            <set field="gatewayName" from="previewed.gatewayName"/>
+            <set field="currencyUomId" from="previewed.currencyUomId"/>
+            <set field="rows" from="previewed.rows"/>
+            <set field="reasonCode" from="previewed.reasonCode"/>
+            <set field="message" from="previewed.message"/>
+            <set field="taxDisplay" from="previewed.taxDisplay"/>
+            <set field="taxTotalText" from="previewed.taxTotalText"/>
+            <set field="displayText" from="previewed.displayText"/>
+        </actions>
+    </service>
+    <service verb="find" noun="CheckoutOptions" allow-remote="false">
+        <description>The options of a checkout form's drop-down, the values its save accepts: shipMethods, carriers, methods,
+            shippingGateways (approved for carrierPartyId), paymentInstruments, paymentGateways (the organization's enabled,
+            current ones), geos (countries, states and zones, searched), supportQueues (the organization's offered queues),
+            taxGateways, storeFacilities, weightUoms, currencies. Refuses an unknown choice.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="choice" required="true"/>
+            <parameter name="carrierPartyId"/>
+            <parameter name="term"/>
+            <parameter name="selected"/>
+        </in-parameters>
+        <out-parameters><parameter name="options" type="List"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreCheckout.js').execute('findCheckoutOptions', context)"/>
+            <set field="options" from="found.options"/>
+        </actions>
+    </service>
 </services>
