@@ -480,7 +480,7 @@ feature("a preview needs the site's preview host and answers only its token on t
         const forged = run(null, T + "get#ThemePreviewPage", {
             siteId: site,
             hostname: previewHost,
-            token: token.slice(0, -1) + "Q"
+            token: token.slice(0, -1) + (token.endsWith("Q") ? "R" : "Q")
         })
         const hostKind = run(null, T + "get#PreviewHost", {siteId: site, hostname: previewHost})
         const row = one("mantle.public.PublicThemePreview", {previewId: made.previewId})
