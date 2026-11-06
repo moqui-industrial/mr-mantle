@@ -274,4 +274,9 @@
     ['POST', 'email-preferences/view', 'getEmailPreferences'],
     ['POST', 'email-preferences', 'storeEmailPreferences'],
     ['POST', 'email-preferences/one-click', 'applyOneClickUnsubscribe'],
+    // Commerce P9: a product's reviews, a signed-in buyer's review (its photo a multipart part) and a review image (a GET
+    // with the digest as its query, as the transports' downloads send it)
+    ['GET', 'shop/products/{productId}/reviews', 'getProductReviews'],
+    ['POST', 'shop/products/{productId}/reviews', 'submitProductReview'],
+    ['GET', 'shop/media/review', 'getShopReviewImage'],
 ]

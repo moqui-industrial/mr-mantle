@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Store reviews (impl-commerce P9): the review request's source on the delivery ledger (CX-DELIVERY; its build service
+    makes the message, or suppresses it once the item is reviewed, returned or no longer public). The request's store email
+    type, PsetReviewRequest, is ProductStoreEmailType seed data already. -->
+<entity-facade-xml type="seed-initial">
+    <moqui.basic.Enumeration enumId="MdsrcReviewRequest" description="Store review request" sequenceNum="2"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.product.StoreMerchandisingServices.build#ReviewRequest"/>
+</entity-facade-xml>

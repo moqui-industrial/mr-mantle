@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Store reviews (impl-commerce P9, F19, F41; design-commerce §4 Reviews, design-shop §5 PublicReviews and SubmitReview,
+    §14.2; COM-MERCH, SHOP-SUPPORT; service/mantle/product/StoreReviews.js). ProductReview gains its purchase proof (the
+    author's own order item), the author's public label and the store's reply with its author and time, the proof and the
+    reply audit-logged with the status; a moderation decision is a status change whose reason is in the audit log, with no
+    decision record (impl-commerce §4). A review's images are ProductReviewImage rows: a scanned PNG or JPEG kept under the
+    store's content root, served by its digest only while the review is approved. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <extend-entity entity-name="ProductReview" package="mantle.product">
+    <field name="orderId" type="id" enable-audit-log="true">
+      <description>The purchase proof: the author's own order (impl-commerce F19), found by Shop from the signed-in account's
+        own qualifying order item, never taken from the request.</description>
+    </field>
+    <field name="orderItemSeqId" type="id" enable-audit-log="true"/>
+    <field name="displayName" type="text-medium">
+      <description>The author's public label as they chose it at submission (a first name and initial, or none for "A
+        customer"); the public projection shows this and never the account, party or email.</description>
+    </field>
+    <field name="replyText" type="text-very-long" enable-audit-log="true">
+      <description>The store's public reply, plain text, shown under an approved review.</description>
+    </field>
+    <field name="replyUserId" type="id" enable-audit-log="true"/>
+    <field name="replyDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.order.OrderItem">
+      <key-map field-name="orderId"/>
+      <key-map field-name="orderItemSeqId"/>
+    </relationship>
+    <relationship type="one" title="Reply" related="moqui.security.UserAccount">
+      <key-map field-name="replyUserId" related="userId"/>
+    </relationship>
+    <index name="PRODUCT_REVIEW_STORE">
+      <index-field name="productStoreId"/>
+      <index-field name="productId"/>
+      <index-field name="statusId"/>
+    </index>
+    <seed-data>
+      <!-- an author's edit returns an approved review to pending (design-shop §5: the flow had no way back) -->
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrvwApproved" toStatusId="PrvwPending" transitionName="Review Edited"/>
+    </seed-data>
+  </extend-entity>
+
+  <entity entity-name="ProductReviewImage" package="mantle.product" cache="never">
+    <description>An image of a review (impl-commerce §4, F41): a PNG or JPEG staged and scanned through PortalMedia.js and
+      kept under the content root, decided with its review and served by its content digest only while the review is
+      approved and its product public in the store. Removing one deletes the row and its file.</description>
+    <field name="productReviewId" type="id" is-pk="true"/>
+    <field name="imageSeqId" type="id" is-pk="true"/>
+    <field name="digest" type="text-medium"><description>The sha-256 of the file's base64, its public address.</description></field>
+    <field name="contentLocation" type="text-medium"/>
+    <field name="filename" type="text-medium"/>
+    <field name="contentType" type="text-short"/>
+    <field name="byteSize" type="number-integer"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.ProductReview"/>
+    <index name="PRODUCT_REVIEW_IMG_DIGEST" unique="true">
+      <index-field name="digest"/>
+    </index>
+  </entity>
+</entities>
