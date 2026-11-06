@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The store worklists' joins (impl-commerce P8, COM-OPS; mantle.order.StoreOperationsServices, StoreOperations.js): a
+    return by the store of its source order lines, and a request by the store of an order it is linked to, so a store's
+    returns and cases are found in the query rather than by listing every order of the store. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <view-entity entity-name="StoreReturnItemView" package="mantle.order.return">
+        <description>A return's lines with the store of each line's source order (a line with no order is left out).</description>
+        <member-entity entity-alias="RTNH" entity-name="mantle.order.return.ReturnHeader"/>
+        <member-entity entity-alias="RITM" entity-name="mantle.order.return.ReturnItem" join-from-alias="RTNH">
+            <key-map field-name="returnId"/></member-entity>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="RITM">
+            <key-map field-name="orderId"/></member-entity>
+        <alias name="returnId" entity-alias="RTNH"/>
+        <alias name="statusId" entity-alias="RTNH"/>
+        <alias name="customerPartyId" entity-alias="RTNH"/>
+        <alias name="vendorPartyId" entity-alias="RTNH"/>
+        <alias name="entryDate" entity-alias="RTNH"/>
+        <alias name="orderId" entity-alias="RITM"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
+    <view-entity entity-name="StoreRequestOrderView" package="mantle.request">
+        <description>A request linked to a sales order (RequestRecord) with the order's store.</description>
+        <member-entity entity-alias="RQRC" entity-name="mantle.request.RequestRecord"/>
+        <member-entity entity-alias="OHDR" entity-name="mantle.order.OrderHeader" join-from-alias="RQRC">
+            <key-map field-name="recordId" related="orderId"/></member-entity>
+        <alias name="requestId" entity-alias="RQRC"/>
+        <alias name="recordEntityName" entity-alias="RQRC"/>
+        <alias name="orderId" entity-alias="OHDR"/>
+        <alias name="productStoreId" entity-alias="OHDR"/>
+    </view-entity>
+</entities>

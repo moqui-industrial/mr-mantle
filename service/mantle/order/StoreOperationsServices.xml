@@ -1,0 +1,407 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Store operations (impl-commerce P8, COM-OPS; design-commerce §6, §10; StoreOperations.js): a store's worklists of
+    submitted orders, carts, returns, customers, cases and delivery-ledger notices, the reads of Commerce's OrderDetail,
+    CartDetail, ReturnDetail, Customer360 and RequestDetail branches, Order again, an internal note on a case and Home's work
+    counts. Each service checks COMMERCE_VIEW, COMMERCE_ORDER_VIEW for the order, cart, return, customer and case reads, and
+    the store scope (the user's own organizations; a current StoreStaff row's stores, F51); a missing record and one outside
+    the scope are refused alike (RECORD_UNAVAILABLE). Commerce takes none of the owners' actions: a Payment hold is
+    Accounting's to release, a return and a case Customer Service's to work, a delivery exception MESSAGE_DELIVERY_REVIEW's
+    to resolve. Refusals start with their reason code. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="StoreOrders" allow-remote="false">
+        <description>The submitted orders of the user's stores (or one store), newest first, never an open order (a cart): by number, name or external reference (term), customer, status, placed dates (fromDate, thruDate), an attention filter (paymentHold, hold, cancelRequest, notice; stuck lists the Shop placements waiting for staff, impl-shop F85, which are open orders) and a computed payment state (paid, authorized, promised, unpaid, held, none). Each row: store, channel, customer, placed date, status, total, payment and fulfillment state, holds (the Payment hold read only) and a cancellation-proposal badge. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="attention"/>
+            <parameter name="payment"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orders" type="List"/>
+            <parameter name="ordersCount" type="Integer"/>
+            <parameter name="ordersPageIndex" type="Integer"/>
+            <parameter name="ordersPageSize" type="Integer"/>
+            <parameter name="ordersPageMaxIndex" type="Integer"/>
+            <parameter name="ordersPageRangeLow" type="Integer"/>
+            <parameter name="ordersPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreOrders', context)"/>
+            <set field="orders" from="found.orders"/>
+            <set field="ordersCount" from="found.ordersCount"/>
+            <set field="ordersPageIndex" from="found.ordersPageIndex"/>
+            <set field="ordersPageSize" from="found.ordersPageSize"/>
+            <set field="ordersPageMaxIndex" from="found.ordersPageMaxIndex"/>
+            <set field="ordersPageRangeLow" from="found.ordersPageRangeLow"/>
+            <set field="ordersPageRangeHigh" from="found.ordersPageRangeHigh"/>
+            <set field="truncated" from="found.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreOrder" allow-remote="false">
+        <description>A submitted order of the user's stores for OrderDetail's Commerce branch, read only: its header with payment and fulfillment state, open holds (a Payment hold is Accounting's to release), items, payments, shipments, invoices, open order changes (Customer Service's), cases, returns, its notices on the delivery ledger (addresses masked) and its Shop checkout. A missing order, an open one and one outside the scope are refused alike (RECORD_UNAVAILABLE). COMMERCE_ORDER_VIEW.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="order" type="Map"/>
+            <parameter name="holds" type="List"/>
+            <parameter name="items" type="List"/>
+            <parameter name="payments" type="List"/>
+            <parameter name="shipments" type="List"/>
+            <parameter name="invoices" type="List"/>
+            <parameter name="changes" type="List"/>
+            <parameter name="cases" type="List"/>
+            <parameter name="returns" type="List"/>
+            <parameter name="notices" type="List"/>
+            <parameter name="checkout" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreOrder', context)"/>
+            <set field="order" from="found.order"/>
+            <set field="holds" from="found.holds"/>
+            <set field="items" from="found.items"/>
+            <set field="payments" from="found.payments"/>
+            <set field="shipments" from="found.shipments"/>
+            <set field="invoices" from="found.invoices"/>
+            <set field="changes" from="found.changes"/>
+            <set field="cases" from="found.cases"/>
+            <set field="returns" from="found.returns"/>
+            <set field="notices" from="found.notices"/>
+            <set field="checkout" from="found.checkout"/>
+        </actions>
+    </service>
+
+    <service verb="reorder" noun="StoreOrder" allow-remote="false">
+        <description>Order again (design §10, R-COM-W04): a new open order of the same store and customer with a placed order's product lines, through clone#Order with copyPayment false (no payment is copied), each line repriced at today's price (recalc#OrderPartItemAmounts: the clone keeps each item's unitAmount, F43), then its promotions, shipping and tax (handle#OrderMajorChange). Nothing is placed or charged. Keyed by operationKey on PostingOperation: a retry or a second submit answers the first new order; orderRevision, when given, is the order's revision the user saw (a stale one is refused STALE_REVISION naming the current). COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="baseOrderId"/>
+            <parameter name="totalText"/>
+            <parameter name="message"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('reorderStoreOrder', context)"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+            <set field="orderId" from="found.orderId"/>
+            <set field="baseOrderId" from="found.baseOrderId"/>
+            <set field="totalText" from="found.totalText"/>
+            <set field="message" from="found.message"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreCarts" allow-remote="false">
+        <description>The open orders of the user's stores (or one), latest shopper activity first (StoreCartAccess.lastActivityDate, never lastUpdatedStamp): by state (active, abandoned: inactive past the store's delay with no live checkout; checkout; stuck; staff: made by staff, with no shopper activity), customer and id or name. A guest's cart shows no identity. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="carts" type="List"/>
+            <parameter name="cartsCount" type="Integer"/>
+            <parameter name="cartsPageIndex" type="Integer"/>
+            <parameter name="cartsPageSize" type="Integer"/>
+            <parameter name="cartsPageMaxIndex" type="Integer"/>
+            <parameter name="cartsPageRangeLow" type="Integer"/>
+            <parameter name="cartsPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreCarts', context)"/>
+            <set field="carts" from="found.carts"/>
+            <set field="cartsCount" from="found.cartsCount"/>
+            <set field="cartsPageIndex" from="found.cartsPageIndex"/>
+            <set field="cartsPageSize" from="found.cartsPageSize"/>
+            <set field="cartsPageMaxIndex" from="found.cartsPageMaxIndex"/>
+            <set field="cartsPageRangeLow" from="found.cartsPageRangeLow"/>
+            <set field="cartsPageRangeHigh" from="found.cartsPageRangeHigh"/>
+            <set field="truncated" from="found.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreCart" allow-remote="false">
+        <description>A cart of the user's stores for CartDetail, read only: its lines and totals, activity, store and Shop checkout phase (a stuck placement says why); recovery is empty until Commerce P10. A missing cart and one outside the scope are refused alike (RECORD_UNAVAILABLE). COMMERCE_ORDER_VIEW.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="cart" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="checkout" type="Map"/>
+            <parameter name="access" type="Map"/>
+            <parameter name="recovery" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreCart', context)"/>
+            <set field="cart" from="found.cart"/>
+            <set field="lines" from="found.lines"/>
+            <set field="checkout" from="found.checkout"/>
+            <set field="access" from="found.access"/>
+            <set field="recovery" from="found.recovery"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreReturns" allow-remote="false">
+        <description>The returns whose lines come from the orders of the user's stores (or one), Requested first then newest: by status, customer and id or source order. Customer Service authorizes them and Accounting settles them. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returns" type="List"/>
+            <parameter name="returnsCount" type="Integer"/>
+            <parameter name="returnsPageIndex" type="Integer"/>
+            <parameter name="returnsPageSize" type="Integer"/>
+            <parameter name="returnsPageMaxIndex" type="Integer"/>
+            <parameter name="returnsPageRangeLow" type="Integer"/>
+            <parameter name="returnsPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreReturns', context)"/>
+            <set field="returns" from="found.returns"/>
+            <set field="returnsCount" from="found.returnsCount"/>
+            <set field="returnsPageIndex" from="found.returnsPageIndex"/>
+            <set field="returnsPageSize" from="found.returnsPageSize"/>
+            <set field="returnsPageMaxIndex" from="found.returnsPageMaxIndex"/>
+            <set field="returnsPageRangeLow" from="found.returnsPageRangeLow"/>
+            <set field="returnsPageRangeHigh" from="found.returnsPageRangeHigh"/>
+            <set field="truncated" from="found.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreReturn" allow-remote="false">
+        <description>A return of the user's stores' orders for ReturnDetail's Commerce branch, read only: its lines with what was asked, received and how each is settled. A missing return and one with a line of another store's order are refused alike (RECORD_UNAVAILABLE). COMMERCE_ORDER_VIEW.</description>
+        <in-parameters>
+            <parameter name="returnId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="returnHeader" type="Map"/>
+            <parameter name="items" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreReturn', context)"/>
+            <set field="returnHeader" from="found.returnHeader"/>
+            <set field="items" from="found.items"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreCustomers" allow-remote="false">
+        <description>The customers of the user's stores (or one): each a party with an order or a signed-in cart there, never a party directory; by name or id, most recent order first, each with its stores, orders, open carts and PASS account state. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="customers" type="List"/>
+            <parameter name="customersCount" type="Integer"/>
+            <parameter name="customersPageIndex" type="Integer"/>
+            <parameter name="customersPageSize" type="Integer"/>
+            <parameter name="customersPageMaxIndex" type="Integer"/>
+            <parameter name="customersPageRangeLow" type="Integer"/>
+            <parameter name="customersPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreCustomers', context)"/>
+            <set field="customers" from="found.customers"/>
+            <set field="customersCount" from="found.customersCount"/>
+            <set field="customersPageIndex" from="found.customersPageIndex"/>
+            <set field="customersPageSize" from="found.customersPageSize"/>
+            <set field="customersPageMaxIndex" from="found.customersPageMaxIndex"/>
+            <set field="customersPageRangeLow" from="found.customersPageRangeLow"/>
+            <set field="customersPageRangeHigh" from="found.customersPageRangeHigh"/>
+            <set field="truncated" from="found.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreCustomer" allow-remote="false">
+        <description>A customer of the user's stores for Customer360's Commerce branch: its store relationships, PASS account state (verified email, self access), current addresses, masked payment methods (type and last four), and its orders, carts, cases and returns in those stores. A party with no order or signed-in cart in the user's stores is refused like a missing one (RECORD_UNAVAILABLE). COMMERCE_ORDER_VIEW.</description>
+        <in-parameters>
+            <parameter name="customerPartyId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="customer" type="Map"/>
+            <parameter name="addresses" type="List"/>
+            <parameter name="methods" type="List"/>
+            <parameter name="orders" type="List"/>
+            <parameter name="carts" type="List"/>
+            <parameter name="requests" type="List"/>
+            <parameter name="returns" type="List"/>
+            <parameter name="subscriptions" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreCustomer', context)"/>
+            <set field="customer" from="found.customer"/>
+            <set field="addresses" from="found.addresses"/>
+            <set field="methods" from="found.methods"/>
+            <set field="orders" from="found.orders"/>
+            <set field="carts" from="found.carts"/>
+            <set field="requests" from="found.requests"/>
+            <set field="returns" from="found.returns"/>
+            <set field="subscriptions" from="found.subscriptions"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreRequests" allow-remote="false">
+        <description>The support cases of the user's stores (or one): by Request.productStoreId, linked to one of their orders, or filed in a store's checkout support queue; open by default (state all for every one), by status, customer and id or subject; newest first. Customer Service works them. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="term"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requests" type="List"/>
+            <parameter name="requestsCount" type="Integer"/>
+            <parameter name="requestsPageIndex" type="Integer"/>
+            <parameter name="requestsPageSize" type="Integer"/>
+            <parameter name="requestsPageMaxIndex" type="Integer"/>
+            <parameter name="requestsPageRangeLow" type="Integer"/>
+            <parameter name="requestsPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreRequests', context)"/>
+            <set field="requests" from="found.requests"/>
+            <set field="requestsCount" from="found.requestsCount"/>
+            <set field="requestsPageIndex" from="found.requestsPageIndex"/>
+            <set field="requestsPageSize" from="found.requestsPageSize"/>
+            <set field="requestsPageMaxIndex" from="found.requestsPageMaxIndex"/>
+            <set field="requestsPageRangeLow" from="found.requestsPageRangeLow"/>
+            <set field="requestsPageRangeHigh" from="found.requestsPageRangeHigh"/>
+            <set field="truncated" from="found.truncated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreRequest" allow-remote="false">
+        <description>A case of the user's stores for RequestDetail's Commerce branch, read only: its facts and conversation (messages and internal notes). A missing case and another store's are refused alike (RECORD_UNAVAILABLE). COMMERCE_ORDER_VIEW.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="request" type="Map"/>
+            <parameter name="conversation" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreRequest', context)"/>
+            <set field="request" from="found.request"/>
+            <set field="conversation" from="found.conversation"/>
+        </actions>
+    </service>
+
+    <service verb="add" noun="StoreRequestNote" allow-remote="false">
+        <description>An internal note on a case of the user's stores (a Comment through add#RequestComment, never sent to the customer); every other action on the case stays Customer Service's. COMMERCE_ORDER_VIEW and the case's store scope.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="body"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('addStoreRequestNote', context)"/>
+            <set field="communicationEventId" from="found.communicationEventId"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="StoreDeliveries" allow-remote="false">
+        <description>The store's notices on the delivery ledger (MessageDelivery.productStoreId), the exceptions (failed, uncertain, waiting to retry) unless state is all, newest first, each address masked; read only, as resolve#Delivery stays MESSAGE_DELIVERY_REVIEW's (impl-shop F91). COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deliveries" type="List"/>
+            <parameter name="deliveriesCount" type="Integer"/>
+            <parameter name="deliveriesPageIndex" type="Integer"/>
+            <parameter name="deliveriesPageSize" type="Integer"/>
+            <parameter name="deliveriesPageMaxIndex" type="Integer"/>
+            <parameter name="deliveriesPageRangeLow" type="Integer"/>
+            <parameter name="deliveriesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('findStoreDeliveries', context)"/>
+            <set field="deliveries" from="found.deliveries"/>
+            <set field="deliveriesCount" from="found.deliveriesCount"/>
+            <set field="deliveriesPageIndex" from="found.deliveriesPageIndex"/>
+            <set field="deliveriesPageSize" from="found.deliveriesPageSize"/>
+            <set field="deliveriesPageMaxIndex" from="found.deliveriesPageMaxIndex"/>
+            <set field="deliveriesPageRangeLow" from="found.deliveriesPageRangeLow"/>
+            <set field="deliveriesPageRangeHigh" from="found.deliveriesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreWorkSummary" allow-remote="false">
+        <description>Home's work counts for the user's stores (or one): to approve, payment holds, to fulfill, unpaid (computed over the recent submitted orders), open carts, stuck placements and notice exceptions, a count that cannot be read being null and named in the log; and the recent submitted orders for a holder of COMMERCE_ORDER_VIEW. COMMERCE_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="productStoreId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="counts" type="Map"/>
+            <parameter name="recentOrders" type="List"/>
+            <parameter name="canOrders" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('getStoreWorkSummary', context)"/>
+            <set field="counts" from="found.counts"/>
+            <set field="recentOrders" from="found.recentOrders"/>
+            <set field="canOrders" from="found.canOrders"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="StoreCallRecords" allow-remote="false">
+        <description>The Comms call context's store records: the open orders and carts of the given parties (a caller's) in the user's stores, newest first, at most ten. COMMERCE_ORDER_VIEW and the store scope.</description>
+        <in-parameters>
+            <parameter name="partyIds" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="records" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/StoreOperations.js').execute('storeCallRecords', context)"/>
+            <set field="records" from="found.records"/>
+        </actions>
+    </service>
+</services>
