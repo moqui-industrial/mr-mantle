@@ -1494,7 +1494,17 @@ const readinessChecks = [
                     .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
                     .readiness[definition.key](store)
         })
-    )
+    ),
+    // Shop P7: a store with recurring offers renews off-session and its Shop sites' subscription address is Shop's page
+    // (store#RecurringOffer keeps it; an outside address is named); a store with no offer has no finding
+    {
+        key: "subscriptions",
+        area: "payments",
+        label: "Subscriptions",
+        severity: "warning",
+        fix: "checkout",
+        check: store => ec.resource.script("component://mr-mantle/service/mantle/product/ShopSubscriptions.js").readiness(store)
+    }
 ]
 // The findings for a store: each check's result, a check that fails to answer named not ready (failure tolerance).
 function findings(store) {

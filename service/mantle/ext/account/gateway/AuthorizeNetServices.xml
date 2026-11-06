@@ -23,7 +23,10 @@ along with this software (see the LICENSE.md file). If not, see
             dataDescriptor and dataValue), else with the payment method's customer payment profile (gatewayCustomerId and
             gatewayCimId at this gateway). A payment with neither is refused (NO_PAYMENT_PROFILE): card numbers are not
             sent from the server. The idempotency key's first 20 characters go in refId and order.invoiceNumber, which a
-            lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference.</description>
+            lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference. With
+            storedCredential (Shop P7's renewals), a profile charge carries the stored-credential, merchant-initiated
+            indicators: processingOptions (isSubsequentAuth, isStoredCredentials), subsequentAuthInformation (the original
+            network transaction id and amount) and authorizationIndicatorType.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorize', context).paymentGatewayResponseId"/>
@@ -43,7 +46,8 @@ along with this software (see the LICENSE.md file). If not, see
             hosted page (a response with transactionStatus HostedPending and no result), which the frontend's relay opens
             with a fresh form token (get#HostedPaymentForm), and the details lookup finds the payer's transaction by the
             attempt's reference (the idempotency key's first 20 characters, in refId and order.invoiceNumber). Needs the
-            https returnUrl Mantle builds.</description>
+            https returnUrl Mantle builds. A merchant-initiated renewal (storedCredential, Shop P7) is a profile charge
+            of the payment's kept method, as authorize#Payment's.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorizeHosted', context).paymentGatewayResponseId"/>

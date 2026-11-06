@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's prepaid and recurring access (mr-pass impl-shop P7; design-shop §10 Subscriptions, SubscriptionDetail, §10.1,
+    §10.2, §14.2; SHOP-SUBSCRIPTION, CX-RECURRING; mantle.product.ShopSubscriptionServices over
+    service/mantle/product/ShopSubscriptions.js). Sales' RecurringTemplate marker on OrderHeader (X5, F21), a store's
+    recurring offers, a customer's accepted contract with its off-session consent and resource instance, and one renewal
+    occurrence per contract and period. Money and order lines stay on Mantle's own orders, payments and invoices; access
+    stays Mantle's Subscription rows (and the Forum's source-bound grants), one per paid term of the contract's instance. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <!-- Sales' proposed order purpose (design-sales SAL-QUOTE; review X5): RecurringTemplate marks a recurring base, the one
+    marker every exclusion reads (credit exposure, reservation, the store emails, invoicing, subscription fulfillment, the
+    order lists and the sales index). Sales seeds its own values (SalesQuote, SalesOrder) when it builds them. -->
+  <extend-entity entity-name="OrderHeader" package="mantle.order">
+    <field name="orderPurposeEnumId" type="id"><description>OrderPurpose: OrpRecurringTemplate for a recurring base,
+      the template of the next period that never reserves, invoices, emails or counts as an order; empty for any other order.</description></field>
+    <relationship type="one" title="OrderPurpose" related="moqui.basic.Enumeration">
+      <key-map field-name="orderPurposeEnumId" related="enumId"/>
+    </relationship>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Order purpose" enumTypeId="OrderPurpose"/>
+      <moqui.basic.Enumeration enumId="OrpRecurringTemplate" description="Recurring template" sequenceNum="9" enumTypeId="OrderPurpose"/>
+    </seed-data>
+  </extend-entity>
+
+  <!-- the checkout of a subscription purchase: the offer it buys (or the prepaid contract it renews) and the buyer's
+    recorded off-session consent -->
+  <extend-entity entity-name="StoreCheckout" package="mantle.order">
+    <field name="recurringOfferId" type="id"><description>The StoreRecurringOffer this checkout buys (begin#SubscriptionPurchase); its
+      product's line is the subscription line, and a signed-in verified account is required.</description></field>
+    <field name="renewContractId" type="id"><description>For another prepaid term of a contract (RenewPrepaid): the contract it extends.</description></field>
+    <field name="recurringConsentDate" type="date-time"><description>When the buyer accepted the offer's renewal terms
+      and off-session charges of the method kept at this checkout (submit's recurringConsent).</description></field>
+    <field name="recurringConsentTerms" type="text-short"><description>The offer's terms version the consent is for.</description></field>
+    <field name="recurringConsentEvidence" type="text-medium"><description>What was shown and accepted: the hash of the
+      offer's price, currency, term and terms version with the visit.</description></field>
+  </extend-entity>
+
+  <!-- a paid-access line's fulfillment names the term it activated (design-shop §14.2: the granted subscription) -->
+  <extend-entity entity-name="StoreItemFulfillment" package="mantle.product.store">
+    <field name="subscriptionId" type="id"><description>For a paid-access line: the Subscription its settled term activated
+      on its contract's resource instance.</description></field>
+  </extend-entity>
+
+  <entity entity-name="StoreRecurringOffer" package="mantle.product.subscription" cache="never">
+    <description>A store's offer of a paid-access product as a fixed plan: the product and the subscription resource its
+      term grants (the product's ProductSubscriptionResource sets the term), the fixed price and currency, whether it renews
+      automatically (an automatic offer needs a store gateway with off-session charges), the terms version a buyer accepts,
+      the retry days after a failed renewal (by default 1, 3 and 7), and its effective dates and revision. A contract pins the
+      offer as accepted; a change of price or terms starts a new offer row.</description>
+    <field name="offerId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="subscriptionResourceId" type="id"/>
+    <field name="offerName" type="text-medium"/>
+    <field name="priceAmount" type="currency-amount"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="autoRenew" type="text-indicator"><description>Y renews by charging the kept method off-session each term;
+      N is a prepaid term, renewed only by buying another.</description></field>
+    <field name="termsVersion" type="text-short"/>
+    <field name="retryDays" type="text-short"><description>Days after the first failed renewal charge it is tried again,
+      comma separated (default 1,3,7); after the last it waits for the customer.</description></field>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revision" type="number-integer"/>
+    <field name="changedByUserId" type="id-long"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.Product"/>
+    <relationship type="one" related="mantle.product.subscription.SubscriptionResource"/>
+    <relationship type="one" title="Currency" related="moqui.basic.Uom">
+      <key-map field-name="currencyUomId" related="uomId"/>
+    </relationship>
+    <index name="STORE_OFFER_STORE">
+      <index-field name="productStoreId"/>
+      <index-field name="productId"/>
+    </index>
+  </entity>
+
+  <entity entity-name="StoreRecurringContract" package="mantle.product.subscription" cache="never">
+    <description>A verified customer's accepted subscription in a store: the offer as accepted (product, resource, price,
+      currency, automatic renewal, terms), the first order and line that bought it, the recurring base order
+      (RecurringTemplate) when it renews automatically, the kept payment method with its off-session consent (time, method,
+      terms version and evidence; cleared by a merge or an ended method), the paid-through date, the next renewal, a
+      cancellation at the end of the paid term, its state (StoreContractState) and revision. Its contractId is the resource
+      instance of every Subscription it pays for, so its renewals never extend another subscription of the same person. It
+      keeps no money balance.</description>
+    <field name="contractId" type="id" is-pk="true"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="customerPartyId" type="id"/>
+    <field name="offerId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="subscriptionResourceId" type="id"/>
+    <field name="priceAmount" type="currency-amount"/>
+    <field name="currencyUomId" type="id"/>
+    <field name="autoRenew" type="text-indicator"/>
+    <field name="termsVersion" type="text-short"/>
+    <field name="stateEnumId" type="id"/>
+    <field name="originOrderId" type="id"/>
+    <field name="originOrderItemSeqId" type="id"/>
+    <field name="baseOrderId" type="id"/>
+    <field name="paymentMethodId" type="id"/>
+    <field name="consentDate" type="date-time"/>
+    <field name="consentMethodId" type="id"><description>The payment method the off-session consent is for; a charge
+      needs it to be the contract's method.</description></field>
+    <field name="consentTermsVersion" type="text-short"/>
+    <field name="consentEvidence" type="text-medium"/>
+    <field name="consentPaymentId" type="id"><description>The customer-initiated payment that first used the method
+      (its network transaction id is the original of the merchant-initiated renewals).</description></field>
+    <field name="consentEndedReason" type="text-short"><description>Why a consent was cleared (PARTY_MERGED,
+      METHOD_ENDED); a renewal then waits for the customer.</description></field>
+    <field name="paidThroughDate" type="date-time"/>
+    <field name="nextRenewalDate" type="date-time"/>
+    <field name="cancelDate" type="date-time"/>
+    <field name="cancelAtDate" type="date-time"><description>When access ends after a cancellation: the end of the paid term.</description></field>
+    <field name="cancelReason" type="text-medium"/>
+    <field name="revision" type="number-integer"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.subscription.StoreRecurringOffer"/>
+    <relationship type="one" title="Customer" related="mantle.party.Party">
+      <key-map field-name="customerPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" related="mantle.account.method.PaymentMethod"/>
+    <relationship type="one" title="Origin" related="mantle.order.OrderHeader">
+      <key-map field-name="originOrderId" related="orderId"/>
+    </relationship>
+    <relationship type="one" title="Base" related="mantle.order.OrderHeader">
+      <key-map field-name="baseOrderId" related="orderId"/>
+    </relationship>
+    <relationship type="one" title="StoreContractState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_CONTRACT_CUSTOMER">
+      <index-field name="customerPartyId"/>
+      <index-field name="productStoreId"/>
+    </index>
+    <index name="STORE_CONTRACT_ORIGIN" unique="true">
+      <index-field name="originOrderId"/>
+      <index-field name="originOrderItemSeqId"/>
+    </index>
+    <index name="STORE_CONTRACT_BASE">
+      <index-field name="baseOrderId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store contract state" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsActive" description="Active" sequenceNum="1" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsPastDue" description="Renewal payment due" sequenceNum="2" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsCancelled" description="Renewal cancelled" sequenceNum="3" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsEnded" description="Ended" sequenceNum="4" enumTypeId="StoreContractState"/>
+      <moqui.basic.Enumeration enumId="ScsPrepaid" description="Prepaid" sequenceNum="5" enumTypeId="StoreContractState"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="StoreRenewalOccurrence" package="mantle.product.subscription" cache="never">
+    <description>One due billing period of a contract (unique by contract and period start): the renewal order cloned
+      from the base (copyPayment=false), the payment of its current attempt (Accounting's coordinator, purpose shopRenewal)
+      and the attempts made, the next retry after a failure, the term's Subscription once activated, the notices, and its
+      state (StoreRenewalState). At most one renewal order per period; concurrent jobs and retries answer this row.</description>
+    <field name="occurrenceId" type="id" is-pk="true"/>
+    <field name="contractId" type="id"/>
+    <field name="periodStartDate" type="date-time"/>
+    <field name="stateEnumId" type="id"/>
+    <field name="orderId" type="id"/>
+    <field name="paymentId" type="id"/>
+    <field name="invoiceId" type="id"/>
+    <field name="subscriptionId" type="id"/>
+    <field name="attemptCount" type="number-integer"/>
+    <field name="firstFailureDate" type="date-time"/>
+    <field name="nextRetryDate" type="date-time"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="activatedDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.subscription.StoreRecurringContract"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.account.payment.Payment"/>
+    <relationship type="one" title="StoreRenewalState" related="moqui.basic.Enumeration">
+      <key-map field-name="stateEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_RENEWAL_PERIOD" unique="true">
+      <index-field name="contractId"/>
+      <index-field name="periodStartDate"/>
+    </index>
+    <index name="STORE_RENEWAL_ORDER">
+      <index-field name="orderId"/>
+    </index>
+    <index name="STORE_RENEWAL_DUE">
+      <index-field name="stateEnumId"/>
+      <index-field name="nextRetryDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store renewal state" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsClaimed" description="Claimed" sequenceNum="1" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsCharging" description="Payment in progress" sequenceNum="2" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsRetry" description="Payment failed, retrying" sequenceNum="3" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsActionRequired" description="Waiting for the customer" sequenceNum="4" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsPlaced" description="Paid, order placed" sequenceNum="5" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsActivated" description="Renewed" sequenceNum="6" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsFailed" description="Retries exhausted" sequenceNum="7" enumTypeId="StoreRenewalState"/>
+      <moqui.basic.Enumeration enumId="SrsCancelled" description="Not renewed" sequenceNum="8" enumTypeId="StoreRenewalState"/>
+    </seed-data>
+  </entity>
+</entities>

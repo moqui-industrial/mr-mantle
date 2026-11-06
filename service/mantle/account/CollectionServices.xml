@@ -326,7 +326,9 @@ along with this software (see the LICENSE.md file). If not, see
             notices: for each customer and currency with overdue invoices, a notice at the level of its most overdue
             invoice that is not disputed, naming its overdue invoices and their amount; and, left out with the reason,
             disputed invoices (unless the level includes them), customers whose unapplied payments cover what is overdue,
-            customers with an open promise, and a notice of the same level sent within its cadence. More overdue invoices
+            customers with an open promise, a notice of the same level sent within its cadence, and the invoice of a Shop
+            renewal whose payment is still being retried (RENEWAL_RETRY; its attempt notices remind the customer until the
+            retries end). More overdue invoices
             than one run takes (2,000) are named by incomplete. Changes no invoice. Refuses an organization without dunning
             levels. Needs RECEIVABLE_EDIT in the organization.</description>
         <in-parameters>

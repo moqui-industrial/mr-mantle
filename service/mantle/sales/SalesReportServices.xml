@@ -115,7 +115,9 @@ along with this software (see the LICENSE.md file). If not, see
             }}}
 
             if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no sales order summary", "danger"); return }
-            const aggregationsMap = ec.search.aggregate({documentType:documentType, filter:{bool:{all:filterList}}, aggs:aggsMap})
+            // a RecurringTemplate base (X5) is the next period's template, never a placed sale (mr-pass impl-shop P7, F139)
+            const notBase = [{field: {name: 'orderPurposeEnumId', op: 'eq', value: 'OrpRecurringTemplate'}}]
+            const aggregationsMap = ec.search.aggregate({documentType:documentType, filter:{bool:{all:filterList, none:notBase}}, aggs:aggsMap})
 
             salesOrderSummaryList = []
             ordersTotal = {dateKey:"Prior Total"}
@@ -472,7 +474,8 @@ along with this software (see the LICENSE.md file). If not, see
             if (vendorPartyIds?.length) filterList.push({field: {name: 'vendorPartyId', op: 'in', values: vendorPartyIds}})
             if (productStoreIds?.length) filterList.push({field: {name: 'productStoreId', op: 'in', values: productStoreIds}})
             if (currencyUomIds?.length) filterList.push({field: {name: 'currencyUomId', op: 'in', values: currencyUomIds}})
-            const filter = {bool:{all:filterList}}
+            // a RecurringTemplate base (X5) is never a sale (mr-pass impl-shop P7, F139)
+            const filter = {bool:{all:filterList, none:[{field: {name: 'orderPurposeEnumId', op: 'eq', value: 'OrpRecurringTemplate'}}]}}
 
             if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no top products", "danger"); return }
             const aggregationsMap = ec.search.aggregate({documentType:documentType, filter:filter, aggs:{

@@ -683,6 +683,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
+            <!-- a recurring base (RecurringTemplate, X5) never reserves: it is the next period's template (mr-pass impl-shop P7) -->
+            <if condition="orderHeader?.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
             <set field="productStore" from="orderHeader['mantle.product.store.ProductStore']"/>
 
             <!-- return early if doesn't appear to be sales order (vendor OrgInternal) or store setting is no res -->
@@ -751,6 +753,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="orderItem == null"><return error="true" message="Order Item ${orderId}:${orderItemSeqId} not found"/></if>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
+            <!-- a recurring base (RecurringTemplate, X5) never reserves (mr-pass impl-shop P7) -->
+            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
 
             <entity-find-related-one value-field="orderItem" relationship-name="mantle.order.OrderPart" to-value-field="orderPart"/>
 
