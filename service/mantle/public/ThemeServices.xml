@@ -219,4 +219,278 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getShopThemeFiles", input)</script>
         </actions>
     </service>
+
+    <!-- ===== pages and navigation (impl-commerce P4, X14; SitePages.js) =====
+        A site is worked through its Shop mount's store (the user's organizations, a StoreStaff row's stores). Commerce's
+        pages are PublicSitePage rows on the Shop mount; the Forum's guidelines and about pages stay Forum.js's. -->
+    <service verb="find" noun="SitePages" allow-remote="false">
+        <description>Commerce's pages of the sites of the user's stores (or one site): title, mount, route, locale, policy role,
+            template, SEO, the published and scheduled versions, window, state and a failed scheduled publication; by title
+            or route ignoring case, locale, role and state (draft, published, withdrawn, scheduled, failed), a page at a
+            time. With sitePageId that page alone, with the menus that link to it. COMMERCE_VIEW and the site's store.</description>
+        <in-parameters>
+            <parameter name="sitePageId"/>
+            <parameter name="siteId"/>
+            <parameter name="term"/>
+            <parameter name="locale"/>
+            <parameter name="pageRole"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="pages" type="List"/>
+            <parameter name="pagesCount" type="Integer"/>
+            <parameter name="pagesPageIndex" type="Integer"/>
+            <parameter name="pagesPageSize" type="Integer"/>
+            <parameter name="pagesPageMaxIndex" type="Integer"/>
+            <parameter name="pagesPageRangeLow" type="Integer"/>
+            <parameter name="pagesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('findSitePages', context)"/>
+            <set field="pages" from="out.pages"/>
+            <set field="pagesCount" from="out.pagesCount"/>
+            <set field="pagesPageIndex" from="out.pagesPageIndex"/>
+            <set field="pagesPageSize" from="out.pagesPageSize"/>
+            <set field="pagesPageMaxIndex" from="out.pagesPageMaxIndex"/>
+            <set field="pagesPageRangeLow" from="out.pagesPageRangeLow"/>
+            <set field="pagesPageRangeHigh" from="out.pagesPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SitePage" allow-remote="false">
+        <description>A new page of a site's Shop (siteId, title, route, locale, template, policy role, SEO; its text a new page of
+            the store's page space, which is made with restrictUpdate when the store has none), a page's binding fields
+            (live at once on a published page, the site's generation advanced), or a new version of its text (pageText,
+            versionNote; with baseVersionName a page saved since by someone else answers conflict). Saving never publishes.
+            Refuses a taken route (ROUTE_TAKEN) or role (ROLE_TAKEN), a Forum role (ROLE_RESERVED), a stale stamp
+            (REVISION_STALE), a store page space without restrictUpdate (SPACE_NOT_RESTRICTED) and values out of shape
+            (VALUE_INVALID, SCHEME_REFUSED). COMMERCE_THEME_EDIT and the site's store.</description>
+        <in-parameters>
+            <parameter name="sitePageId"/>
+            <parameter name="siteId"/>
+            <parameter name="appMountId"/>
+            <parameter name="title"/>
+            <parameter name="routePath"/>
+            <parameter name="locale"/>
+            <parameter name="templateKey"/>
+            <parameter name="pageRole"/>
+            <parameter name="seoTitle"/>
+            <parameter name="seoDescription"/>
+            <parameter name="socialImageUrl"/>
+            <parameter name="pageText" allow-html="any"/>
+            <parameter name="versionNote"/>
+            <parameter name="baseVersionName"/>
+            <parameter name="force" type="Boolean"/>
+            <parameter name="expectedLastUpdatedStamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sitePageId"/>
+            <parameter name="changed" type="List"/>
+            <parameter name="generation" type="Integer"/>
+            <parameter name="page" type="Map"/>
+            <parameter name="versionName"/>
+            <parameter name="currentVersionName"/>
+            <parameter name="conflict" type="Boolean"/>
+            <parameter name="conflictText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('storeSitePage', context)"/>
+            <set field="sitePageId" from="out.sitePageId"/>
+            <set field="changed" from="out.changed"/>
+            <set field="generation" from="out.generation"/>
+            <set field="page" from="out.page"/>
+            <set field="versionName" from="out.versionName"/>
+            <set field="currentVersionName" from="out.currentVersionName"/>
+            <set field="conflict" from="out.conflict"/>
+            <set field="conflictText" from="out.conflictText"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SitePageHistory" allow-remote="false">
+        <description>A page's saved versions (newest first; the published and the scheduled one marked) and its binding's activity
+            from the audit log: who changed its route, locale, role, template, version or window, when and why.
+            COMMERCE_VIEW and the site's store.</description>
+        <in-parameters>
+            <parameter name="sitePageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="versions" type="List"/>
+            <parameter name="activity" type="List"/>
+            <parameter name="currentVersionName"/>
+            <parameter name="publishedVersionName"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('getSitePageHistory', context)"/>
+            <set field="versions" from="out.versions"/>
+            <set field="activity" from="out.activity"/>
+            <set field="currentVersionName" from="out.currentVersionName"/>
+            <set field="publishedVersionName" from="out.publishedVersionName"/>
+        </actions>
+    </service>
+    <service verb="find" noun="SiteNavigation" allow-remote="false">
+        <description>A site's menus (each with its draft items, every destination checked now, and its active, scheduled and failed
+            versions) and its redirects; the first site of the user's stores when none is named. COMMERCE_VIEW and the
+            site's store.</description>
+        <in-parameters>
+            <parameter name="siteId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="siteId"/>
+            <parameter name="siteName"/>
+            <parameter name="appMountId"/>
+            <parameter name="mountPath"/>
+            <parameter name="menus" type="List"/>
+            <parameter name="redirects" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canPublish" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('findSiteNavigation', context)"/>
+            <set field="siteId" from="out.siteId"/>
+            <set field="siteName" from="out.siteName"/>
+            <set field="appMountId" from="out.appMountId"/>
+            <set field="mountPath" from="out.mountPath"/>
+            <set field="menus" from="out.menus"/>
+            <set field="redirects" from="out.redirects"/>
+            <set field="canEdit" from="out.canEdit"/>
+            <set field="canPublish" from="out.canPublish"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SiteNavigation" allow-remote="false">
+        <description>A menu's draft on the site's Shop mount: a new menu (menuKey, locale, name), its name, an item added or changed
+            (item: itemId, parentItemId, label, destinationTypeEnumId, destinationValue, visible), removed (removeItemId,
+            with its children) or moved (moveItemId, direction up, down, in or out; at most 3 levels and 200 items); or a
+            redirect's draft (redirect: redirectId, oldPath, destinationTypeEnumId, destinationValue, permanent, fromDate,
+            thruDate, expectedRevision, changeReason) or its removal (removeRedirectId, a draft or failed one). Every
+            destination is checked: a product public in the store, a store category, a published page, an enabled app of the
+            site, a plain path of the site, an https address; refused are another scheme (SCHEME_REFUSED), a private BOSS
+            address (PRIVATE_LINK), a reserved path (PATH_RESERVED), a draft product or page (DESTINATION_NOT_PUBLIC), a
+            redirect off the site (REDIRECT_OFF_SITE), into a loop (REDIRECT_LOOP) or of a path redirected already
+            (REDIRECT_TAKEN). expectedRevision is the menu's draftRevision. Nothing is live until publish#SiteNavigation.
+            COMMERCE_MERCHANDISE and the site's store.</description>
+        <in-parameters>
+            <parameter name="siteId"/>
+            <parameter name="navigationId"/>
+            <parameter name="menuKey"/>
+            <parameter name="locale"/>
+            <parameter name="name"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="item" type="Map"/>
+            <parameter name="removeItemId"/>
+            <parameter name="moveItemId"/>
+            <parameter name="direction"/>
+            <parameter name="redirect" type="Map"/>
+            <parameter name="removeRedirectId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="navigationId"/>
+            <parameter name="draftRevision" type="Integer"/>
+            <parameter name="menu" type="Map"/>
+            <parameter name="redirectId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="url"/>
+            <parameter name="redirect" type="Map"/>
+            <parameter name="removed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('storeSiteNavigation', context)"/>
+            <set field="navigationId" from="out.navigationId"/>
+            <set field="draftRevision" from="out.draftRevision"/>
+            <set field="menu" from="out.menu"/>
+            <set field="redirectId" from="out.redirectId"/>
+            <set field="revision" from="out.revision"/>
+            <set field="url" from="out.url"/>
+            <set field="redirect" from="out.redirect"/>
+            <set field="removed" from="out.removed"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="SiteNavigation" allow-remote="false">
+        <description>A menu's draft published as a version (navigationId; every destination checked again; from now it ends the
+            active version, from a later date it waits for the publication job) or its active version withdrawn; or a
+            redirect's draft published (redirectId; now or from its date) or withdrawn. expectedRevision is the menu's
+            draftRevision or the redirect's revision (REVISION_STALE); operationKey (PostingOperation SiteNavigationPublish)
+            answers a retry with the first result; a publish or withdrawal from now advances the site's generation.
+            previewOnly answers the checks and the generation and writes nothing. COMMERCE_PUBLISH and the site's store.</description>
+        <in-parameters>
+            <parameter name="siteId"/>
+            <parameter name="navigationId"/>
+            <parameter name="redirectId"/>
+            <parameter name="publishAction"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="changeReason"/>
+            <parameter name="operationKey"/>
+            <parameter name="previewOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="kind"/>
+            <parameter name="navigationId"/>
+            <parameter name="redirectId"/>
+            <parameter name="state"/>
+            <parameter name="url"/>
+            <parameter name="generation" type="Integer"/>
+            <parameter name="nextGeneration" type="Integer"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="items" type="List"/>
+            <parameter name="problem"/>
+            <parameter name="scheduled" type="Boolean"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('publishSiteNavigation', context)"/>
+            <set field="kind" from="out.kind"/>
+            <set field="navigationId" from="out.navigationId"/>
+            <set field="redirectId" from="out.redirectId"/>
+            <set field="state" from="out.state"/>
+            <set field="url" from="out.url"/>
+            <set field="generation" from="out.generation"/>
+            <set field="nextGeneration" from="out.nextGeneration"/>
+            <set field="revision" from="out.revision"/>
+            <set field="items" from="out.items"/>
+            <set field="problem" from="out.problem"/>
+            <set field="scheduled" from="out.scheduled"/>
+            <set field="alreadyApplied" from="out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="run" noun="ScheduledSitePublications" authenticate="false" allow-remote="false" transaction-timeout="1800">
+        <description>The run_ScheduledSitePublications job: each page, menu version and redirect whose scheduled from date has
+            come, revalidated and activated in its own transaction (run#ScheduledSitePublication); a failure is recorded on
+            the item and the rest go on.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueCount" type="Integer"/>
+            <parameter name="activatedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="results" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('runScheduledSitePublications', context)"/>
+            <set field="dueCount" from="out.dueCount"/>
+            <set field="activatedCount" from="out.activatedCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+            <set field="results" from="out.results"/>
+        </actions>
+    </service>
+    <service verb="run" noun="ScheduledSitePublication" authenticate="false" allow-remote="false">
+        <description>One scheduled page (kind page, id its sitePageId), menu version (menu, the navigationId and fromDate) or
+            redirect (redirect, its redirectId), revalidated as the user who scheduled it (COMMERCE_PUBLISH and the store still
+            theirs, the version or destinations still valid) and activated with the site's generation; a refusal is recorded on
+            it, which the store's readiness lists, and what is live stays as it was. The job's step.</description>
+        <in-parameters>
+            <parameter name="kind" required="true"/>
+            <parameter name="id" required="true"/>
+            <parameter name="fromDate" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/SitePages.js').execute('runScheduledSitePublication', context)"/>
+            <set field="result" from="out.result"/>
+        </actions>
+    </service>
 </services>

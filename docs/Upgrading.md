@@ -46,3 +46,50 @@ ALTER TABLE PRODUCT_STORE_PRODUCT DROP PRIMARY KEY, ADD PRIMARY KEY (PRODUCT_STO
 
 Start the server. The query above should list the three columns. Publishing, withdrawing and publishing a product again
 in Commerce's Assortment should now work.
+
+## PublicSitePage: pages by mount and route (Commerce P4, November 2026)
+
+`mantle.public.PublicSitePage` is now keyed by a sequenced `sitePageId`, so a site has pages beyond its Forum roles: a
+page of a Shop mount by route and locale, with its role (the Forum's guidelines and about, or a policy role) optional and
+unique within the site when set (the `PASS_PAGE_ROLE` index). An older database keeps the old key (site, role) and gains a
+nullable `site_page_id`. The Forum's guidelines and about pages still read, but a new binding fails: the Forum's first
+publication of a page needs the new key, and Commerce's pages, which have no role, cannot be stored at all.
+
+Check the key first. A table with no rows still needs the key changed, so check it on any database made before November
+2026:
+
+```sql
+SELECT kcu.column_name FROM information_schema.table_constraints tc
+  JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name
+   AND kcu.table_schema = tc.table_schema AND kcu.table_name = tc.table_name
+ WHERE tc.constraint_type = 'PRIMARY KEY' AND lower(tc.table_name) = 'public_site_page';
+```
+
+When it lists `site_id` and `page_role`, stop the server and take a backup, start the new build once so the table check
+adds the new columns, and stop it again. Each row gets a key made of its site and role (an id of at most 40 characters;
+the sequence gives new pages numeric ids, so these never collide), and the key moves to it. The role becomes optional and
+unique within its site:
+
+PostgreSQL (the constraint name is the one the query above found, usually `public_site_page_pkey`):
+
+```sql
+BEGIN;
+UPDATE public_site_page SET site_page_id = left(site_id || '_' || page_role, 40) WHERE site_page_id IS NULL;
+ALTER TABLE public_site_page DROP CONSTRAINT public_site_page_pkey;
+ALTER TABLE public_site_page ALTER COLUMN page_role DROP NOT NULL;
+ALTER TABLE public_site_page ADD PRIMARY KEY (site_page_id);
+CREATE UNIQUE INDEX IF NOT EXISTS pass_page_role ON public_site_page (site_id, page_role);
+COMMIT;
+```
+
+MySQL (names as the database has them; the table changes are not transactional, so the backup is the rollback):
+
+```sql
+UPDATE PUBLIC_SITE_PAGE SET SITE_PAGE_ID = LEFT(CONCAT(SITE_ID, '_', PAGE_ROLE), 40) WHERE SITE_PAGE_ID IS NULL;
+ALTER TABLE PUBLIC_SITE_PAGE DROP PRIMARY KEY, MODIFY PAGE_ROLE VARCHAR(40) NULL, ADD PRIMARY KEY (SITE_PAGE_ID);
+CREATE UNIQUE INDEX PASS_PAGE_ROLE ON PUBLIC_SITE_PAGE (SITE_ID, PAGE_ROLE);
+```
+
+Start the server. The query above should list `site_page_id` alone, and the Forum's guidelines and about pages read as
+before. No shipped data file has PublicSitePage rows; a data file of your own that names one by site and role still loads
+once its rows carry a `sitePageId`.

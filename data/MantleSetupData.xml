@@ -801,4 +801,9 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_CHANNEL_OPERATE" fromDate="0"/>
     <userPermissions userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" description="Commerce Subscription Manage"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" fromDate="0"/>
+    <!-- Commerce P4 (impl-commerce): scheduled page, menu and redirect publication, revalidated at its from date as its
+        author (mantle.public.ThemeServices.run#ScheduledSitePublications); a failure leaves the old version live -->
+    <moqui.service.job.ServiceJob jobName="run_ScheduledSitePublications" description="Publish scheduled site pages, menus and redirects"
+            serviceName="mantle.public.ThemeServices.run#ScheduledSitePublications" cronExpression="0 * * * * ?" paused="N"
+            errorHistoryOnly="Y"/>
 </entity-facade-xml>

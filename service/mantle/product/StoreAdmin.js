@@ -1305,6 +1305,30 @@ const readinessChecks = [
                 ? {ready: false, message: "No supported theme is published on " + missing.map(mount => mount.siteId).join(", ")}
                 : {ready: true, message: "Every site shows a published theme"}
         }
+    },
+    // Commerce P4: a scheduled page, menu or redirect publication of the store's sites that its revalidation refused
+    // (SitePages.js); the old version stays live
+    {
+        key: "sitePublication",
+        area: "site",
+        label: "Scheduled publication",
+        fix: "sites",
+        severity: "warning",
+        check: store => {
+            const siteIds = (shopMounts([store.productStoreId])[store.productStoreId] || []).map(mount => mount.siteId)
+            if (!siteIds.length) return null
+            const failed = ec.resource
+                .script("component://mr-mantle/service/mantle/public/SitePages.js")
+                .failedPublications(siteIds)
+            return failed.length
+                ? {
+                      ready: false,
+                      message:
+                          "Not published at its date: " +
+                          failed.map(row => row.kind + " " + row.label + " (" + row.message + ")").join("; ")
+                  }
+                : {ready: true, message: "Every scheduled page, menu and redirect was published"}
+        }
     }
 ]
 // The findings for a store: each check's result, a check that fails to answer named not ready (failure tolerance).

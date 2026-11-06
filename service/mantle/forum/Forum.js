@@ -2091,38 +2091,11 @@ methods.storeMounts = (p) => {
     revision(s, p.expectedRevision)
     const mounts = p.mounts || [],
         hosts = p.hosts || [],
-        reserved = [
-            'apps',
-            'qapps',
-            'rest',
-            'rpc',
-            'status',
-            'error',
-            'health',
-            'metrics',
-            'fop',
-            'js',
-            'css',
-            'libs',
-            'images',
-            // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
-            'static',
-            'assets',
-            'Login',
-            'SecondFactor',
-            'PasswordReset',
-            'sso',
-            'notws',
-            'termws',
-            'PublicShell',
-            's',
-            'u',
-            'cal',
-            'r',
-            'sw.js',
-            'manifest.webmanifest',
-            'WebPush',
-        ]
+        // the app roots and framework routes no mount may take (PublicApps.js reservedPaths, also the site page and
+        // redirect checks of SitePages.js)
+        reserved = ec.resource.script(
+            'component://mr-mantle/service/mantle/public/PublicApps.js',
+        ).reservedPaths
     for (const h of hosts) {
         if (!isOperator())
             fail('Unauthorized', 'Host bindings require an operator')
@@ -3246,7 +3219,17 @@ methods.publishSitePage = (p) => {
         versionName: p.versionName,
         publicationRevision: Number(old?.publicationRevision || 0) + 1,
     }
-    old ? update(old, values) : create(S + 'PublicSitePage', values)
+    // a new binding takes its sequenced key (PublicSitePage is keyed by sitePageId since Commerce P4)
+    old
+        ? update(old, values)
+        : create(S + 'PublicSitePage', {
+              ...values,
+              sitePageId: ec.entity.sequencedIdPrimary(
+                  S + 'PublicSitePage',
+                  null,
+                  null,
+              ),
+          })
     bump(p.siteId)
     return { revision: values.publicationRevision }
 }

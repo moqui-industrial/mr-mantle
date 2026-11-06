@@ -51,7 +51,19 @@ const shapes = {
     site: {displayName: "value", locale: "value"},
     shop: {name: "value", baseUrl: "value", currencyUomId: "value"},
     locale: "value",
-    page: {kind: "value", title: "value", description: "value", canonicalUrl: "value", query: "value", body: "rich"},
+    page: {
+        kind: "value",
+        title: "value",
+        description: "value",
+        canonicalUrl: "value",
+        query: "value",
+        body: "rich",
+        // Commerce P4: a site page's social image, policy role and the exact published version (checkout records the
+        // accepted terms version)
+        socialImageUrl: "value",
+        policyRole: "value",
+        policyVersion: "value"
+    },
     navigation: [Object.assign({children: [link]}, link)],
     product: Object.assign({images: [image]}, productCard),
     category: {id: "value", name: "value", url: "value", description: "rich", image},
@@ -164,6 +176,18 @@ function loadSources(manifest, template, shop) {
     return out
 }
 
+// The site's live main menu (Commerce P4, SitePages.js): the active version's items whose destinations are public now; a
+// menu that cannot be read is left out and logged.
+function mainNavigation(siteId, locale) {
+    try {
+        const pages = ec.resource.script("component://mr-mantle/service/mantle/public/SitePages.js")
+        return pages.liveNavigation(pages.liveContext(siteId), "main", locale)
+    } catch (error) {
+        ec.logger.error("Shop navigation of site " + siteId + " not read: " + error.message)
+        return []
+    }
+}
+
 // ===== getShopPage =====
 // getShopPage: a page of a published site's Shop mount (NOT_AVAILABLE otherwise, as getShopContext): its kind's status,
 // the active release (null when none is published: PASS shows its own shell), the site's generation, and the view, the
@@ -200,7 +224,7 @@ function getShopPage(p) {
                 shop: {name: shop.name, baseUrl: shop.baseUrl, currencyUomId: shop.currencyUomId},
                 locale,
                 page: {kind, canonicalUrl: base + "/"},
-                navigation: []
+                navigation: mainNavigation(site.siteId, locale)
             },
             page.view(shop, p)
         )
