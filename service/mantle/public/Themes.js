@@ -471,8 +471,10 @@ function validateTheme(p) {
         diagnostics: result.diagnostics
     }
 }
-// The binding of a site's mount, locked, and its revision; a stale expected revision is a Conflict.
+// The binding of a site's mount, locked, and its revision; a stale expected revision is a Conflict. The site's row is
+// locked first, so two first publishes (no binding row to lock yet) are serialized and the later one is REVISION_STALE.
 function lockedBinding(siteId, appMountId, expectedActiveRevision) {
+    find(SITE, {siteId}).forUpdate(true).one()
     const binding = find(BINDING, {siteId, appMountId}).forUpdate(true).one()
     const revision = binding ? Number(binding.revision || 0) : 0
     if (expectedActiveRevision == null || expectedActiveRevision === "" || Number(expectedActiveRevision) !== revision)
@@ -504,6 +506,13 @@ function activate(site, mount, held, release, activation) {
         generation
     }
 }
+// The operation identity of a publish or restore (impl-commerce §2: PostingOperation): a retry with the same key and
+// request answers the first result before any gate, and a key used for another request is refused.
+const operationOf = (p, type, store, request) => lib.operation(p, type, store.organizationPartyId, request)
+function completed(op, activated) {
+    lib.complete(op, RELEASE, activated.releaseId, activated)
+    return activated
+}
 // publish#Theme: a release of the theme's current draft on a site's Shop mount. The draft is validated again and must
 // match the validation digest the publisher saw (VALIDATION_STALE) and pass (THEME_INVALID); the site's active revision
 // must be the one given (REVISION_STALE); then the release is written with its pinned files and manifest, and the
@@ -518,6 +527,14 @@ function publishTheme(p) {
             "Theme " + theme.themeId + " is not a theme of the store site " + site.siteId + " sells",
             "Unprocessable"
         )
+    const op = operationOf(p, "ThemePublish", store, {
+        themeId: theme.themeId,
+        siteId: site.siteId,
+        validationDigest: text(p.validationDigest),
+        expectedActiveRevision: Number(p.expectedActiveRevision)
+    })
+    const again = lib.previous(op)
+    if (again) return again
     const entries = draftFiles(theme)
     const files = Object.fromEntries(entries.map(entry => [entry.path, entry.text]))
     const result = validatePackage(files)
@@ -538,7 +555,7 @@ function publishTheme(p) {
     const held = lockedBinding(site.siteId, mount.appMountId, p.expectedActiveRevision)
     const release = makeRelease(theme, entries, files, result.engine, validationDigest)
     const activated = activate(site, mount, held, release, "publish")
-    return Object.assign(activated, {themeId: theme.themeId, manifestDigest: release.manifestDigest})
+    return completed(op, Object.assign(activated, {themeId: theme.themeId, manifestDigest: release.manifestDigest}))
 }
 // The immutable release of a draft: its pinned files and its manifest with digest.
 function makeRelease(theme, entries, files, engine, validationDigest) {
@@ -608,13 +625,21 @@ function restoreThemeRelease(p) {
     const theme = release ? one(THEME, {themeId: release.themeId}) : null
     if (!theme || theme.productStoreId !== store.productStoreId)
         refuse("RECORD_UNAVAILABLE", "Release " + (p.releaseId || "") + " is not available")
+    const op = operationOf(p, "ThemeRestore", store, {
+        siteId: site.siteId,
+        releaseId: release.releaseId,
+        expectedActiveRevision: Number(p.expectedActiveRevision)
+    })
+    const again = lib.previous(op)
+    if (again) return again
     const files = releaseFiles(release)
     const result = validatePackage(files)
-    if (!result.ok || !renderers[release.engine])
+    const renderer = renderers[release.engine]
+    if (!result.ok || !renderer || !renderer.viewApiVersions.includes(Number(release.viewApiVersion)))
         refuse("RELEASE_INVALID", "Release " + release.releaseId + " does not validate on this renderer", "Unprocessable")
     const held = lockedBinding(site.siteId, mount.appMountId, p.expectedActiveRevision)
     const activated = activate(site, mount, held, release, "restore")
-    return Object.assign(activated, {themeId: theme.themeId, manifestDigest: release.manifestDigest})
+    return completed(op, Object.assign(activated, {themeId: theme.themeId, manifestDigest: release.manifestDigest}))
 }
 // export#ThemeRelease: a release's manifest (files with versions and digests, schemas, settings, composition, engine,
 // renderer and view API versions, validation digest) and, when asked, its files' text. A package holds no secret: it is

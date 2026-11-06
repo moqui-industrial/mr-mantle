@@ -88,12 +88,15 @@
             stale expectedActiveRevision (REVISION_STALE; 0 when the site has no theme), then writes the immutable release
             (each file's version and digest, the manifest and its digest) and switches the site's binding and advances its
             generation in one transaction. A theme of another store than the one the site sells is refused
-            (THEME_STORE_MISMATCH). COMMERCE_THEME_PUBLISH and the store's scope.</description>
+            (THEME_STORE_MISMATCH). A retry with the same operationKey answers the first result (alreadyApplied).
+            COMMERCE_THEME_PUBLISH and the store's scope.</description>
         <in-parameters>
             <parameter name="themeId" required="true"/>
             <parameter name="siteId" required="true"/>
             <parameter name="validationDigest" required="true"/>
             <parameter name="expectedActiveRevision" type="Integer" required="true"/>
+            <parameter name="operationKey" required="true"><description>The operation's identity (PostingOperation): a retry
+                with the same key answers the first result.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="releaseId"/>
@@ -103,6 +106,7 @@
             <parameter name="appMountId"/>
             <parameter name="revision" type="Integer"/>
             <parameter name="generation" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('publishTheme', context)"/>
@@ -113,17 +117,21 @@
             <set field="appMountId" from="out.appMountId"/>
             <set field="revision" from="out.revision"/>
             <set field="generation" from="out.generation"/>
+            <set field="alreadyApplied" from="out.alreadyApplied == true"/>
         </actions>
     </service>
     <service verb="restore" noun="ThemeRelease" allow-remote="false">
         <description>Makes an earlier release of the store's the active theme of a site's Shop mount, through the same gate
             as publish: its files must still match their digests (RELEASE_DAMAGED) and validate on this renderer
-            (RELEASE_INVALID), and expectedActiveRevision must be current (REVISION_STALE). The binding's audit log records
+            (RELEASE_INVALID: also an engine or view API this authority no longer supports), and expectedActiveRevision must
+            be current (REVISION_STALE); a retry with the same operationKey answers the first result. The binding's audit log records
             it; live pages still show only what is published now. COMMERCE_THEME_PUBLISH and the store's scope.</description>
         <in-parameters>
             <parameter name="siteId" required="true"/>
             <parameter name="releaseId" required="true"/>
             <parameter name="expectedActiveRevision" type="Integer" required="true"/>
+            <parameter name="operationKey" required="true"><description>The operation's identity (PostingOperation): a retry
+                with the same key answers the first result.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="releaseId"/>
@@ -133,6 +141,7 @@
             <parameter name="appMountId"/>
             <parameter name="revision" type="Integer"/>
             <parameter name="generation" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/Themes.js').execute('restoreThemeRelease', context)"/>
@@ -143,6 +152,7 @@
             <set field="appMountId" from="out.appMountId"/>
             <set field="revision" from="out.revision"/>
             <set field="generation" from="out.generation"/>
+            <set field="alreadyApplied" from="out.alreadyApplied == true"/>
         </actions>
     </service>
     <service verb="export" noun="ThemeRelease" allow-remote="false">

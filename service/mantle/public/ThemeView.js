@@ -5,7 +5,9 @@
 // The view contract v1 holds only site, shop, locale, page, navigation and the page's own projection (product,
 // category, productList, cart, checkout, account); stable public ids and links, display text and decimal strings. It
 // never holds ec, an entity value, a service caller, a session or user object, a secret, token or staff field:
-// contract() keeps the contract's keys of plain JSON values and drops every name in forbiddenNames at any depth.
+// contract() is an allow-list projection, keeping only the fields the `shapes` table names (plain JSON values), and
+// drops every name in forbiddenNames at any depth as well, so a projection that hands it a whole record (costs,
+// internal names, party or user IDs, draft text) still gives a theme only the contract's fields.
 //
 // Later phases append to the tables: pages (P3 the catalog kinds, P4 cart, P5 checkout, P6 account) and sources (P3's
 // product lists). A page kind not in pages is Not Found.
@@ -27,6 +29,37 @@ const contractKeys = [
     "checkout",
     "account"
 ]
+// The view contract v1's fields (design-shop §12.3), the allow-list contract() projects through: "value" is a string,
+// finite number, boolean or null; "rich" a sanitized rich text ({$richText}) or a string; an object names its fields; a
+// one-element array is a list of that shape. Later phases append fields here for their page kinds (P3 the catalog's,
+// P4 the cart's, P5 checkout's, P6 the account's); a field not named never reaches a theme.
+const price = {amount: "value", currencyUomId: "value", display: "value"}
+const link = {label: "value", url: "value"}
+const image = {url: "value", alt: "value", width: "value", height: "value"}
+const productCard = {
+    id: "value",
+    name: "value",
+    url: "value",
+    sku: "value",
+    description: "rich",
+    price,
+    compareAtPrice: price,
+    availability: {label: "value", purchasable: "value"},
+    image
+}
+const shapes = {
+    site: {displayName: "value", locale: "value"},
+    shop: {name: "value", baseUrl: "value", currencyUomId: "value"},
+    locale: "value",
+    page: {kind: "value", title: "value", description: "value", canonicalUrl: "value", query: "value", body: "rich"},
+    navigation: [Object.assign({children: [link]}, link)],
+    product: Object.assign({images: [image]}, productCard),
+    category: {id: "value", name: "value", url: "value", description: "rich", image},
+    productList: [productCard],
+    cart: {itemCount: "value", subtotal: price},
+    checkout: {},
+    account: {displayName: "value"}
+}
 // Names never in a view at any depth (lower case; also any name ending in one of the suffixes).
 const forbiddenNames = [
     "ec",
@@ -51,7 +84,8 @@ const pages = {
     home: {status: 200, view: () => ({productList: []})},
     "not-found": {status: 404, view: () => ({})}
 }
-// Approved dynamic sources (design-shop §12.3): name -> {limit, load(shop, limit)} answering plain rows. Each page loads
+// Approved dynamic sources (design-shop §12.3): name -> {limit, load(shop, limit), shape} answering rows, projected
+// through the descriptor's shape (a list of shapes.productList's cards when it names none). Each page loads
 // each source its template names once (one batch, never one call per card); P3 adds the catalog's.
 const sources = {}
 
@@ -60,33 +94,48 @@ const forbidden = name => {
     const lower = String(name).toLowerCase()
     return forbiddenNames.includes(lower) || forbiddenSuffixes.some(suffix => lower.endsWith(suffix))
 }
-// A plain JSON copy of a value: strings, finite numbers, booleans, null, arrays and objects of them, bounded in depth
-// and length; anything else (a function, an entity value, a date) is left out, as is a forbidden name.
-function plain(value, depth) {
-    if (value == null) return null
-    if (typeof value === "string" || typeof value === "boolean") return value
-    if (typeof value === "number") return Number.isFinite(value) ? value : null
-    if (depth >= maxDepth || typeof value !== "object") return undefined
-    if (Array.isArray(value))
+const isPlainObject = value =>
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+// A value projected through its shape (the shapes table): only the fields the shape names, each as plain JSON; a value
+// that is not of its shape is left out (undefined).
+function project(value, shape, depth) {
+    if (value === undefined) return undefined
+    if (value === null) return null
+    if (shape === "value") {
+        if (typeof value === "string" || typeof value === "boolean") return value
+        if (typeof value === "number") return Number.isFinite(value) ? value : null
+        return undefined
+    }
+    if (shape === "rich") {
+        if (typeof value === "string") return value
+        return isPlainObject(value) && typeof value.$richText === "string" ? {$richText: value.$richText} : undefined
+    }
+    if (depth >= maxDepth) return undefined
+    if (Array.isArray(shape)) {
+        if (!Array.isArray(value)) return undefined
         return value
             .slice(0, maxItems)
-            .map(item => plain(item, depth + 1))
+            .map(item => project(item, shape[0], depth + 1))
             .filter(item => item !== undefined)
-    if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return undefined
+    }
+    if (!isPlainObject(value)) return undefined
     const out = {}
-    for (const [key, item] of Object.entries(value)) {
-        if (forbidden(key)) continue
-        const kept = plain(item, depth + 1)
+    for (const [key, fieldShape] of Object.entries(shape)) {
+        if (forbidden(key) || !Object.prototype.hasOwnProperty.call(value, key)) continue
+        const kept = project(value[key], fieldShape, depth + 1)
         if (kept !== undefined) out[key] = kept
     }
     return out
 }
-// The view contract v1 of a view: only its keys, as plain JSON without forbidden names.
+// The view contract v1 of a view: only its keys and, in each, only the fields its shape names.
 function contract(view) {
     const out = {}
     for (const key of contractKeys) {
         if (view[key] === undefined) continue
-        const kept = plain(view[key], 0)
+        const kept = project(view[key], shapes[key], 0)
         if (kept !== undefined) out[key] = kept
     }
     return out
@@ -106,7 +155,7 @@ function loadSources(manifest, template, shop) {
         const descriptor = sources[source]
         if (!descriptor) continue
         try {
-            out[source] = plain(descriptor.load(shop, descriptor.limit), 0) || []
+            out[source] = project(descriptor.load(shop, descriptor.limit), descriptor.shape || shapes.productList, 0) || []
         } catch (error) {
             ec.logger.error("Shop source " + source + " of site " + shop.siteId + " failed: " + error.message)
             out[source] = []
@@ -177,6 +226,7 @@ function getShopPage(p) {
 const operations = {getShopPage}
 ;({
     contractKeys,
+    shapes,
     pages,
     sources,
     contract,

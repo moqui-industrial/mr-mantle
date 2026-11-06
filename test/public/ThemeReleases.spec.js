@@ -1,7 +1,7 @@
 // Shop themes and releases (mr-pass impl-shop P2; mantle.public.ThemeServices, Themes.js, ThemeView.js): a draft's
 // validation digest follows its files and a template naming `ec` fails with its file and line; publish pins the files and
-// advances the binding's revision and the site's generation together, restore switches back through the same gate with an
-// audit record, and a stale active revision or validation digest is refused with nothing changed; a designer validates
+// advances the binding's revision and the site's generation together (a retry by its operation key answers the first
+// result), restore switches back through the same gate with an audit record, and a stale active revision or validation digest is refused with nothing changed; a designer validates
 // but cannot publish, another organization's publisher cannot see the theme; the live reads give only the active
 // release, and the page view keeps to the view contract.
 // Standalone: spec-local organizations, users, store, site and a small package written into the theme's draft (the
@@ -14,6 +14,10 @@ const orgA = prefix + "_ORG_A",
     storeA2 = prefix + "_STORE_A2",
     site = prefix + "_SITE"
 const state = {}
+// operation keys unique to this run (PostingOperation rows outlive it)
+const runKey = String(Date.now()).slice(-9)
+let keys = 0
+const key = () => prefix + "-" + runKey + "-" + ++keys
 const themes = () => ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js")
 const view = () => ec.resource.script("component://mr-mantle/service/mantle/public/ThemeView.js")
 
@@ -217,7 +221,16 @@ feature("publish pins the files and advances the revision and generation; restor
     when() {
         const digest = run(state.publisher, T + "validate#Theme", {themeId: state.themeId}).validationDigest
         const before = generation()
+        state.firstKey = key()
         const first = run(state.publisher, T + "publish#Theme", {
+            operationKey: state.firstKey,
+            themeId: state.themeId,
+            siteId: site,
+            validationDigest: digest,
+            expectedActiveRevision: 0
+        })
+        const retried = run(state.publisher, T + "publish#Theme", {
+            operationKey: state.firstKey,
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest,
@@ -231,12 +244,14 @@ feature("publish pins the files and advances the revision and generation; restor
         })
         const digest2 = run(state.publisher, T + "validate#Theme", {themeId: state.themeId}).validationDigest
         const second = run(state.publisher, T + "publish#Theme", {
+            operationKey: key(),
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest2,
             expectedActiveRevision: 1
         })
         const restored = run(state.publisher, T + "restore#ThemeRelease", {
+            operationKey: key(),
             siteId: site,
             releaseId: first.releaseId,
             expectedActiveRevision: 2
@@ -249,6 +264,7 @@ feature("publish pins the files and advances the revision and generation; restor
         Object.assign(state, {
             before,
             first,
+            retried,
             afterFirst,
             release,
             pinned,
@@ -261,11 +277,15 @@ feature("publish pins the files and advances the revision and generation; restor
         })
     },
     then() {
-        const {before, first, afterFirst, release, pinned, second, restored, exported, audit, after, bound} = state
+        const {before, first, retried, afterFirst, release, pinned, second, restored, exported, audit, after, bound} = state
         const manifest = JSON.parse(release.manifestText)
         return (
             first.error === "" &&
             first.revision === 1 &&
+            first.alreadyApplied === false &&
+            retried.error === "" &&
+            retried.alreadyApplied === true &&
+            retried.releaseId === first.releaseId &&
             afterFirst === before + 1 &&
             first.generation === afterFirst &&
             release.manifestDigest === ec.resource.digestText(release.manifestText, "sha256") &&
@@ -295,6 +315,7 @@ feature("a stale active revision or validation digest is refused and nothing cha
         const before = generation()
         const held = binding()
         const staleRevision = run(state.publisher, T + "publish#Theme", {
+            operationKey: key(),
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest,
@@ -302,12 +323,14 @@ feature("a stale active revision or validation digest is refused and nothing cha
         })
         change(state.themeId, {"assets/store.css": "body { color: #333; }"})
         const staleDigest = run(state.publisher, T + "publish#Theme", {
+            operationKey: key(),
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest,
             expectedActiveRevision: 3
         })
         const staleRestore = run(state.publisher, T + "restore#ThemeRelease", {
+            operationKey: key(),
             siteId: site,
             releaseId: state.second.releaseId,
             expectedActiveRevision: 2
@@ -332,6 +355,7 @@ feature("a designer cannot publish, another organization cannot see the theme, a
         const digest = run(state.publisher, T + "validate#Theme", {themeId: state.themeId}).validationDigest
         const revision = Number(binding().revision)
         const designer = run(state.designer, T + "publish#Theme", {
+            operationKey: key(),
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest,
@@ -339,6 +363,7 @@ feature("a designer cannot publish, another organization cannot see the theme, a
         })
         const outsider = run(state.outsider, T + "validate#Theme", {themeId: state.themeId})
         const outsiderPublish = run(state.outsider, T + "publish#Theme", {
+            operationKey: key(),
             themeId: state.themeId,
             siteId: site,
             validationDigest: digest,
@@ -347,6 +372,7 @@ feature("a designer cannot publish, another organization cannot see the theme, a
         const other = draft(storeA2, packageFiles("Other store"))
         const otherDigest = run(state.publisher, T + "validate#Theme", {themeId: other}).validationDigest
         const mismatch = run(state.publisher, T + "publish#Theme", {
+            operationKey: key(),
             themeId: other,
             siteId: site,
             validationDigest: otherDigest,
@@ -398,7 +424,8 @@ feature("the live reads give only the active release, and the page view keeps to
             page: {kind: "home", fn: () => 1, user: {userId: "u"}},
             ec: {},
             entity: "x",
-            productList: [{id: "1", price: {amount: "1.00"}, token: "t"}]
+            productList: [{id: "1", price: {amount: "1.00", cost: "0.40"}, token: "t", internalName: "M-1", ownerPartyId: "P"}],
+            product: {id: "2", name: "Mug", standardCost: "3.00", draftDescription: "x", availability: {label: "In", stock: 7}}
         })
         Object.assign(state, {active, release, files, inactive, page, unknownKind, contract})
     },
@@ -420,6 +447,7 @@ feature("the live reads give only the active release, and the page view keeps to
                     site: {displayName: "S"},
                     shop: {name: "N"},
                     page: {kind: "home"},
+                    product: {id: "2", name: "Mug", availability: {label: "In"}},
                     productList: [{id: "1", price: {amount: "1.00"}}]
                 })
         )
