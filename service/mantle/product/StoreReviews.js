@@ -115,8 +115,10 @@ function reviewOf(s, productReviewId, forUpdate = false) {
     }
     return row
 }
+// A decision or reply names the revision it was made at (F102): one without it is refused, as one at another revision is.
 function stale(expected, row) {
-    if (expected != null && expected !== "" && ms(expected) !== ms(row.lastUpdatedStamp))
+    if (expected == null || expected === "") denied("REVISION_REQUIRED", "Give the revision the review was read at; reload")
+    if (ms(expected) !== ms(row.lastUpdatedStamp))
         denied("STALE_REVISION", "Changed since it was read (now " + dateText(row.lastUpdatedStamp) + "); reload")
 }
 const imagesOf = productReviewId =>
@@ -432,11 +434,14 @@ function qualifyingItems(shop, partyId, productId, first = false) {
             }
     return out
 }
-// The author's own review of a product in the store (not deleted), or null.
+// The author's own review of a product in the store, in any state, or null. A review staff deleted stays the author's one
+// review of the product: deletion is final, so it is neither edited nor written again (F101).
 const ownReview = (shop, productId) =>
     find(R, {userId: ec.user.userId, productStoreId: shop.productStoreId, productId})
-        .condition("statusId", "not-equals", "PrvwDeleted")
-        .one()
+        .orderBy("productReviewId")
+        .limit(1)
+        .list()[0] || null
+const removed = row => row?.statusId === "PrvwDeleted"
 // The author's public label for a choice: the first name and the last name's initial, or none.
 function labelOf(partyId, choice) {
     if (choice === "anonymous") return null
@@ -495,12 +500,27 @@ function removeImage(review, imageSeqId) {
     const image = one(IMAGE, {productReviewId: review.productReviewId, imageSeqId: text(imageSeqId)})
     if (!image) return false
     call("delete#" + IMAGE, {productReviewId: review.productReviewId, imageSeqId: image.imageSeqId})
-    try {
-        asAuthority(() => ec.resource.getLocationReference(image.contentLocation).delete())
-    } catch (error) {
-        ec.logger.warn("Review image file " + image.contentLocation + " was not removed")
-    }
+    // the file goes once the removal commits (F105): a rolled-back removal keeps the row and its file
+    ec.service
+        .special()
+        .name("mantle.product.StoreMerchandisingServices.remove#ReviewImageFile")
+        .parameters({contentLocation: image.contentLocation})
+        .registerOnCommit()
     return true
+}
+// remove#ReviewImageFile (after a removal commits): a review image's file under the store reviews' content root, only once no
+// image row names it.
+function removeImageFile(p) {
+    const location = text(p.contentLocation)
+    if (!location.startsWith(media().contentRoot() + "/productReview/") || location.includes("..")) return {removed: false}
+    if (one(IMAGE, {contentLocation: location})) return {removed: false}
+    try {
+        asAuthority(() => ec.resource.getLocationReference(location).delete())
+        return {removed: true}
+    } catch (error) {
+        ec.logger.warn("Review image file " + location + " was not removed")
+        return {removed: false}
+    }
 }
 // A visitor's image staged and scanned: {staged} or {refused: message}. Only PNG or JPEG (no PDF for a review).
 function stageImage(file) {
@@ -528,7 +548,16 @@ function submitReview(p) {
     if (body.length > limits.bodyLength) invalid("body", "Keep the review to " + limits.bodyLength + " characters")
     const choice = text(p.displayChoice) || "name"
     if (!displayChoices.includes(choice)) invalid("displayChoice", "Choose how your name is shown")
+    // the account's row locked first, so two first submissions of one account are made one after the other and the second
+    // finds the first (F103: no unique key on account, store and product)
+    // (a direct call outside a transaction, as a spec makes it, has nothing to serialize with)
+    try {
+        find("moqui.security.UserAccount", {userId: ec.user.userId}).forUpdate(true).one()
+    } catch (error) {
+        if (!/needs a transaction/.test(String(error.message))) throw error
+    }
     const mine = ownReview(shop, productId)
+    if (removed(mine)) refuse("Conflict", "REVIEW_REMOVED", "Your review of this product was removed; another cannot be written")
     if (text(p.productReviewId)) {
         if (!mine || mine.productReviewId !== text(p.productReviewId)) notAvailable("This review")
         if (text(p.expectedRevision) && text(p.expectedRevision) !== revisionOf(mine))
@@ -669,10 +698,12 @@ function reviewsView(shop, productId, p = {}) {
     const writeUrl = shop.base + "/Review?productId=" + encodeURIComponent(productId)
     let own = null
     let canReview = false
+    let reviewRemoved = false
     if (ec.user.userId) {
         const partyId = customers().selfParty()
         const mine = partyId ? ownReview(shop, productId) : null
-        if (mine)
+        if (removed(mine)) reviewRemoved = true
+        else if (mine)
             own = {
                 id: mine.productReviewId,
                 rating: ratingOf(mine),
@@ -710,6 +741,7 @@ function reviewsView(shop, productId, p = {}) {
         nextCursor: more ? "c" + (offset + size).toString(36) : null,
         own,
         canReview,
+        reviewRemoved,
         writeUrl
     }
 }
@@ -839,7 +871,8 @@ const operations = {
     getReviews,
     getReviewImage,
     queueRequests,
-    buildRequest
+    buildRequest,
+    removeImageFile
 }
 ;({
     limits,

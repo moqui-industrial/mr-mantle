@@ -1031,6 +1031,30 @@ function ensureFulfilled(occurrence) {
 // due, each on its own, then the contracts whose renewal is due and whose period has no occurrence yet, claimed as the
 // nightly create_RecurringOrders hand-off claims them (claimDue), so access does not lapse until the night (Shop F113); one
 // that fails is named and the rest go on.
+// The due contracts of a run (active: a past-due one already has its period's occurrence), oldest due first: the ones whose
+// period already has an occurrence (in flight) are left out before the batch is cut, a page at a time, so many in-flight
+// renewals never hold newly due ones back to the nightly hand-off (F148).
+function dueContracts(batch) {
+    const contracts = []
+    for (let offset = 0, pages = 0; contracts.length < batch && pages < 20; pages++, offset += batch) {
+        const page = Array.from(
+            find(CONTRACT, {autoRenew: "Y", stateEnumId: "ScsActive"})
+                .condition("cancelDate", "is-null", null)
+                .condition("baseOrderId", "is-not-null", null)
+                .condition("nextRenewalDate", "less-equals", ec.user.nowTimestamp)
+                .orderBy("nextRenewalDate")
+                .orderBy("contractId")
+                .offset(offset)
+                .limit(batch)
+                .list()
+        )
+        for (const row of page)
+            if (contracts.length < batch && !one(OCC, {contractId: row.contractId, periodStartDate: row.paidThroughDate}))
+                contracts.push(row)
+        if (page.length < batch) break
+    }
+    return contracts
+}
 function runRenewals(p) {
     const cf = ec.entity.conditionFactory
     const due = Array.from(
@@ -1066,16 +1090,8 @@ function runRenewals(p) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " failed: " + firstLine(error.message))
         }
     }
-    // the due contracts (active: a past-due one already has its period's occurrence), each claimed on its own
-    const contracts = Array.from(
-        find(CONTRACT, {autoRenew: "Y", stateEnumId: "ScsActive"})
-            .condition("cancelDate", "is-null", null)
-            .condition("baseOrderId", "is-not-null", null)
-            .condition("nextRenewalDate", "less-equals", ec.user.nowTimestamp)
-            .orderBy("nextRenewalDate")
-            .limit(Number(p.limit || limits.batch))
-            .list()
-    ).filter(row => !one(OCC, {contractId: row.contractId, periodStartDate: row.paidThroughDate}))
+    // the due contracts, each claimed on its own
+    const contracts = dueContracts(Number(p.limit || limits.batch))
     let claimed = 0
     for (const contract of contracts) {
         try {
@@ -1380,6 +1396,8 @@ const operations = {
     // StoreAdmin.js: the subscriptions readiness
     readiness,
     advance,
+    // run#Renewals' due batch (F148)
+    dueContracts,
     // StoreSubscriptions.js (Commerce P12, the staff part): the contract's terms and states, its consent, the renewals that
     // can be tried again, stopping its renewal and the coordinator's resumption
     limits,

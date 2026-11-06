@@ -187,6 +187,13 @@ const photo = (name, contentType) => ({
     }
 })
 const state = {}
+// a value that appears after a commit (a tx-commit SECA runs then)
+function waitFor(read, millis = 5000) {
+    const end = Date.now() + millis
+    let value = read()
+    while (!value && Date.now() < end) value = read()
+    return value
+}
 
 spec({
     stepwise: true,
@@ -335,11 +342,23 @@ feature("only approved reviews are public; a pending review's image is not serve
             reviews: [{productReviewId: state.reviewId, expectedLastUpdatedStamp: revision}],
             changeReason: "Checked"
         })
-        const reply = run(state.merchandiser, M + "reply#Review", {productReviewId: state.reviewId, replyText: "Thanks, Rita!"})
+        const noRevision = run(state.merchandiser, M + "reply#Review", {
+            productReviewId: state.reviewId,
+            replyText: "Thanks, Rita!"
+        })
+        const reply = run(state.merchandiser, M + "reply#Review", {
+            productReviewId: state.reviewId,
+            replyText: "Thanks, Rita!",
+            expectedLastUpdatedStamp: one("mantle.product.ProductReview", {productReviewId: state.reviewId}).lastUpdatedStamp
+        })
         const found = run(state.reader, M + "find#Reviews", {productStoreId: ids.store, statusId: "PrvwApproved"})
         const publicView = op(null, K + "get#Reviews", {productId: ids.product})
         const image = op(null, K + "get#ReviewImage", {reviewImage: "strv0000000000000000000000000001"})
-        return {pendingImage, readerDecision, stale, approved, reply, found, publicView, image}
+        const noRevisionDecision = run(state.merchandiser, M + "moderate#Review", {
+            decision: "approve",
+            productReviewId: state.reviewId
+        })
+        return {pendingImage, readerDecision, stale, approved, noRevision, reply, found, publicView, image, noRevisionDecision}
     },
     then(r) {
         code(r.pendingImage.error) == "NOT_AVAILABLE"
@@ -348,6 +367,9 @@ feature("only approved reviews are public; a pending review's image is not serve
         r.stale.results[0].reasonCode == "STALE_REVISION"
         r.approved.results[0].ok == true
         r.approved.results[0].statusId == "PrvwApproved"
+        // a reply or decision without the revision it was made at is refused (F102)
+        code(r.noRevision.error) == "REVISION_REQUIRED"
+        r.noRevisionDecision.results[0].reasonCode == "REVISION_REQUIRED"
         r.reply.replied == true
         r.found.reviews.map(row => row.productReviewId).includes(state.reviewId)
         r.found.canModerate == false
@@ -480,6 +502,131 @@ feature(
             r.reviewed.suppress == "Already reviewed"
             r.plain.queued == 0
             r.notShopRequests.length == 0
+        }
+    }
+)
+
+// Commerce P15 (F104, F105, F101): the first download of a Shop order's digital line queues its review request (the
+// DownloadFirstRequestReview SECA); the Review page's read claims a verified account's guest purchase of its email, so the
+// account may write a review; a removed photo's file goes once the change commits; and a review staff deleted stays the
+// author's one review of the product, neither edited nor written again.
+feature(
+    "a first download queues the request; get#Reviews claims the guest purchase; a removed photo's file goes; a deleted review is final",
+    {
+        when() {
+            // the download SECA: a grant of a Shop order's line downloaded once
+            const downloaded = order(ids.other, true)
+            system(() => {
+                make(S + "StoreDownloadGrant", {
+                    downloadGrantId: prefix + "_GRANT",
+                    orderId: downloaded.orderId,
+                    orderItemSeqId: "01",
+                    productId: ids.product,
+                    recipientPartyId: ids.other,
+                    productStoreId: ids.store,
+                    siteId: ids.site,
+                    fromDate: ec.user.nowTimestamp,
+                    downloadCount: 0
+                })
+            })
+            run("john.doe", "update#" + S + "StoreDownloadGrant", {downloadGrantId: prefix + "_GRANT", downloadCount: 1})
+            // the SECA runs after the commit, on a worker
+            const requested =
+                waitFor(() => {
+                    const found = list("mantle.party.MessageDelivery", {eventKey: "reviewRequest:" + downloaded.orderId + ":01"})
+                    return found.length ? found : null
+                }) || []
+            // get#Reviews' claim: a guest checkout of the product by the account's verified email, delivered
+            const claimer = prefix + "_CLAIMER"
+            const guest = system(() => {
+                account(claimer, "Cleo", "Claimer")
+                const guestPartyId = prefix + "_GUEST"
+                person(guestPartyId, "Guest", null)
+                make("mantle.party.PartyRole", {partyId: guestPartyId, roleTypeId: "Customer"})
+                return guestPartyId
+            })
+            const guestOrder = order(guest, true)
+            system(() => {
+                const cartAccessId = make("mantle.order.StoreCartAccess", {
+                    orderId: guestOrder.orderId,
+                    siteId: ids.site,
+                    productStoreId: ids.store,
+                    guestPartyId: guest,
+                    createdDate: ec.user.nowTimestamp
+                }).cartAccessId
+                const checkout = one("mantle.order.StoreCheckout", {orderId: guestOrder.orderId})
+                call("update#mantle.order.StoreCheckout", {
+                    checkoutId: checkout.checkoutId,
+                    cartAccessId,
+                    accountCheckout: "N",
+                    contactEmail: claimer.toLowerCase() + "@strv.example.test"
+                })
+            })
+            deliver(guestOrder.shipmentId)
+            const claimed = op(claimer, K + "get#Reviews", {productId: ids.product})
+            // a removed photo: its row at once, its file after the commit
+            const location =
+                ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js").contentRoot() +
+                "/productReview/" +
+                ids.store +
+                "/" +
+                state.reviewId +
+                "/02.png"
+            system(() => {
+                ec.resource.getLocationReference(location).putText("a photo to remove")
+                make("mantle.product.ProductReviewImage", {
+                    productReviewId: state.reviewId,
+                    imageSeqId: "02",
+                    digest: "strv0000000000000000000000000002",
+                    contentLocation: location,
+                    filename: "remove.png",
+                    contentType: "image/png",
+                    byteSize: 17
+                })
+            })
+            const mine = op(ids.buyer, K + "get#Reviews", {productId: ids.product}).result.own
+            const photoRemoved = op(ids.buyer, K + "submit#Review", {
+                productId: ids.product,
+                productReviewId: state.reviewId,
+                expectedRevision: mine.revision,
+                rating: "2",
+                body: "It chipped.",
+                displayChoice: "anonymous",
+                removeImageSeqIds: "02"
+            })
+            const fileKept = system(() => ec.resource.getLocationReference(location).getExists())
+            // staff delete the review: the author can neither edit it nor write another
+            const deleted = run(state.merchandiser, M + "moderate#Review", {
+                decision: "delete",
+                reviews: [
+                    {
+                        productReviewId: state.reviewId,
+                        expectedLastUpdatedStamp: one("mantle.product.ProductReview", {productReviewId: state.reviewId})
+                            .lastUpdatedStamp
+                    }
+                ],
+                changeReason: "Off topic"
+            })
+            const input = {productId: ids.product, rating: "5", body: "Trying again.", displayChoice: "name"}
+            const writeAgain = op(ids.buyer, K + "submit#Review", input)
+            const editDeleted = op(ids.buyer, K + "submit#Review", Object.assign({productReviewId: state.reviewId}, input))
+            const afterDelete = op(ids.buyer, K + "get#Reviews", {productId: ids.product})
+            return {requested, claimed, guest, photoRemoved, fileKept, deleted, writeAgain, editDeleted, afterDelete}
+        },
+        then(r) {
+            r.requested.length == 1
+            r.requested[0].sourceEnumId == "MdsrcReviewRequest"
+            r.claimed.result.canReview == true
+            one("mantle.party.Party", {partyId: r.guest}).mergedToPartyId == prefix + "_CLAIMER"
+            r.photoRemoved.result.imageChanged == true
+            r.fileKept == false
+            !one("mantle.product.ProductReviewImage", {productReviewId: state.reviewId, imageSeqId: "02"})
+            r.deleted.results[0].ok == true
+            code(r.writeAgain.error) == "REVIEW_REMOVED"
+            code(r.editDeleted.error) == "REVIEW_REMOVED"
+            r.afterDelete.result.own == null
+            r.afterDelete.result.canReview == false
+            r.afterDelete.result.reviewRemoved == true
         }
     }
 )

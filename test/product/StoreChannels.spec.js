@@ -155,6 +155,8 @@ spec({
                     publicationKindEnumId: "PspkPublished"
                 })
             party(ids.customer, true, "Marketplace", "Customer")
+            // organization A's own customer (Commerce F167: a binding's customer is the store organization's or shared)
+            call("update#mantle.party.Party", {partyId: ids.customer, ownerPartyId: orgA})
             const channel = ["COMMERCE_VIEW", "COMMERCE_CHANNEL_OPERATE"]
             users.reader = user("reader", orgA, ["COMMERCE_VIEW", "COMMERCE_ORDER_VIEW"])
             users.operator = user("operator", orgA, channel)
@@ -503,3 +505,79 @@ feature("a staged import previews each order, is guarded by its digest and commi
         r.problems == ""
     }
 })
+
+// Commerce P15 (F167, F168, F165, F169): a binding's customer is the store organization's own or shared (another
+// organization's refused); a replay kept while its original had failed answers the original's order once a retry makes it; a
+// batch is claimed under its lock, so a second claim of it finds it taken; a pasted import's 2 MiB limit counts bytes.
+feature(
+    "P15: the organization's own customer; a failed original's replay gets its order; a batch claimed once; the import limit in bytes",
+    {
+        when() {
+            const problems = []
+            const product3 = prefix + "_PROD3"
+            system(() => {
+                party(prefix + "_CUST_B", true, "Other marketplace", "Customer")
+                call("update#mantle.party.Party", {partyId: prefix + "_CUST_B", ownerPartyId: orgB})
+                make("mantle.product.Product", {
+                    productId: product3,
+                    productName: "Channel item " + product3,
+                    productTypeEnumId: "PtService",
+                    ownerPartyId: orgA
+                })
+            })
+            for (const customerPartyId of [prefix + "_CUST_B"]) {
+                const out = run(users.operator, I + "store#StoreIntegration", {
+                    systemMessageRemoteId: state.remoteA,
+                    customerPartyId
+                })
+                if (code(out) !== "CUSTOMER_UNAVAILABLE")
+                    problems.push("bound customer " + customerPartyId + ": " + (out.error || "allowed"))
+            }
+            // E6 fails (its product not sold yet); its replay is kept a duplicate with no order; the retry makes the order for both
+            deliver(state.remoteA, [order("E6", product3)])
+            deliver(state.remoteA, [order("E6", product3)])
+            const original = messageOf(state.remoteA, "E6").find(row => !row.duplicateOfMessageId) || {}
+            system(() =>
+                make("mantle.product.store.ProductStoreProduct", {
+                    productStoreId: ids.storeA,
+                    productId: product3,
+                    fromDate: 0,
+                    publicationKindEnumId: "PspkPublished"
+                })
+            )
+            run(users.operator, I + "retry#StoreMessages", {
+                systemMessageRemoteId: state.remoteA,
+                systemMessageIds: original.systemMessageId,
+                reason: "Product published",
+                operationKey: prefix + "-retry-e6"
+            })
+            const after = messageOf(state.remoteA, "E6")
+            const made = after.find(row => !row.duplicateOfMessageId)?.orderId
+            const replay = after.find(row => row.duplicateOfMessageId === original.systemMessageId)
+            if (!made || !replay || replay.orderId !== made)
+                problems.push("the replay's order: " + JSON.stringify(after.map(row => [row.statusId, row.orderId])))
+            // a staged batch claimed twice: the second finds it taken
+            const prepared = run(users.operator, I + "prepare#ChannelImport", {
+                systemMessageRemoteId: state.remoteA,
+                formatEnumId: "SciCsv",
+                importText: "externalId,lineId,productId,quantity,unitAmount\nE7,1," + ids.product + ",1,10.00"
+            })
+            const claim = () =>
+                run(users.operator, I + "claim#ChannelImport", {systemMessageId: prepared.batch?.systemMessageId}).claimed
+            const claims = [claim(), claim()]
+            if (JSON.stringify(claims) !== "[true,false]")
+                problems.push("claims " + JSON.stringify(claims) + " " + (prepared.error || ""))
+            // 1.1 million two-byte characters: 2.2 MB, refused though under 2 Mi characters
+            const large = run(users.operator, I + "prepare#ChannelImport", {
+                systemMessageRemoteId: state.remoteA,
+                formatEnumId: "SciCsv",
+                importText: "é".repeat(1100000)
+            })
+            if (code(large) !== "IMPORT_TOO_LARGE") problems.push("a 2.2 MB text: " + (large.error || "accepted").slice(0, 200))
+            return {problems: problems.join("\n")}
+        },
+        then(r) {
+            r.problems == ""
+        }
+    }
+)

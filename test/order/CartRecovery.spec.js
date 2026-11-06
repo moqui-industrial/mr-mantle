@@ -379,7 +379,9 @@ feature("the job sends one recovery to the opted-in idle cart and no other; a fa
             others: ["active", "guest", "unconsented", "done"].map(name => deliveries(carts[name]).length),
             reasons: Object.fromEntries(["ok", "active", "guest", "unconsented"].map(name => [name, reason(name)])),
             history: run(users.operator, O + "get#CartRecovery", {orderId: carts.ok}).recovery,
-            abandoned: (found.carts || []).map(row => row.orderId)
+            abandoned: (found.carts || []).map(row => row.orderId),
+            okAccess: one("mantle.order.StoreCartAccess", {cartAccessId: carts.ok}),
+            unconsentedAccess: one("mantle.order.StoreCartAccess", {cartAccessId: carts.unconsented})
         }
     },
     then(r) {
@@ -395,6 +397,10 @@ feature("the job sends one recovery to the opted-in idle cart and no other; a fa
         r.broken.length == 1 && r.broken[0].stateEnumId == "MdsFailed"
         r.others == [0, 0, 0, 0]
         r.second.queued == 0
+        // the two carts handled for this visit are marked and not read again (F133); the unconsented one still is
+        r.second.carts == r.first.carts - 2
+        Number(r.okAccess.recoveryHandledDate) == Number(r.okAccess.lastActivityDate)
+        r.unconsentedAccess.recoveryHandledDate == null
         r.after == 1
         r.reasons.ok == "ALREADY_SENT"
         r.reasons.active == "ACTIVE"
@@ -459,6 +465,8 @@ feature("the link restores the cart for its own account once, repriced with the 
         code(r.again) == "NOT_AVAILABLE"
         r.access.recoveryTokenDigest == null
         r.access.recoveryUsedDate != null
+        // the restored visit clears the job's mark (F133)
+        r.access.recoveryHandledDate == null
         r.access.capabilityDigest == ec.user.singleUseCodeHash(r.restored.result.token)
         code(r.expired) == "NOT_AVAILABLE"
         r.history.sends[0].redeemed == true

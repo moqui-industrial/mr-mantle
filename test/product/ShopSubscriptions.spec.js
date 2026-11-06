@@ -1328,3 +1328,52 @@ feature("P12 review: a product also sold in a store outside the user's scope is 
         code(r.noRow) == "RECORD_UNAVAILABLE"
     }
 })
+
+// Commerce P15 (F148): run#Renewals' due batch leaves out contracts whose period already has an occurrence (in flight) before
+// it is cut, so a newly due contract behind them is in a batch of one. Two contracts written directly, due long ago so they
+// come first, then stopped so no later run renews them.
+feature("P15 (F148): an in-flight renewal does not hold a newly due contract out of the job's batch", {
+    when() {
+        const at = new Date("2000-01-01T00:00:00Z").getTime()
+        system(() =>
+            call("create#mantle.order.OrderHeader", {orderId: prefix + "_DUE_BASE", statusId: "OrderOpen", currencyUomId: "USD"})
+        )
+        const contract = (suffix, dueMs) =>
+            system(() =>
+                call("create#" + SUB + "StoreRecurringContract", {
+                    contractId: prefix + "_DUE_" + suffix,
+                    productStoreId: ids.store,
+                    autoRenew: "Y",
+                    stateEnumId: "ScsActive",
+                    baseOrderId: prefix + "_DUE_BASE",
+                    paidThroughDate: new Date(dueMs),
+                    nextRenewalDate: new Date(dueMs)
+                })
+            )
+        contract("FLIGHT", at)
+        contract("NEW", at + 86400000)
+        system(() =>
+            call("create#" + SUB + "StoreRenewalOccurrence", {
+                contractId: prefix + "_DUE_FLIGHT",
+                periodStartDate: new Date(at),
+                stateEnumId: "SrsCharging",
+                attemptCount: 1,
+                createdDate: ec.user.nowTimestamp
+            })
+        )
+        const due = system(() =>
+            ec.resource
+                .script("component://mr-mantle/service/mantle/product/ShopSubscriptions.js")
+                .dueContracts(1)
+                .map(row => row.contractId)
+        )
+        system(() => {
+            for (const suffix of ["FLIGHT", "NEW"])
+                call("update#" + SUB + "StoreRecurringContract", {contractId: prefix + "_DUE_" + suffix, autoRenew: "N"})
+        })
+        return {due}
+    },
+    then(r) {
+        r.due == [prefix + "_DUE_NEW"]
+    }
+})

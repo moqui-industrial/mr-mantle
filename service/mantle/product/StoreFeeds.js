@@ -408,6 +408,9 @@ function recordFailure(feed, error, scheduled) {
 // null. A change scheduled ahead advanced the generation when it was scheduled, not when it takes effect.
 function takenEffectSince(productStoreId, since, now) {
     let latest = null
+    const later = at => {
+        if (at != null && (latest == null || at > latest)) latest = at
+    }
     for (const entity of [S + "ProductStoreProduct", S + "ProductStoreCategory"])
         for (const field of ["fromDate", "thruDate"]) {
             const found = Array.from(
@@ -418,8 +421,25 @@ function takenEffectSince(productStoreId, since, now) {
                     .limit(1)
                     .list()
             )[0]
-            const at = found ? ms(found[field]) : null
-            if (at != null && (latest == null || at > latest)) latest = at
+            later(found ? ms(found[field]) : null)
+        }
+    // a membership of the store's view or purchase allow-list categories (or a category below one) that started or ended
+    // (F156): a membership scheduled ahead decides what is public when it takes effect, with no generation change
+    const allowRoots = rows(S + "ProductStoreCategory", {productStoreId})
+        .filter(row => ["PsctViewAllow", "PsctPurchaseAllow"].includes(row.storeCategoryTypeEnumId) && current(row, now))
+        .map(row => row.productCategoryId)
+    const allowTree = Array.from(new Set(allowRoots.flatMap(id => categoryTree(id))))
+    if (allowTree.length)
+        for (const field of ["fromDate", "thruDate"]) {
+            const found = Array.from(
+                selecting(find(MEMBER).condition("productCategoryId", "in", allowTree), [field])
+                    .condition(field, ">", new Date(since))
+                    .condition(field, "<=", new Date(now))
+                    .orderBy("-" + field)
+                    .limit(1)
+                    .list()
+            )[0]
+            later(found ? ms(found[field]) : null)
         }
     return latest
 }
@@ -641,7 +661,14 @@ function checkValues(store, p, existing) {
     if (currencyUomId !== (store.defaultCurrencyUomId || "USD"))
         refuse("VALUE_INVALID[currencyUomId]", "Shop's catalog of this store sells in " + (store.defaultCurrencyUomId || "USD"))
     const productCategoryId = text(value("productCategoryId")) || null
-    if (productCategoryId && !one("mantle.product.category.ProductCategory", {productCategoryId}))
+    // a category the store may carry: its owner the store's organization or the shared catalog (_NA_, or none; F154), as
+    // StoreMerchandising's categoryOf has it
+    const category = productCategoryId ? one("mantle.product.category.ProductCategory", {productCategoryId}) : null
+    if (
+        productCategoryId &&
+        (!category ||
+            (category.ownerPartyId && category.ownerPartyId !== "_NA_" && category.ownerPartyId !== store.organizationPartyId))
+    )
         refuse("VALUE_INVALID[productCategoryId]", "Choose a category of the store")
     const scheduleEnumId = text(value("scheduleEnumId")) || "PsfsManual"
     if (!Object.hasOwn(schedules, scheduleEnumId)) refuse("VALUE_INVALID[scheduleEnumId]", "Choose a listed schedule")

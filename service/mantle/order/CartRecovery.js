@@ -268,6 +268,15 @@ function queueRecovery(p) {
 }
 
 // ===== run#CartRecovery (the job) =====
+// The outcomes that hold for the rest of a visit to the cart: the job marks the cart handled for that activity (F133).
+const handledCodes = ["QUEUED", "ALREADY_SENT", "SEND_LIMIT"]
+function markHandled(row) {
+    try {
+        lib.probe("update#" + A, {cartAccessId: row.cartAccessId, recoveryHandledDate: row.lastActivityDate})
+    } catch (error) {
+        ec.logger.warn("Cart recovery of cart " + row.orderId + " not marked handled: " + String(error.message).split("\n")[0])
+    }
+}
 // The stores with recovery enabled now (or the ones named), each store's carts idle past its delay within its window, each
 // cart in its own transaction; one that fails is logged and named. {stores, carts, queued, failed, failures}.
 function runRecovery(p) {
@@ -295,6 +304,8 @@ function runRecovery(p) {
                 .condition("revokedDate", "is-null", null)
                 .condition("lastActivityDate", "less-equals", new Date(at - pol.delayMinutes * 60000))
                 .condition("lastActivityDate", "greater-equals", new Date(at - pol.retentionDays * DAY_MS))
+                // a cart handled for this visit (its mark, cleared by the shopper's next action) is not read again (F133)
+                .condition("recoveryHandledDate", "is-null", null)
                 // newest first: the carts just past the delay are the ones due, and the ones already handled in the window
                 // (most of them, a run every ten minutes) never crowd them out of the limit
                 .orderBy("-lastActivityDate")
@@ -306,6 +317,7 @@ function runRecovery(p) {
             try {
                 const done = lib.probe(SERVICES + "queue#CartRecovery", {orderId: row.orderId})
                 if (done.queued) out.queued++
+                if (handledCodes.includes(done.code)) markHandled(row)
                 if (done.stateEnumId === "MdsFailed") {
                     out.failed++
                     out.failures.push(row.orderId + ": not sent")
@@ -378,6 +390,7 @@ function recoverCart(p) {
     const missing = pending ? [] : shopCart.reprice(shop, cart)
     const token = shopCart.rotate(cart.row, {
         lastActivityDate: ec.user.nowTimestamp,
+        recoveryHandledDate: null,
         expireDate: new Date(shop.at + shopCart.limits.accountDays * DAY_MS)
     })
     return shopCart.answer(shop, cart, {token, recovered: true, unavailableItems: missing})
