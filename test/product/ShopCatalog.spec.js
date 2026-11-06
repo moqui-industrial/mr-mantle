@@ -437,6 +437,7 @@ feature(
             ec.resource
                 .script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
                 .simpleQuery('name:mug* AND (red OR "x")') == 'name\\:mug\\* and \\(red or \\"x\\"\\)'
+            ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js").simpleQuery(">10 <a") == " 10  a"
 
             plain.result.product.image.url == "/shop/media?productContentId=" + prefix + "_IMG_PNG"
             plain.result.product.image.alt == "A picture"

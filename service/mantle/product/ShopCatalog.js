@@ -593,10 +593,12 @@ function searchShop(p) {
     })
 }
 // The visitor's text as a plain query of its words (impl-shop P4, F67): the index's query syntax (fields, wildcards,
-// ranges, fuzzy and boolean operators, grouping) escaped, so a visitor's text costs what a few words cost.
+// ranges, fuzzy and boolean operators, grouping) escaped, so a visitor's text costs what a few words cost. "<" and ">"
+// cannot be escaped in a query_string (a bare ">10" is a range), so they become spaces.
 const simpleQuery = query =>
     query
-        .replace(/[+\-=&|><!(){}\[\]^"~*?:\\/]/g, character => "\\" + character)
+        .replace(/[<>]/g, " ")
+        .replace(/[+\-=&|!(){}\[\]^"~*?:\\/]/g, character => "\\" + character)
         .replace(/\b(AND|OR|NOT)\b/g, word => word.toLowerCase())
 // The site's live Shop pages whose title has every word of the query.
 function pageMatches(shop, query) {

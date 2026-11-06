@@ -640,6 +640,11 @@ function attachCart(p) {
             customerPartyId: shop.customerPartyId
         })
         lib.call("update#" + A, {cartAccessId: session.row.cartAccessId, customerPartyId: shop.customerPartyId})
+        // the account's promotions (and the guest's that no longer apply) as the customer changed
+        lib.call("mantle.order.OrderServices.handle#OrderMajorChange", {
+            orderId: session.part.orderId,
+            orderPartSeqId: session.part.orderPartSeqId
+        })
         target = loaded(session.row)
     } else target = session || own
     if (!target) return answer(shop, null, {token: null, attached: false, merged: false, unavailableItems: []})
