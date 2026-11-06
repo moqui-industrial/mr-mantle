@@ -70,6 +70,9 @@ const reservedPaths = [
     'sw.js',
     'manifest.webmanifest',
     'WebPush',
+    // Commerce P14: the Shop mount's feed path (feeds/{feedKey}.{extension}, mr-pass resolve#Route), so a Shop at '/' keeps
+    // it from another app's mount, a page route or a redirect
+    'feeds',
 ]
 /* Whether a target id names a record of the target type. */
 const targets = {

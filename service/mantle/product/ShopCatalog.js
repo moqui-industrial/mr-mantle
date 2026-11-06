@@ -1081,6 +1081,11 @@ const operations = {
     unavailablePrice,
     // P4 (F67): the index query of a visitor's text
     simpleQuery,
+    // Commerce P14 (StoreFeeds.js): a feed build's rows are this projection: the cards of the public products and their store
+    // descriptions as plain text
+    cards,
+    contentTexts,
+    plainText,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop catalog operation " + op)
         return operations[op](parameters || {})

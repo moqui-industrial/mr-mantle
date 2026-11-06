@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- A store's product feeds and their builds (impl-commerce P14, COM-FEED; design-commerce §9 Feeds, FeedDetail): a feed
+    binds a store's Shop site to a registered format and destination; a build is an immutable artifact made from Shop's
+    public catalog projection (ShopCatalog.js) at the site's publication generation, with its rows, skips and errors; the
+    feed's active build is the one Shop serves at its reserved feed path (mr-pass, feeds/{feedKey}.{extension} under the
+    Shop mount), checked against the current generation. StoreFeeds.js writes both; nothing else does. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ProductStoreFeed" package="mantle.product.store">
+        <description>A product feed of a store (find#StoreFeeds, store#StoreFeed): its Shop site, a registered format and
+            destination (StoreFeeds.js formats, destinations), the product scope (a category and below, or the whole published
+            assortment), whether images and products that cannot be bought now are included, a schedule for the feed job, and
+            the active build. A feed is current from fromDate until thruDate (ending it stops serving); a change of its key
+            fields is audit-logged and names its reason. A change of site, key, format or category clears the active build,
+            which then needs a new one.</description>
+        <field name="productStoreFeedId" type="id" is-pk="true"/>
+        <field name="productStoreId" type="id" enable-audit-log="true"/>
+        <field name="siteId" type="id" enable-audit-log="true"/>
+        <field name="feedName" type="text-medium" enable-audit-log="true"/>
+        <field name="feedKey" type="text-short" enable-audit-log="true"><description>The feed's name in its public path
+            (feeds/{feedKey}.{extension} under the Shop mount): lower case letters, digits and hyphens, one current feed of a
+            site each.</description></field>
+        <field name="formatEnumId" type="id" enable-audit-log="true"/>
+        <field name="destinationEnumId" type="id" enable-audit-log="true"/>
+        <field name="locale" type="text-short"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="productCategoryId" type="id" enable-audit-log="true"/>
+        <field name="includeImages" type="text-indicator" enable-audit-log="true"/>
+        <field name="includeUnavailable" type="text-indicator" enable-audit-log="true"><description>Y keeps a product that
+            cannot be bought now (out of stock) as a row with its availability; otherwise it is a skip.</description></field>
+        <field name="scheduleEnumId" type="id" enable-audit-log="true"/>
+        <field name="activeBuildId" type="id" enable-audit-log="true"/>
+        <field name="activatedDate" type="date-time"/>
+        <field name="activatedByUserId" type="id"/>
+        <field name="lastScheduledDate" type="date-time"><description>When the feed job last built it.</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" related="mantle.public.PublicSite" short-alias="site"/>
+        <relationship type="one" title="Format" related="moqui.basic.Enumeration" short-alias="format">
+            <key-map field-name="formatEnumId"/></relationship>
+        <relationship type="one" title="Destination" related="moqui.basic.Enumeration" short-alias="destination">
+            <key-map field-name="destinationEnumId"/></relationship>
+        <relationship type="one" title="Schedule" related="moqui.basic.Enumeration" short-alias="schedule">
+            <key-map field-name="scheduleEnumId"/></relationship>
+        <relationship type="one" related="mantle.product.category.ProductCategory" short-alias="category"/>
+        <relationship type="one-nofk" title="Active" related="mantle.product.store.ProductStoreFeedBuild" short-alias="activeBuild">
+            <key-map field-name="activeBuildId" related="feedBuildId"/></relationship>
+        <relationship type="one" related="moqui.basic.Uom" short-alias="currency"><key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <index name="PSFEED_SITE_KEY"><index-field name="siteId"/><index-field name="feedKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Feed Format" enumTypeId="StoreFeedFormat"/>
+            <moqui.basic.Enumeration description="Product feed (RSS 2.0, Google Merchant fields)" enumId="PsffGoogleXml" enumTypeId="StoreFeedFormat" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Product feed (CSV)" enumId="PsffCsv" enumTypeId="StoreFeedFormat" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Product feed (JSON)" enumId="PsffJson" enumTypeId="StoreFeedFormat" sequenceNum="3"/>
+            <moqui.basic.EnumerationType description="Store Feed Destination" enumTypeId="StoreFeedDestination"/>
+            <moqui.basic.Enumeration description="The store's Shop site" enumId="PsfdShopSite" enumTypeId="StoreFeedDestination" sequenceNum="1"/>
+            <moqui.basic.EnumerationType description="Store Feed Schedule" enumTypeId="StoreFeedSchedule"/>
+            <moqui.basic.Enumeration description="When asked" enumId="PsfsManual" enumTypeId="StoreFeedSchedule" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Every hour" enumId="PsfsHourly" enumTypeId="StoreFeedSchedule" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Every day" enumId="PsfsDaily" enumTypeId="StoreFeedSchedule" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ProductStoreFeedBuild" package="mantle.product.store" cache="never">
+        <description>One build of a feed (build#StoreFeed, the feed job), never changed once written: complete (its artifact,
+            digest, rows, skips and errors) or failed (its failure, no artifact; the feed's active build is left as it was).
+            generation is the site's publication generation the build read; productIds are its rows' products, which serving
+            re-checks against the resolver once the generation has moved on, so a product withdrawn after the build blocks the
+            build until a rebuild without it is active.</description>
+        <field name="feedBuildId" type="id" is-pk="true"/>
+        <field name="productStoreFeedId" type="id"/>
+        <field name="productStoreId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="buildStatusEnumId" type="id"/>
+        <field name="formatEnumId" type="id"/>
+        <field name="locale" type="text-short"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="generation" type="number-integer"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="builtByUserId" type="id"><description>Empty for the feed job.</description></field>
+        <field name="scheduled" type="text-indicator"/>
+        <field name="rowCount" type="number-integer"/>
+        <field name="skipCount" type="number-integer"/>
+        <field name="errorCount" type="number-integer"/>
+        <field name="productIds" type="text-very-long"/>
+        <field name="skipsJson" type="text-very-long"/>
+        <field name="errorsJson" type="text-long"/>
+        <field name="sampleJson" type="text-long"><description>The first rows' public projection, for FeedPreview.</description></field>
+        <field name="failureCode" type="text-short"/>
+        <field name="failureText" type="text-medium"/>
+        <field name="contentType" type="text-short"/>
+        <field name="artifactDigest" type="text-medium"/>
+        <field name="artifactSize" type="number-integer"/>
+        <field name="artifactText" type="text-very-long"/>
+        <relationship type="one" related="mantle.product.store.ProductStoreFeed" short-alias="feed"/>
+        <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
+        <relationship type="one" title="BuildStatus" related="moqui.basic.Enumeration" short-alias="buildStatus">
+            <key-map field-name="buildStatusEnumId"/></relationship>
+        <index name="PSFEEDBLD_FEED"><index-field name="productStoreFeedId"/><index-field name="startedDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Feed Build Status" enumTypeId="StoreFeedBuildStatus"/>
+            <moqui.basic.Enumeration description="Complete" enumId="PsfbComplete" enumTypeId="StoreFeedBuildStatus" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Failed" enumId="PsfbFailed" enumTypeId="StoreFeedBuildStatus" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+</entities>

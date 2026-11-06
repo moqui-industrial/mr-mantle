@@ -1620,4 +1620,9 @@
         service: 'mantle.product.ShopSubscriptionServices.resume#Renewal',
         fields: ['siteId', 'contractId', 'operationId'],
     },
+    // Commerce P14: a store feed's active build served at the Shop mount's feed path (its key and the format's extension)
+    getShopFeed: {
+        service: 'mantle.product.StoreChannelServices.get#ShopFeed',
+        fields: ['siteId', 'feedKey', 'extension'],
+    },
 })
