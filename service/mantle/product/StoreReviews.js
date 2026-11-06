@@ -397,7 +397,9 @@ function delivered(order, item) {
 }
 // The buyer's qualifying order lines of a product in the store (the proof), newest order first: an order of the store whose
 // parts are all the buyer's (ShopCustomer.js ownOrder), approved, sent or completed, the line not cancelled, and delivered.
-function qualifyingItems(shop, partyId, productId) {
+// The account's lines of the product are found first in one query (most visitors bought none: a product page view costs the
+// parts' and the lines' queries, F-P9-7); only their orders are read and checked. first: stop at the first line found.
+function qualifyingItems(shop, partyId, productId, first = false) {
     const productIds = reviewedIds(productId)
     const orderIds = unique(
         rows("mantle.order.OrderPart", {customerPartyId: partyId, vendorPartyId: shop.store.organizationPartyId}).map(
@@ -405,9 +407,13 @@ function qualifyingItems(shop, partyId, productId) {
         )
     )
     if (!orderIds.length) return []
+    const items = Array.from(
+        find(ITEM).condition("orderId", "in", orderIds).condition("productId", "in", productIds).list()
+    ).filter(stillOrdered)
+    if (!items.length) return []
     const orders = Array.from(
         find("mantle.order.OrderHeader")
-            .condition("orderId", "in", orderIds)
+            .condition("orderId", "in", unique(items.map(item => item.orderId)))
             .condition("productStoreId", shop.productStoreId)
             .condition("statusId", "in", reviewableOrderStatuses)
             .orderBy("-placedDate")
@@ -416,8 +422,11 @@ function qualifyingItems(shop, partyId, productId) {
     ).filter(order => customers().ownOrder(shop, order, partyId))
     const out = []
     for (const order of orders)
-        for (const item of find(ITEM, {orderId: order.orderId}).condition("productId", "in", productIds).list())
-            if (stillOrdered(item) && delivered(order, item)) out.push(item)
+        for (const item of items)
+            if (item.orderId === order.orderId && delivered(order, item)) {
+                out.push(item)
+                if (first) return out
+            }
     return out
 }
 // The author's own review of a product in the store (not deleted), or null.
@@ -524,7 +533,7 @@ function submitReview(p) {
     } else if (mine) refuse("Conflict", "ALREADY_REVIEWED", "You have reviewed this product; change your review instead")
     let proof = null
     if (!mine) {
-        proof = qualifyingItems(shop, partyId, productId)[0]
+        proof = qualifyingItems(shop, partyId, productId, true)[0]
         if (!proof) refuse("Unprocessable", "PURCHASE_REQUIRED", "Only a buyer whose order of it has arrived can review it")
     }
     const removals = (Array.isArray(p.removeImageSeqIds) ? p.removeImageSeqIds : text(p.removeImageSeqIds).split(","))
@@ -625,6 +634,10 @@ function summaryOf(productStoreId, productId) {
 function getReviews(p) {
     const shop = catalog().shopOf(p)
     const productId = publicProduct(shop, p.productId)
+    // the Review page (the review request's link) claims the verified account's guest purchases first, as submit#Review and
+    // the account pages do, so a guest buyer who made an account is offered the form (the product page's view does not)
+    const partyId = ec.user.userId ? customers().selfParty() : null
+    if (partyId) customers().claimGuestPurchases(shop, partyId)
     const name = productName(productId)
     return Object.assign(reviewsView(shop, productId, p), {
         product: {id: productId, name, url: shop.base + "/products/" + productId + "/" + catalog().slug(name)},
@@ -668,7 +681,7 @@ function reviewsView(shop, productId, p = {}) {
                 revision: revisionOf(mine),
                 images: imagesOf(mine.productReviewId).map(image => ({imageSeqId: image.imageSeqId, filename: image.filename}))
             }
-        else if (partyId) canReview = qualifyingItems(shop, partyId, productId).length > 0
+        else if (partyId) canReview = qualifyingItems(shop, partyId, productId, true).length > 0
     }
     return {
         productId,
