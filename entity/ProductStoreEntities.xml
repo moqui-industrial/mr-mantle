@@ -387,8 +387,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="settingTypeEnumId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="settingValue" type="text-medium"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="settingValue" type="text-medium" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the setting was started or
+            ended (the checkout policy names its reason, impl-commerce P6; the store's History shows it).</description></field>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" title="ProductStoreSettingType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="settingTypeEnumId"/></relationship>
@@ -439,7 +441,8 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="ProductStoreShippingGateway" package="mantle.product.store">
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="carrierPartyId" type="id" is-pk="true"/>
-        <field name="shippingGatewayConfigId" type="id"/>
+        <!-- audit-logged (impl-commerce P6): a delete is not logged, so store#StoreShippingGateway records a removal -->
+        <field name="shippingGatewayConfigId" type="id" enable-audit-log="true"/>
         <field name="billingType" type="text-short"><description>For third party and other carrier account billing;
             for Shippo valid values are SENDER, RECIPIENT, THIRD_PARTY</description></field>
         <field name="billingAccount" type="text-short"><description>Third party or other carrier account number</description></field>
