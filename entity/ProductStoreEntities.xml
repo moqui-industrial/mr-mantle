@@ -291,13 +291,35 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
 
     <entity entity-name="ProductStoreProduct" package="mantle.product.store" use="configuration" cache="true">
+        <description>A product's publication in a store (impl-commerce P3, §4; design-commerce §4), effective dated as
+            ProductStoreCategory is: publishing starts a row from a date, withdrawal ends it, a change of template, badge or rank
+            is a new row. A virtual product's published row covers its saleable variants; a variant is left out by its own
+            exclusion row (PspkExcluded). A row with no kind is published (rows made before P3). Read the current row
+            (fromDate at or before the time, thruDate after it or empty), never by the store and product alone.
+            StoreMerchandisingServices writes it; get#StorePublication answers what is public.</description>
         <field name="productStoreId" type="id" is-pk="true"/>
         <field name="productId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true" default="ec.user.nowTimestamp"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="publicationKindEnumId" type="id" enable-audit-log="true"/>
+        <field name="templateKey" type="text-short" enable-audit-log="true"><description>The theme's product template for
+            this product in the store (Shop's theme release names the keys); empty for the theme's default.</description></field>
+        <field name="badgeText" type="text-medium" enable-audit-log="true"/>
+        <field name="featuredRank" type="number-integer" enable-audit-log="true"/>
+        <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the row was started or
+            ended (a publication, withdrawal or storefront change names its reason).</description></field>
         <field name="signatureRequiredEnumId" type="id"/>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
         <relationship type="one" title="SignatureRequired" related="moqui.basic.Enumeration" short-alias="signatureRequiredEnum">
             <key-map field-name="signatureRequiredEnumId"/></relationship>
+        <relationship type="one" title="PublicationKind" related="moqui.basic.Enumeration" short-alias="publicationKind">
+            <key-map field-name="publicationKindEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Store Publication Kind" enumTypeId="StorePublicationKind"/>
+            <moqui.basic.Enumeration description="Published" enumId="PspkPublished" enumTypeId="StorePublicationKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Variant excluded" enumId="PspkExcluded" enumTypeId="StorePublicationKind" sequenceNum="2"/>
+        </seed-data>
     </entity>
 
     <entity entity-name="ProductStorePromotion" package="mantle.product.store" use="configuration" cache="true">

@@ -1490,6 +1490,12 @@ const operations = {
     scope,
     storeQuery,
     storeOf,
+    // P3 (StoreMerchandising.js): the dated save, the date and reason checks and row dates, shared by the store modules
+    saveDated,
+    dateOf,
+    reason,
+    rowDates,
+    stateOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store operation " + op)
         return operations[op](parameters || {})

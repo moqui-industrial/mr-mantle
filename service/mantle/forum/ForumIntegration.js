@@ -380,10 +380,16 @@
             (mount) =>
                 mount.enabled !== 'N' &&
                 !!mount.targetId &&
-                !!one('mantle.product.store.ProductStoreProduct', {
+                // the store's current publication row (dated, impl-commerce P3); an exclusion is not a carry
+                rows('mantle.product.store.ProductStoreProduct', {
                     productStoreId: mount.targetId,
                     productId,
-                }),
+                }).some(
+                    (row) =>
+                        row.publicationKindEnumId !== 'PspkExcluded' &&
+                        (row.fromDate == null || millis(row.fromDate) <= t) &&
+                        (row.thruDate == null || millis(row.thruDate) > t),
+                ),
         )
     }
     /* Internal staff who moderate the topic: the only people who see or make case links. */
