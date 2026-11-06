@@ -27,6 +27,7 @@ const ids = {
     free: prefix + "_FREE",
     noPrice: prefix + "_NOPRICE",
     storePriced: prefix + "_STOREPRICE",
+    otherParty: prefix + "_PERSON2",
     space: "SHCATPG"
 }
 const state = {}
@@ -73,9 +74,10 @@ const price = (productId, amount, fields = {}) =>
 const published = (productStoreId, productId, kind) =>
     make(S + "ProductStoreProduct", {productStoreId, productId, fromDate: 0, publicationKindEnumId: kind || "PspkPublished"})
 const wiki = (verb, parameters) => call("org.moqui.impl.WikiServices." + verb, parameters)
-// a Shop read as the public reads it (no one signed in): {result} or {error}
-function read(service, input) {
-    logout()
+// a Shop read as the public reads it (no one signed in), or as a signed-in user: {result} or {error}
+function read(service, input, username) {
+    if (username) login(username)
+    else logout()
     ec.message.pushErrors()
     try {
         const out =
@@ -162,6 +164,11 @@ spec({
             price(ids.free, "0")
             // a row of the store's organization: the authority's price for the store; get#ProductPrice gives the public none
             price(ids.storePriced, "7.00", {vendorPartyId: ids.org})
+            // the signed-in customer's own row (john.doe's party) and another party's, both more specific than the store's
+            state.customerPartyId = ec.user.userAccount.partyId
+            make("mantle.party.Party", {partyId: ids.otherParty, partyTypeEnumId: "PtyPerson"})
+            price(ids.storePriced, "6.00", {vendorPartyId: ids.org, customerPartyId: state.customerPartyId})
+            price(ids.storePriced, "2.00", {vendorPartyId: ids.org, customerPartyId: ids.otherParty})
             for (const productId of [ids.plain, ids.draft, ids.virtual, ids.free, ids.noPrice, ids.storePriced])
                 published(ids.store, productId)
             published(ids.store, ids.blue, "PspkExcluded")
@@ -311,5 +318,28 @@ feature("prices are the store authority's: a zero price, an unavailable one, a s
         !JSON.stringify([free, none, store, quote]).includes("priceTrace")
         !JSON.stringify([free, none, store, quote]).includes("productPriceId")
         !JSON.stringify([free, none, store, quote]).toLowerCase().includes("cost")
+    }
+})
+
+feature("a signed-in customer gets its own price row, never another party's; get#ProductPrice takes no storeAuthority", {
+    when() {
+        const forged = (() => {
+            logout()
+            try {
+                // an undeclared parameter is dropped, so no caller of get#ProductPrice can ask for the store's authority
+                return ec.service
+                    .sync()
+                    .name("mantle.product.PriceServices.get#ProductPrice")
+                    .parameters({productId: ids.storePriced, productStoreId: ids.store, priceUomId: "USD", storeAuthority: true})
+                    .call()
+            } finally {
+                login("john.doe")
+            }
+        })()
+        return {mine: read("get#Product", {productId: ids.storePriced}, "john.doe"), forged}
+    },
+    then({mine, forged}) {
+        mine.result.product.price.amount == "6.00"
+        forged.priceAvailable == false
     }
 })
