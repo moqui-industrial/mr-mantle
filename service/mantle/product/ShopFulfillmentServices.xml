@@ -56,7 +56,8 @@
     <service verb="fulfill" noun="StoreItems" allow-remote="false" operation="shop.fulfillment.run">
         <description>The fulfill_StoreItems job: the Shop orders whose digital lines are not done and are due a try, and
             (Shop P8, impl-shop F96) the approved Shop orders completed in the last days with a line Shop fulfills and no
-            fulfillment row (the approval SECA never ran), each on its own; one that fails is named and the rest go on.</description>
+            fulfillment row (the approval SECA never ran), and (Shop P9, impl-shop F126) the renewal orders made in those days with no
+            row, each on its own; one that fails is named and the rest go on.</description>
         <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
         <out-parameters>
             <parameter name="orders" type="Integer"/>
