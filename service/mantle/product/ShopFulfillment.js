@@ -447,7 +447,7 @@ function fulfillDue(p) {
 }
 // Shop P8 (impl-shop F96): the approval SECA is the usual start, so a crash between the approval's commit and it leaves no
 // row for the job; the job also takes the Shop orders completed in the last days that are approved, have a line Shop
-// fulfills and have no fulfillment row yet; Shop P9 (impl-shop F126): and the renewal orders (StoreRenewalOccurrence) made
+// fulfills and have no fulfillment row yet; Shop P9 (impl-shop F126): and the renewal orders (StoreRenewalOccurrence) changed
 // in those days, whose approval SECA may as well never have run.
 function unstarted(p) {
     const since = new Date(nowMs() - limits.unstartedDays * 86400000)
@@ -462,11 +462,12 @@ function unstarted(p) {
             .list()
     ).map(row => row.orderId)
     const renewals = Array.from(
+        // by the occurrence's last change, not its creation: a failed period reopened later places its order then
         find("mantle.product.subscription.StoreRenewalOccurrence")
-            .condition("createdDate", "greater-equals", since)
+            .condition("lastUpdatedStamp", "greater-equals", since)
             .condition("orderId", "is-not-null", null)
             .selectField("orderId")
-            .orderBy("-createdDate")
+            .orderBy("-lastUpdatedStamp")
             .limit(scan)
             .list()
     ).map(row => row.orderId)
