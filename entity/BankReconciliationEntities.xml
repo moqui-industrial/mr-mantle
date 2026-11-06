@@ -224,6 +224,6 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="paymentDepositId" type="id" enable-audit-log="update"><description>The deposit slip this receipt was
             deposited with (create#DepositSlip)</description></field>
         <relationship type="one" related="mantle.account.payment.PaymentDeposit" short-alias="deposit"/>
-        <index name="PAYMENT_DEPOSIT"><index-field name="paymentDepositId"/></index>
+        <index name="PAYMENT_DEPOSIT_ID"><index-field name="paymentDepositId"/></index>
     </extend-entity>
 </entities>
