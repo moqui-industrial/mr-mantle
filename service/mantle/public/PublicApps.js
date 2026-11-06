@@ -32,6 +32,41 @@ const apps = {
         readiness: 'mantle.product.StoreAdminServices.check#StoreReadiness',
     },
 }
+/* The first path segments no app mount, site page route or redirect may take: the BOSS apps, REST and RPC, the framework's
+ * routes (public_site.rs FRAMEWORK_ROUTES, so a root app never shadows them; Shop P1, F2) and its sign-in, token and
+ * asset paths. Forum.js storeMounts checks mounts against it, SitePages.js redirects and navigation paths. */
+const reservedPaths = [
+    'apps',
+    'qapps',
+    'rest',
+    'rpc',
+    'status',
+    'error',
+    'health',
+    'metrics',
+    'fop',
+    'js',
+    'css',
+    'libs',
+    'images',
+    // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
+    'static',
+    'assets',
+    'Login',
+    'SecondFactor',
+    'PasswordReset',
+    'sso',
+    'notws',
+    'termws',
+    'PublicShell',
+    's',
+    'u',
+    'cal',
+    'r',
+    'sw.js',
+    'manifest.webmanifest',
+    'WebPush',
+]
 /* Whether a target id names a record of the target type. */
 const targets = {
     organization: (targetId) =>
@@ -103,4 +138,4 @@ function sitesFor(app, targetId) {
                     .count() > 0,
         )
 }
-;({ apps, targets, mount, pageUrl, sitesFor })
+;({ apps, targets, mount, pageUrl, sitesFor, reservedPaths })

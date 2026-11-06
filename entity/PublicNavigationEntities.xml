@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- A public site's navigation (impl-commerce P4, X14, design-commerce §5 Navigation, design-shop §11): the menus of a
+    site's app mount by key and locale, each with its draft items and its published versions (dated snapshots), and the
+    site's redirects of old paths to typed destinations, each dated. mantle.public.ThemeServices writes them
+    (service/mantle/public/SitePages.js) after its permission and store checks; the live reads are SiteServices'
+    get#SiteNavigation and resolve#SiteRedirect. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="PublicSiteNavigation" package="mantle.public">
+    <description>A menu of a site's app mount, by its key (main, footer, ...) and locale. draftText holds the draft's items
+      as JSON ({itemId, parentItemId, label, destinationTypeEnumId, destinationValue, visible}, in order); draftRevision
+      counts its saves, each checked. What visitors see is its active PublicSiteNavigationVersion.</description>
+    <field name="navigationId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="menuKey" type="id"/>
+    <field name="locale" type="id"/>
+    <field name="name" type="text-medium"/>
+    <field name="draftText" type="text-very-long"/>
+    <field name="draftRevision" type="number-integer"/>
+    <field name="lastChangedByUserId" type="id-long"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_NAV_MENU">
+      <index-field name="siteId"/>
+      <index-field name="appMountId"/>
+      <index-field name="menuKey"/>
+    </index>
+  </entity>
+  <entity entity-name="PublicSiteNavigationVersion" package="mantle.public">
+    <description>A published version of a menu: the draft's items as validated when published (snapshotText), live from
+      its fromDate while active. A scheduled version waits until the publication job revalidates it at its from date; it
+      then becomes active and ends the version before it, or fails with its reason and leaves that version live.</description>
+    <field name="navigationId" type="id" is-pk="true"/>
+    <field name="fromDate" type="date-time" is-pk="true"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="draftRevision" type="number-integer"><description>The draft revision this version is of.</description></field>
+    <field name="snapshotText" type="text-very-long"/>
+    <field name="publicationStateEnumId" type="id"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="publishedDate" type="date-time"/>
+    <field name="changeReason" type="text-medium"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicSiteNavigation"/>
+    <relationship type="one" title="SitePublicationState" related="moqui.basic.Enumeration">
+      <key-map field-name="publicationStateEnumId"/></relationship>
+    <index name="PASS_NAV_VERSION_STATE">
+      <index-field name="publicationStateEnumId"/>
+      <index-field name="fromDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Site Publication State" enumTypeId="SitePublicationState"/>
+      <moqui.basic.Enumeration description="Draft" enumId="SpsDraft" enumTypeId="SitePublicationState" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Scheduled" enumId="SpsScheduled" enumTypeId="SitePublicationState" sequenceNum="2"/>
+      <moqui.basic.Enumeration description="Active" enumId="SpsActive" enumTypeId="SitePublicationState" sequenceNum="3"/>
+      <moqui.basic.Enumeration description="Failed" enumId="SpsFailed" enumTypeId="SitePublicationState" sequenceNum="4"/>
+      <moqui.basic.Enumeration description="Superseded" enumId="SpsSuperseded" enumTypeId="SitePublicationState" sequenceNum="5"/>
+      <moqui.basic.Enumeration description="Withdrawn" enumId="SpsWithdrawn" enumTypeId="SitePublicationState" sequenceNum="6"/>
+    </seed-data>
+  </entity>
+  <entity entity-name="PublicSiteRedirect" package="mantle.public">
+    <description>An old path of a site (absolute, under one of its app mounts) sent to a typed destination, permanently
+      (301) or for a time (302), from its fromDate until its thruDate once published. A draft is not live; a scheduled one
+      waits for the publication job, which revalidates it.</description>
+    <field name="redirectId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="oldPath" type="text-medium" enable-audit-log="true"/>
+    <field name="destinationTypeEnumId" type="id" enable-audit-log="true"/>
+    <field name="destinationValue" type="text-medium" enable-audit-log="true"/>
+    <field name="permanent" type="text-indicator" enable-audit-log="true"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="publicationStateEnumId" type="id" enable-audit-log="true"/>
+    <field name="revision" type="number-integer"/>
+    <field name="publishedByUserId" type="id-long"/>
+    <field name="changeReason" type="text-medium" enable-audit-log="true"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <relationship type="one" title="SiteDestinationType" related="moqui.basic.Enumeration">
+      <key-map field-name="destinationTypeEnumId"/></relationship>
+    <relationship type="one" title="SitePublicationState" related="moqui.basic.Enumeration">
+      <key-map field-name="publicationStateEnumId"/></relationship>
+    <index name="PASS_REDIRECT_PATH">
+      <index-field name="siteId"/>
+      <index-field name="oldPath"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Site Destination Type" enumTypeId="SiteDestinationType"/>
+      <moqui.basic.Enumeration description="Product" enumId="SdtProduct" enumTypeId="SiteDestinationType" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Category" enumId="SdtCategory" enumTypeId="SiteDestinationType" sequenceNum="2"/>
+      <moqui.basic.Enumeration description="Page" enumId="SdtPage" enumTypeId="SiteDestinationType" sequenceNum="3"/>
+      <moqui.basic.Enumeration description="App of the site" enumId="SdtMount" enumTypeId="SiteDestinationType" sequenceNum="4"/>
+      <moqui.basic.Enumeration description="Path on the site" enumId="SdtPath" enumTypeId="SiteDestinationType" sequenceNum="5"/>
+      <moqui.basic.Enumeration description="Other website (https)" enumId="SdtExternal" enumTypeId="SiteDestinationType" sequenceNum="6"/>
+    </seed-data>
+  </entity>
+</entities>

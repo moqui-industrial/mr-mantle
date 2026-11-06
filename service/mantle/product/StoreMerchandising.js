@@ -1183,6 +1183,8 @@ const operations = {
     // (pages, menus and themes, P4 and P5)
     resolve,
     advanceGeneration,
+    // the categories of a store's tree at a time, for the site navigation's live check (Commerce P4, SitePages.js)
+    storeTree,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown store merchandising operation " + op)
         return operations[op](parameters || {})
