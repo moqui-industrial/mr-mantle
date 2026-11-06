@@ -49,8 +49,20 @@ const formats = {
 const destinations = {PsfdShopSite: {served: true}}
 // The schedules the feed job runs, by interval.
 const schedules = {PsfsManual: null, PsfsHourly: 3600000, PsfsDaily: 86400000}
-// Bounds: rows a build writes, products projected at a time, sample rows kept, skips and errors kept, the category depth.
-const limits = {rows: 5000, chunk: 100, sample: 10, skips: 500, errors: 100, depth: 4, description: 5000, feeds: 200}
+// Bounds: rows a build writes, products projected at a time, sample rows kept, skips and errors kept, the category depth,
+// the publication rows read at a time and the candidates a build considers.
+const limits = {
+    rows: 5000,
+    chunk: 100,
+    sample: 10,
+    skips: 500,
+    errors: 100,
+    depth: 4,
+    description: 5000,
+    feeds: 200,
+    page: 1000,
+    candidates: 50000
+}
 const keyPattern = /^[a-z0-9][a-z0-9-]{0,39}$/
 // The feed's availability values of the projection's bands.
 const availabilityCodes = {inStock: "in_stock", lowStock: "in_stock", available: "in_stock", backorder: "backorder"}
@@ -134,15 +146,51 @@ function categoryTree(productCategoryId) {
     }
     return Array.from(all)
 }
-function inCategory(productIds, productCategoryId) {
-    if (!productIds.length) return []
+// The current members of a category and those below it.
+function membersOf(productCategoryId) {
     const at = nowMs()
-    const members = new Set(
+    return new Set(
         Array.from(find(MEMBER).condition("productCategoryId", "in", categoryTree(productCategoryId)).list())
             .filter(row => current(row, at))
             .map(row => row.productId)
     )
-    return productIds.filter(id => members.has(id))
+}
+// The feed's candidates: the store's products with a current published row now (ShopCatalog.js publishedIds' rule, featured
+// rank first then id), in the category tree when the feed is scoped. The publication rows are read a page at a time with no
+// bound but limits.candidates, so a store larger than the Shop list's candidate bound (2,000) is covered (F-P14-1).
+function candidatesOf(shop, feed) {
+    const members = feed.productCategoryId ? membersOf(feed.productCategoryId) : null
+    const seen = new Set()
+    const out = []
+    for (let offset = 0; out.length < limits.candidates; offset += limits.page) {
+        const page = Array.from(
+            selecting(find(S + "ProductStoreProduct", {productStoreId: shop.productStoreId}), [
+                "productId",
+                "fromDate",
+                "thruDate",
+                "publicationKindEnumId",
+                "featuredRank"
+            ])
+                .orderBy("featuredRank")
+                .orderBy("productId")
+                .orderBy("fromDate")
+                .offset(offset)
+                .limit(limits.page)
+                .list()
+        )
+        for (const row of page)
+            if (
+                !seen.has(row.productId) &&
+                current(row, shop.at) &&
+                (row.publicationKindEnumId || "PspkPublished") === "PspkPublished" &&
+                (!members || members.has(row.productId))
+            ) {
+                seen.add(row.productId)
+                out.push(row.productId)
+            }
+        if (page.length < limits.page) break
+    }
+    return out.slice(0, limits.candidates)
 }
 // The feed row of a card: only the public projection's fields, absolute links on the site's canonical host.
 function rowOf(card, description, host, includeImages) {
@@ -170,16 +218,22 @@ function project(feed) {
     } catch (error) {
         refuse("SITE_UNAVAILABLE", "The feed's site is not published with its Shop")
     }
+    // a visitor's projection: never the signed-in operator's own prices (a customer's rows, get#StoreProductPrice)
+    shop.customerPartyId = null
     if (shop.productStoreId !== feed.productStoreId) refuse("SITE_UNAVAILABLE", "The feed's site no longer sells from its store")
     const host = hostOf(feed.siteId)
     if (!host) refuse("HOST_REQUIRED", "The feed's site has no canonical host for its links")
     if (!formats[feed.formatEnumId]) refuse("FORMAT_UNREGISTERED", "The feed's format is not registered")
-    let candidates = shopCatalog.publishedIds(shop)
-    if (feed.productCategoryId) candidates = inCategory(candidates, feed.productCategoryId)
+    const candidates = candidatesOf(shop, feed)
     const out = {shop, host, rows: [], skips: [], errors: []}
     const skip = (productId, reasonCode) => out.skips.push({productId, reasonCode})
     for (let start = 0; start < candidates.length; start += limits.chunk) {
         const chunk = candidates.slice(start, start + limits.chunk)
+        // past the row bound the rest are not projected
+        if (out.rows.length >= limits.rows) {
+            for (const productId of chunk) skip(productId, "ROW_LIMIT")
+            continue
+        }
         const answers = merchandising().resolve(shop.store, chunk, shop.at, shop.siteId)
         const visible = []
         for (const found of answers) {
@@ -349,14 +403,36 @@ function recordFailure(feed, error, scheduled) {
         failureText: message.replace(/^[A-Z][A-Z0-9_]*(\[[^\]]*\])?: /, "").slice(0, 250)
     }).feedBuildId
 }
-// Whether a build may be served or published now: at its own generation it is; after it, every product in it must still be
-// public. {ok, withdrawn, generation}. Remembered by build and generation, which a withdrawal always advances.
+// The latest instant after since and at or before now at which a publication row of the store (ProductStoreProduct: published
+// or excluded) or one of its category roles (ProductStoreCategory: the view and purchase allow lists) started or ended, or
+// null. A change scheduled ahead advanced the generation when it was scheduled, not when it takes effect.
+function takenEffectSince(productStoreId, since, now) {
+    let latest = null
+    for (const entity of [S + "ProductStoreProduct", S + "ProductStoreCategory"])
+        for (const field of ["fromDate", "thruDate"]) {
+            const found = Array.from(
+                selecting(find(entity, {productStoreId}), [field])
+                    .condition(field, ">", new Date(since))
+                    .condition(field, "<=", new Date(now))
+                    .orderBy("-" + field)
+                    .limit(1)
+                    .list()
+            )[0]
+            const at = found ? ms(found[field]) : null
+            if (at != null && (latest == null || at > latest)) latest = at
+        }
+    return latest
+}
+// Whether a build may be served or published now: at its own generation, with no scheduled publication change taking effect
+// since it was built, it is; otherwise every product in it must still be public. {ok, withdrawn, generation}. Remembered by
+// build, generation and the latest change taken effect (a withdrawal advances the generation, or takes effect on its date).
 function servable(build) {
     const site = one("mantle.public.PublicSite", {siteId: build.siteId})
     const generation = Number(site?.generation || 0)
     if (!site) return {ok: false, withdrawn: [], generation}
-    if (generation === Number(build.generation || 0)) return {ok: true, withdrawn: [], generation}
-    const key = build.feedBuildId + "@" + generation
+    const effective = takenEffectSince(build.productStoreId, ms(build.startedDate) ?? 0, nowMs())
+    if (generation === Number(build.generation || 0) && effective == null) return {ok: true, withdrawn: [], generation}
+    const key = build.feedBuildId + "@" + generation + (effective == null ? "" : "@" + effective)
     let cache = null
     try {
         cache = ec.cache.getCache("mantle.product.feedServing")

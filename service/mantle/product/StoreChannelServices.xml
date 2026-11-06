@@ -208,10 +208,11 @@
             <set field="thruDate" from="out.thruDate"/>
         </actions>
     </service>
-    <service verb="run" noun="StoreFeeds" authenticate="false" allow-remote="false" transaction-timeout="1800">
+    <service verb="run" noun="StoreFeeds" authenticate="false" allow-remote="false" transaction="ignore">
         <description>The run_StoreFeeds job: each current feed on an hourly or daily schedule whose interval has passed, built
             in its own transaction (run#StoreFeedBuild) and published when complete with no errors; a failure is recorded as a
-            failed build of that feed and the others go on.</description>
+            failed build of that feed and the others go on. The job holds no transaction of its own, so each feed's failure
+            record and schedule stamp commit as they are written and no feed row stays locked while the others build.</description>
         <in-parameters>
             <parameter name="limit" type="Integer"/>
         </in-parameters>

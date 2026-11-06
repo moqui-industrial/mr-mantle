@@ -112,14 +112,14 @@ const publish = (feedId, feedBuildId, extra = {}) =>
         Object.assign({productStoreFeedId: feedId, feedBuildId, expectedRevision: revision(feedId), operationKey: key()}, extra)
     )
 // the Shop site's feed path, as the public reads it (no one signed in)
-function served(feedKey, extension = "xml") {
+function served(feedKey, extension = "xml", siteId = ids.site) {
     logout()
     ec.message.pushErrors()
     try {
         const out = ec.service
             .sync()
             .name(C + "get#ShopFeed")
-            .parameters({input: {siteId: ids.site, feedKey, extension}})
+            .parameters({input: {siteId, feedKey, extension}})
             .call()
         return ec.message.hasError() ? {error: ec.message.getErrorsString()} : out.result
     } catch (error) {
@@ -201,6 +201,17 @@ spec({
             users.operator = user("operator", orgA, ["COMMERCE_VIEW", "COMMERCE_CHANNEL_OPERATE"])
             users.reader = user("reader", orgA, ["COMMERCE_VIEW"])
             users.outside = user("outside", orgB, ["COMMERCE_VIEW", "COMMERCE_CHANNEL_OPERATE"])
+            // the operator's own price of the mug: a build is a visitor's projection, never the builder's prices
+            make("mantle.product.ProductPrice", {
+                productId: ids.mug,
+                pricePurposeEnumId: "PppPurchase",
+                priceTypeEnumId: "PptCurrent",
+                fromDate: 0,
+                minQuantity: 1,
+                price: "1.00",
+                priceUomId: "USD",
+                customerPartyId: users.operator
+            })
             make("moqui.service.message.SystemMessageRemote", {
                 systemMessageRemoteId: ids.remote,
                 description: "Feeds channel",
@@ -280,7 +291,17 @@ feature("a build of the public projection names its skip, carries no private fie
         const operationKey = key()
         const published = publish(state.feedId, built.feedBuildId, {operationKey})
         const retried = publish(state.feedId, built.feedBuildId, {operationKey, expectedRevision: 1})
-        return {built, before, detail, stale, published, retried, after: served("spec-main"), csv: served("spec-main", "csv")}
+        return {
+            built,
+            before,
+            detail,
+            stale,
+            published,
+            retried,
+            after: served("spec-main"),
+            csv: served("spec-main", "csv"),
+            otherSite: served("spec-main", "xml", ids.hostless)
+        }
     },
     then(r) {
         r.built.error == ""
@@ -301,9 +322,12 @@ feature("a build of the public projection names its skip, carries no private fie
         r.after.content.includes("<g:id>" + ids.mug + "</g:id>")
         r.after.content.includes("Feeds " + ids.mug + " &amp; &quot;stone&quot;")
         r.after.content.includes("<g:price>12.50 USD</g:price>")
+        r.after.content.includes("<g:price>10.00 USD</g:price>")
+        !r.after.content.includes("1.00 USD</g:price>")
         r.after.content.includes("<link>https://" + ids.host + "/shop/products/" + ids.cup + "/")
         !r.after.content.includes(ids.unpriced)
         code(r.csv) == "FEED_UNAVAILABLE"
+        code(r.otherSite) == "FEED_UNAVAILABLE"
     }
 })
 
@@ -341,7 +365,21 @@ feature("a fatal build leaves the active build served; the job goes on past a fa
             [failing.productStoreFeedId, scheduled.productStoreFeedId].includes(result.productStoreFeedId)
         )
         const health = run(users.operator, C + "get#ChannelHealth", {productStoreId: ids.store})
-        return {fatal, stillServed, mine, failingId: failing.productStoreFeedId, json: served("spec-hourly", "json"), health}
+        const json = served("spec-hourly", "json")
+        // the site unpublished, then a withdrawal scheduled before the build taking effect (no generation advance)
+        const site = state =>
+            system(() => ec.entity.find("mantle.public.PublicSite").condition({siteId: ids.site}).updateAll({state}))
+        site("draft")
+        const unpublished = served("spec-main")
+        site("published")
+        system(() =>
+            ec.entity
+                .find(S + "ProductStoreProduct")
+                .condition({productStoreId: ids.store, productId: ids.mug})
+                .updateAll({thruDate: ec.user.nowTimestamp})
+        )
+        const takenEffect = served("spec-main")
+        return {fatal, stillServed, mine, failingId: failing.productStoreFeedId, json, health, unpublished, takenEffect}
     },
     then(r) {
         r.fatal.failed == true
@@ -362,5 +400,7 @@ feature("a fatal build leaves the active build served; the job goes on past a fa
         r.health.feeds.find(feed => feed.productStoreFeedId == r.failingId).latestFailed == true
         r.health.totals.messageErrors == 1
         r.health.totals.failingFeeds == 2
+        code(r.unpublished) == "NOT_AVAILABLE"
+        code(r.takenEffect) == "FEED_UNAVAILABLE"
     }
 })

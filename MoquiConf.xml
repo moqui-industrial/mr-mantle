@@ -10,4 +10,9 @@
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>
         </servlet>
     </webapp></webapp-list>
+    <!-- Commerce P14: a served feed's check by build, generation and the latest publication change in effect (StoreFeeds.js
+        servable); bounded, as each generation change leaves the earlier keys behind -->
+    <cache-list>
+        <cache name="mantle.product.feedServing" type="local" max-elements="2000" expire-time-live="86400"/>
+    </cache-list>
 </moqui-conf>
