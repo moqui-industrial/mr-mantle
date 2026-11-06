@@ -147,6 +147,12 @@ function nothingFound({batches = []} = {}) {
     answer("getUnsettledTransactionListRequest", {messages: noRecords})
     answer("getSettledBatchListRequest", batches.length ? {batchList: batches, messages: ok} : {messages: noRecords})
 }
+// a reference with no transaction yet in the lists (Shop P6, F85: a form token is issued only then)
+function noTransactions() {
+    answer("pendingApproval", {messages: noRecords})
+    answer("getUnsettledTransactionListRequest", {messages: noRecords})
+    answer("getSettledBatchListRequest", {messages: noRecords})
+}
 function token() {
     const value = "spec-opaque-" + ++tokenCount
     tokensSent.push(value)
@@ -869,6 +875,7 @@ feature("Accept Hosted: the payment waits at its page, a form token per visit, a
         const auth = call(P + "authorize#SinglePayment", {paymentId, operationKey: "anet-h-1", returnUrl})
         const pending = response(auth.paymentGatewayResponseId)
         const nothingSent = sent().length
+        noTransactions()
         answer("getHostedPaymentPageRequest", {token: "spec-form-token-1", messages: ok})
         const form = call(A + "get#HostedPaymentForm", {
             paymentId,
@@ -876,7 +883,7 @@ feature("Accept Hosted: the payment waits at its page, a form token per visit, a
             cancelUrl: returnUrl + "&cancelled=true",
             merchantName: "Spec Store"
         })
-        const formRequest = requestOf(sent()[0])
+        const formRequest = sent().find(body => body.getHostedPaymentPageRequest).getHostedPaymentPageRequest
         const reference = pending.idempotencyKey.slice(0, 20)
         // the payer paid on the page; the webhook names the transaction with no merchant reference: its invoice number
         // (getTransactionDetails) matches the waiting payment, whose lookup finds it by the reference
@@ -892,6 +899,7 @@ feature("Accept Hosted: the payment waits at its page, a form token per visit, a
                 networkTransId: "SPECNTI0001"
             })
         )
+        noTransactions()
         const notification = call(A + "receive#Webhook", {
             systemMessageTypeId: "AuthorizeNetWebhook",
             systemMessageRemoteId: "ANET_SPEC",
@@ -953,6 +961,7 @@ feature("Accept Hosted: a decline is final only once no form token can be used, 
         const auth = call(P + "authorize#SinglePayment", {paymentId, operationKey: "anet-h-2", returnUrl})
         const pending = response(auth.paymentGatewayResponseId)
         const reference = pending.idempotencyKey.slice(0, 20)
+        noTransactions()
         answer("getHostedPaymentPageRequest", {token: "spec-form-token-2", messages: ok})
         call(A + "get#HostedPaymentForm", {paymentId, returnUrl, merchantName: "Spec Store"})
         const declined = details("60310", "declined", {order: {invoiceNumber: reference}, authAmount: 31, responseCode: 2})
@@ -982,6 +991,107 @@ feature("Accept Hosted: a decline is final only once no form token can be used, 
         during.statusId == "PmntPromised" && during.paymentRefNum == null
         after.statusId == "PmntAuthorized"
         after.paymentRefNum == "60311"
+    }
+})
+
+// Shop P6 (F85): one page per reference, and two approvals under one reference an exception
+feature("Accept Hosted: a used reference gets no new form; a second approval under it is flagged", {
+    when() {
+        const paymentId = cardPayment(32, "ANET_SPEC_HOSTED")
+        const returnUrl = "https://shop.example.test/Checkout/return?ref=3&key=" + "k".repeat(40)
+        const auth = call(P + "authorize#SinglePayment", {paymentId, operationKey: "anet-h-3", returnUrl})
+        const reference = response(auth.paymentGatewayResponseId).idempotencyKey.slice(0, 20)
+        answer("pendingApproval", {messages: noRecords})
+        answer("getUnsettledTransactionListRequest", {
+            transactions: [{transId: "60400", invoiceNumber: reference, transactionStatus: "declined"}],
+            totalNumInResultSet: 1,
+            messages: ok
+        })
+        let refused = null
+        ec.message.pushErrors()
+        try {
+            call(A + "get#HostedPaymentForm", {paymentId, returnUrl, merchantName: "Spec Store"})
+        } catch (error) {
+            refused = String(error.message)
+        } finally {
+            if (!refused && ec.message.hasError()) refused = ec.message.getErrorsString()
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+        const formsAsked = sent().filter(body => body.getHostedPaymentPageRequest).length
+        // two pages paid: the lookup finds one approval, and the lists show another under the reference
+        answer("transrefId", details("60401", "authorizedPendingCapture", {order: {invoiceNumber: reference}, authAmount: 32}))
+        answer("pendingApproval", {messages: noRecords})
+        answer("getUnsettledTransactionListRequest", {
+            transactions: [
+                {transId: "60402", invoiceNumber: reference, transactionStatus: "authorizedPendingCapture"},
+                {transId: "60401", invoiceNumber: reference, transactionStatus: "authorizedPendingCapture"}
+            ],
+            totalNumInResultSet: 2,
+            messages: ok
+        })
+        answer("getSettledBatchListRequest", {messages: noRecords})
+        call(P + "get#SinglePaymentGatewayDetails", {paymentId})
+        const flagged = Array.from(
+            ec.entity
+                .find("mantle.account.method.PaymentGatewayResponse")
+                .condition({paymentId, reasonCode: "DUPLICATE_APPROVAL"})
+                .list()
+        )
+        return {refused, formsAsked, flagged, after: payment(paymentId)}
+    },
+    then({refused, formsAsked, flagged, after}) {
+        refused.includes("HOSTED_ALREADY_USED")
+        formsAsked == 0
+        after.paymentRefNum == "60401"
+        flagged.length == 1
+        flagged[0].resultSuccess == "N"
+        flagged[0].reasonMessage.includes("60402")
+    }
+})
+
+// Shop P6 (F40): the hosted profile page for a card kept outside a checkout, and the profile's read after it
+feature("Accept Hosted profile page: a form token for a new customer profile; the sync keeps each new card once", {
+    when() {
+        const partyId = call("mantle.party.PartyServices.create#Person", {firstName: "Hana", lastName: "Hosted", roleTypeId: "Customer"}).partyId
+        answer("createCustomerProfileRequest", {customerProfileId: "70100", messages: ok})
+        answer("getHostedProfilePageRequest", {token: "spec-profile-token-1", messages: ok})
+        const form = call(A + "get#HostedProfileForm", {
+            partyId,
+            paymentGatewayConfigId: "ANET_SPEC",
+            returnUrl: "https://shop.example.test/shop/PaymentMethods/return?setup=1"
+        })
+        const profile = {
+            profile: {
+                customerProfileId: "70100",
+                paymentProfiles: [{customerPaymentProfileId: "80100", payment: {creditCard: {cardNumber: "XXXX4242", cardType: "Visa"}}}]
+            },
+            messages: ok
+        }
+        answer("getCustomerProfileRequest", profile)
+        const synced = call(A + "sync#CustomerProfile", {partyId, paymentGatewayConfigId: "ANET_SPEC"})
+        answer("getCustomerProfileRequest", profile)
+        const again = call(A + "sync#CustomerProfile", {partyId, paymentGatewayConfigId: "ANET_SPEC"})
+        const requests = sent()
+        return {
+            form,
+            synced,
+            again,
+            byMerchant: requests.find(body => body.getCustomerProfileRequest)?.getCustomerProfileRequest,
+            methods: Array.from(
+                ec.entity.find("mantle.account.method.PaymentMethod").condition({ownerPartyId: partyId}).disableAuthz().list()
+            )
+        }
+    },
+    then({form, synced, again, byMerchant, methods}) {
+        form.fields.token == "spec-profile-token-1"
+        form.formUrl == "https://test.authorize.net/customer/addPayment"
+        byMerchant.merchantCustomerId != null
+        synced.added == 1
+        again.added == 0
+        methods.length == 1
+        methods[0].gatewayCimId == "80100"
+        methods[0].description == "Card ending 4242"
     }
 })
 

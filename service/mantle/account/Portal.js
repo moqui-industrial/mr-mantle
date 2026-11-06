@@ -208,7 +208,12 @@ function getInvoice(p) {
 function findInvoices(p) {
     const organizationPartyId = served(p.siteId, "billing")
     if (!ec.user.userId) fail("AuthenticationRequired", "Sign in to see your invoices")
-    const parties = access.contactParties(organizationPartyId, "billing")
+    // Shop P6 (R-SHP-W06): the account's own party through the self relationship beside its contact grants
+    const own = ec.user.userAccount?.partyId
+    const parties = access
+        .contactParties(organizationPartyId, "billing")
+        .concat(own && access.selfOf(own) ? [own] : [])
+        .filter((partyId, index, all) => all.indexOf(partyId) === index)
     if (!parties.length) return {invoiceList: []}
     const list = Array.from(
         find(I)
@@ -563,7 +568,20 @@ function appReadiness(p) {
     return {checks}
 }
 
+// The PASS Account hub's Billing card (Shop P6, F6): the open invoices the signed-in account reaches (its contacts' and its
+// own through the self relationship).
+function accountCard(p) {
+    const list = findInvoices(p).invoiceList
+    const open = list.filter(row => row.statusText !== "Paid")
+    return {
+        title: "Invoices",
+        lines: [list.length ? open.length + " open of " + list.length : "No invoices"],
+        url: apps.pageUrl(p.siteId, "billing", "/Invoices")
+    }
+}
+
 const operations = {
+    accountCard,
     beginPayment,
     resolvePending,
     // Billing's refresh never touches another purpose's attempt (X9)

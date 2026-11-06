@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's digital delivery (mr-pass impl-shop P6; design-shop §8.3 Digital items, §10 Downloads, §14.2; SHOP-DIGITAL;
+    mantle.product.ShopFulfillmentServices, service/mantle/product/ShopFulfillment.js). An approved Shop order's digital
+    lines are fulfilled by StoreItemFulfillment, one row per line, each step resumable by its marker: the internal invoice
+    of the lines (create#InvoiceFromSource's split service), the payment's capture and the invoice's finalization (the
+    receipt), the part's completion, then a StoreDownloadGrant per file of the product. The invoices, payments and orders stay
+    Mantle's own records; a grant binds a settled line to a ProductContent download (its file and version) for its
+    recipient, never a public location. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <entity entity-name="StoreItemFulfillment" package="mantle.product.store" cache="never">
+    <description>The fulfillment of one digital line of an approved Shop order (a StoreCheckout's): its step
+      (StoreItemFulfillmentStep: pending, invoiced, paid, completed, held when the capture did not succeed, revoked after a
+      refund or return) with the marker of each step done (the invoice, the capture and finalization, the part's completion,
+      the grants), the tries and the last safe failure. One row per order line; a retry resumes at the first step not
+      done, so no second invoice, capture or grant is made.</description>
+    <field name="fulfillmentId" type="id" is-pk="true"/>
+    <field name="orderId" type="id"/>
+    <field name="orderItemSeqId" type="id"/>
+    <field name="orderPartSeqId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="recipientPartyId" type="id"><description>The order part's customer, who the grant is for.</description></field>
+    <field name="stepEnumId" type="id"/>
+    <field name="invoiceId" type="id"/>
+    <field name="paymentId" type="id"/>
+    <field name="invoicedDate" type="date-time"/>
+    <field name="paidDate" type="date-time"><description>The payment captured and the invoice finalized.</description></field>
+    <field name="completedDate" type="date-time"><description>The part completed and the grants issued.</description></field>
+    <field name="noticeDate" type="date-time"><description>The download-ready notice handed to the delivery ledger.</description></field>
+    <field name="revokedDate" type="date-time"/>
+    <field name="tries" type="number-integer"/>
+    <field name="nextTryDate" type="date-time"/>
+    <field name="failureCode" type="id"/>
+    <field name="failureMessage" type="text-medium"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.order.OrderItem"/>
+    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.account.invoice.Invoice"/>
+    <relationship type="one" title="StoreItemFulfillmentStep" related="moqui.basic.Enumeration">
+      <key-map field-name="stepEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_FULFILL_ITEM" unique="true">
+      <index-field name="orderId"/>
+      <index-field name="orderItemSeqId"/>
+    </index>
+    <index name="STORE_FULFILL_DUE">
+      <index-field name="stepEnumId"/>
+      <index-field name="nextTryDate"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store item fulfillment step" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifPending" description="Waiting for its invoice" sequenceNum="1" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifInvoiced" description="Invoiced, waiting for payment" sequenceNum="2" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifPaid" description="Paid, waiting for delivery" sequenceNum="3" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifCompleted" description="Delivered" sequenceNum="4" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifHeld" description="Payment not captured" sequenceNum="5" enumTypeId="StoreItemFulfillmentStep"/>
+      <moqui.basic.Enumeration enumId="SifRevoked" description="Refunded or returned" sequenceNum="6" enumTypeId="StoreItemFulfillmentStep"/>
+    </seed-data>
+  </entity>
+
+  <entity entity-name="StoreDownloadGrant" package="mantle.product.store" cache="never">
+    <description>A recipient's entitlement to one downloadable file (a ProductContent of type PcntDownload, its version
+      the content's own) of a settled order line, from the line's fulfillment: from and thru dates, the revocation with its
+      reason (StoreDownloadRevokeReason: a refund, a return's settlement, a chargeback, staff), and the use count. The file's
+      location is read from the ProductContent at each download and never kept or answered here. It follows its
+      recipient through merge#Parties.</description>
+    <field name="downloadGrantId" type="id" is-pk="true"/>
+    <field name="fulfillmentId" type="id"/>
+    <field name="orderId" type="id"/>
+    <field name="orderItemSeqId" type="id"/>
+    <field name="productId" type="id"/>
+    <field name="productContentId" type="id"/>
+    <field name="versionText" type="text-short"><description>The file's version when granted (the content's
+      sequence and date), shown to the buyer.</description></field>
+    <field name="recipientPartyId" type="id"/>
+    <field name="productStoreId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="revokedDate" type="date-time"/>
+    <field name="revokeReasonEnumId" type="id"/>
+    <field name="downloadCount" type="number-integer"/>
+    <field name="lastDownloadDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.product.store.StoreItemFulfillment"/>
+    <relationship type="one" related="mantle.order.OrderHeader"/>
+    <relationship type="one" related="mantle.product.ProductContent"/>
+    <relationship type="one" title="Recipient" related="mantle.party.Party">
+      <key-map field-name="recipientPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="StoreDownloadRevokeReason" related="moqui.basic.Enumeration">
+      <key-map field-name="revokeReasonEnumId" related="enumId"/>
+    </relationship>
+    <index name="STORE_GRANT_SOURCE" unique="true">
+      <index-field name="orderId"/>
+      <index-field name="orderItemSeqId"/>
+      <index-field name="productContentId"/>
+    </index>
+    <index name="STORE_GRANT_RECIPIENT">
+      <index-field name="recipientPartyId"/>
+      <index-field name="productStoreId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Store download revoke reason" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrRefunded" description="Refunded" sequenceNum="1" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrReturned" description="Returned" sequenceNum="2" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrChargeback" description="Charged back" sequenceNum="3" enumTypeId="StoreDownloadRevokeReason"/>
+      <moqui.basic.Enumeration enumId="SdrStaff" description="Ended by staff" sequenceNum="4" enumTypeId="StoreDownloadRevokeReason"/>
+    </seed-data>
+  </entity>
+</entities>

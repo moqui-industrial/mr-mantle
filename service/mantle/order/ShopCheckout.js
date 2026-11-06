@@ -7,7 +7,10 @@
  * - Who: the cart's holder (the session's cart capability, or the signed-in account's own cart); after submission also
  *   the checkout's reference and its key (the narrow capability a provider's return and a refreshed frontend carry, read
  *   for a day after completion), and for the confirmation the guest's SalesOrder OrderView capability or the signed-in
- *   customer. An order id alone reaches nothing.
+ *   customer. An order id alone reaches nothing. Shop P6 (F85): the reference and key, which the provider and the
+ *   browser's history also hold, read only the payment's state and the order's reference; the guest's order link is
+ *   issued only to the cart's own session (its capability, live or of the placed cart), and a declined checkout is
+ *   resumed only through that session, never handed a new cart capability.
  * - What a shopper sends: contact fields, address fields (or an own saved address), the delivery option of the current
  *   quote, the payment option, the revision and terms version they saw, and an operation id; never a price, total,
  *   customer, store or status.
@@ -199,6 +202,11 @@ function reach(p, needCheckout = true) {
     let checkout = p.reference && p.key ? checkoutOfReference(shop, p.reference, p.key) : null
     let via = checkout ? "reference" : null
     if (checkout && cart && cart.row.cartAccessId === checkout.cartAccessId) via = "cart"
+    // Shop P6 (F85): the session's own placed cart names the same checkout: the session's, not only the reference's
+    if (checkout && via === "reference" && !cart && p.token) {
+        const placed = placedCheckoutOfToken(shop, p.token)
+        if (placed && placed.checkoutId === checkout.checkoutId) via = "placedCart"
+    }
     if (!checkout && cart) {
         checkout = checkoutOfCart(cart)
         via = "cart"
@@ -443,6 +451,7 @@ const addressText = contactMechId => {
 // text; no party, gateway or internal id but the line's and the checkout's reference.
 function view(reached, extra) {
     const {shop, checkout} = reached
+    if (reached.via === "reference") return Object.assign(referenceView(checkout), extra || {})
     const currency = checkout.currencyUomId
     const order = orderOf(checkout.orderId)
     const part = partOf(checkout.orderId)
@@ -526,6 +535,23 @@ function view(reached, extra) {
         extra || {}
     )
 }
+// What the reference and key read (Shop P6, F85; the provider and the browser's history hold them): the checkout's state
+// and reference, what is due and the payment's progress; no contact, address, line or total of the order.
+function referenceView(checkout) {
+    const payment = checkout.paymentId ? one(P, {paymentId: checkout.paymentId}) : null
+    return {
+        checkout: {
+            reference: checkout.returnReference,
+            state: stateNames[checkout.statusId],
+            minimal: true,
+            missing: [],
+            review: [],
+            totals: {dueNow: money(checkout.dueAmount ?? 0, checkout.currencyUomId)},
+            attempt: payment ? attemptView(checkout, payment) : null,
+            failure: checkout.failureCode ? {code: checkout.failureCode} : null
+        }
+    }
+}
 // The payment's progress for a page: its state (pending at the provider, unknown, approved, declined, cancelled or failed)
 // with a safe message, and where the payer completes a pending hosted payment (a provider page, or the relay's form).
 function attemptView(checkout, payment) {
@@ -603,18 +629,13 @@ function getCheckout(p) {
     return view(reached.via === "cart" ? restate(reached) : reached)
 }
 // resume#Checkout: a submitted checkout whose attempt resolved without a payment (declined, cancelled, failed) is open to
-// change again; reached by its reference and key from a refreshed frontend, the session gets a new cart capability (its
-// token in the answer), so the shopper goes on in this session. A pending or unknown attempt is answered as it is.
+// change again. A pending or unknown attempt is answered as it is. Only the cart's own session goes on with it (Shop P6,
+// F85): the reference and key read its state and hand over no cart capability.
 function resumeCheckout(p) {
     const reached = reach(p)
     const result = refreshAttempt(reached.shop, reached.checkout.checkoutId, "page")
     const checkout = checkoutRow(reached.checkout.checkoutId)
-    let token = null
-    if (reached.via === "reference" && editableStatuses.includes(checkout.statusId)) {
-        const cartRow = one(A, {cartAccessId: checkout.cartAccessId})
-        if (cartRow && !cartRow.revokedDate) token = carts().rotate(cartRow)
-    }
-    return view(Object.assign({}, reached, {checkout}), Object.assign({resumed: true}, result, token ? {token} : {}))
+    return view(Object.assign({}, reached, {checkout}), Object.assign({resumed: reached.via === "cart"}, result))
 }
 
 // ===== operations: contact and addresses =====
@@ -1126,6 +1147,9 @@ function freeze(p) {
     call("update#" + C, Object.assign(values, {statusId: "ScoPaymentPending", paymentId}))
     return {paymentId}
 }
+// Whether an order has a downloadable product line (a plain digital product, Shop P6's fulfillment).
+const digitalOrder = orderId =>
+    ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").digitalLines(orderId).length > 0
 // The canonical return address of a checkout: the site's canonical host and Shop mount (never a caller's origin), with
 // its reference and key.
 const returnUrl = (checkout, returnKey) =>
@@ -1214,12 +1238,44 @@ function placeStep(p) {
             revokedDate: ec.user.nowTimestamp,
             revokeReasonEnumId: "ScrPlaced"
         })
+    billingEmail(checkout)
     if (checkout.paymentId) {
         attempts().record(checkout.paymentId, "placed")
-        const mismatch = amountMismatch(checkout)
-        if (mismatch) holdPayment(checkout.orderId, checkout.paymentId, mismatch)
+        // an exception, not a plain success (design-shop §8.2): the order placed and held with its money for Accounting
+        const exception = amountMismatch(checkout) || duplicateApproval(checkout)
+        if (exception) {
+            holdPayment(checkout.orderId, checkout.paymentId, exception)
+            attempts().record(checkout.paymentId, "placed", "exception")
+        }
     }
     return {statusId: "ScoCompleted"}
+}
+// The buyer's billing email (Shop P6): the checkout's contact email, the address the order's invoices and their receipt go
+// to (send#InvoiceStoreEmail reads EmailBilling), added once to the order's customer when it has none.
+function billingEmail(checkout) {
+    if (!checkout.contactEmail || !checkout.customerPartyId) return
+    const current = rows("mantle.party.contact.PartyContactMech", {
+        partyId: checkout.customerPartyId,
+        contactMechPurposeId: "EmailBilling"
+    }).filter(row => lib.active(row))
+    if (current.length) return
+    const mechId = checkout.emailContactMechId
+    if (
+        mechId &&
+        rows("mantle.party.contact.PartyContactMech", {partyId: checkout.customerPartyId, contactMechId: mechId}).length
+    )
+        call("create#mantle.party.contact.PartyContactMech", {
+            partyId: checkout.customerPartyId,
+            contactMechId: mechId,
+            contactMechPurposeId: "EmailBilling",
+            fromDate: ec.user.nowTimestamp
+        })
+    else
+        call("mantle.party.ContactServices.create#EmailAddress", {
+            emailAddress: checkout.contactEmail,
+            partyId: checkout.customerPartyId,
+            contactMechPurposeId: "EmailBilling"
+        })
 }
 // A placement that failed (its transaction rolled back): the reason kept on the checkout, the payment and attempt untouched.
 function placementFailedStep(p) {
@@ -1252,6 +1308,19 @@ function amountMismatch(checkout) {
         " for a payment of " +
         moneyText(payment.amount, payment.amountUomId)
     )
+}
+// The provider's report that the checkout's reference has more than one approved transaction (two hosted pages paid at
+// once; Shop P6, F85): the adapter's DUPLICATE_APPROVAL answer on the payment, naming the others.
+function duplicateApproval(checkout) {
+    const flagged = Array.from(
+        find(R, {paymentId: checkout.paymentId, reasonCode: "DUPLICATE_APPROVAL"})
+            .orderBy("-paymentGatewayResponseId")
+            .limit(1)
+            .list()
+    )[0]
+    return flagged
+        ? "The provider approved more than one payment for this checkout: " + text(flagged.reasonMessage).slice(0, 200)
+        : null
 }
 // The order held for a payment exception after placement (OhtPayment, released by PAYMENT_HOLD_RELEASE).
 function holdPayment(orderId, paymentId, comment) {
@@ -1388,15 +1457,33 @@ function getOrderConfirmation(p) {
     if (checkout.statusId !== "ScoCompleted") notAvailable()
     const order = orderOf(checkout.orderId)
     const part = partOf(checkout.orderId)
+    // the reference and key alone (Shop P6, F85): the order's reference and state, nothing of its buyer, and no order link
+    if (via === "reference")
+        return {
+            confirmation: {
+                orderId: order.orderId,
+                reference: checkout.returnReference,
+                placedDate: lib.dateText(order.placedDate),
+                statusText: rows("mantle.order.OrderHoldReason", {orderId: order.orderId}).some(row => !row.releasedDate)
+                    ? "Received, being reviewed"
+                    : "Received",
+                minimal: true,
+                guest: checkout.accountCheckout !== "Y"
+            }
+        }
     let orderToken = null
-    // issued once: two first reads (two tabs) are serialized on the checkout's lock, and the second issues none
-    if (checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId && via !== "orderToken")
+    // issued once, and only to the cart's own session (its capability, live or of the placed cart; Shop P6, F85): two first
+    // reads (two tabs) are serialized on the checkout's lock, and the second issues none
+    const issues = via === "cart" || via === "placedCart"
+    if (issues && checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId)
         checkout = checkoutRow(checkout.checkoutId, true)
-    if (checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId && via !== "orderToken") {
+    if (issues && checkout.accountCheckout !== "Y" && !checkout.orderCapabilityId) {
         const created = externalAccess().create({
             recordType: "SalesOrder",
             recordId: order.orderId,
-            scopes: "OrderView",
+            // Shop P6: an order with a file to download lets the buyer's own session download it too (the notice's link
+            // carries the same scopes)
+            scopes: digitalOrder(order.orderId) ? "OrderView,Download" : "OrderView",
             validDays: limits.orderLinkDays,
             issuerKind: "organization"
         })

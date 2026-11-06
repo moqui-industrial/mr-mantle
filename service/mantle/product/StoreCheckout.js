@@ -60,11 +60,20 @@ const choiceTexts = {
 // off-session (recurring) charges. Shop P5 (Accept Hosted) and P7 (off-session) turn theirs on; a gateway whose type is not
 // here offers none. The test gateway with a hosted page (hostedPending) is hosted.
 const gatewayCapabilities = {
-    PgtTest: config => ({
-        hostedCheckout: String(config.authorizeServiceName || "").includes("hostedPending"),
-        savedMethods: false,
-        offSession: false
-    }),
+    // Shop P6: a hosted test gateway also keeps a payer's card and sets one up on its hosted setup page (a test card)
+    PgtTest: config => {
+        const hosted = String(config.authorizeServiceName || "").includes("hostedPending")
+        return Object.assign(
+            {hostedCheckout: hosted, savedMethods: hosted, offSession: false},
+            hosted
+                ? {
+                      hostedProfileService: "mantle.account.PaymentTestServices.store#HostedPaymentProfile",
+                      hostedSetupService: "mantle.account.PaymentTestServices.begin#HostedMethodSetup",
+                      setupSyncService: "mantle.account.PaymentTestServices.finish#HostedMethodSetup"
+                  }
+                : {}
+        )
+    },
     // Shop P5 (F14, F37): Accept Hosted, a gateway whose authorization service is authorizeHosted#Payment; its page takes a
     // posted form token, which hostedFormService gives the frontend's relay on each visit
     PgtAuthorizeNet: config => ({
@@ -72,7 +81,10 @@ const gatewayCapabilities = {
         savedMethods: true,
         offSession: false,
         hostedFormService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedPaymentForm",
-        hostedProfileService: "mantle.ext.account.gateway.AuthorizeNetServices.store#HostedPaymentProfile"
+        hostedProfileService: "mantle.ext.account.gateway.AuthorizeNetServices.store#HostedPaymentProfile",
+        // Shop P6 (F40): the hosted profile page for a card kept outside a checkout, and its profile read after it
+        hostedSetupService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedProfileForm",
+        setupSyncService: "mantle.ext.account.gateway.AuthorizeNetServices.sync#CustomerProfile"
     }),
     PgtPayTrace: () => ({hostedCheckout: false, savedMethods: false, offSession: false})
 }

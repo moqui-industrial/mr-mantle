@@ -579,6 +579,11 @@ General Order Placement and eCommerce Usage
             </if>
             <!-- if available inventory not required return now -->
             <if condition="!requireInventory"><return/></if>
+            <!-- a digital product has no physical stock, so a store's inventory requirement does not hold it back (mr-pass
+                impl-shop P6, F76); every other product type is checked as before -->
+            <entity-find-one entity-name="mantle.product.Product" value-field="checkedProduct" cache="true">
+                <field-map field-name="productId"/></entity-find-one>
+            <if condition="checkedProduct?.productTypeEnumId == 'PtDigital'"><return/></if>
             <!-- get current available inventory -->
             <service-call name="mantle.product.AssetServices.get#AvailableForOrder" out-map="availOut"
                     in-map="{productId:productId, orderId:orderId, orderPartSeqId:orderPartSeqId, orderItemSeqId:orderItemSeqId,

@@ -343,4 +343,56 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="gatewayStatusId" value="PmntDeclined"/>
         </actions>
     </service>
+    <!-- mr-pass impl-shop P6: the test gateway's hosted card setup and kept card, as a provider's hosted profile pages are
+        (the card never reaches the site): the setup page returns the payer at once, and the provider's profile then holds a
+        test card (ending 1111) the sync keeps, once per setup; an approved hosted payment's card is kept the same way -->
+    <service verb="begin" noun="HostedMethodSetup" allow-remote="false">
+        <description>The test gateway's hosted card setup page: it returns the payer to returnUrl at once.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference" required="true"/>
+            <parameter name="returnUrl" required="true"/>
+            <parameter name="merchantName"/>
+        </in-parameters>
+        <out-parameters><parameter name="redirectUrl"/></out-parameters>
+        <actions><set field="redirectUrl" from="returnUrl"/></actions>
+    </service>
+    <service verb="finish" noun="HostedMethodSetup" allow-remote="false">
+        <description>The test gateway's profile read after its setup page: a test card ending 1111 for the party, kept once
+            per setup reference (a repeated sync adds none).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference"/>
+        </in-parameters>
+        <out-parameters><parameter name="paymentMethodId"/></out-parameters>
+        <actions>
+            <if condition="!setupReference"><return/></if>
+            <entity-find entity-name="mantle.account.method.PaymentMethod" list="keptList" limit="1">
+                <econdition field-name="ownerPartyId" from="partyId"/>
+                <econdition field-name="gatewayCimId" from="'TEST-SETUP-' + setupReference"/>
+            </entity-find>
+            <if condition="keptList.length"><set field="paymentMethodId" from="keptList[0].paymentMethodId"/><return/></if>
+            <set field="paymentMethodId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js')
+                .createCardMethod(partyId, {paymentGatewayConfigId:paymentGatewayConfigId, gatewayCimId:'TEST-SETUP-' + setupReference,
+                    gatewayCustomerId:'TEST-' + partyId}, '1111', 'CctVisa')"/>
+        </actions>
+    </service>
+    <service verb="store" noun="HostedPaymentProfile" allow-remote="false">
+        <description>The test gateway's kept card of an approved hosted payment: a test card ending 1111 for the payer, which the
+            payment then names (once).</description>
+        <in-parameters><parameter name="paymentId" required="true"/></in-parameters>
+        <out-parameters><parameter name="paymentMethodId"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <if condition="payment == null || !['PmntAuthorized', 'PmntDelivered', 'PmntConfirmed'].includes(payment.statusId)">
+                <return error="true" message="PAYMENT_NOT_APPROVED: Only an approved hosted payment's card is kept"/></if>
+            <if condition="payment.paymentMethodId"><set field="paymentMethodId" from="payment.paymentMethodId"/><return/></if>
+            <set field="paymentMethodId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js')
+                .createCardMethod(payment.fromPartyId, {paymentGatewayConfigId:payment.paymentGatewayConfigId, gatewayCimId:'TEST-PAY-' + paymentId,
+                    gatewayCustomerId:'TEST-' + payment.fromPartyId}, '1111', 'CctVisa')"/>
+            <service-call name="update#mantle.account.payment.Payment" in-map="{paymentId:paymentId, paymentMethodId:paymentMethodId}"/>
+        </actions>
+    </service>
 </services>

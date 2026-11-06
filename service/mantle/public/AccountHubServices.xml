@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The PASS Account hub and email preferences (mr-pass impl-shop P6, F6; design-crosscut §5.1, X6, X15), the PASS Account
+    foundation's: PASS operations through pass.Facade.call#Operation over AccountHub.js, and the cart reminders consent
+    check Commerce's cart recovery reads. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="AccountHub" authenticate="anonymous-all" allow-remote="false">
+        <description>getAccountHub (PASS Account/Home): the signed-in account's cards from the apps the site mounts that register one (PublicApps accountCard: Shop, Billing, Support), each asked in its own transaction (one that fails says so and the others show), and its account links. SIGN_IN_REQUIRED for a visitor.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/AccountHub.js").execute("getAccountHub", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="EmailPreferences" authenticate="anonymous-all" allow-remote="false">
+        <description>getEmailPreferences (PASS Account/EmailPreferences): by a list link's token, its list and the party's other lists of that organization (read only, so a mail scanner changes nothing); for the signed-in account, its current lists, the site's store topics (each store's cart reminders) and the Forum opt-out's page.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/AccountHub.js").execute("getEmailPreferences", input)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="EmailPreferences" authenticate="anonymous-all" allow-remote="false">
+        <description>storeEmailPreferences: by a list link's token, the lists chosen or all marketing email (apply#UnsubscribePreferences); for the signed-in account, lists unsubscribed and the store topics turned on or off (store#PartyConsent, purpose PcpCartReminder on the store's topic list). Answers the preferences after.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/AccountHub.js").execute("storeEmailPreferences", input)</script>
+        </actions>
+    </service>
+    <service verb="apply" noun="OneClickUnsubscribe" authenticate="anonymous-all" allow-remote="false">
+        <description>applyOneClickUnsubscribe: RFC 8058's one-click POST to a list link: the token's list unsubscribed.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/AccountHub.js").execute("oneClick", input)</script>
+        </actions>
+    </service>
+    <service verb="check" noun="CartReminderConsent" allow-remote="false">
+        <description>Whether a party turned on a store's cart reminders on its email preferences (its latest PcpCartReminder
+            consent on the store's topic list is a grant); never for a party with no account (a guest). Commerce's cart
+            recovery requires it (impl-commerce P10).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="productStoreId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="consented" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="consented" from="ec.resource.script('component://mr-mantle/service/mantle/public/AccountHub.js').execute('checkCartReminder', context).consented"/>
+        </actions>
+    </service>
+</services>

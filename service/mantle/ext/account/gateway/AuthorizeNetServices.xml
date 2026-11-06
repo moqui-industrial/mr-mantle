@@ -57,6 +57,42 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('saleHosted', context).paymentGatewayResponseId"/>
         </actions>
     </service>
+    <service verb="get" noun="HostedProfileForm" allow-remote="false">
+        <description>Shop P6 (F40): a form token of the hosted profile page (getHostedProfilePageRequest) where a payer adds a
+            card to their customer profile (made now, with the party as its merchantCustomerId, when the party has none),
+            returning to returnUrl (https); never stored. Answers the page's address and its form fields, which the caller's
+            relay posts at once.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference"/>
+            <parameter name="returnUrl" required="true"/>
+            <parameter name="merchantName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formUrl"/>
+            <parameter name="fields" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('hostedProfileForm', context)"/>
+            <set field="formUrl" from="out.formUrl"/>
+            <set field="fields" from="out.fields"/>
+        </actions>
+    </service>
+    <service verb="sync" noun="CustomerProfile" allow-remote="false">
+        <description>Shop P6 (F40): the party's customer profile read after the hosted profile page (getCustomerProfileRequest,
+            by its kept reference or the party as merchantCustomerId); each payment profile not kept yet is kept as a masked
+            card method. A party with no profile adds none.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="setupReference"/>
+        </in-parameters>
+        <out-parameters><parameter name="added" type="Integer"/></out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('syncCustomerProfile', context).added"/>
+        </actions>
+    </service>
     <service verb="get" noun="HostedPaymentForm" allow-remote="false">
         <description>A fresh Accept Hosted form token for a payment waiting at its hosted page (getHostedPaymentPageRequest),
             asked on each call and never stored: its amount and transaction type, the attempt's reference, the canonical

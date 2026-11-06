@@ -228,12 +228,14 @@ function findCustomerReturns(p) {
 function getReturnableOrder(p) {
     const s = portal()
     const organizationPartyId = s.served(p.siteId)
-    if (!ec.user.userId) s.signInRequired()
-    const customers = s.actingFor(organizationPartyId)
+    // a signed-in account's customers, or a guest's order link for its one order (Shop P6, F27)
+    const asked = s.askers(p, organizationPartyId)
+    const customers = asked.customers
     if (!customers.length) s.unavailable()
-    const orderList = orders().customerOrders(organizationPartyId, customers)
-    if (blank(p.orderId)) return {orderList, order: null, reasons: reasonsOf(organizationPartyId)}
-    const {order, customer} = orders().orderFor(p.orderId, organizationPartyId, customers)
+    const orderList = asked.orderId ? [] : orders().customerOrders(organizationPartyId, customers)
+    const orderId = asked.orderId || p.orderId
+    if (blank(orderId)) return {orderList, order: null, reasons: reasonsOf(organizationPartyId)}
+    const {order, customer} = orders().orderFor(orderId, organizationPartyId, customers)
     const evaluated = policies.asCustomer({organizationPartyId, customerPartyId: customer.partyId}, () =>
         policies.evaluateCore({orderId: order.orderId})
     )
@@ -281,12 +283,12 @@ function requestCustomerReturn(p) {
     const s = portal()
     s.throttle("support-return")
     const organizationPartyId = s.served(p.siteId)
-    if (!ec.user.userId) s.signInRequired()
-    const customers = s.actingFor(organizationPartyId)
-    const {order, customer} = orders().orderFor(p.orderId, organizationPartyId, customers)
+    // a signed-in account's customers, or a guest's order link for its one order (Shop P6, F27)
+    const asked = s.askers(p, organizationPartyId)
+    const {order, customer} = orders().orderFor(asked.orderId || p.orderId, organizationPartyId, asked.customers)
     const key = s.operationKey(p)
     const reasons = new Map(reasonsOf(organizationPartyId).map(row => [row.returnReasonEnumId, row]))
-    const offered = getReturnableOrder({siteId: p.siteId, orderId: order.orderId}).order.lines
+    const offered = getReturnableOrder({siteId: p.siteId, orderId: order.orderId, orderToken: p.orderToken}).order.lines
     const chosen = (typeof p.lines === "string" ? lib.json(p.lines, []) : Array.from(p.lines || [])).filter(
         line => line && line.orderItemSeqId
     )

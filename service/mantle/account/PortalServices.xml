@@ -40,6 +40,17 @@ along with this software (see the LICENSE.md file). If not, see
                 .execute('findInvoices', input)"/>
         </actions>
     </service>
+    <service verb="get" noun="AccountCard" authenticate="anonymous-all" allow-remote="false">
+        <description>The PASS Account hub's Billing card (mr-pass impl-shop P6, F6): the invoices the signed-in account reaches
+            in the site's Billing app (its contacts' and its own through the self relationship), how many are open, and the
+            Invoices page.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/account/Portal.js')
+                .execute('accountCard', input)"/>
+        </actions>
+    </service>
     <service verb="get" noun="Invoice" authenticate="anonymous-all" allow-remote="false">
         <description>An issued invoice for its pay link's token or a signed-in contact: number, dates, lines, total, paid and
             due, an attempt still pending, and whether it can be paid here. An expired, revoked or foreign token, or an

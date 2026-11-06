@@ -143,6 +143,39 @@ function actingFor(organizationPartyId) {
         .filter(row => cases.servedCustomer(row.partyId, organizationPartyId))
         .map(row => Object.assign(row, {name: cases.partyName(row.partyId)}))
 }
+// Who a request may be for (Shop P6, impl-shop F27; design-customer-service §8 Access): a guest's order link (the SalesOrder
+// OrderView capability, orderToken) is the order's customer for that one order only, as a contact or the self relationship
+// is for its customers; else the signed-in account's customers (actingFor). {customers, orderId, via}.
+function askers(p, organizationPartyId) {
+    if (!blank(p.orderToken)) {
+        const checked = access().check({
+            token: String(p.orderToken),
+            scope: "OrderView",
+            recordType: "SalesOrder",
+            organizationPartyId
+        })
+        if (!blank(p.orderId) && String(p.orderId) !== checked.recordId) unavailable()
+        if (!cases.servedCustomer(checked.partyId, organizationPartyId)) unavailable()
+        return {
+            customers: [
+                {partyId: checked.partyId, administrator: false, via: "orderLink", name: cases.partyName(checked.partyId)}
+            ],
+            orderId: checked.recordId,
+            via: "orderLink"
+        }
+    }
+    if (!ec.user.userId) signInRequired()
+    return {customers: actingFor(organizationPartyId), orderId: null, via: "account"}
+}
+// The queue a store's order's request goes to: its checkout policy's support queue (Commerce P6), when the mount offers it.
+function storeQueueOf(orderId, offered) {
+    const order = blank(orderId) ? null : one("mantle.order.OrderHeader", {orderId})
+    if (!order?.productStoreId) return null
+    const queueId = ec.resource
+        .script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+        .settingAt(order.productStoreId, "PsstCheckoutSupportQueue")?.settingValue
+    return queueId ? offered.find(row => row.requestCategoryId === queueId) || null : null
+}
 const settingOf = organizationPartyId => cases.currentRow(SETTING, {organizationPartyId})
 // The queues the mount offers a signed-in customer: the setting's, else the organization's default queue; each a service queue
 // of the organization, with the case types offered there (the setting's among the queue's own).
@@ -663,15 +696,19 @@ function getCaseIntake(p) {
             capabilities: {canSubmit: true, takesFiles: true, needsSender: true}
         }
     }
-    if (!ec.user.userId) signInRequired()
-    const customers = actingFor(organizationPartyId)
+    const asked = askers(p, organizationPartyId)
+    const customers = asked.customers
     if (!customers.length) unavailable()
     const queues = offeredQueues(organizationPartyId)
+    const orderId = asked.orderId || p.orderId
     let order = null
-    if (!blank(p.orderId))
+    if (!blank(orderId))
         order = ec.resource
             .script("component://mr-mantle/service/mantle/order/CustomerOrders.js")
-            .cancelView(p, organizationPartyId, customers)
+            .cancelView(Object.assign({}, p, {orderId}), organizationPartyId, customers)
+    // a store's order's request goes to the store's queue first (Shop P6)
+    const storeQueue = storeQueueOf(orderId, queues)
+    if (storeQueue) queues.sort((a, b) => (a === storeQueue ? -1 : b === storeQueue ? 1 : 0))
     let article = null
     if (!blank(p.wikiPageId))
         try {
@@ -680,7 +717,7 @@ function getCaseIntake(p) {
             article = null
         }
     return {
-        mode: "contact",
+        mode: asked.via === "orderLink" ? "orderLink" : "contact",
         organizationName: cases.partyName(organizationPartyId),
         customers: customers.map(row => ({partyId: row.partyId, name: row.name})),
         queues: queues.map(offered => queueView(organizationPartyId, offered)),
@@ -766,8 +803,10 @@ function intakeCase(p, organizationPartyId, key, staged) {
     return result
 }
 function contactCase(p, organizationPartyId, key, staged) {
-    if (!ec.user.userId) signInRequired()
-    const customers = actingFor(organizationPartyId)
+    const asked = askers(p, organizationPartyId)
+    const customers = asked.customers
+    // an order link's case is about its one order (Shop P6)
+    if (asked.orderId) p = Object.assign({}, p, {orderId: asked.orderId})
     const customer = blank(p.customerPartyId)
         ? customers.length === 1
             ? customers[0]
@@ -775,7 +814,9 @@ function contactCase(p, organizationPartyId, key, staged) {
         : customers.find(row => row.partyId === p.customerPartyId)
     if (!customer) fail("Unprocessable", customers.length ? "Choose who the request is for" : "This page is not available")
     const offered = offeredQueues(organizationPartyId)
-    const queue = blank(p.requestCategoryId) ? offered[0] : offered.find(row => row.requestCategoryId === p.requestCategoryId)
+    const queue = blank(p.requestCategoryId)
+        ? storeQueueOf(p.orderId, offered) || offered[0]
+        : offered.find(row => row.requestCategoryId === p.requestCategoryId)
     if (!queue) fail("Unprocessable", "Choose what your request is about")
     const requestTypeEnumId = blank(p.requestTypeEnumId) ? queue.types[0] : p.requestTypeEnumId
     if (!queue.types.includes(requestTypeEnumId)) fail("Unprocessable", "Choose what your request is about")
@@ -798,8 +839,10 @@ function contactCase(p, organizationPartyId, key, staged) {
         if (!checked.valid) fail("Unprocessable", checked.errors.map(error => error.message).join("; "))
         checkedValues = checked.values
     }
-    // the order a case is about: a sales order of this customer with the organization
+    // the order a case is about: a sales order of this customer with the organization; its store goes on the case (impl-commerce
+    // F37, Shop P6)
     let orderId = null
+    let productStoreId = null
     if (!blank(p.orderId)) {
         const parts = rows("mantle.order.OrderPart", {orderId: p.orderId})
         if (
@@ -808,6 +851,7 @@ function contactCase(p, organizationPartyId, key, staged) {
         )
             fail("Unprocessable", "Choose one of your orders")
         orderId = String(p.orderId)
+        productStoreId = one("mantle.order.OrderHeader", {orderId})?.productStoreId || null
     }
     // the article read before asking (F109): kept in the description and linked to the case
     let cited = null
@@ -830,7 +874,8 @@ function contactCase(p, organizationPartyId, key, staged) {
         statusId: "ReqSubmitted",
         salesChannelEnumId: "ScWeb",
         customerPartyId: customer.partyId,
-        filedByPartyId: userPartyId
+        productStoreId,
+        filedByPartyId: asked.via === "orderLink" ? null : userPartyId
     }).requestId
     call("create#mantle.request.RequestParty", {
         requestId,
@@ -1049,7 +1094,41 @@ function caseLink(p) {
         .caseLink(p.requestId, p.validDays || 60)
 }
 
+// The PASS Account hub's Support card (Shop P6, F6): the signed-in account's open cases and returns with the organization
+// the site's Support app serves.
+function accountCard(p) {
+    const organizationPartyId = served(p.siteId)
+    if (!ec.user.userId) signInRequired()
+    const customers = actingFor(organizationPartyId).map(row => row.partyId)
+    const openCases = customers.length
+        ? find("mantle.request.Request")
+              .condition("customerPartyId", "in", customers)
+              .condition("statusId", "in", openStatuses)
+              .count()
+        : 0
+    const returns = customers.length
+        ? find("mantle.order.return.ReturnHeader")
+              .condition("customerPartyId", "in", customers)
+              .condition("vendorPartyId", organizationPartyId)
+              .condition("statusId", "not-in", ["ReturnCompleted", "ReturnCancelled"])
+              .count()
+        : 0
+    return {
+        title: "Support",
+        lines: [
+            openCases + (openCases === 1 ? " open case" : " open cases"),
+            returns + (returns === 1 ? " open return" : " open returns")
+        ],
+        url: apps().pageUrl(p.siteId, "support", "/MyCases"),
+        links: [
+            {text: "My cases", url: apps().pageUrl(p.siteId, "support", "/MyCases")},
+            {text: "My returns", url: apps().pageUrl(p.siteId, "support", "/MyReturns")}
+        ]
+    }
+}
+
 const operations = {
+    accountCard,
     getSupportHome,
     getCustomerArticle,
     rateArticle,
@@ -1075,6 +1154,8 @@ const internalOperations = new Set(["saveSetting", "getSetting", "caseLink"])
     customerValues,
     served,
     actingFor,
+    // Shop P6 (F27): a guest's order link beside the account's customers
+    askers,
     offeredQueues,
     hoursNotice,
     throttle,
