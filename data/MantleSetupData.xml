@@ -768,4 +768,37 @@ along with this software (see the LICENSE.md file). If not, see
             description="Warranty repair finished" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
             isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="The repair of ${assetText} on claim ${requestId} is finished: ${requestName} (${customerName})"/>
+    <!-- Commerce's stores, merchandising, website, orders, promotions, channels and subscriptions (impl-commerce P1, F2;
+        design-commerce §1.1), each checked by the store services with the store's organization: COMMERCE_VIEW reads stores and
+        their records, COMMERCE_STORE_EDIT keeps a store's configuration and checkout settings, COMMERCE_MERCHANDISE its
+        assortment, categories, navigation and review moderation, COMMERCE_PUBLISH publishes assortment and content,
+        COMMERCE_THEME_EDIT edits themes and pages, COMMERCE_THEME_CODE a theme's template source, COMMERCE_THEME_PUBLISH
+        publishes or restores a theme release, COMMERCE_ORDER_VIEW reads store orders and carts, COMMERCE_RECOVERY works cart
+        recovery, COMMERCE_PROMOTION_EDIT keeps promotions and codes, COMMERCE_CHANNEL_OPERATE operates integrations, imports and
+        feeds, COMMERCE_SUBSCRIPTION_MANAGE manages recurring contracts. No permission implies another, and a store assignment
+        (a StoreStaff ProductStoreParty) grants none. Granted to the Commerce groups by the app's setup data. -->
+    <userPermissions userPermissionId="COMMERCE_VIEW" description="Commerce View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_STORE_EDIT" description="Commerce Store Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_STORE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_MERCHANDISE" description="Commerce Merchandise"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_MERCHANDISE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_PUBLISH" description="Commerce Publish"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_PUBLISH" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_EDIT" description="Commerce Theme Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_CODE" description="Commerce Theme Code"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_CODE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_THEME_PUBLISH" description="Commerce Theme Publish"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_THEME_PUBLISH" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_ORDER_VIEW" description="Commerce Order View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_ORDER_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_RECOVERY" description="Commerce Recovery"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_RECOVERY" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_PROMOTION_EDIT" description="Commerce Promotion Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_PROMOTION_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_CHANNEL_OPERATE" description="Commerce Channel Operate"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_CHANNEL_OPERATE" fromDate="0"/>
+    <userPermissions userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" description="Commerce Subscription Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_SUBSCRIPTION_MANAGE" fromDate="0"/>
 </entity-facade-xml>
