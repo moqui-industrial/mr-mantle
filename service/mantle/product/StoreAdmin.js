@@ -102,17 +102,27 @@ const groupOwnerRole = "OrgInternal"
 const staffRelationships = ["PrtAgent", "PrtEmployee", "PrtMember"]
 
 // ===== scope =====
-// The organizations whose stores the user works (null for every one: a system administrator), the stores a store-limited
-// staff member is limited to (null when none), and whether they may change stores. COMMERCE_VIEW reads; COMMERCE_STORE_EDIT
-// with it changes. A Projects client contact and a user without the read get nothing.
+// The organizations whose stores the user works (null for every one: a system administrator, or a Commerce administrator
+// with no active organization), the stores a store-limited staff member is limited to (null when none), and whether they may
+// change stores. COMMERCE_VIEW reads; COMMERCE_STORE_EDIT with it changes. A Projects client contact and a user without the
+// read get nothing.
 function scope(need = "view") {
     if (!ec.user.userId || !access.has("COMMERCE_VIEW")) denied("PERMISSION_DENIED", "COMMERCE_VIEW is required")
     const canEdit = access.has("COMMERCE_STORE_EDIT")
     if (need === "edit" && !canEdit) denied("PERMISSION_DENIED", "COMMERCE_STORE_EDIT is required")
     const organizations = facilityScope.scope()
     const systemAdmin = organizations.systemAdmin
-    // FACILITY_ALL_ORGANIZATIONS is Warehouse's: a store is worked in the user's own organizations
-    const organizationPartyIds = systemAdmin ? null : organizations.organizationPartyIds || organizations.memberPartyIds
+    // FACILITY_ALL_ORGANIZATIONS is Warehouse's: a store is worked in the user's own organizations, unless the user holds
+    // COMMERCE_ALL_ORGANIZATIONS (a Commerce administrator's, as the active organization filter of their authorization):
+    // every organization, or the active one (Commerce P6 review, F-P6-3)
+    const allOrganizations = !systemAdmin && access.has("COMMERCE_ALL_ORGANIZATIONS")
+    const organizationPartyIds = systemAdmin
+        ? null
+        : allOrganizations
+          ? organizations.activeOrganizationPartyId
+              ? [organizations.activeOrganizationPartyId]
+              : null
+          : organizations.organizationPartyIds || organizations.memberPartyIds
     const partyId = ec.user.userAccount?.partyId || null
     let storeLimit = null
     if (!systemAdmin && partyId) {

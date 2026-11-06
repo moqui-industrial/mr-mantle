@@ -567,8 +567,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="simulate" noun="StoreShipping" allow-remote="false">
         <description>What each of the store's ship options charges a sample cart (its value and weight) going to a sample
-            address (its geos as get#PostalAddressGeoIdSet reads an address: county, state or province, country, postal code;
-            or an address's contactMechId): the local rate chosen, or no delivery, for a carrier on a local gateway of a store
+            address (its geos as get#PostalAddressGeoIdSet reads an address: county, state or province, country, postal
+            code): the local rate chosen, or no delivery, for a carrier on a local gateway of a store
             with rates; Mantle's local default (nothing) for a store with none; the carrier's own gateway otherwise. Writes
             nothing.</description>
         <in-parameters>
@@ -577,7 +577,6 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="stateProvinceGeoId"/>
             <parameter name="countyGeoId"/>
             <parameter name="postalCodeGeoId"/>
-            <parameter name="contactMechId"/>
             <parameter name="amount"/>
             <parameter name="weight"/>
             <parameter name="weightUomId"/>

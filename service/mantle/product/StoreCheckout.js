@@ -381,10 +381,10 @@ function liveRates(productStoreId, at = nowMs()) {
 }
 // The rate that applies to a sale: the store's rates in effect at the time that match its zone, carrier, method, currency,
 // weight and value, the lowest priority number first, then the latest start. {rate, shippingTotal} or {rate: null, reason}.
-function rate(productStoreId, sale) {
+function rate(productStoreId, sale, storeRates = null) {
     const at = sale.at ?? nowMs()
     const cache = {}
-    const candidates = rows(RATE, {productStoreId})
+    const candidates = (storeRates || rows(RATE, {productStoreId}))
         .filter(row => active(row, at))
         .filter(row => inZone(row.geoId, sale.geoIdSet, cache))
         .filter(row => !row.carrierPartyId || row.carrierPartyId === sale.carrierPartyId)
@@ -406,19 +406,24 @@ function rate(productStoreId, sale) {
     return {rate: candidates[0], shippingTotal: toDecimal(candidates[0].shippingAmount ?? 0)}
 }
 // get#StoreShippingRateLocal, the local gateway's rule (no permission: order flows call it): whether the store is rated by its
-// rates and, when it is, the part's charge or that nothing delivers it.
+// rates and, when it is, the part's charge or that nothing delivers it. Every cart change of every store runs it (the order
+// item ECA's shipping calculation, F-P6-2), so a store with no rates costs the one indexed read of its rates.
 function getStoreShippingRateLocal(p) {
-    const store = p.productStoreId ? one(S + "ProductStore", {productStoreId: p.productStoreId}) : null
-    if (!store || !liveRates(store.productStoreId).length) return {rated: false, available: true}
+    const live = p.productStoreId ? liveRates(p.productStoreId) : []
+    if (!live.length) return {rated: false, available: true}
     const measure = partMeasure(p.orderId, p.orderPartSeqId)
-    const found = rate(store.productStoreId, {
-        geoIdSet: Array.from(p.geoIdSet || []).map(String),
-        carrierPartyId: p.carrierPartyId,
-        shipmentMethodEnumId: p.shipmentMethodEnumId,
-        currencyUomId: measure.currencyUomId,
-        amount: measure.amount,
-        weights: measure.weights
-    })
+    const found = rate(
+        p.productStoreId,
+        {
+            geoIdSet: Array.from(p.geoIdSet || []).map(String),
+            carrierPartyId: p.carrierPartyId,
+            shipmentMethodEnumId: p.shipmentMethodEnumId,
+            currencyUomId: measure.currencyUomId,
+            amount: measure.amount,
+            weights: measure.weights
+        },
+        live
+    )
     return found.rate
         ? {rated: true, available: true, shippingTotal: found.shippingTotal, shippingRateId: found.rate.shippingRateId}
         : {rated: true, available: false, shippingTotal: null, shippingRateId: null}
@@ -630,11 +635,8 @@ function sampleGeoIds(p) {
 function simulateStoreShipping(p) {
     const s = admin().scope()
     const store = admin().storeOf(s, p.productStoreId)
-    const geoIdSet = p.contactMechId
-        ? Array.from(
-              call("mantle.party.ContactServices.get#PostalAddressGeoIdSet", {contactMechId: p.contactMechId}).geoIdSet || []
-          )
-        : sampleGeoIds(p)
+    // a sample address's geos only: an address id would read any party's address (P6 review)
+    const geoIdSet = sampleGeoIds(p)
     if (!geoIdSet.length) denied("VALUE_INVALID", "Give the sample address's country")
     const amount = num(decimalOf(p.amount, "The cart value", false) ?? 0)
     const weight = num(decimalOf(p.weight, "The cart weight", false) ?? 0)
