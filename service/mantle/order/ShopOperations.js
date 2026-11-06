@@ -32,6 +32,9 @@ const P = "mantle.account.payment.Payment"
 const R = "mantle.account.method.PaymentGatewayResponse"
 const ATTEMPT = "mantle.account.payment.PortalPaymentAttempt"
 const SERVICES = "mantle.order.ShopOperationsServices."
+// Review (R1): a stuck placement whose payment a resolution is giving back, and the key prefix of that release or refund
+const REFUND_PENDING = "REFUND_PENDING"
+const RESOLVE_KEY = "shop-resolve-"
 
 // ===== tables =====
 // Bounds: carts and checkouts a run takes, days a completed checkout is swept for a second approval, days a retired cart's
@@ -86,7 +89,10 @@ function unresolved(access) {
 function retireStep(p) {
     const access = find(A, {cartAccessId: p.cartAccessId}).forUpdate(true).one()
     if (!access || access.revokedDate || (ms(access.expireDate) ?? Infinity) > nowMs()) return {retired: false}
-    const order = one("mantle.order.OrderHeader", {orderId: access.orderId})
+    // Review (R4): the cart's checkouts, then its order, locked in the order a checkout's freeze takes them, so a submit that
+    // raced the expiry is seen committed (and waited for) before the money is judged
+    find(C, {cartAccessId: access.cartAccessId}).orderBy("checkoutId").forUpdate(true).list()
+    const order = find("mantle.order.OrderHeader", {orderId: access.orderId}).forUpdate(true).one()
     if (order && order.statusId === "OrderOpen") {
         const why = unresolved(access)
         if (why) return {retired: false, waiting: why}
@@ -99,13 +105,35 @@ function retireStep(p) {
     call("update#" + A, {cartAccessId: access.cartAccessId, revokedDate: ec.user.nowTimestamp, revokeReasonEnumId: "ScrExpired"})
     return {retired: true, guestRetired: retireGuest(access.guestPartyId)}
 }
-// A cart's guest party retired (disabled, never deleted) once nothing else is its: no account, no order but cancelled
-// ones, no completed checkout, not merged into another party.
+// What makes a party more than a cart's anonymous guest (review R2: merge#Parties moves StoreCartAccess.guestPartyId to the
+// party merged into, so a cart's guestPartyId may name a customer staff keep): an account, a relationship, a cart of its
+// own as a customer, a case, a consent, an agreement, a download grant, a recurring contract, a subscription, a financial
+// account, an invoice.
+const guestHolds = [
+    ["moqui.security.UserAccount", "partyId"],
+    ["mantle.party.PartyRelationship", "fromPartyId"],
+    ["mantle.party.PartyRelationship", "toPartyId"],
+    [A, "customerPartyId"],
+    ["mantle.request.RequestParty", "partyId"],
+    ["mantle.request.Request", "filedByPartyId"],
+    ["mantle.party.PartyConsent", "partyId"],
+    ["mantle.party.agreement.AgreementParty", "partyId"],
+    ["mantle.product.store.StoreDownloadGrant", "recipientPartyId"],
+    ["mantle.product.subscription.StoreRecurringContract", "customerPartyId"],
+    ["mantle.product.subscription.Subscription", "subscriberPartyId"],
+    ["mantle.account.financial.FinancialAccount", "ownerPartyId"],
+    ["mantle.account.invoice.Invoice", "toPartyId"],
+    ["mantle.account.invoice.Invoice", "fromPartyId"]
+]
+// A cart's guest party retired (disabled, never deleted) once it is only that: the guest of carts that are all retired, no
+// role but Customer, nothing of guestHolds, no completed checkout, no order but cancelled ones, not merged into another.
 function retireGuest(partyId) {
     if (!partyId) return false
     const party = one("mantle.party.Party", {partyId})
     if (!party || party.disabled === "Y" || party.mergedToPartyId) return false
-    if (find("moqui.security.UserAccount", {partyId}).count() > 0) return false
+    for (const [entity, field] of guestHolds) if (find(entity, {[field]: partyId}).count() > 0) return false
+    if (rows("mantle.party.PartyRole", {partyId}).some(row => row.roleTypeId !== "Customer")) return false
+    if (find(A, {guestPartyId: partyId}).condition("revokedDate", "is-null", null).count() > 0) return false
     if (find(C, {customerPartyId: partyId, statusId: "ScoCompleted"}).count() > 0) return false
     const orderIds = Array.from(
         find("mantle.order.OrderPart", {customerPartyId: partyId}).selectField("orderId").distinct(true).limit(50).list()
@@ -177,6 +205,9 @@ function duplicateService(paymentGatewayConfigId) {
 }
 const paymentHeld = orderId =>
     rows("mantle.order.OrderHoldReason", {orderId, holdTypeEnumId: "OhtPayment"}).some(row => !row.releasedDate)
+// whether the order was ever held for this payment (open or released)
+const everHeld = (orderId, paymentId) =>
+    find("mantle.order.OrderHoldReason", {orderId, holdTypeEnumId: "OhtPayment", sourceId: paymentId}).count() > 0
 function holdStep(p) {
     const order = one("mantle.order.OrderHeader", {orderId: p.orderId})
     if (!order || !placedStatuses.includes(order.statusId) || paymentHeld(order.orderId)) return {held: false}
@@ -212,10 +243,13 @@ function sweepHostedReferences(p) {
                 .list()
         )
         if (marks.some(row => row.reasonCode === "DUPLICATES_CHECKED")) continue
-        if (marks.length && paymentHeld(checkout.orderId)) continue
-        searches++
+        // Review (R3): a second approval already flagged is held once; a hold Accounting released (PAYMENT_HOLD_RELEASE) is
+        // their decision and is never put back, so it is not searched again
+        const flaggedBefore = marks.length > 0
+        if (flaggedBefore && everHeld(checkout.orderId, payment.paymentId)) continue
+        if (!flaggedBefore) searches++
         try {
-            const out = lib.probe(service, {paymentId: payment.paymentId})
+            const out = flaggedBefore ? {flagged: true} : lib.probe(service, {paymentId: payment.paymentId})
             if (out.checked) checked++
             if (out.flagged && !paymentHeld(checkout.orderId)) {
                 const held = step("hold", {orderId: checkout.orderId, paymentId: payment.paymentId})
@@ -262,14 +296,52 @@ function stuckCheckout(orderId) {
 function retryStep(p) {
     const checkout = find(C, {checkoutId: p.checkoutId}).forUpdate(true).one()
     if (!checkout || checkout.statusId !== "ScoPlacementPending") return {}
+    // a refund of this placement in progress (or interrupted) is never raced by a placement
+    if (checkout.failureCode === REFUND_PENDING) return {refundPending: true}
     call("update#" + C, {checkoutId: checkout.checkoutId, placementTries: 0})
     return {}
+}
+// Review (R1): before its payment is released or refunded, the checkout is marked REFUND_PENDING under its lock, which the
+// placement step (ShopCheckout.js placeStep) and a retry honour, so a placement never lands while the provider is asked; the
+// failure it had is kept to put back when the provider refuses. {blocked, prior?, statusId}.
+function blockStep(p) {
+    const checkout = find(C, {checkoutId: p.checkoutId}).forUpdate(true).one()
+    if (!checkout || checkout.statusId !== "ScoPlacementPending") return {blocked: false, statusId: checkout?.statusId}
+    if (checkout.failureCode === REFUND_PENDING) return {blocked: true}
+    call("update#" + C, {checkoutId: checkout.checkoutId, failureCode: REFUND_PENDING})
+    return {blocked: true, prior: {failureCode: checkout.failureCode || null}}
+}
+// The failure put back after the provider refused the release or refund (nothing else changed).
+function unblockStep(p) {
+    const checkout = find(C, {checkoutId: p.checkoutId}).forUpdate(true).one()
+    if (!checkout || checkout.statusId !== "ScoPlacementPending" || checkout.failureCode !== REFUND_PENDING) return {}
+    call("update#" + C, {checkoutId: checkout.checkoutId, failureCode: p.failureCode || null})
+    return {}
+}
+// A release or refund of the payment an earlier resolution sent and the provider confirmed (its key is a resolution's), so
+// an interrupted resolution is finished without asking the provider again.
+function confirmedRefund(paymentId) {
+    return (
+        Array.from(
+            find(R, {paymentId, resultSuccess: "Y"})
+                .condition("paymentOperationEnumId", "in", ["PgoRelease", "PgoRefund"])
+                .condition("operationKey", "like", RESOLVE_KEY + "%")
+                .orderBy("-paymentGatewayResponseId")
+                .limit(1)
+                .list()
+        )[0] || null
+    )
 }
 // cancelled: the checkout cancelled with who resolved it and why, its cart's access retired and the open order cancelled
 // through the order path, after its payment was released or refunded.
 function cancelledStep(p) {
     const checkout = find(C, {checkoutId: p.checkoutId}).forUpdate(true).one()
-    if (!checkout || checkout.statusId !== "ScoPlacementPending") return {}
+    if (checkout?.statusId === "ScoCancelled") return {}
+    // never both: a payment given back for a placement that landed anyway is named for Accounting, not reported resolved
+    if (!checkout || checkout.statusId !== "ScoPlacementPending")
+        throw new Error(
+            "PLACED_AND_REFUNDED: Checkout " + p.checkoutId + " is " + checkout?.statusId + " after its payment was given back"
+        )
     call("update#" + C, {
         checkoutId: checkout.checkoutId,
         statusId: "ScoCancelled",
@@ -315,6 +387,11 @@ function resolveStuckPlacement(p) {
     if (action === "retry") {
         const reset = step("retry", {checkoutId: checkout.checkoutId})
         if (reset.error) throw new Error(firstLine(reset.error))
+        if (reset.result.refundPending)
+            denied(
+                "REFUND_PENDING",
+                "A refund of cart " + order.orderId + " was started; finish it with Refund (the provider is not asked twice)"
+            )
         const out = checkouts().refreshAttempt(checkout.siteId, checkout.checkoutId)
         const after = one(C, {checkoutId: checkout.checkoutId})
         result =
@@ -322,31 +399,59 @@ function resolveStuckPlacement(p) {
                 ? {resolved: true, stateText: "Placed as order " + checkout.orderId}
                 : {resolved: false, stateText: "Still not placed: " + text(after?.failureMessage || after?.failureCode)}
     } else {
+        // no placement from here until the provider answers (R1)
+        const block = step("block", {checkoutId: checkout.checkoutId})
+        if (block.error) throw new Error(firstLine(block.error))
+        if (!block.result.blocked) denied("NOT_STUCK", "No placement of cart " + order.orderId + " is waiting")
+        const unblock = () =>
+            block.result.prior ? step("unblock", Object.assign({checkoutId: checkout.checkoutId}, block.result.prior)) : null
         const payment = one(P, {paymentId: checkout.paymentId})
-        if (!payment || !moneyStatuses.includes(payment.statusId))
-            denied("PAYMENT_NOT_SETTLED", "The payment of cart " + order.orderId + " is not approved; it cannot be refunded here")
-        const operationKey = "shop-resolve-" + text(op.operationKey).slice(0, 26)
-        const released = payment.statusId === "PmntAuthorized"
-        const sent = released
-            ? lib.probe("mantle.account.PaymentServices.release#SinglePayment", {paymentId: payment.paymentId, operationKey})
-            : lib.probe("mantle.account.PaymentServices.refund#SinglePayment", {
-                  paymentId: payment.paymentId,
-                  operationKey,
-                  amount: payment.amount
-              })
-        const response = sent.paymentGatewayResponseId ? one(R, {paymentGatewayResponseId: sent.paymentGatewayResponseId}) : null
-        if (!response || response.resultSuccess !== "Y")
-            denied(
-                "REFUND_NOT_DONE",
-                "The provider did not " +
-                    (released ? "release" : "refund") +
-                    " the payment: " +
-                    text(response?.reasonMessage || sent.reasonCode || "no answer") +
-                    ". Nothing else changed; try again or ask Accounting"
-            )
+        let response = confirmedRefund(checkout.paymentId)
+        let released = response ? response.paymentOperationEnumId === "PgoRelease" : payment?.statusId === "PmntAuthorized"
+        if (!response) {
+            if (!payment || !moneyStatuses.includes(payment.statusId)) {
+                unblock()
+                denied(
+                    "PAYMENT_NOT_SETTLED",
+                    "The payment of cart " + order.orderId + " is not approved; it cannot be refunded here"
+                )
+            }
+            const operationKey = RESOLVE_KEY + text(op.operationKey).slice(0, 26)
+            // an exception (an outcome not known) leaves the placement blocked for staff
+            const sent = released
+                ? lib.probe("mantle.account.PaymentServices.release#SinglePayment", {paymentId: payment.paymentId, operationKey})
+                : lib.probe("mantle.account.PaymentServices.refund#SinglePayment", {
+                      paymentId: payment.paymentId,
+                      operationKey,
+                      amount: payment.amount
+                  })
+            response = sent.paymentGatewayResponseId ? one(R, {paymentGatewayResponseId: sent.paymentGatewayResponseId}) : null
+            if (!response || response.resultSuccess !== "Y") {
+                // a clear refusal, or nothing sent, puts the placement back; an outcome not known keeps it blocked
+                const unknown =
+                    response?.resultUnknown === "Y" ||
+                    ["GATEWAY_OUTCOME_UNKNOWN", "GATEWAY_OUTCOME_PENDING"].includes(sent.reasonCode)
+                if (!unknown) unblock()
+                denied(
+                    "REFUND_NOT_DONE",
+                    "The provider did not " +
+                        (released ? "release" : "refund") +
+                        " the payment: " +
+                        text(response?.reasonMessage || sent.reasonCode || "no answer") +
+                        (unknown
+                            ? ". Its outcome is not known; look it up in Accounting"
+                            : ". Nothing else changed; try again or ask Accounting")
+                )
+            }
+        }
         const note = (released ? "Released" : "Refunded") + " by " + who + ": " + reason
         const cancelled = step("cancelled", {checkoutId: checkout.checkoutId, note})
-        if (cancelled.error) throw new Error(firstLine(cancelled.error))
+        if (cancelled.error) {
+            ec.logger.error(
+                "Shop placement of cart " + order.orderId + " given back but not cancelled: " + firstLine(cancelled.error)
+            )
+            throw new Error(firstLine(cancelled.error))
+        }
         result = {resolved: true, stateText: note}
     }
     if (action === "retry") ec.logger.info("Shop placement of cart " + order.orderId + " retried by " + who + ": " + reason)
@@ -359,6 +464,8 @@ const steps = {
     guest: guestStep,
     hold: holdStep,
     retry: retryStep,
+    block: blockStep,
+    unblock: unblockStep,
     cancelled: cancelledStep
 }
 const ops = {

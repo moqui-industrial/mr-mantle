@@ -240,8 +240,11 @@ feature("an expired cart is cancelled through the order path and its guest retir
     when() {
         const plain = cart()
         const waiting = submitted()
+        // review R2: a cart whose guestPartyId names a party staff keep (merge#Parties moves it there): never disabled
+        const kept = cart()
+        system(() => make("mantle.party.PartyRole", {partyId: kept.access.guestPartyId, roleTypeId: "Supplier"}))
         system(() => {
-            for (const c of [plain, waiting])
+            for (const c of [plain, waiting, kept])
                 call("update#mantle.order.StoreCartAccess", {
                     cartAccessId: c.access.cartAccessId,
                     expireDate: new Date(Date.now() - 60000)
@@ -253,6 +256,8 @@ feature("an expired cart is cancelled through the order path and its guest retir
             plainAccess: one("mantle.order.StoreCartAccess", {cartAccessId: plain.access.cartAccessId}),
             plainOrder: one("mantle.order.OrderHeader", {orderId: plain.access.orderId}),
             guest: one("mantle.party.Party", {partyId: plain.access.guestPartyId}),
+            keptOrder: one("mantle.order.OrderHeader", {orderId: kept.access.orderId}),
+            keptParty: one("mantle.party.Party", {partyId: kept.access.guestPartyId}),
             waitingAccess: one("mantle.order.StoreCartAccess", {cartAccessId: waiting.access.cartAccessId}),
             waitingOrder: one("mantle.order.OrderHeader", {orderId: waiting.access.orderId}),
             waitingCheckout: checkoutOf(waiting),
@@ -260,13 +265,15 @@ feature("an expired cart is cancelled through the order path and its guest retir
             again: system(() => call(O + "run#ShopOperations", {limit: 500}))
         }
     },
-    then({job, plainAccess, plainOrder, guest, waitingAccess, waitingOrder, waitingCheckout, again}) {
+    then({job, plainAccess, plainOrder, guest, keptOrder, keptParty, waitingAccess, waitingOrder, waitingCheckout, again}) {
         job.failed == 0
         job.retired >= 1
         job.waiting >= 1
         plainAccess.revokeReasonEnumId == "ScrExpired"
         plainOrder.statusId == "OrderCancelled"
         guest.disabled == "Y"
+        keptOrder.statusId == "OrderCancelled"
+        keptParty.disabled != "Y"
         waitingAccess.revokedDate == null
         waitingOrder.statusId == "OrderOpen"
         waitingCheckout.statusId == "ScoPaymentPending"
@@ -308,6 +315,24 @@ feature("a stuck placement is retried and placed, or refunded and its cart cance
                 operationKey: key()
             })
         }
+        // review R1: while a refund of it is in progress no placement lands (the job) and a retry is refused
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {
+                checkoutId: tried.checkout.checkoutId,
+                placementTries: 0,
+                failureCode: "REFUND_PENDING"
+            })
+        )
+        const pendingRetry = resolve(users.resolver, tried, "retry", key())
+        system(() => call(CHECKOUT + "reconcile#Checkouts", {limit: 500}))
+        const pendingState = checkoutOf(tried).statusId
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {
+                checkoutId: tried.checkout.checkoutId,
+                placementTries: 5,
+                failureCode: null
+            })
+        )
         const retried = resolve(users.resolver, tried, "retry", key())
         const refundKey = key()
         const refunded = resolve(users.resolver, changed, "refund", refundKey)
@@ -315,6 +340,8 @@ feature("a stuck placement is retried and placed, or refunded and its cart cance
         return {
             stuck,
             refused,
+            pendingRetry,
+            pendingState,
             retried,
             refunded,
             replayed,
@@ -333,6 +360,8 @@ feature("a stuck placement is retried and placed, or refunded and its cart cance
     then({
         stuck,
         refused,
+        pendingRetry,
+        pendingState,
         retried,
         refunded,
         replayed,
@@ -350,6 +379,8 @@ feature("a stuck placement is retried and placed, or refunded and its cart cance
         refused.operator.error.includes("PERMISSION_DENIED")
         refused.outsider.error.includes("RECORD_UNAVAILABLE")
         refused.noReason.error.includes("REASON_REQUIRED")
+        pendingRetry.error.includes("REFUND_PENDING")
+        pendingState == "ScoPlacementPending"
         retried.error == ""
         retried.resolved == true
         triedCheckout.statusId == "ScoCompleted"

@@ -1240,6 +1240,8 @@ const placedStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "Orde
 function placeStep(p) {
     const checkout = checkoutRow(p.checkoutId, true)
     if (!checkout || checkout.statusId !== "ScoPlacementPending") return {statusId: checkout?.statusId}
+    // Shop P8 review (R1): staff are giving its payment back (ShopOperations.js resolve#StuckPlacement): never placed meanwhile
+    if (checkout.failureCode === "REFUND_PENDING") return {statusId: checkout.statusId}
     const order = orderOf(checkout.orderId)
     if (!placedStatuses.includes(order.statusId)) {
         // only the order that was frozen and paid for is placed: one changed since (a staff edit, a raced cart write) is

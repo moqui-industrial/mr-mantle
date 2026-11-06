@@ -339,6 +339,8 @@ function imagesOf(shop, productIds) {
                 row.contentLocation &&
                 // Shop P8 (F75): only the resource stores staff upload to, never a file, http or other location scheme
                 /^(?:dbresource|component):\/\//.test(String(row.contentLocation)) &&
+                // review (R5): and no step out of that store (a component:// path climbing to another file)
+                !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(String(row.contentLocation)) &&
                 imageMimeTypes[imageExtension(row.contentLocation)] &&
                 activeAt(row, shop.at) &&
                 (!row.productStoreId || row.productStoreId === shop.productStoreId)
