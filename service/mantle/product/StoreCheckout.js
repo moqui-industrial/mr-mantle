@@ -87,7 +87,9 @@ const gatewayCapabilities = {
         hostedProfileService: "mantle.ext.account.gateway.AuthorizeNetServices.store#HostedPaymentProfile",
         // Shop P6 (F40): the hosted profile page for a card kept outside a checkout, and its profile read after it
         hostedSetupService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedProfileForm",
-        setupSyncService: "mantle.ext.account.gateway.AuthorizeNetServices.sync#CustomerProfile"
+        setupSyncService: "mantle.ext.account.gateway.AuthorizeNetServices.sync#CustomerProfile",
+        // Shop P8 (impl-shop F95): an approved hosted payment's reference searched again for a later second approval
+        duplicateCheckService: "mantle.ext.account.gateway.AuthorizeNetServices.check#HostedDuplicates"
     }),
     PgtPayTrace: () => ({hostedCheckout: false, savedMethods: false, offSession: false})
 }

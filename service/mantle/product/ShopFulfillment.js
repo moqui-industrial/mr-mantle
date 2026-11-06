@@ -39,7 +39,7 @@ const SERVICES = "mantle.product.ShopFulfillmentServices."
 // ===== tables =====
 // Bounds: minutes a download capability lives, days a guest's download link lives, tries before a row waits for staff, rows
 // the job takes a run, minutes between tries.
-const limits = {downloadMinutes: 10, linkDays: 90, tries: 8, batch: 100, backoffMinutes: [5, 15, 60, 240, 720]}
+const limits = {downloadMinutes: 10, linkDays: 90, tries: 8, batch: 100, backoffMinutes: [5, 15, 60, 240, 720], unstartedDays: 7}
 const approvedOrderStatuses = ["OrderApproved", "OrderSent", "OrderProcessing", "OrderCompleted"]
 const paidStatuses = ["PmntDelivered", "PmntConfirmed"]
 const openSteps = ["SifPending", "SifInvoiced", "SifPaid", "SifHeld"]
@@ -397,7 +397,13 @@ function buildNotice(p) {
                         row.productId
                 )
                 .join(", "),
-            downloadsUrl
+            downloadsUrl,
+            // Shop P8 (impl-shop F99): a guest's link stops working once a verified account claims the order (one account);
+            // the store's template can say so with this text
+            linkNote:
+                checkout.accountCheckout === "Y"
+                    ? null
+                    : "If you create an account with this email address and verify it, these downloads move to your account and this link opens them after you sign in."
         }
     }
 }
@@ -427,7 +433,7 @@ function fulfillDue(p) {
     let orders = 0,
         fulfilled = 0,
         failed = 0
-    for (const orderId of new Set(due.map(row => row.orderId))) {
+    for (const orderId of new Set(due.map(row => row.orderId).concat(unstarted(p)))) {
         orders++
         try {
             if (fulfillOrder({orderId}).fulfilled) fulfilled++
@@ -438,6 +444,29 @@ function fulfillDue(p) {
         }
     }
     return {orders, fulfilled, failed}
+}
+// Shop P8 (impl-shop F96): the approval SECA is the usual start, so a crash between the approval's commit and it leaves no
+// row for the job; the job also takes the Shop orders completed in the last days that are approved, have a line Shop
+// fulfills and have no fulfillment row yet.
+function unstarted(p) {
+    const since = new Date(nowMs() - limits.unstartedDays * 86400000)
+    const completed = Array.from(
+        find(C, {statusId: "ScoCompleted"})
+            .condition("completedDate", "greater-equals", since)
+            .condition("orderId", "is-not-null", null)
+            .selectField("orderId")
+            .orderBy("-completedDate")
+            .limit(Number(p.limit || limits.batch) * 5)
+            .list()
+    ).map(row => row.orderId)
+    const out = []
+    for (const orderId of completed) {
+        if (out.length >= Number(p.limit || limits.batch)) break
+        if (find(F, {orderId}).count() > 0) continue
+        const order = one("mantle.order.OrderHeader", {orderId})
+        if (order && approvedOrderStatuses.includes(order.statusId) && fulfilledLines(orderId).length) out.push(orderId)
+    }
+    return out
 }
 
 // ===== downloads =====

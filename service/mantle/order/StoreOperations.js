@@ -203,7 +203,7 @@ function cancelRequestOrderIds(storeIds) {
 // (impl-shop F85); the job no longer retries it
 const stuck = checkout =>
     checkout.statusId === "ScoPlacementPending" &&
-    (checkout.failureCode === "ORDER_CHANGED" || num(checkout.placementTries) >= limits.placementTries)
+    (["ORDER_CHANGED", "REFUND_PENDING"].includes(checkout.failureCode) || num(checkout.placementTries) >= limits.placementTries)
 function stuckCheckouts(storeIds) {
     if (!storeIds.length) return []
     return Array.from(
@@ -385,7 +385,9 @@ function stuckOrders(s, storeIds, p) {
             failureText:
                 checkout.failureCode === "ORDER_CHANGED"
                     ? "The order changed after it was paid"
-                    : "Placement failed " + num(checkout.placementTries) + " times",
+                    : checkout.failureCode === "REFUND_PENDING"
+                      ? "A refund was started and not finished"
+                      : "Placement failed " + num(checkout.placementTries) + " times",
             placedText: dateText(checkout.frozenDate)
         })
     })
