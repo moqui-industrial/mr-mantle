@@ -260,6 +260,11 @@ function importTheme(p) {
         refuse("ENGINE_UNSUPPORTED", "Liquid themes are not supported; this store renders js-fancy themes", "Unprocessable")
     if (!themes.renderers[engine])
         refuse("ENGINE_UNSUPPORTED", "Engine " + (engine || "(none)") + " is not installed; use js-fancy", "Unprocessable")
+    // as every save (checkedSave): an SVG cleaned to the safe set, and a file the adapter finds an error in (a script, an
+    // event handler) refuses the import with its file and line, so a draft never holds one
+    for (const path of Object.keys(files)) if (path.endsWith(".svg")) files[path] = ec.resource.theme.sanitizeSvg(files[path])
+    const errors = check(files).filter(diagnostic => diagnostic.severity === "error" && files[diagnostic.file] != null)
+    if (errors.length) refuse("THEME_SOURCE_INVALID", errors.slice(0, 5).map(located).join("; "), "Unprocessable")
     const name = (text(p.name) || text(manifest.name) || "Imported theme").slice(0, 255)
     const created = call("create#" + THEME, {
         productStoreId: store.productStoreId,

@@ -327,10 +327,17 @@ feature("a required checkout component cannot be removed or hidden; Liquid and s
             productStoreId: storeA,
             files: Object.assign(packageFiles(), {"assets/app.js": "alert(1)"})
         })
-        Object.assign(state, {at, removed, hidden, dropNote, fileRemoved, liquid, scriptFile})
+        // review: an import is checked as a save is, so a draft never holds an event handler
+        const handler = run(state.designer, T + "import#Theme", {
+            productStoreId: storeA,
+            files: Object.assign(packageFiles(), {"sections/note.html.fancy-locked": '<aside onclick="steal()">x</aside>'})
+        })
+        Object.assign(state, {at, removed, hidden, dropNote, fileRemoved, liquid, scriptFile, handler})
     },
     then() {
-        const {at, removed, hidden, dropNote, fileRemoved, liquid, scriptFile} = state
+        const {at, removed, hidden, dropNote, fileRemoved, liquid, scriptFile, handler} = state
+        code(handler) === "THEME_SOURCE_INVALID"
+        handler.error.includes("sections/note.html.fancy-locked:")
         code(removed) === "REQUIRED_COMPONENT"
         removed.error.includes("shop.checkout")
         code(hidden) === "REQUIRED_COMPONENT"
@@ -499,5 +506,48 @@ feature("a preview needs the site's preview host and answers only its token on t
         code(otherHost) === "NOT_AVAILABLE"
         code(forged) === "NOT_AVAILABLE"
         hostKind.preview === true
+    }
+})
+
+feature("store#Mounts binds a preview host, never canonical, and a save that does not name preview keeps its kind", {
+    when() {
+        const live = "live.thmaut.example.test",
+            bound = "bound-preview.thmaut.example.test"
+        const policy = () => Number(one("mantle.public.PublicSite", {siteId: site}).policyRevision || 0)
+        const mounts = hosts =>
+            run("john.doe", "mantle.public.SiteServices.store#Mounts", {
+                input: {siteId: site, expectedRevision: policy(), mounts: [], hosts}
+            })
+        const canonicalPreview = mounts([{hostname: bound, canonical: true, preview: true}])
+        const refusedKind = one("mantle.public.PublicSiteHost", {hostname: bound})?.hostKindEnumId ?? null
+        const bind = mounts([
+            {hostname: live, canonical: true},
+            {hostname: bound, preview: true}
+        ])
+        const resaved = mounts([{hostname: bound}])
+        const kind = hostname => one("mantle.public.PublicSiteHost", {hostname})?.hostKindEnumId
+        const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+        Object.assign(state, {
+            canonicalPreview,
+            refusedKind,
+            bind,
+            resaved,
+            liveKind: kind(live),
+            boundKind: kind(bound),
+            pageUrl: system(() => apps.pageUrl(site, "shop", "/")),
+            shopMount: one("mantle.public.PublicSiteApp", {siteId: site, appMountId: "shop"})
+        })
+    },
+    then() {
+        const {canonicalPreview, refusedKind, bind, resaved, liveKind, boundKind, pageUrl, shopMount} = state
+        // PREVIEW_NOT_CANONICAL[hosts], a field error
+        canonicalPreview.error !== ""
+        refusedKind === null
+        bind.error === ""
+        resaved.error === ""
+        liveKind === "PshkLive"
+        boundKind === "PshkPreview"
+        pageUrl === "https://live.thmaut.example.test/"
+        shopMount != null
     }
 })

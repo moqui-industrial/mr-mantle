@@ -2175,8 +2175,13 @@ methods.storeMounts = (p) => {
         })
     if (hosts.filter((h) => h.canonical).length > 1)
         invalid('Choose one canonical hostname')
-    // Commerce P5 (F54): a theme preview host serves only the preview render, so it is never the canonical one
-    if (hosts.some((h) => h.canonical && h.preview))
+    // Commerce P5 (F54): a theme preview host serves only the preview render, so it is never the canonical one; a host
+    // named without `preview` keeps its kind (a save that does not know preview hosts never makes one live)
+    const kindOf = (h) => {
+        if (h.preview != null) return h.preview === true ? 'PshkPreview' : 'PshkLive'
+        return one(S + 'PublicSiteHost', { hostname: h.hostname })?.hostKindEnumId || 'PshkLive'
+    }
+    if (hosts.some((h) => h.canonical && kindOf(h) === 'PshkPreview'))
         invalid('PREVIEW_NOT_CANONICAL[hosts]: A preview host is not the site\'s address')
     if (hosts.some((h) => h.canonical))
         for (const old of rows(
@@ -2191,7 +2196,7 @@ methods.storeMounts = (p) => {
             hostname: h.hostname,
             siteId: p.siteId,
             canonical: h.canonical ? 'Y' : 'N',
-            hostKindEnumId: h.preview ? 'PshkPreview' : 'PshkLive',
+            hostKindEnumId: kindOf(h),
         }
         old ? update(old, fields) : create(S + 'PublicSiteHost', fields)
     }
@@ -5509,7 +5514,8 @@ function execute(operation, p) {
                 invalid('Invalid configuration list')
             const allowed =
                 key === 'hosts'
-                    ? ['hostname', 'canonical']
+                    ? // preview: a theme preview host (Commerce P5, F54)
+                      ['hostname', 'canonical', 'preview']
                     : ['appMountId', 'app', 'pathPrefix', 'enabled', 'targetId']
             for (const item of value) {
                 if (
@@ -5522,7 +5528,7 @@ function execute(operation, p) {
                 for (const [field, data] of Object.entries(item))
                     if (
                         data != null &&
-                        (['canonical', 'enabled'].includes(field)
+                        (['canonical', 'enabled', 'preview'].includes(field)
                             ? typeof data !== 'boolean'
                             : typeof data !== 'string')
                     )
