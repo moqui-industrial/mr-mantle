@@ -101,7 +101,10 @@ function mount(siteId, app) {
           }
         : null
 }
-/* The absolute address of an app's page on a site: its canonical host and the app's mount; null when either is missing. */
+/* Whether a host row is a theme preview host (Commerce P5, F54): it serves only the preview render, never a page link. */
+const isPreviewHost = (host) => host?.hostKindEnumId === 'PshkPreview'
+/* The absolute address of an app's page on a site: its canonical host and the app's mount; null when either is missing
+ * (a preview host is never one). */
 function pageUrl(siteId, app, path) {
     const host = ec.entity
         .find('mantle.public.PublicSiteHost')
@@ -109,7 +112,7 @@ function pageUrl(siteId, app, path) {
         .disableAuthz()
         .one()
     const m = mount(siteId, app)
-    if (!host || !m) return null
+    if (!host || isPreviewHost(host) || !m) return null
     return 'https://' + host.hostname + m.base + path
 }
 /* The published sites with a canonical host whose enabled mount of an app targets a record, first by site id: the sites
@@ -131,11 +134,13 @@ function sitesFor(app, targetId) {
                     .condition({ siteId, state: 'published' })
                     .disableAuthz()
                     .count() > 0 &&
-                ec.entity
-                    .find('mantle.public.PublicSiteHost')
-                    .condition({ siteId, canonical: 'Y' })
-                    .disableAuthz()
-                    .count() > 0,
+                Array.from(
+                    ec.entity
+                        .find('mantle.public.PublicSiteHost')
+                        .condition({ siteId, canonical: 'Y' })
+                        .disableAuthz()
+                        .list(),
+                ).some((host) => !isPreviewHost(host)),
         )
 }
-;({ apps, targets, mount, pageUrl, sitesFor, reservedPaths })
+;({ apps, targets, mount, pageUrl, sitesFor, reservedPaths, isPreviewHost })

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Theme authoring and preview (impl-commerce P5; design-commerce §5, design-shop §12.6; mantle.public.ThemeServices'
+    authoring part, service/mantle/public/ThemeAuthoring.js). A site host has a kind: a live host serves the site, a preview
+    host (impl-commerce F54) serves only the preview render of a draft, framed by the configured BOSS origins. A preview is a
+    short-lived capability for one site, Shop mount, theme draft and actor, carried in the preview URL (never a cookie): the
+    row keeps only the token's digest. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+  <extend-entity entity-name="PublicSiteHost" package="mantle.public">
+    <field name="hostKindEnumId" type="id"><description>PshkLive (or empty) serves the site; PshkPreview serves only the theme
+      preview render and is never the canonical host.</description></field>
+    <relationship type="one" title="PublicSiteHostKind" related="moqui.basic.Enumeration">
+      <key-map field-name="hostKindEnumId"/></relationship>
+  </extend-entity>
+  <extend-entity entity-name="PublicTheme" package="mantle.public">
+    <field name="description" type="text-medium"><description>The theme's description (ThemeDetail's ThemeIdentity).</description></field>
+  </extend-entity>
+  <entity entity-name="PublicThemePreview" package="mantle.public">
+    <description>A preview of a theme's draft on a site's Shop mount for one actor (create#ThemePreview), until expireDate:
+      the page kind and representative record it shows. tokenDigest is the SHA-256 of the token the preview URL carries.</description>
+    <field name="previewId" type="id" is-pk="true"/>
+    <field name="themeId" type="id"/>
+    <field name="siteId" type="id"/>
+    <field name="appMountId" type="id"/>
+    <field name="userId" type="id-long"/>
+    <field name="tokenDigest" type="text-medium"/>
+    <field name="pageKind" type="text-short"/>
+    <field name="targetId" type="id"><description>The product, category or page (sitePageId) the page shows, when it shows one.</description></field>
+    <field name="locale" type="text-short"/>
+    <field name="draftRevision" type="number-integer"><description>The draft's revision when the preview was made.</description></field>
+    <field name="expireDate" type="date-time"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicTheme"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="PASS_THEME_PREVIEW_TOKEN" unique="true">
+      <index-field name="tokenDigest"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Public Site Host Kind" enumTypeId="PublicSiteHostKind"/>
+      <moqui.basic.Enumeration description="Live" enumId="PshkLive" enumTypeId="PublicSiteHostKind" sequenceNum="1"/>
+      <moqui.basic.Enumeration description="Theme preview" enumId="PshkPreview" enumTypeId="PublicSiteHostKind" sequenceNum="2"/>
+    </seed-data>
+  </entity>
+</entities>

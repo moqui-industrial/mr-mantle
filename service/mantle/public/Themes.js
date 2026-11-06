@@ -61,6 +61,9 @@ const viewApiVersion = 1
 const packageLimits = {maxFiles: 300, maxFileBytes: 512 * 1024, maxPackageBytes: 8 * 1024 * 1024}
 const pathPattern = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*(\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/
 const textExtensions = [".json", ".html.fancy-locked", ".css", ".svg"]
+// Commerce P5 (F55): images and fonts under assets/, kept as bytes; in a package (the adapter's, a release read, a remote
+// frontend's file) a binary file's text is the base64 of its bytes, and its digest is of that text.
+const binaryExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff2"]
 // A starter is a component's theme/{name} directory, named "component/name".
 const starterPattern = /^([a-z0-9][a-z0-9-]{0,60})\/([a-z0-9][a-z0-9-]{0,60})$/
 // Files a remote frontend may read in one call.
@@ -91,6 +94,26 @@ const parsed = (content, fallback = null) => {
     }
 }
 const isTextPath = path => textExtensions.some(extension => path.endsWith(extension))
+const isBinaryPath = path =>
+    path.startsWith("assets/") && binaryExtensions.some(extension => path.toLowerCase().endsWith(extension))
+const isPackagePath = path => isTextPath(path) || isBinaryPath(path)
+// The base64 of a stream's bytes (null for none), closing it.
+function streamBase64(stream) {
+    if (stream == null) return null
+    try {
+        return StringUtilities.base64Encode(stream.readAllBytes())
+    } finally {
+        stream.close()
+    }
+}
+// A package file's text at a location (a binary file's base64), its version when named.
+function fileText(location, path, versionName) {
+    if (!isBinaryPath(path))
+        return versionName
+            ? ec.resource.getLocationReference(location).getText(versionName)
+            : ec.resource.getLocationReference(location).getText()
+    return streamBase64(ec.resource.getLocationReference(versionName ? location + "#" + versionName : location).openStream())
+}
 const rootOf = themeId => "dbresource://mantle/public/theme/" + themeId
 
 // ===== scope =====
@@ -145,12 +168,12 @@ function readPackage(location) {
     if (paths.length > packageLimits.maxFiles)
         refuse("PACKAGE_TOO_LARGE", "A theme holds at most " + packageLimits.maxFiles + " files")
     for (const path of paths) {
-        if (!pathPattern.test(path) || !isTextPath(path)) {
+        if (!pathPattern.test(path) || !isPackagePath(path)) {
             skipped.push({path, reason: "not a theme text file"})
             ec.logger.error("Theme package " + location + ": skipped " + path + " (not a theme text file)")
             continue
         }
-        const content = ec.resource.getLocationReference(location + "/" + path).getText() ?? ""
+        const content = fileText(location + "/" + path, path) ?? ""
         bytes += content.length
         if (content.length > packageLimits.maxFileBytes)
             refuse("PACKAGE_TOO_LARGE", path + " is over " + packageLimits.maxFileBytes + " bytes")
@@ -178,7 +201,7 @@ function draftFiles(theme) {
 function putDraftFiles(theme, changes, note) {
     asSystem(() => {
         for (const [path, content] of Object.entries(changes)) {
-            if (!pathPattern.test(path) || path.split("/").includes("..") || !isTextPath(path))
+            if (!pathPattern.test(path) || path.split("/").includes("..") || !isPackagePath(path))
                 refuse("INVALID_PATH", path + " is not a theme file path")
             const ref = ec.resource.getLocationReference(theme.packageRoot + "/" + path)
             if (content == null) {
@@ -186,7 +209,8 @@ function putDraftFiles(theme, changes, note) {
             } else {
                 if (String(content).length > packageLimits.maxFileBytes)
                     refuse("PACKAGE_TOO_LARGE", path + " is over " + packageLimits.maxFileBytes + " bytes")
-                ref.putText(String(content), note || null)
+                if (isBinaryPath(path)) ref.putBytes(StringUtilities.base64Decode(String(content)), note || null)
+                else ref.putText(String(content), note || null)
             }
         }
     })
@@ -204,8 +228,7 @@ function releaseFiles(release, paths) {
     asSystem(() => {
         for (const file of pinned) {
             if (wanted && !wanted.has(file.filePath)) continue
-            const ref = ec.resource.getLocationReference(theme.packageRoot + "/" + file.filePath)
-            const content = ref.getText(file.versionName)
+            const content = fileText(theme.packageRoot + "/" + file.filePath, file.filePath, file.versionName)
             if (content == null || digestOf(content) !== file.digest)
                 refuse(
                     "RELEASE_DAMAGED",
@@ -724,6 +747,15 @@ const operations = {
 ;({
     // tables and the core for Commerce P5's editors and the Shop page view (ThemeView.js)
     pageKinds,
+    // Commerce P5: the package's bounds and paths, the manifest's composition and the representative views
+    packageLimits,
+    pathPattern,
+    isTextPath,
+    isBinaryPath,
+    isPackagePath,
+    compositionOf,
+    sampleView,
+    rootOf,
     requiredComponents,
     componentsOf,
     renderers,

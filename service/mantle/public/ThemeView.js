@@ -277,6 +277,14 @@ function getShopPage(p) {
         const row = lib.one("mantle.public.PublicThemeRelease", {releaseId: release.releaseId})
         manifest = lib.json(row && row.manifestText, null)
     }
+    // Commerce P5 (F77): the page's own projection, read once; a page that names an alternate template the active release
+    // has renders with it (else the page kind's default)
+    const own = page.view(shop, p) || {}
+    const alternate = own.page && own.page.templateKey ? String(own.page.templateKey) : null
+    const template =
+        alternate && alternate.split(".")[0] === kind && manifest && manifest.composition && manifest.composition[alternate]
+            ? alternate
+            : null
     const view = contract(
         Object.assign(
             {
@@ -292,7 +300,7 @@ function getShopPage(p) {
                 page: {kind, canonicalUrl: base + "/"},
                 navigation: mainNavigation(site.siteId, locale)
             },
-            page.view(shop, p)
+            own
         )
     )
     return {
@@ -307,9 +315,10 @@ function getShopPage(p) {
               }
             : null,
         view,
+        template,
         references: {},
         media: {},
-        sources: release ? loadSources(manifest, kind, shop) : {}
+        sources: release ? loadSources(manifest, template || kind, shop) : {}
     }
 }
 
@@ -320,6 +329,8 @@ const operations = {getShopPage}
     pages,
     sources,
     contract,
+    // Commerce P5: the preview's sources (ThemeAuthoring.js)
+    loadSources,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop page operation " + op)
         return operations[op](parameters || {})
