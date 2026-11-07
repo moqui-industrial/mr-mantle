@@ -1,0 +1,46 @@
+{
+  "id": "mantle-inventory",
+  "type": "dataset",
+  "title": "Inventory",
+  "body": {
+    "documentType": "MantleInventoryAsset",
+    "timeField": "receivedDate",
+    "signal": "business",
+    "rowFilterService": "mantle.party.PartyServices.get#OrganizationRowFilter",
+    "rowFilterParameters": {
+      "organizationField": "ownerPartyId"
+    },
+    "fieldDefaults": {
+      "productId": {
+        "lookup": {
+          "entityName": "mantle.product.Product",
+          "keyField": "productId",
+          "displayField": "productName"
+        }
+      },
+      "facilityId": {
+        "lookup": {
+          "entityName": "mantle.facility.Facility",
+          "keyField": "facilityId",
+          "displayField": "facilityName"
+        }
+      },
+      "ownerPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "statusId": {
+        "statusTypeId": "Asset"
+      },
+      "quantityOnHandTotal": {
+        "decimals": 2
+      },
+      "availableToPromiseTotal": {
+        "decimals": 2
+      }
+    }
+  }
+}

@@ -6,6 +6,10 @@
     "documentType": "MantleSalesOrderItem",
     "timeField": "placedDate",
     "signal": "business",
+    "rowFilterService": "mantle.party.PartyServices.get#OrganizationRowFilter",
+    "rowFilterParameters": {
+      "organizationField": "vendorPartyId"
+    },
     "fieldDefaults": {
       "acquireCost": {
         "unit": "USD",
