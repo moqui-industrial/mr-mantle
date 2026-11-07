@@ -293,3 +293,25 @@ feature("a refusal's listed reason, its field and the text of a request's own fa
         script.message == "State changed; reload and compare"
     }
 })
+// Shop F55: a theme release's asset by digest is a registered frontend's read only, and the immutable Cache-Control goes
+// only with that download (a product image naming it is answered no-store)
+feature("a theme asset by digest is a registered frontend's download, and only it may be immutable", {
+    when() {
+        const input = {releaseId: "R1", path: "assets/hero.png", digest: "0".repeat(64)}
+        return {
+            browser: handle({operation: "getShopThemeAsset", input}),
+            frontend: handle({operation: "getShopThemeAsset", input, clientId: CLIENT, clientVerified: true}),
+            cache: authority().downloadCache
+        }
+    },
+    then({browser, frontend, cache}) {
+        browser.error.status == 404
+        // registered, it reaches the release check: this site has no Shop mount
+        frontend.error.status == 404
+        !frontend.download
+        cache("getShopThemeAsset", "public, max-age=31536000, immutable")
+        !cache("getShopProductImage", "public, max-age=31536000, immutable")
+        cache("getShopProductImage", "public, max-age=60")
+        !cache("getShopThemeAsset", "public, max-age=31536000")
+    }
+})

@@ -1215,6 +1215,11 @@
         service: 'mantle.public.ThemeServices.get#ShopThemeFiles',
         fields: ['siteId', 'releaseId', 'paths'],
     },
+    // Shop F55: a binary asset of the active release, by its path and the digest its manifest pins (a download)
+    getShopThemeAsset: {
+        service: 'mantle.public.ThemeServices.get#ShopThemeAsset',
+        fields: ['siteId', 'releaseId', 'path', 'digest'],
+    },
     getSiteGeneration: {
         service: 'mantle.public.SiteServices.get#SiteGeneration',
         fields: ['siteId'],

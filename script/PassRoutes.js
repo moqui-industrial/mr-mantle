@@ -212,6 +212,7 @@
     ['GET', 'shop/page', 'getShopPage'],
     ['GET', 'shop/theme/release', 'getShopThemeRelease'],
     ['GET', 'shop/theme/files', 'getShopThemeFiles'],
+    ['GET', 'shop/theme/asset', 'getShopThemeAsset'],
     ['GET', 'site/generation', 'getSiteGeneration'],
     // Shop P3
     ['GET', 'shop/home', 'getShopHome'],
