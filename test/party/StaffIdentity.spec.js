@@ -3,8 +3,12 @@
 // account-wide change of an identity shared with an organization the operator does not administer is refused without
 // ADMIN_IDENTITY_GLOBAL, while a reset request is sent; a reset mails reset#Password and sets no password; an organization
 // membership is dated and ended, never deleted; and a staff account comes with its organization relationship and the grant
-// proposal's registered bundles, an unregistered group refused with nothing written. The operators hold the framework's
-// ADMIN_IDENTITY_* permissions through spec groups, never an app group. New spec, no Groovy original.
+// proposal's registered bundles, an unregistered group refused with nothing written. Scope is the organization entity filters
+// of the authorization (impl-admin §4, the P4 follow-up): the operators call under the services' ALL_USERS grant
+// (MANTLE_USER_ORG), the chief under a spec grant naming MANTLE_ACTIVE_ORG and ADMIN under its own (every organization with
+// none active, F65), an account's notes follow the same filters (F75), and relating another organization's staff to one's own
+// needs ADMIN_IDENTITY_GLOBAL (F78). The operators hold the framework's ADMIN_IDENTITY_* permissions through spec
+// groups, never an app group. New spec, no Groovy original.
 // Run: ./moq test mr-mantle --spec party/StaffIdentity
 const S = "mantle.party.IdentityServices."
 const dayMillis = 86400000
@@ -106,17 +110,56 @@ feature("two internal organizations, an operator of one, staff of each and an id
                     fromDate: effectiveTime - dayMillis
                 })
         }
+        // the chief's grant names MANTLE_ACTIVE_ORG, as an administrator's app root does; ALWAYS, so it is the one the
+        // services run under rather than their ALL_USERS grant; the notes grant names MANTLE_USER_ORG, as an app's groups do
+        call("create#moqui.security.UserGroup", {userGroupId: "SID_CHIEFS", description: "Spec identity chiefs"})
+        call("create#moqui.security.UserGroup", {userGroupId: "SID_NOTES", description: "Spec record notes"})
+        call("create#moqui.security.ArtifactGroup", {artifactGroupId: "SID_IDENTITY", description: "Spec identity services"})
+        call("create#moqui.security.ArtifactGroupMember", {
+            artifactGroupId: "SID_IDENTITY",
+            artifactTypeEnumId: "AT_SERVICE",
+            artifactName: "mantle\\.party\\.IdentityServices\\..*",
+            nameIsPattern: "Y",
+            inheritAuthz: "Y"
+        })
+        call("create#moqui.security.ArtifactGroup", {artifactGroupId: "SID_NOTES", description: "Spec record notes"})
+        call("create#moqui.security.ArtifactGroupMember", {
+            artifactGroupId: "SID_NOTES",
+            artifactTypeEnumId: "AT_SERVICE",
+            artifactName: "mantle.party.CommunicationServices.get#RecordLinkInfo",
+            nameIsPattern: "N",
+            inheritAuthz: "Y"
+        })
+        for (const [authzId, groupId, artifactGroupId, type, filterSetId] of [
+            ["SID_CHIEFS", "SID_CHIEFS", "SID_IDENTITY", "AUTHZT_ALWAYS", "MANTLE_ACTIVE_ORG"],
+            ["SID_NOTES", "SID_NOTES", "SID_NOTES", "AUTHZT_ALLOW", "MANTLE_USER_ORG"]
+        ]) {
+            call("create#moqui.security.ArtifactAuthz", {
+                artifactAuthzId: authzId,
+                userGroupId: groupId,
+                artifactGroupId,
+                authzTypeEnumId: type,
+                authzActionEnumId: "AUTHZA_ALL"
+            })
+            call("create#moqui.security.ArtifactAuthzFilter", {artifactAuthzId: authzId, entityFilterSetId: filterSetId})
+        }
         person("Operator", "sid.operator", [orgId])
+        person("Chief", "sid.chief", [orgId])
         person("Global", "sid.global", [orgId])
         person("One", "sid.one", [orgId])
         person("Two", "sid.two", [otherOrgId])
         person("Both", "sid.both", [orgId, otherOrgId])
-        for (const key of ["Operator", "Global"])
-            call("create#moqui.security.UserGroupMember", {
-                userGroupId: "SID_OPERATORS",
-                userId: users[key],
-                fromDate: effectiveTime - dayMillis
-            })
+        for (const [groupId, keys] of [
+            ["SID_OPERATORS", ["Operator", "Global", "Chief"]],
+            ["SID_CHIEFS", ["Chief"]],
+            ["SID_NOTES", ["Operator", "Two"]]
+        ])
+            for (const key of keys)
+                call("create#moqui.security.UserGroupMember", {
+                    userGroupId: groupId,
+                    userId: users[key],
+                    fromDate: effectiveTime - dayMillis
+                })
         call("create#moqui.security.UserGroupMember", {
             userGroupId: "SID_GLOBAL",
             userId: users.Global,
@@ -159,6 +202,52 @@ feature("an operator finds its organization's staff, not another organization's,
 })
 
 feature(
+    "an authorization naming MANTLE_ACTIVE_ORG sees every organization's staff with none active, the active one's with one (F65)",
+    {
+        when() {
+            // ADMIN, called directly (as the Assistant's tool is), under its own MANTLE_ACTIVE_ORG grant of the services
+            ec.artifactExecution.enableAuthz()
+            let admin
+            try {
+                admin = result(S + "find#Users", {text: "sid."}).userList.map(row => row.userId)
+            } finally {
+                ec.artifactExecution.disableAuthz()
+            }
+            return Object.assign(
+                {admin},
+                as("sid.chief", () => {
+                    const none = {
+                        found: result(S + "find#Users", {text: "sid."}),
+                        shared: result(S + "get#Account", {userId: users.Both})
+                    }
+                    ec.user.setPreference("ACTIVE_ORGANIZATION", orgId)
+                    try {
+                        return {
+                            none,
+                            active: result(S + "find#Users", {text: "sid."}),
+                            other: result(S + "get#Account", {userId: users.Two}),
+                            shared: result(S + "get#Account", {userId: users.Both})
+                        }
+                    } finally {
+                        ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+                    }
+                })
+            )
+        },
+        then({admin, none, active, other, shared}) {
+            admin.includes(users.One) && admin.includes(users.Two)
+            const noneIds = none.found.userList.map(row => row.userId)
+            noneIds.includes(users.One) && noneIds.includes(users.Two)
+            none.shared.error == "" && none.shared.sharedBeyondScope == false
+            const activeIds = active.userList.map(row => row.userId)
+            activeIds.includes(users.One) && !activeIds.includes(users.Two)
+            other.error.includes("RECORD_UNAVAILABLE")
+            shared.sharedBeyondScope == true && shared.canChangeAccount == false
+        }
+    }
+)
+
+feature(
     "the shared identity's account-wide change is refused without ADMIN_IDENTITY_GLOBAL; a reset request is sent and sets no password",
     {
         when() {
@@ -197,46 +286,52 @@ feature(
     }
 )
 
-feature("an organization membership is dated and ended, never deleted, and refused for another organization", {
-    when() {
-        return as("sid.operator", () => {
-            const added = result(S + "store#OrganizationMembership", {
-                partyId: parties.Two,
-                organizationPartyId: orgId,
-                relationshipTypeEnumId: "PrtAgent",
-                reason: "Covering"
-            })
-            const duplicate = result(S + "store#OrganizationMembership", {
-                partyId: parties.Two,
-                organizationPartyId: orgId,
-                relationshipTypeEnumId: "PrtAgent"
-            })
-            const elsewhere = result(S + "store#OrganizationMembership", {partyId: parties.One, organizationPartyId: otherOrgId})
-            const stale = result(S + "store#OrganizationMembership", {
-                partyRelationshipId: added.partyRelationshipId,
-                expectedRevision: "1"
-            })
-            const ended = result(S + "store#OrganizationMembership", {
-                partyRelationshipId: added.partyRelationshipId,
-                expectedRevision: added.revision,
-                reason: "Cover over"
-            })
-            return {added, duplicate, elsewhere, stale, ended}
-        })
-    },
-    then({added, duplicate, elsewhere, stale, ended}) {
-        added.applied == true && duplicate.reasonCode == "MEMBERSHIP_EXISTS"
-        elsewhere.error.includes("RECORD_UNAVAILABLE")
-        stale.reasonCode == "REVISION_CHANGED"
-        ended.applied == true
-        const kept = rows("mantle.party.PartyRelationship", {partyRelationshipId: added.partyRelationshipId})
-        kept.length == 1 && kept[0].thruDate != null
-        rows("moqui.entity.EntityAuditLog", {
-            changedEntityName: "mantle.party.PartyRelationship",
-            pkPrimaryValue: added.partyRelationshipId
-        }).some(row => row.changedFieldName == "thruDate" && row.changeReason == "Cover over")
+feature(
+    "an organization membership is dated and ended, never deleted, refused for another organization, and relating another's staff needs ADMIN_IDENTITY_GLOBAL (F78)",
+    {
+        when() {
+            const cover = {partyId: parties.Two, organizationPartyId: orgId, relationshipTypeEnumId: "PrtAgent"}
+            // Two is the other organization's staff: relating it to the operator's organization would make it readable
+            const crossing = as("sid.operator", () => result(S + "store#OrganizationMembership", cover))
+            const {added, duplicate} = as("sid.global", () => ({
+                added: result(S + "store#OrganizationMembership", Object.assign({reason: "Covering"}, cover)),
+                duplicate: result(S + "store#OrganizationMembership", cover)
+            }))
+            return Object.assign(
+                {crossing, added, duplicate},
+                as("sid.operator", () => {
+                    const elsewhere = result(S + "store#OrganizationMembership", {
+                        partyId: parties.One,
+                        organizationPartyId: otherOrgId
+                    })
+                    const stale = result(S + "store#OrganizationMembership", {
+                        partyRelationshipId: added.partyRelationshipId,
+                        expectedRevision: "1"
+                    })
+                    const ended = result(S + "store#OrganizationMembership", {
+                        partyRelationshipId: added.partyRelationshipId,
+                        expectedRevision: added.revision,
+                        reason: "Cover over"
+                    })
+                    return {elsewhere, stale, ended}
+                })
+            )
+        },
+        then({crossing, added, duplicate, elsewhere, stale, ended}) {
+            crossing.applied == false && crossing.reasonCode == "IDENTITY_GLOBAL"
+            added.applied == true && duplicate.reasonCode == "MEMBERSHIP_EXISTS"
+            elsewhere.error.includes("RECORD_UNAVAILABLE")
+            stale.reasonCode == "REVISION_CHANGED"
+            ended.applied == true
+            const kept = rows("mantle.party.PartyRelationship", {partyRelationshipId: added.partyRelationshipId})
+            kept.length == 1 && kept[0].thruDate != null
+            rows("moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.party.PartyRelationship",
+                pkPrimaryValue: added.partyRelationshipId
+            }).some(row => row.changedFieldName == "thruDate" && row.changeReason == "Cover over")
+        }
     }
-})
+)
 
 feature(
     "a staff account comes with its organization and registered bundles; an unregistered group is refused with nothing written",
@@ -311,11 +406,12 @@ feature(
     }
 )
 
-feature("an account's notes are read by an identity viewer within its scope only (review R3)", {
+feature("an account's notes follow the organization filters, and with none named are nobody's (F75)", {
     when() {
-        // as the user with authorization off, as under an app root's inherited grant: the record rule alone decides
-        const visible = (username, userId) => {
+        // as the user, with authorization on (the notes grant's MANTLE_USER_ORG) or off (no organization filter)
+        const visible = (username, userId, authz = true) => {
             login(username, "moqui1!!")
+            if (authz) ec.artifactExecution.enableAuthz()
             try {
                 return result("mantle.party.CommunicationServices.get#RecordLinkInfo", {
                     recordEntityName: "moqui.security.UserAccount",
@@ -323,16 +419,21 @@ feature("an account's notes are read by an identity viewer within its scope only
                     checkOnly: true
                 }).recordVisible
             } finally {
+                ec.artifactExecution.disableAuthz()
                 login("john.doe")
             }
         }
         return {
             inScope: visible("sid.operator", users.One),
             outOfScope: visible("sid.operator", users.Two),
-            noPermission: visible("sid.one", users.Both)
+            otherOrganization: visible("sid.two", users.One),
+            ownOrganization: visible("sid.two", users.Both),
+            noFilter: visible("sid.operator", users.One, false)
         }
     },
-    then({inScope, outOfScope, noPermission}) {
-        inScope == true && outOfScope == false && noPermission == false
+    then({inScope, outOfScope, otherOrganization, ownOrganization, noFilter}) {
+        inScope == true && outOfScope == false
+        otherOrganization == false && ownOrganization == true
+        noFilter == false
     }
 })
