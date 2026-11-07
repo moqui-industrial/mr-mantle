@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Staff invitations (mantle.party.IdentityServices; mr-boss impl-admin P5, design-admin §4.1, §16), named to load after
+    MantleSetupData (its filter sets): the invitation's states,
+    the invitation email and the organization filters of its records. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.StatusType statusTypeId="UserInvitation" description="Staff invitation"/>
+    <moqui.basic.StatusItem statusId="UinvPending" statusTypeId="UserInvitation" description="Pending" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="UinvAccepted" statusTypeId="UserInvitation" description="Accepted" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="UinvRevoked" statusTypeId="UserInvitation" description="Revoked" sequenceNum="3"/>
+    <!-- not stored: a pending invitation past its expiry reads as expired -->
+    <moqui.basic.StatusItem statusId="UinvExpired" statusTypeId="UserInvitation" description="Expired" sequenceNum="4"/>
+
+    <!-- The invitation email (EmailType EMT_ACCOUNT_INVITE, framework BasicEntities): the organization, the inviter, the access
+        proposed, the inviter's note and the acceptance link /i/<token>, sent without an EmailMessage record so the link is not
+        stored (invite#User and resend#Invitation, createEmailMessage false) -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_STAFF_INVITATION" description="Staff Invitation" emailServerId="SYSTEM"
+            emailTypeEnumId="EMT_ACCOUNT_INVITE" bodyScreenLocation="component://mr-mantle/template/party/StaffInvitation.xml"
+            webappName="webroot" fromAddress="" ccAddresses="" bccAddresses="" subject="${organizationName}: you are invited to join"
+            sendPartial="Y"/>
+
+    <!-- An invitation is read under an app's organization filters by its organization (the Users area's MANTLE_USER_ORG for
+        the identity operator, MANTLE_ACTIVE_ORG for the administrator), beside the services' own scope check -->
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_UINV" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.UserInvitation" filterMap="({organizationPartyId: filterOrgIds})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_UINV" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.UserInvitation" filterMap="({organizationPartyId: activeOrgId})"/>
+</entity-facade-xml>

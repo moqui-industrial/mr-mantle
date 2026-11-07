@@ -190,4 +190,206 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('resetAuthentication', context))</script></actions>
     </service>
+    <!-- Staff invitations (impl-admin P5; design-admin §4.1 Invitations, §4 Invitations and AcceptInvitation, §16): the bodies are
+        Invitations.js. invite#User, find#Invitations, resend#Invitation, revoke#Invitation and reveal#InvitationLink are the
+        inviter's (ADMIN_IDENTITY_MANAGE, ADMIN_IDENTITY_VIEW to read, an organization in scope); check#InvitationToken,
+        get#InvitationSummary, accept#Invitation and confirm#InvitationFactor the token holder's, signed in or not (the token
+        route /i/<token>), each checking the token first. A token is never an out-parameter but of reveal#InvitationLink, once. -->
+    <service verb="invite" noun="User" allow-remote="false">
+        <description>One staff invitation: emailAddress (an existing person's, partyId, or a new person's with firstName and
+            lastName), an internal organization the caller administers, the relationship (relationshipTypeEnumId, PrtEmployee by
+            default) and the grant proposal (bundleGroupIdList: registered bundles the app supplies, checked as the caller by
+            the framework's check#GrantProposal; a privileged group or a group granting a sealed permission is refused), with an
+            optional message and expiry (expireDays, 7, at most 30). The token is mailed when the instance can send mail
+            (mailSent); otherwise linkPending says the caller shows the link once through reveal#InvitationLink. A pending
+            invitation of the address to the organization is refused (resend it); a retry with the same operationKey answers
+            the invitation it made (retried). An existing person (the one chosen, or the owner of the address's account) who works for
+            an organization the caller does not administer, or who has an account and works for no internal organization (a site
+            identity), needs ADMIN_IDENTITY_GLOBAL (IDENTITY_GLOBAL); an address of another person's account is refused
+            (ADDRESS_IN_USE). Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="emailAddress" required="true"><text-email/></parameter>
+            <parameter name="partyId"/>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="relationshipTypeEnumId"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="message"/>
+            <parameter name="expireDays" type="Integer"/>
+            <parameter name="operationKey"/>
+            <parameter name="baseUrl"><description>The site root of the link, such as https://boss.example.com; else the
+                template's web host or its mail server's web base URL</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="invitationId"/>
+            <parameter name="state"/>
+            <parameter name="mailSent" type="Boolean"/>
+            <parameter name="linkPending" type="Boolean"/>
+            <parameter name="expiresDate" type="Long"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('inviteUser', context))</script></actions>
+    </service>
+    <service verb="find" noun="Invitations" allow-remote="false">
+        <description>The invitations of the organizations the caller administers (organizationPartyId among them), narrowed by
+            text (address or name) and state (pending, accepted, revoked, expired), newest first, paged: address, person,
+            organization, the access by name, state, expiry, sends, inviter, revision and what the caller may do. Never a token
+            or its hash. Needs ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="text"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer" default="0"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invitationList" type="List"/>
+            <parameter name="invitationListCount" type="Integer"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('findInvitations', context))</script></actions>
+    </service>
+    <service verb="resend" noun="Invitation" allow-remote="false">
+        <description>A new token for a pending or expired invitation at its revision (expectedRevision), with a new expiry: the
+            earlier token no longer matches. Mailed, or linkPending as invite#User. The proposal and invite#User's
+            ADMIN_IDENTITY_GLOBAL rule are checked again as the caller.
+            Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="invitationId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="expireDays" type="Integer"/>
+            <parameter name="baseUrl"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="invitationId"/>
+            <parameter name="revision"/>
+            <parameter name="mailSent" type="Boolean"/>
+            <parameter name="linkPending" type="Boolean"/>
+            <parameter name="expiresDate" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('resendInvitation', context))</script></actions>
+    </service>
+    <service verb="revoke" noun="Invitation" allow-remote="false">
+        <description>Revoke a pending or expired invitation at its revision, with the reason audit-logged; its token then reads
+            as no longer valid. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="invitationId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('revokeInvitation', context))</script></actions>
+    </service>
+    <service verb="reveal" noun="InvitationLink" allow-remote="false">
+        <description>The acceptance link of an invitation the instance could not mail (no mail server), once, to whoever sent or
+            resent it, within fifteen minutes: a new token is made now and only its hash kept; linkShownDate, audited, records
+            the showing (never the token). Refused (LINK_SHOWN) after that: a resend makes a new link. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="invitationId" required="true"/>
+            <parameter name="baseUrl"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="acceptUrl"/>
+            <parameter name="emailAddress"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('revealInvitationLink', context))</script></actions>
+    </service>
+    <service verb="check" noun="InvitationToken" authenticate="anonymous-view" allow-remote="false">
+        <description>The token check of the token route i (/i/&lt;token&gt;; the framework calls it with token and routeName before
+            anything of the page runs): every well-formed token is valid, so the page says "This invitation is no longer valid"
+            for a spent token and an unknown one alike; routeContext is {open}. Read only.</description>
+        <in-parameters>
+            <parameter name="token" required="true"/>
+            <parameter name="routeName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="valid" type="Boolean"/>
+            <parameter name="routeContext" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('checkInvitationToken', context))</script></actions>
+    </service>
+    <service verb="get" noun="InvitationSummary" authenticate="anonymous-view" allow-remote="false">
+        <description>For the holder of a token: step (invitation, factor, done or spent) and, while open, the organization, the
+            inviter, the invited address, the access proposed by name (no group ids), the expiry, how to accept (accountMode:
+            signedIn, wrongAccount, signIn, create), whether a factor will be asked, and on the factor step, only for the session
+            that accepted or the account signed in, the authenticator's setup. A spent or unknown token answers step spent and message alone. Read only.</description>
+        <in-parameters><parameter name="token" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="open" type="Boolean"/>
+            <parameter name="step"/>
+            <parameter name="message"/>
+            <parameter name="organizationName"/>
+            <parameter name="inviterName"/>
+            <parameter name="emailAddress"/>
+            <parameter name="personName"/>
+            <parameter name="bundleList" type="List"/>
+            <parameter name="expiresDate" type="Long"/>
+            <parameter name="accountMode"/>
+            <parameter name="signedInName"/>
+            <parameter name="signedInAsInvited" type="Boolean"/>
+            <parameter name="factorRequired" type="Boolean"/>
+            <parameter name="factor" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('getInvitationSummary', context))</script></actions>
+    </service>
+    <service verb="accept" noun="Invitation" authenticate="anonymous-all" allow-remote="false">
+        <description>Accept an open invitation as its token's holder: the signed-in account with the invited address, or with no
+            one signed in a new account (username, userFullName, newPassword, newPasswordVerify; the invited address, through
+            create#PartyUserAccount) when no account has the address (else ACCOUNT_EXISTS: sign in first). The inviter's
+            authority and each bundle are checked again, and invite#User's ADMIN_IDENTITY_GLOBAL rule for the inviter against
+            the redeeming account's person (IDENTITY_GLOBAL); then the organization relationship, the memberships of the proposal
+            (authorization on, so the framework's sealed and privileged EECAs decide each) and, when a bundle's group requires a
+            factor the account lacks, an authenticator factor to confirm (step factor); all or nothing. Nothing of the request
+            names the organization or the access. A spent token: INVITATION_SPENT, "This invitation is no longer valid".</description>
+        <in-parameters>
+            <parameter name="token" required="true"/>
+            <parameter name="username"/>
+            <parameter name="userFullName"/>
+            <parameter name="newPassword"/>
+            <parameter name="newPasswordVerify"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="userId"/>
+            <parameter name="accountCreated" type="Boolean"/>
+            <parameter name="addedGroupIds" type="List"/>
+            <parameter name="step"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('acceptInvitation', context))</script></actions>
+    </service>
+    <service verb="confirm" noun="InvitationFactor" authenticate="anonymous-all" allow-remote="false">
+        <description>The first code (code) of the authenticator factor an acceptance made, from the token's holder in the session
+            that accepted (or signed in as the account), within a day of the acceptance; a wrong code counts as a failed sign-in of the account (CODE_INVALID).</description>
+        <in-parameters>
+            <parameter name="token" required="true"/>
+            <parameter name="code" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="step"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('confirmInvitationFactor', context))</script></actions>
+    </service>
 </services>

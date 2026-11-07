@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Organization-scoped staff identity (mantle.party.IdentityServices; mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P5):
+    the staff invitation. Separate from PASS's PublicSiteInvitation, which is a site's public identity flow and never grants
+    staff access. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="UserInvitation" package="mantle.party" cache="never">
+        <description>A staff invitation: an address, the organization the invited person will work for (a relationship of
+            relationshipTypeEnumId), the grant proposal (registered bundles, checked when it is sent and again when it is accepted)
+            and a single-use token, kept only as its hash, that lasts until expiresDate. statusId is UinvPending until it is
+            accepted (UinvAccepted, with the account it went to) or revoked (UinvRevoked); a pending one past expiresDate reads
+            as expired (UinvExpired). A resend gives it a new token, so the earlier one no longer matches. operationKey makes a
+            retry of the same request answer this invitation. The token itself is mailed, or shown once to the inviter when
+            the instance cannot send mail (linkShownDate); it is never stored, listed or logged. Read and changed only through
+            mantle.party.IdentityServices.</description>
+        <field name="invitationId" type="id" is-pk="true"/>
+        <field name="emailAddress" type="text-medium"><description>The invited address; the account the invitation
+            goes to has it.</description></field>
+        <field name="firstName" type="text-medium"><description>The person's name when the invitation makes a new
+            person.</description></field>
+        <field name="lastName" type="text-medium"/>
+        <field name="partyId" type="id"><description>An existing person the inviter chose, or the person the acceptance
+            made or matched.</description></field>
+        <field name="userId" type="id"><description>The account the invitation was accepted with.</description></field>
+        <field name="organizationPartyId" type="id"><description>The internal organization the person will work
+            for; the organization entity filters apply to it.</description></field>
+        <field name="relationshipTypeEnumId" type="id"><description>PrtEmployee, PrtAgent or PrtMember.</description></field>
+        <field name="bundleGroupIds" type="text-medium"><description>The grant proposal: registered bundles (UserGroup
+            ids, comma separated) the app supplied, validated structured data, never executable.</description></field>
+        <field name="message" type="text-long"><description>The inviter's note in the email.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="tokenHash" type="text-medium"><description>The hash of the current token (singleUseCodeHash);
+            never the token.</description></field>
+        <field name="expiresDate" type="date-time" enable-audit-log="true"/>
+        <field name="sentDate" type="date-time" enable-audit-log="true"><description>When the current token was
+            issued (sent, or made for the link shown).</description></field>
+        <field name="sendCount" type="number-integer"/>
+        <field name="mailSent" type="text-indicator"><description>Y when the current token went out by mail.</description></field>
+        <field name="linkShownDate" type="date-time" enable-audit-log="true"><description>When the acceptance link of the
+            current token was shown to the inviter, the instance having no mail server; audited, without the token.</description></field>
+        <field name="acceptedDate" type="date-time" enable-audit-log="true"/>
+        <field name="revokedDate" type="date-time" enable-audit-log="true"/>
+        <field name="factorId" type="id"><description>The authenticator factor the acceptance made when a bundle's group
+            requires one, until its first code confirms it.</description></field>
+        <field name="acceptVisitId" type="id"><description>The session (Visit) the acceptance ran in: only it, or the account
+            signed in, sees the factor step and its key.</description></field>
+        <field name="inviterUserId" type="id"/>
+        <field name="revokedByUserId" type="id"/>
+        <field name="operationKey" type="text-medium"><description>The caller's key of the request: a retry with the same
+            key answers this invitation.</description></field>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Inviter" related="moqui.security.UserAccount">
+            <key-map field-name="inviterUserId" related="userId"/></relationship>
+        <index name="USER_INVITE_TOKEN" unique="true"><index-field name="tokenHash"/></index>
+        <index name="USER_INVITE_OPKEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="USER_INVITE_EMAIL"><index-field name="emailAddress"/></index>
+    </entity>
+</entities>
