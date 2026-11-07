@@ -291,7 +291,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="failedCount" from="converted.failedCount"/>
         </actions>
     </service>
-    <service verb="convert" noun="PurchaseSourcingGroup" allow-remote="false">
+    <service verb="convert" noun="PurchaseSourcingGroup" transaction="cache" allow-remote="false">
         <description>Internal to convert#PurchaseSourcing, which runs it in a transaction of its own per supplier group: the
             group's requirements locked in id order, each line read again (its refusal by name), the draft purchase order and
             its lines (or the drop-ship route) and the lineage. Requires PURCHASE_ORDER_EDIT.</description>
