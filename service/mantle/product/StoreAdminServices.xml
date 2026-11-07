@@ -760,4 +760,27 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <!-- Commerce P15: the store's readiness and configuration summary (StoreSummary.js; design-commerce §13) -->
+    <service verb="get" noun="StoreSummary" allow-remote="false">
+        <description>A store's readiness and configuration summary for StoreDetail's CSV and print: its readiness findings and
+            grouped settings (general, sites, facilities, staff, emails, order checks, search and content, settings, checkout),
+            read through get#Store, get#StoreSites, check#StoreReadiness and get#CheckoutSettings (COMMERCE_VIEW in the store's
+            scope, as each checks), with every credential redacted (gateway configuration never read, a carrier account said to
+            be set, a value named as a credential shown [redacted]), as of now; a section that cannot be read is named and the
+            rest made. The sections, the CSV text and file name, and a printable HTML page.</description>
+        <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="store" type="Map"/>
+            <parameter name="asOfText"/>
+            <parameter name="ready" type="Boolean"/>
+            <parameter name="readinessText"/>
+            <parameter name="sections" type="List"/>
+            <parameter name="csvText"/>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreSummary.js').execute('getStoreSummary', context))</script>
+        </actions>
+    </service>
 </services>

@@ -288,6 +288,11 @@ function endTopicPending(topicId, partyId, productStoreId) {
     const contactListId = topicList(topicId, productStoreId, false)
     if (contactListId && partyId) endPending(contactListId, partyId)
 }
+// A party's own pending membership of a list declined (F124: the preferences page's decline of a checkout's news choice);
+// a list with no pending membership of the party is left as it is.
+function declinePending(contactListId, partyId) {
+    if (contactListId && partyId) endPending(contactListId, partyId)
+}
 function endPending(contactListId, partyId) {
     for (const row of currentRows(contactListId, partyId))
         if (row.statusId === "CLPT_PENDING")
@@ -455,6 +460,7 @@ const operations = {applyOptIn, makeConfirmLink}
     topicPending,
     topicListTypes,
     endTopicPending,
+    declinePending,
     checkoutView,
     askedOf,
     chosenFrom,

@@ -352,6 +352,65 @@ feature("a withdrawn product is never served, and a rebuild leaves it out", {
     }
 })
 
+// Commerce P15 (F154, F156): a feed's category is one the store may carry (not another organization's); and a membership of the
+// store's view allow-list category that ends with no generation change is a change taken effect, so the active build is
+// checked again and not served while it holds a product no longer public.
+feature(
+    "P15: a feed names only the store's categories; an allow-list membership ending without a generation change is rechecked",
+    {
+        when() {
+            const foreign = system(() => {
+                make("mantle.product.category.ProductCategory", {
+                    productCategoryId: prefix + "_CAT_B",
+                    categoryName: "Organization B's",
+                    ownerPartyId: orgB
+                })
+                make("mantle.product.category.ProductCategory", {
+                    productCategoryId: prefix + "_ALLOW",
+                    categoryName: "Allowed",
+                    ownerPartyId: orgA
+                })
+                make("mantle.product.category.ProductCategoryMember", {
+                    productCategoryId: prefix + "_ALLOW",
+                    productId: ids.mug,
+                    fromDate: 0
+                })
+                make(S + "ProductStoreCategory", {
+                    productStoreId: ids.store,
+                    productCategoryId: prefix + "_ALLOW",
+                    storeCategoryTypeEnumId: "PsctViewAllow",
+                    fromDate: 0
+                })
+                return null
+            })
+            const otherCategory = newFeed({feedKey: "spec-foreign", productCategoryId: prefix + "_CAT_B"})
+            const before = served("spec-main")
+            // the mug leaves the allow list now: no generation change
+            system(() =>
+                ec.entity
+                    .find("mantle.product.category.ProductCategoryMember")
+                    .condition({productCategoryId: prefix + "_ALLOW", productId: ids.mug})
+                    .updateAll({thruDate: new Date(Date.now() - 1)})
+            )
+            const after = served("spec-main")
+            // the allow list ended: the mug is public again and the build is served
+            system(() =>
+                ec.entity
+                    .find(S + "ProductStoreCategory")
+                    .condition({productStoreId: ids.store, productCategoryId: prefix + "_ALLOW"})
+                    .updateAll({thruDate: new Date(Date.now() - 1)})
+            )
+            return {foreign, otherCategory, before, after, restored: served("spec-main")}
+        },
+        then(r) {
+            code(r.otherCategory) == "VALUE_INVALID"
+            r.before.content.includes(ids.mug)
+            code(r.after) == "FEED_UNAVAILABLE"
+            r.restored.content.includes(ids.mug)
+        }
+    }
+)
+
 feature("a fatal build leaves the active build served; the job goes on past a failing feed; channel health counts both", {
     when() {
         const failing = newFeed({siteId: ids.hostless, feedKey: "spec-hostless", scheduleEnumId: "PsfsHourly"})

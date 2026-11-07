@@ -145,6 +145,8 @@ function touch(cart) {
     lib.call("update#" + A, {
         cartAccessId: cart.row.cartAccessId,
         lastActivityDate: ec.user.nowTimestamp,
+        // a new visit: cart recovery's mark of the last one cleared (Commerce F133)
+        recoveryHandledDate: null,
         expireDate: days(cart.row.customerPartyId ? limits.accountDays : limits.guestDays)
     })
 }
@@ -658,6 +660,7 @@ function attachCart(p) {
     missing = missing.concat(reprice(shop, target).filter(name => !missing.includes(name)))
     const token = rotate(target.row, {
         lastActivityDate: ec.user.nowTimestamp,
+        recoveryHandledDate: null,
         expireDate: days(limits.accountDays)
     })
     return answer(shop, target, {token, attached: true, merged, unavailableItems: missing})

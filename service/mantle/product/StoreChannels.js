@@ -471,7 +471,7 @@ function ediDocumentRow(doc) {
 }
 
 // A binding's typed parameters from the request (a name not given keeps its value), each checked by its kind.
-function parametersOf(handler, p, current) {
+function parametersOf(handler, p, current, organizationPartyId) {
     const values = Object.assign({}, current)
     for (const [name, def] of Object.entries(handler.parameters || {})) {
         if (p[name] == null) continue
@@ -479,10 +479,16 @@ function parametersOf(handler, p, current) {
         if (value && def.kind === "enum" && one("moqui.basic.Enumeration", {enumId: value})?.enumTypeId !== def.enumTypeId)
             denied("VALUE_INVALID", "Choose a valid " + def.label.toLowerCase())
         if (value && def.kind === "customer") {
+            // the store organization's own customer (F167): a Customer-role party not disabled, not an internal organization,
+            // not someone else's private contact, owned by the store's organization or shared (_NA_)
             const party = one("mantle.party.PartyDetail", {partyId: value})
             const customer = !!one("mantle.party.PartyRole", {partyId: value, roleTypeId: "Customer"})
+            const internal = !!one("mantle.party.PartyRole", {partyId: value, roleTypeId: "OrgInternal"})
             const privateToOther = party?.privateOwnerUserId && party.privateOwnerUserId !== ec.user.userId
-            if (!party || !customer || privateToOther) denied("CUSTOMER_UNAVAILABLE", "Customer " + value + " is not available")
+            const owned =
+                party && (party.ownerPartyId === "_NA_" || (organizationPartyId && party.ownerPartyId === organizationPartyId))
+            if (!party || party.disabled === "Y" || !customer || internal || privateToOther || !owned)
+                denied("CUSTOMER_UNAVAILABLE", "Customer " + value + " is not available")
         }
         values[name] = value
     }
@@ -509,7 +515,7 @@ function storeStoreIntegration(p) {
         const version = Number(p.mappingVersion || registry.mappingVersion || handler.versions[0])
         if (!handler.versions.includes(version))
             denied("MAPPING_UNSUPPORTED", "Mapping version " + version + " is not registered")
-        const values = parametersOf(handler, p, {})
+        const values = parametersOf(handler, p, {}, store.organizationPartyId)
         const created = call("create#" + REMOTE, {
             description,
             productStoreId: store.productStoreId,
@@ -553,7 +559,12 @@ function storeStoreIntegration(p) {
             denied("MAPPING_UNSUPPORTED", "Mapping version " + version + " is not registered")
         changes.storeMappingVersion = version
     }
-    const values = parametersOf(b.handler, p, mappingOf(remote))
+    const values = parametersOf(
+        b.handler,
+        p,
+        mappingOf(remote),
+        one(STORE, {productStoreId: b.productStoreId})?.organizationPartyId
+    )
     changes.storeMappingJson = JSON.stringify(values)
     if (p.enabled != null && p.enabled !== "") {
         const enable = indicator(p.enabled)
@@ -1180,6 +1191,9 @@ function consumeChannelOrder(p) {
     call("mantle.order.OrderServices.place#Order", {orderId, requireInventory: false})
     call("update#" + MESSAGE, {systemMessageId: m.systemMessageId, orderId, orderPartSeqId})
     call("create#mantle.order.OrderSystemMessage", {orderId, systemMessageId: m.systemMessageId, externalId: order.externalId})
+    // the matching replays kept while this original had no order (it had failed) now answer its order (F168)
+    for (const replay of rows(MESSAGE, {duplicateOfMessageId: m.systemMessageId, statusId: "SmsgConsumed"}))
+        if (!replay.orderId) call("update#" + MESSAGE, {systemMessageId: replay.systemMessageId, orderId, orderPartSeqId})
     return {}
 }
 
@@ -1239,6 +1253,21 @@ function parseCsv(textValue) {
         return order
     })
 }
+// The length of a text in UTF-8 bytes.
+function utf8Length(value) {
+    let bytes = 0
+    for (let index = 0; index < value.length; index++) {
+        const unit = value.charCodeAt(index)
+        if (unit < 0x80) bytes += 1
+        else if (unit < 0x800) bytes += 2
+        else if (unit >= 0xd800 && unit < 0xdc00 && index + 1 < value.length) {
+            // a surrogate pair: one character of four bytes
+            bytes += 4
+            index++
+        } else bytes += 3
+    }
+    return bytes
+}
 function importFileText(p) {
     const file = p.importFile
     if (file && Number(file.size) > 0) {
@@ -1254,7 +1283,9 @@ function importFileText(p) {
         return {textValue: file.getString("UTF-8"), fileName: String(file.getName() || "")}
     }
     const textValue = String(p.importText ?? "")
-    if (textValue.length > limits.bytes) denied("IMPORT_TOO_LARGE", "An import file holds at most 2 MiB")
+    // bytes, as the upload's limit counts them (F169): a character is one to four bytes in UTF-8
+    if (textValue.length > limits.bytes || utf8Length(textValue) > limits.bytes)
+        denied("IMPORT_TOO_LARGE", "An import file holds at most 2 MiB")
     return {textValue, fileName: String(p.fileName || "")}
 }
 function batchIn(s, systemMessageId) {
@@ -1400,6 +1431,20 @@ function getChannelImport(p) {
         .join(", ")
     return out
 }
+// claim#ChannelImport (commit#ChannelImport's claim, its own transaction): the batch locked and, while still staged, marked
+// committing. {claimed}.
+function claimChannelImport(p) {
+    const s = scope()
+    batchIn(s, p.systemMessageId)
+    const batch = find(MESSAGE, {systemMessageId: p.systemMessageId}).forUpdate(true).one()
+    if (!batch || batch.statusId !== "SmsgStaged") return {claimed: false}
+    call("update#" + MESSAGE, {
+        systemMessageId: batch.systemMessageId,
+        statusId: "SmsgConsuming",
+        lastAttemptDate: ec.user.nowTimestamp
+    })
+    return {claimed: true}
+}
 // commit#ChannelImport: the staged batch, as previewed (its digest), committed with a reason: its orders received through the
 // API's connector path (receive#ChannelOrders, the batch as their parent) and each consumed in its own transaction; a
 // failing order does not stop the others. Committing again answers the batch's outcome; a commit that fails before its
@@ -1420,11 +1465,15 @@ function commitChannelImport(p) {
     if (!reason) denied("REASON_REQUIRED", "Give a reason for the import")
     if (!b.handler?.imports || !registered(b.connectorId)) denied("IMPORT_UNSUPPORTED", "The integration does not import files")
     const id = batch.systemMessageId
+    // a claim of the staged batch under its lock, in a transaction of its own (F165): of two concurrent commits only one
+    // finds it staged; the other is refused as busy
+    let claim
     try {
-        probe("update#" + MESSAGE, {systemMessageId: id, statusId: "SmsgConsuming", lastAttemptDate: ec.user.nowTimestamp})
+        claim = probe(SERVICES + "claim#ChannelImport", {systemMessageId: id})
     } catch (error) {
         denied("BATCH_BUSY", "Batch " + id + " is being committed")
     }
+    if (!claim.claimed) denied("BATCH_BUSY", "Batch " + id + " is being committed")
     let kept
     try {
         const orders = importFormats[batch.docType].parse(String(batch.messageText || ""))
@@ -1481,6 +1530,7 @@ const operations = {
     prepareChannelImport,
     getChannelImport,
     commitChannelImport,
+    claimChannelImport,
     connectorOptions: () => ({connectors: (scope(), connectorOptions())})
 }
 ;({
