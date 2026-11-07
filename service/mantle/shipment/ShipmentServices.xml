@@ -477,7 +477,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Order Shipment Services ========== -->
     <!-- ============================================= -->
 
-    <service verb="ship" noun="OrderPart">
+    <service verb="ship" noun="OrderPart" transaction="cache">
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderPartSeqId" required="true"/>
@@ -2106,7 +2106,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Status Update Services ========== -->
     <!-- ============================================ -->
 
-    <service verb="pack" noun="Shipment">
+    <service verb="pack" noun="Shipment" transaction="cache">
         <in-parameters>
             <parameter name="shipmentId" required="true"/>
             <parameter name="packedDate" type="Timestamp"/>

@@ -433,7 +433,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Create Payment Services ========== -->
     <!-- ============================================= -->
 
-    <service verb="create" noun="Payment">
+    <service verb="create" noun="Payment" transaction="cache">
         <in-parameters>
             <auto-parameters entity-name="mantle.account.payment.Payment" include="nonpk">
                 <exclude field-name="acctgTransResultEnumId"/><exclude field-name="reconcileStatusId"/>
@@ -3219,7 +3219,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
     </service>
-    <service verb="apply" noun="Settlement" allow-remote="false">
+    <service verb="apply" noun="Settlement" transaction="cache" allow-remote="false">
         <description>Confirm the user's own retained settlement review once: recheck it against current balances, postings
             and policy, then apply each allocation through apply#InvoicePayment, apply#PaymentToPayment or
             apply#InvoiceToInvoice on the reviewed date and book day, and each adjustment as a credit memo through
