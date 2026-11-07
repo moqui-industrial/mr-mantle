@@ -392,4 +392,146 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('confirmInvitationFactor', context))</script></actions>
     </service>
+    <!-- An account's lifecycle (impl-admin P6; design-admin §4.1 Offboarding, §4 UserDetail LifecycleActions, LifecycleOperations and
+        LifecycleDetail): the bodies are Lifecycle.js. kind is disable (global: now, revoking access at once and disabling the
+        account for good, or at a future effectiveDate written to the account's terminateDate), removeOrganization (that
+        organization's relationships end, and the account's memberships when it works for no other) or restore (enabled again,
+        no credential or schedule brought back). Each step is independent: a failed one leaves the others, and the revocation, in
+        place and is retried with retry#LifecycleStep. Reads need ADMIN_IDENTITY_VIEW, requests and retries ADMIN_IDENTITY_MANAGE;
+        a global operation, or a removal that ends memberships, is account-wide (ADMIN_IDENTITY_GLOBAL for a shared identity; never
+        an account holding a privileged group or sealed permission the caller lacks); nothing that leaves no administration path;
+        never the caller's own account. -->
+    <service verb="preview" noun="Lifecycle" allow-remote="false">
+        <description>What a lifecycle operation of an identity in scope would do, without doing it: the relationships and
+            memberships that end, the credentials and live sessions it revokes (counts and metadata only), whether owned resources
+            go to new owners (movesResources: a disable, or a removal leaving no organization; the app's participants answer which),
+            the consequences in words, and whether it is allowed (else reasonCode and reason: SELF, IDENTITY_GLOBAL,
+            IDENTITY_PRIVILEGED, ADMINISTRATION_PATH, NOT_A_MEMBER, ALREADY_DISABLED, NOTHING_TO_RESTORE). Needs
+            ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="kind" required="true"><description>disable, removeOrganization or restore</description></parameter>
+            <parameter name="organizationPartyId"><description>The organization removed; for a global operation, the one it is
+                recorded for (else the identity's first in scope)</description></parameter>
+            <parameter name="effectiveDate" type="Timestamp"><description>Empty: now</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="kind"/>
+            <parameter name="kindText"/>
+            <parameter name="account" type="Map"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="isGlobal" type="Boolean"/>
+            <parameter name="effectiveDate" type="Long"/>
+            <parameter name="endsMemberships" type="Boolean"/>
+            <parameter name="movesResources" type="Boolean"/>
+            <parameter name="relationshipCount" type="Integer"/>
+            <parameter name="memberships" type="List"/>
+            <parameter name="credentialCount" type="Integer"/>
+            <parameter name="factorCount" type="Integer"/>
+            <parameter name="activeSessionCount" type="Integer"/>
+            <parameter name="sharedBeyondScope" type="Boolean"/>
+            <parameter name="consequences" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('previewLifecycle', context))</script></actions>
+    </service>
+    <service verb="start" noun="Lifecycle" allow-remote="false">
+        <description>Record a lifecycle operation of an identity in scope and run its steps, each on its own: a disable revokes the
+            account's access (the framework's revoke#AccountAccess, its own transaction) and disables it for good, or with a future
+            effectiveDate writes the account's terminateDate; a removal ends the relationships to the organization and, when it
+            works for no other, signs it out and ends its memberships (authorization on, so the sealed and privileged EECAs decide
+            each); a restore enables it and clears its end date, bringing back no credential, membership or schedule. A disable,
+            or a removal leaving no organization, also records participantSteps (from the app's registered participants: each
+            {providerKey, ownerApp, title, action pause or transfer, actionService, resourceParameter, resourceKind, resourceId,
+            resourceName}): a pause runs now, a transfer waits for a new owner; a service that does not carry the owned-resource
+            contract (org.moqui.admin.IdentityServices define#OwnedResourcePause or define#OwnedResourceTransfer) is a failed
+            step. expectedRevision, when given, is the account's revision (get#Account); a retry with the same operationKey answers
+            the first operation (retried). Refused as preview#Lifecycle says, or REVISION_CHANGED. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="kind" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+            <parameter name="sourceReference"/>
+            <parameter name="participantSteps" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="operationId"/>
+            <parameter name="statusId"/>
+            <parameter name="retried" type="Boolean"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('startLifecycle', context))</script></actions>
+    </service>
+    <service verb="get" noun="Lifecycle" allow-remote="false">
+        <description>One lifecycle operation of an organization in scope: the immutable request (target, kind, global or the
+            organization, requester, source, reason, effective date, the account revision it named) with its state and progress,
+            and its steps (owner, step, resource, state, attempts, reason, new owner) with what the caller may do (canRetry,
+            canTransfer). No owner record is copied. Needs ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters><parameter name="operationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="operation" type="Map"/>
+            <parameter name="stepList" type="List"/>
+            <parameter name="canManage" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('getLifecycle', context))</script></actions>
+    </service>
+    <service verb="find" noun="LifecycleOperations" allow-remote="false">
+        <description>The lifecycle operations of the organizations the caller administers (organizationPartyId among them),
+            narrowed by account (userId), kind, statusId and requested date (fromDate, thruDate), newest first, paged: target,
+            kind, scope, requester, source, state, progress, failures and what waits. Needs ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="kind"/>
+            <parameter name="statusId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer" default="0"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="operationList" type="List"/>
+            <parameter name="operationListCount" type="Integer"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('findLifecycleOperations', context))</script></actions>
+    </service>
+    <service verb="retry" noun="LifecycleStep" allow-remote="false">
+        <description>Run a failed or waiting step of an operation in scope again: the account's own step (for a global
+            operation the identity in scope and the account-wide rules again), a participant's pause, or a transfer to
+            toUserId (an account in the caller's scope, neither the operation's nor the caller's), through the step's owner
+            service (called with the framework's call#OwnedResourceService, so under its own authorization), which checks
+            its own permission and the new owner. A removal's account step needs the operation's organization in scope, and
+            the privileged rule again where it signs out or ends memberships; a disable or a membership end is checked
+            against the administration path again. The outcome (applied, or reasonCode and reason) and the attempt are
+            recorded; the operation's state follows its steps. expectedRevision, when given, is the step's. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="operationId" required="true"/>
+            <parameter name="stepSeqId" required="true"/>
+            <parameter name="toUserId"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="stepStatusId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('retryLifecycleStep', context))</script></actions>
+    </service>
 </services>

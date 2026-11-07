@@ -916,3 +916,29 @@ feature("merge#Parties moves the work, request, message, list, book and link row
         moved.follower == ["Y"]
     },
 })
+
+feature("the shared book its only manager owns is listed and handed to a colleague of its organization; a personal book stays (impl-admin P6)", {
+    when() {
+        at(30)
+        const C = "mantle.party.ContactBookServices."
+        const out = as("cbk.avery", () => ({
+            owned: call(C + "find#OwnedContactBooks", { userId: averyUserId }).resourceList.map((row) => row.resourceId),
+            personal: errorOf(C + "transfer#ContactBookOwner", { contactBookId: defaultBookId, fromUserId: averyUserId, toUserId: blakeUserId }),
+        }))
+        out.peek = as("cbk.blake", () => errorOf(C + "find#OwnedContactBooks", { userId: averyUserId }))
+        out.take = as("cbk.blake", () => errorOf(C + "transfer#ContactBookOwner", { contactBookId: teamBookId, fromUserId: averyUserId, toUserId: blakeUserId }))
+        out.handed = as("cbk.avery", () => call(C + "transfer#ContactBookOwner", { contactBookId: teamBookId, fromUserId: averyUserId,
+                toUserId: blakeUserId, reason: "Leaving" }))
+        out.shares = Array.from(ec.entity.find("mantle.party.contact.ContactBookShare").condition("contactBookId", teamBookId)
+                .condition(ec.entity.conditionFactory.makeConditionDate("fromDate", "thruDate", null)).list())
+                .map((share) => `${share.userId || share.userGroupId}:${share.permissionEnumId}`)
+        return out
+    },
+    then({ owned, personal, peek, take, handed, shares }) {
+        owned == [teamBookId]
+        personal.includes("is personal")
+        peek.includes("CONTACT_BOOK_OWNER_CHANGE") && take.includes("CONTACT_BOOK_OWNER_CHANGE")
+        handed.transferred == true
+        shares.includes(`${blakeUserId}:CbpManage`) && !shares.some((share) => share.startsWith(averyUserId + ":"))
+    },
+})

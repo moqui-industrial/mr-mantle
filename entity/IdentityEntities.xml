@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Organization-scoped staff identity (mantle.party.IdentityServices; mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P5):
     the staff invitation. Separate from PASS's PublicSiteInvitation, which is a site's public identity flow and never grants
-    staff access. -->
+    staff access. P6 adds the lifecycle operation and its steps. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="UserInvitation" package="mantle.party" cache="never">
@@ -70,5 +70,82 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="USER_INVITE_TOKEN" unique="true"><index-field name="tokenHash"/></index>
         <index name="USER_INVITE_OPKEY" unique="true"><index-field name="operationKey"/></index>
         <index name="USER_INVITE_EMAIL"><index-field name="emailAddress"/></index>
+    </entity>
+    <!-- An account's lifecycle (impl-admin P6; design-admin §4.1 Offboarding, §4 LifecycleOperations and LifecycleDetail, §17.2) -->
+    <entity entity-name="UserLifecycleOperation" package="mantle.party" cache="never">
+        <description>One lifecycle request of an account: a global disable (now, or at a future date written to the account's
+            terminateDate), the removal from one internal organization (its relationships, and the account's memberships when no
+            organization is left), or a restoration (enabled again, no credential or schedule brought back). Its independent
+            steps (UserLifecycleOperationStep) each keep their own outcome: a failed step leaves the others, and the revocation,
+            in place and stays to be retried. organizationPartyId is the organization it was requested for (the one removed, or
+            for a global operation the target's organization in the requester's scope), which the organization entity filters
+            apply to. operationKey makes a retry of the same request answer this operation. Read and changed only through
+            mantle.party.IdentityServices.</description>
+        <field name="operationId" type="id" is-pk="true"/>
+        <field name="userId" type="id"><description>The account the operation is about.</description></field>
+        <field name="partyId" type="id"/>
+        <field name="kindEnumId" type="id"><description>UlkDisable, UlkOrgRemoval or UlkRestore.</description></field>
+        <field name="isGlobal" type="text-indicator"><description>Y for an account-wide operation (disable, restore), N for one
+            organization's removal.</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="effectiveDate" type="date-time"><description>When it takes effect; a future date of a disable is the
+            account's terminateDate, of a removal the relationships' end.</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="sourceReference" type="text-medium"><description>The requesting record, as its owner names it (People's
+            operation key, later); empty for Admin's own requests.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"><description>UlopCompleted, UlopScheduled (taking effect at its
+            date) or UlopAttention (a step failed or waits for an owner).</description></field>
+        <field name="accountRevision" type="text-short"><description>The account revision the request named.</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="UserLifecycleKind" related="moqui.basic.Enumeration">
+            <key-map field-name="kindEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="RequestedBy" related="moqui.security.UserAccount">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <relationship type="many" related="mantle.party.UserLifecycleOperationStep" short-alias="steps">
+            <key-map field-name="operationId"/></relationship>
+        <index name="USER_LIFE_OPKEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="USER_LIFE_USER"><index-field name="userId"/></index>
+    </entity>
+    <entity entity-name="UserLifecycleOperationStep" package="mantle.party" cache="never">
+        <description>One independent step of a lifecycle operation: the account's own (disable, end date, access revoked,
+            relationships and memberships ended, enabled again) or a participant's (an owner's pause, or a resource waiting for
+            a new owner through the owner's transfer service, design-admin §14). It keeps the target identity, the provider and
+            its action, the state, the attempts and the reason; never a copy of the owner's records or a secret. A participant
+            step names only a service carrying the owned-resource contract (org.moqui.admin.IdentityServices
+            define#OwnedResourceTransfer or define#OwnedResourcePause).</description>
+        <field name="operationId" type="id" is-pk="true"/>
+        <field name="stepSeqId" type="id" is-pk="true"/>
+        <field name="stepKind" type="text-short"><description>disableAccount, endDate, revokeAccess, endRelationships,
+            endMemberships, enableAccount, pause or transfer.</description></field>
+        <field name="providerKey" type="text-medium"><description>identity for the account's own steps, else the participant's
+            key (the app's registration).</description></field>
+        <field name="ownerApp" type="text-short"/>
+        <field name="title" type="text-medium"/>
+        <field name="resourceKind" type="text-short"/>
+        <field name="resourceId" type="text-medium"/>
+        <field name="resourceName" type="text-medium"/>
+        <field name="actionService" type="text-medium"><description>A participant step's service (the owner's pause or
+            transfer).</description></field>
+        <field name="resourceParameter" type="text-short"><description>The owner's name for the resource's id among the
+            transfer service's parameters.</description></field>
+        <field name="toUserId" type="id"><description>The new owner a transfer went to.</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"><description>UlstDone, UlstFailed, UlstWaiting (for a new
+            owner) or UlstSkipped.</description></field>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="reason" type="text-long"/>
+        <field name="lastAttemptDate" type="date-time"/>
+        <field name="lastAttemptByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <relationship type="one" related="mantle.party.UserLifecycleOperation"/>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="NewOwner" related="moqui.security.UserAccount">
+            <key-map field-name="toUserId" related="userId"/></relationship>
     </entity>
 </entities>
