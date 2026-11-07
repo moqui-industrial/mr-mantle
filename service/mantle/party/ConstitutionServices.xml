@@ -16,8 +16,12 @@ along with this software (see the LICENSE.md file). If not, see
     PcntConstitution per organization, its whole JSON document in the resource its contentLocation names (a document is
     larger than description holds). The framework's org.moqui.admin.ConstitutionServices owns the format, the global
     document and the agent runtime; it reads organizations through get#ScopedConstitution, named in MoquiConf.xml.
-    Reading: the organization's members, and holders of ADMIN_CONSTITUTION_GLOBAL for any internal organization.
-    Changing: ORG_CONSTITUTION_EDIT within the same scope. -->
+    Reading: the organization's members, holders of ADMIN_CONSTITUTION_GLOBAL for any internal organization, and its
+    administrators: the organizations the organization entity filters of the call's authorization find (MANTLE_USER_ORG,
+    MANTLE_ACTIVE_ORG on mantle.party.InternalOrganization, as identity scope; mr-boss impl-admin §4, Nov 7), so an
+    administrator with MANTLE_ACTIVE_ORG reads every one with no active organization and the active one with one.
+    Changing: ORG_CONSTITUTION_EDIT for an organization so administered; when the call's authorization names no organization
+    filter, for one the user reads as a member or with ADMIN_CONSTITUTION_GLOBAL. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="ScopedConstitution" authenticate="false" allow-remote="false">
@@ -39,7 +43,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="organizationPartyId"><then>
                 <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess"
-                        in-map="{organizationPartyId: organizationPartyId, userOrgIds: userOrgIds, isCurrentUser: isCurrentUser}"
+                        in-map="{organizationPartyId: organizationPartyId, userOrgIds: userOrgIds, isCurrentUser: isCurrentUser, readOnly: true}"
                         out-map="access"/>
                 <if condition="!access.canRead"><set field="organizationPartyId" from="null"/><return/></if>
             </then><else>
@@ -73,13 +77,18 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="check" noun="OrganizationConstitutionAccess" authenticate="false" allow-remote="false">
-        <description>Whether the current user may read and change an organization's Constitution: read as a member
-            (userOrgIds) or, for an internal organization, as a holder of ADMIN_CONSTITUTION_GLOBAL; change with
-            ORG_CONSTITUTION_EDIT in that same scope. isCurrentUser false (another user's scope) reads as a member only.</description>
+        <description>Whether the current user may read and change an organization's Constitution. Read as a member
+            (userOrgIds), or, for an internal organization, as a holder of ADMIN_CONSTITUTION_GLOBAL or as one who administers it
+            (administered: in the find on InternalOrganization under the organization filters of the call's authorization).
+            Change with ORG_CONSTITUTION_EDIT for an organization administered; when that authorization names no organization
+            filter (administered null), for one read as a member or with ADMIN_CONSTITUTION_GLOBAL. isCurrentUser false
+            (another user's scope) reads as a member only. readOnly (a caller under the read fence) uses the organization
+            context the user context already has and never sets it up.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="userOrgIds" type="List"/>
             <parameter name="isCurrentUser" type="Boolean" default="true"/>
+            <parameter name="readOnly" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="canRead" type="Boolean"/>
@@ -100,8 +109,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="isInternal" from="!!internalRole"/>
             <set field="member" from="userOrgIds.includes(organizationPartyId)"/>
             <set field="instanceEditor" from="isCurrentUser &amp;&amp; isInternal &amp;&amp; ec.user.hasPermission('ADMIN_CONSTITUTION_GLOBAL')"/>
-            <set field="canRead" from="isInternal &amp;&amp; (member || instanceEditor)"/>
-            <set field="canEdit" from="canRead &amp;&amp; isCurrentUser &amp;&amp; ec.user.hasPermission('ORG_CONSTITUTION_EDIT')"/>
+            <set field="administeredIds" from="isCurrentUser &amp;&amp; isInternal ? ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').administered(readOnly) : null"/>
+            <set field="administers" from="administeredIds != null &amp;&amp; administeredIds.includes(organizationPartyId)"/>
+            <set field="canRead" from="isInternal &amp;&amp; (member || instanceEditor || administers)"/>
+            <set field="canEdit" from="canRead &amp;&amp; isCurrentUser &amp;&amp; ec.user.hasPermission('ORG_CONSTITUTION_EDIT') &amp;&amp; (administeredIds != null ? administers : (member || instanceEditor))"/>
         </actions>
     </service>
 
