@@ -5,8 +5,8 @@
 //
 // A page is a PublicSitePage binding an exact WikiPage version to a site's Shop mount, route and locale, public in its
 // window. Its body is a page of the store's page space, a wiki space with restrictUpdate (F52) that only this module
-// writes: store#SitePage saves a version after its own permission and store checks, giving the user the space's update
-// right for that one write (withSpaceUpdate), so a Commons Knowledge user cannot change or wiki-publish the page. Publishing
+// writes: store#SitePage saves a version after its own permission and store checks, writing it as the system
+// (asSpaceWriter, runAsSystem), so a Commons Knowledge user cannot change or wiki-publish the page. Publishing
 // a version makes it the page's published wiki version and the binding's in one transaction, so the exact-version rule
 // (the binding's version is the page's published one) holds at every read; a scheduled publication does both at its from
 // date, when the publication job revalidates it as its author. The Forum's guidelines and about pages keep Forum.js's
@@ -35,7 +35,6 @@ const NAV = P + "PublicSiteNavigation"
 const NAV_VERSION = P + "PublicSiteNavigationVersion"
 const REDIRECT = P + "PublicSiteRedirect"
 const SPACE = "moqui.resource.wiki.WikiSpace"
-const SPACE_USER = "moqui.resource.wiki.WikiSpaceUser"
 const WIKI_PAGE = "moqui.resource.wiki.WikiPage"
 const STORE_SPACE = "mantle.product.store.ProductStoreWikiSpace"
 const WIKI = "org.moqui.impl.WikiServices."
@@ -259,35 +258,13 @@ function pageSpaceOf(store, create) {
     })
     return one(SPACE, {wikiSpaceId})
 }
-// The user's update right on a page space for one wiki write: a WikiSpaceUser allowUpdate row for the call, put back as
-// it was after it, all in the caller's transaction. The row is never committed (the transaction ends with it removed, or
-// rolls back), so no other request of the user, as in Commons Knowledge, sees the right; WikiPageAccess reads the row
-// without the entity cache.
-function withSpaceUpdate(wikiSpaceId, action) {
-    const userId = ec.user.userId
-    if (!userId) refuse("PERMISSION_DENIED", "A signed-in user writes a page")
-    const row = one(SPACE_USER, {wikiSpaceId, userId})
-    const had = row?.allowUpdate === "Y"
-    if (!had) {
-        if (row) call("update#" + SPACE_USER, {wikiSpaceId, userId, allowUpdate: "Y"})
-        else
-            call("create#" + SPACE_USER, {
-                wikiSpaceId,
-                userId,
-                allowView: "Y",
-                allowUpdate: "Y",
-                allowAdmin: "N",
-                receiveNotifications: "N"
-            })
-    }
-    try {
-        return action()
-    } finally {
-        if (!had) {
-            if (row) call("update#" + SPACE_USER, {wikiSpaceId, userId, allowUpdate: row.allowUpdate ?? null})
-            else call("delete#" + SPACE_USER, {wikiSpaceId, userId})
-        }
-    }
+// One wiki write into a store's page space, as the system (`ec.artifactExecution.runAsSystem`: no user, authorization
+// off, the caller's transaction; Commerce F72): the space has restrictUpdate, so the user has no right to write it, and
+// get#WikiPageAccess admits a write with no user and authorization off. The caller has made its own permission and store
+// checks first.
+function asSpaceWriter(action) {
+    if (!ec.user.userId) refuse("PERMISSION_DENIED", "A signed-in user writes a page")
+    return ec.artifactExecution.runAsSystem(action)
 }
 // The wiki page of a binding, with its current version name.
 function wikiOf(page) {
@@ -621,7 +598,7 @@ function createSitePage(s, p) {
     const space = pageSpaceOf(store, true)
     const sitePageId = ec.entity.sequencedIdPrimary(PAGE, null, null)
     const pageText = p.pageText != null && String(p.pageText) !== "" ? String(p.pageText) : "# " + title + "\n"
-    const written = withSpaceUpdate(space.wikiSpaceId, () =>
+    const written = asSpaceWriter(() =>
         call(WIKI + "update#WikiPage", {
             wikiSpaceId: space.wikiSpaceId,
             pageName: "page-" + sitePageId,
@@ -662,7 +639,7 @@ function savePageText(page, store, p) {
             conflictText: (userText(change?.userId) || "Someone") + " saved this page since you opened it"
         }
     }
-    const written = withSpaceUpdate(space.wikiSpaceId, () =>
+    const written = asSpaceWriter(() =>
         call(WIKI + "update#WikiPage", {
             wikiSpaceId: wiki.wikiSpaceId,
             wikiPageId: wiki.wikiPageId,
@@ -785,7 +762,7 @@ function publishSitePage(p) {
 // Make a version live: the page's published wiki version and the binding's, with the window; the site's generation.
 function activatePage(page, store, versionName, fromDate, thruDate, userId, reason, revision) {
     const wiki = wikiOf(page)
-    withSpaceUpdate(wiki.wikiSpaceId, () =>
+    asSpaceWriter(() =>
         call(WIKI + "set#PublishedVersion", {wikiPageId: wiki.wikiPageId, publishedVersionName: versionName})
     )
     call("update#" + PAGE, {

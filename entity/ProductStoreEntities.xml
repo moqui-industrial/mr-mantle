@@ -307,7 +307,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="badgeText" type="text-medium" enable-audit-log="true"/>
         <field name="featuredRank" type="number-integer" enable-audit-log="true"/>
         <field name="changeReason" type="text-medium" enable-audit-log="true"><description>Why the row was started or
-            ended (a publication, withdrawal or storefront change names its reason).</description></field>
+            ended, on rows written before the reason went to each field's audit row (F63); no longer written.</description></field>
         <field name="signatureRequiredEnumId" type="id"/>
         <relationship type="one" related="mantle.product.store.ProductStore" short-alias="store"/>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>

@@ -873,17 +873,20 @@
         </actions>
     </service>
     <service verb="get" noun="PreviewHost" authenticate="anonymous-all" allow-remote="false">
-        <description>Whether a host of a site is the site's theme preview host (PublicSiteHost PshkPreview): PASS's route and shell refuse every other route on it. Anonymous.</description>
+        <description>Whether a host of a site is the site's theme preview host (PublicSiteHost PshkPreview): PASS's route and shell refuse every other route on it. As a public-site's host-check-service (Commerce F87) it answers restricted for the preview host, so the framework's own routes are 404 there. Anonymous.</description>
         <in-parameters>
             <parameter name="siteId" required="true"/>
             <parameter name="hostname" required="true"/>
+            <parameter name="path"><description>The request's path, when the framework's host check calls; not read</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="preview" type="Boolean"/>
+            <parameter name="restricted" type="Boolean"><description>The same as preview: the framework's routes are refused on the host</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getPreviewHost', context)"/>
             <set field="preview" from="out.preview"/>
+            <set field="restricted" from="out.preview"/>
         </actions>
     </service>
     <service verb="get" noun="ThemePreviewPage" authenticate="anonymous-all" allow-remote="false">
