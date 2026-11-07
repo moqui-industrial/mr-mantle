@@ -75,7 +75,7 @@
     <relationship type="one" related="mantle.order.OrderHeader"/>
     <relationship type="one" related="mantle.order.StoreCartAccess"/>
     <relationship type="one" related="mantle.public.PublicSite"/>
-    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
     <relationship type="one" related="mantle.account.payment.Payment"/>
     <relationship type="one" title="StoreCheckout" related="moqui.basic.StatusItem">
       <key-map field-name="statusId"/>

@@ -3,4 +3,13 @@
     <!-- The shipped sales dashboard executes through the authorized reporting boundary. -->
     <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesOrderItem" userGroupId="ADMIN"/>
     <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesOrderPart" userGroupId="ADMIN"/>
+    <!-- the sales invoice documents (index:mantle_sales and the sales summaries read them) and the inventory asset document of
+        the mantle-inventory dataset, the system administrator's as the orders are; an application grants its own groups -->
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesInvoice" userGroupId="ADMIN"/>
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesInvoiceItem" userGroupId="ADMIN"/>
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleInventoryAsset" userGroupId="ADMIN"/>
+    <!-- The organization scope policy of business datasets (the report engine's ReportScopePolicy; mantle-sales-orders,
+        mantle-sales-items and mantle-inventory name it): the rows of the viewer's organizations on the field the dataset names -->
+    <moqui.basic.Enumeration enumId="MantleOrganization" enumTypeId="ReportScopePolicy"
+            enumCode="mantle.party.PartyServices.get#OrganizationRowFilter" description="the viewer's organizations"/>
 </entity-facade-xml>
