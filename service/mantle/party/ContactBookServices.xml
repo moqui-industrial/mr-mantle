@@ -268,11 +268,11 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="transfer" noun="ContactBookOwner" allow-remote="false">
-        <description>A shared contact book's management handed from fromUserId to toUserId: toUserId gets a CbpManage share and
-            fromUserId's direct shares end. By fromUserId, or with CONTACT_BOOK_OWNER_CHANGE. The new manager must be an enabled
-            account, not ended, and for a book an organization owns work for that organization (a current agent, employee or
-            member relationship). A personal book is refused: it and its personal contacts stay with their user. Logged with the
-            reason.</description>
+        <description>A shared contact book's management handed from fromUserId to toUserId: toUserId gets a CbpManage
+            share and fromUserId's direct shares end. By fromUserId, or with CONTACT_BOOK_OWNER_CHANGE. The new manager must
+            be an enabled account, not ended, not an external user (EXTERNAL_USER), and for a book an organization owns work
+            for that organization (a current agent, employee or member relationship). A personal book is refused: it and its
+            personal contacts stay with their user. Logged with the reason.</description>
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
         <in-parameters><parameter name="contactBookId" required="true"/></in-parameters>
         <actions><script><![CDATA[
@@ -296,6 +296,9 @@ along with this software (see the LICENSE.md file). If not, see
             const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
             if (to == null || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
                 ec.message.addError(`User ${toUserId} cannot manage a contact book: the account is not enabled`); return }
+            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+                    .disableAuthz().call()?.anyExternal !== false) {
+                ec.message.addError(`User ${toUserId} cannot manage a contact book: an external user`); return }
             if (book.ownerPartyId && (!to.partyId || ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', to.partyId)
                     .condition('toPartyId', book.ownerPartyId).condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']))
                     .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().count() === 0)) {

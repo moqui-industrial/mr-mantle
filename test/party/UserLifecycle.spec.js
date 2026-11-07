@@ -4,7 +4,7 @@
 // organization's removal ends that organization's relationships and keeps the other's access, memberships and resources, the
 // operation still read in the organization it was requested for; a failing participant step (a service without the owned-resource
 // contract, a transfer the owner refuses) does not undo the revocation and is retried, a transfer to a new owner through the
-// owner's service (Mantle's calendar owner change); restoration enables the account and reactivates no key, and a retry with the
+// owner's service (Mantle's calendar owner change), never to the operator nor to an outside user; restoration enables the account and reactivates no key, and a retry with the
 // same operation key answers the first operation. The operators hold the framework's ADMIN_IDENTITY_* and Mantle's
 // CALENDAR_OWNER_CHANGE through spec groups, never an app group. New spec, no Groovy original.
 // Run: ./moq test mr-mantle --spec party/UserLifecycle
@@ -150,6 +150,11 @@ feature("two internal organizations, their operators, staff with sessions and ke
         }
         person("Shared", [orgId, otherOrgId])
         member("ULC_STAFF", users.Shared)
+        // an outside user (EXTERNAL_USER) of the organization, who may not own its resources
+        person("Client", [orgId])
+        group("ULC_CLIENTS")
+        grant("ULC_CLIENTS", "EXTERNAL_USER")
+        member("ULC_CLIENTS", users.Client)
         credentials("Leaver")
         credentials("Broken")
         // a shared calendar of Broken's, which offboarding hands to a new owner
@@ -320,6 +325,17 @@ feature(
                     stepSeqId: pause.stepSeqId
                 })
                 const afterRefusal = one("mantle.party.UserLifecycleOperation", {operationId: started.operationId}).statusId
+                // nor to the operator moving it, nor to an outside user
+                const selfRetry = result(S + "retry#LifecycleStep", {
+                    operationId: started.operationId,
+                    stepSeqId: transfer.stepSeqId,
+                    toUserId: users.Operator
+                })
+                const externalRetry = result(S + "retry#LifecycleStep", {
+                    operationId: started.operationId,
+                    stepSeqId: transfer.stepSeqId,
+                    toUserId: users.Client
+                })
                 const moved = result(S + "retry#LifecycleStep", {
                     operationId: started.operationId,
                     stepSeqId: transfer.stepSeqId,
@@ -332,16 +348,20 @@ feature(
                     refusedRetry,
                     pauseRetry,
                     afterRefusal,
+                    selfRetry,
+                    externalRetry,
                     moved,
                     list: result(S + "find#LifecycleOperations", {userId: users.Broken})
                 }
             })
         },
-        then({started, pauseStep, refusedRetry, pauseRetry, afterRefusal, moved, list}) {
+        then({started, pauseStep, refusedRetry, pauseRetry, afterRefusal, selfRetry, externalRetry, moved, list}) {
             started.applied == true && started.statusId == "UlopAttention"
             pauseStep.statusId == "UlstFailed" && pauseStep.reasonCode == "NOT_A_PARTICIPANT"
             refusedRetry.applied == false && refusedRetry.reason.includes("not enabled")
             pauseRetry.applied == false && afterRefusal == "UlopAttention"
+            selfRetry.applied == false && selfRetry.reasonCode == "SELF_OWNER"
+            externalRetry.applied == false && externalRetry.reason.includes("external user")
             // the revocation stayed in place through the failures
             const account = one("moqui.security.UserAccount", {userId: users.Broken})
             account.disabled == "Y" && account.disabledDateTime == null
@@ -350,7 +370,7 @@ feature(
             moved.applied == true && moved.stepStatusId == "UlstDone"
             one("mantle.work.calendar.Calendar", {calendarId}).ownerPartyId == parties.Heir
             const transfer = steps(operations.broken).find(step => step.stepKind == "transfer")
-            transfer.toUserId == users.Heir && Number(transfer.attemptCount) == 2
+            transfer.toUserId == users.Heir && Number(transfer.attemptCount) == 3
             list.operationList.length == 1 && list.operationList[0].failedCount == 1
         }
     }

@@ -310,12 +310,13 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="transfer" noun="CalendarOwner" allow-remote="false">
-        <description>A calendar handed from fromUserId to toUserId: a shared or resource calendar fromUserId's party owns gets
-            toUserId's party as its owner; a calendar an organization owns that fromUserId manages (a direct CalpManage share)
-            gets toUserId as its manager in fromUserId's place (fromUserId's direct shares end). By fromUserId, or with
-            CALENDAR_OWNER_CHANGE. The new owner must be an enabled account with a party, not ended, and for an organization's
-            calendar work for that organization (a current agent, employee or member relationship). A personal calendar stays
-            with its user. Logged with the reason.</description>
+        <description>A calendar handed from fromUserId to toUserId: a shared or resource calendar fromUserId's party
+            owns gets toUserId's party as its owner; a calendar an organization owns that fromUserId manages (a direct
+            CalpManage share) gets toUserId as its manager in fromUserId's place (fromUserId's direct shares end). By
+            fromUserId, or with CALENDAR_OWNER_CHANGE. The new owner must be an enabled account with a party, not ended, not
+            an external user (EXTERNAL_USER), and for an organization's calendar work for that organization (a current
+            agent, employee or member relationship). A personal calendar stays with its user. Logged with the
+            reason.</description>
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
         <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
         <actions><script><![CDATA[
@@ -335,6 +336,9 @@ along with this software (see the LICENSE.md file). If not, see
             const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
             if (to == null || !to.partyId || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
                 ec.message.addError(`User ${toUserId} cannot own a calendar: the account is not enabled or has no party`); return }
+            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+                    .disableAuthz().call()?.anyExternal !== false) {
+                ec.message.addError(`User ${toUserId} cannot own a calendar: an external user`); return }
             const label = row.calendarName || calendarId
             if (from.partyId && row.ownerPartyId === from.partyId) {
                 if (row.calendarKindEnumId === 'CalkPersonal' || row.calendarKindEnumId === 'CalkSubscription') {

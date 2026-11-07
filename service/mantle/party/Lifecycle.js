@@ -13,7 +13,9 @@
 // A disable, and a removal that leaves no organization, also record the participants' steps the app supplies (participantSteps:
 // a registered owner's pause, run now, and each owned resource, waiting for a new owner). A participant step names only a service
 // carrying the owned-resource contract of org.moqui.admin.IdentityServices (define#OwnedResourceTransfer or
-// define#OwnedResourcePause): Mantle reads no app's registry and calls no service written for something else. One failed step
+// define#OwnedResourcePause), called through the framework's call#OwnedResourceService so it runs under its own authorization,
+// never this service's inheritable grant: Mantle reads no app's registry and calls no service written for something else, nor one
+// the caller could not call directly. One failed step
 // leaves the others, and the revocation, in place, and stays to be retried (retry#LifecycleStep); a transfer step is retried with
 // the new owner, whom the owner's service checks.
 //
@@ -106,6 +108,17 @@ function ownCall(name, parameters) {
         ec.message.clearErrors()
         ec.message.popErrors()
     }
+}
+// A participant's service through the framework's call#OwnedResourceService: it carries the contract or is not called, and runs
+// under its own authorization (that call's grant is not inheritable), so this service's inheritable ALL_USERS ALLOW does not
+// carry into it (F-P6-1)
+function participantCall(service, action, parameters) {
+    const out = ownCall("org.moqui.admin.IdentityServices.call#OwnedResourceService", {
+        serviceName: service,
+        contract: action,
+        stepParameters: parameters
+    })
+    return out.result || {}
 }
 function carriesContract(service, action) {
     const contract = contracts[action]
@@ -421,7 +434,7 @@ function runIdentityStep(operation, stepKind, reasonText) {
 function runPause(operation, step, reasonText) {
     try {
         if (!carriesContract(step.actionService, "pause")) throw new Error(step.actionService + " is not a lifecycle pause")
-        const out = ownCall(step.actionService, {userId: operation.userId, reason: reasonText})
+        const out = participantCall(step.actionService, "pause", {userId: operation.userId, reason: reasonText})
         return {statusId: "UlstDone", reason: Number(out.pausedCount || 0) + " paused"}
     } catch (error) {
         ec.logger.error("Lifecycle " + operation.operationId + " pause " + step.providerKey + " failed: " + error.message)
@@ -663,6 +676,26 @@ function findLifecycleOperations(p) {
 }
 
 // ===== retry#LifecycleStep =====
+// The administration path of an account step run again (a disable, memberships ended): a refusal, or null.
+function pathRefusal(operation, stepKind) {
+    const at = ms(operation.effectiveDate) ?? nowMs()
+    const proposed =
+        stepKind === "disableAccount"
+            ? {accounts: {[operation.userId]: {disabled: "Y", disabledDateTime: null}}}
+            : stepKind === "endMemberships"
+              ? {
+                    memberships: currentMemberships(operation.userId, nowMs()).map(row => ({
+                        userGroupId: row.userGroupId,
+                        userId: row.userId,
+                        fromDate: ms(row.fromDate),
+                        thruDate: Math.max(at, ms(row.fromDate) ?? at)
+                    }))
+                }
+              : null
+    if (!proposed) return null
+    const path = frameworkIdentity().administrationPath(proposed)
+    return path.allowed ? null : refused(path.reasonCode, path.reason)
+}
 // A failed step run again, or a transfer step with its new owner (toUserId: an account in the caller's scope, other than the
 // operation's; the owner's service checks it may own the resource). A global operation's account steps are account-wide again.
 function retryLifecycleStep(p) {
@@ -679,15 +712,22 @@ function retryLifecycleStep(p) {
     let outcome
     let toUserId = null
     if (step.providerKey === "identity") {
-        // the account's own step: the identity in scope again, and for a global operation the account-wide rules
-        const found = identityLib.identity(operation.userId, userScope)
+        // the account's own step: for a global operation the identity in scope again and the account-wide rules; for a removal
+        // (whose identity may have left every organization in scope) the operation's organization in scope, and the privileged
+        // rule again where it signs out or ends memberships; either way the administration path again
         if (operation.userId === ec.user.userId)
             return refused("SELF", "Your own account's access is changed by another administrator")
+        if (!identitySteps[step.stepKind]) return refused("NOT_RETRYABLE", "This step cannot be run again")
         if (operation.isGlobal === "Y") {
+            const found = identityLib.identity(operation.userId, userScope)
             const wide = identityLib.accountWideRefusal(found) || identityLib.heldBeyondRefusal(found)
             if (wide) return wide
+        } else if (step.stepKind === "revokeSessions" || step.stepKind === "endMemberships") {
+            const held = frameworkIdentity().heldBeyond(operation.userId)
+            if (held) return refused("IDENTITY_PRIVILEGED", held + ": ending its memberships is refused")
         }
-        if (!identitySteps[step.stepKind]) return refused("NOT_RETRYABLE", "This step cannot be run again")
+        const path = pathRefusal(operation, step.stepKind)
+        if (path) return path
         outcome = runIdentityStep(operation, step.stepKind, reasonText)
     } else if (step.stepKind === "pause") {
         outcome = runPause(operation, step, reasonText)
@@ -695,13 +735,18 @@ function retryLifecycleStep(p) {
         toUserId = text(p.toUserId)
         if (!toUserId) throw new Error("Choose the new owner")
         if (toUserId === operation.userId) return refused("SAME_OWNER", "Choose someone other than the account offboarded")
+        if (toUserId === ec.user.userId)
+            return refused(
+                "SELF_OWNER",
+                "Choose a colleague: a leaver's resources are not handed to the administrator moving them"
+            )
         if (!identityLib.inScope(toUserId).length)
             denied("RECORD_UNAVAILABLE", "User " + toUserId + " is not available as a new owner")
         if (!carriesContract(step.actionService, "transfer") || contractNames.includes(step.resourceParameter))
             outcome = {statusId: "UlstFailed", reasonCode: "NOT_A_PARTICIPANT", reason: "Not a registered lifecycle action"}
         else
             try {
-                const out = ownCall(step.actionService, {
+                const out = participantCall(step.actionService, "transfer", {
                     [step.resourceParameter]: step.resourceId,
                     fromUserId: operation.userId,
                     toUserId,

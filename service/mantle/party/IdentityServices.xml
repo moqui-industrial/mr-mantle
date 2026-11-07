@@ -509,11 +509,15 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('findLifecycleOperations', context))</script></actions>
     </service>
     <service verb="retry" noun="LifecycleStep" allow-remote="false">
-        <description>Run a failed or waiting step of an operation in scope again: the account's own step (the identity in scope,
-            and for a global operation the account-wide rules again), a participant's pause, or a transfer to toUserId (an
-            account in the caller's scope, not the operation's), through the step's owner service, which checks its own permission
-            and the new owner. The outcome (applied, or reasonCode and reason) and the attempt are recorded; the operation's state
-            follows its steps. expectedRevision, when given, is the step's. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <description>Run a failed or waiting step of an operation in scope again: the account's own step (for a global
+            operation the identity in scope and the account-wide rules again), a participant's pause, or a transfer to
+            toUserId (an account in the caller's scope, neither the operation's nor the caller's), through the step's owner
+            service (called with the framework's call#OwnedResourceService, so under its own authorization), which checks
+            its own permission and the new owner. A removal's account step needs the operation's organization in scope, and
+            the privileged rule again where it signs out or ends memberships; a disable or a membership end is checked
+            against the administration path again. The outcome (applied, or reasonCode and reason) and the attempt are
+            recorded; the operation's state follows its steps. expectedRevision, when given, is the step's. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
         <in-parameters>
             <parameter name="operationId" required="true"/>
             <parameter name="stepSeqId" required="true"/>
