@@ -223,6 +223,51 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="ORGT" prefix="to"><exclude field="partyId"/></alias-all>
     </view-entity>
 
+    <!-- Records with no organization of their own found through views that join them back to an internal organization, aliased
+        organizationPartyId, so the organization entity filters (MANTLE_USER_ORG, MANTLE_ACTIVE_ORG: EntityFilter rows in
+        MantleSetupData) apply to a find under an app's authorization (mr-boss impl-admin §4, the P4 follow-up). -->
+    <view-entity entity-name="UserAccountOrganization" package="mantle.party">
+        <description>A user account with each internal organization its party works for now: a current agent, employee or
+            member relationship (as get#PartyInternalOrgIds counts them) to a party with the OrgInternal role, one row for each.
+            A find with authorization on sees the accounts of the organizations the authorization's filters allow (Mantle's
+            identity scope, mantle.party.IdentityServices); an account of no internal organization is never here.</description>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount"/>
+        <member-entity entity-alias="PREL" entity-name="mantle.party.PartyRelationship" join-from-alias="USRACT">
+            <key-map field-name="partyId" related="fromPartyId"/></member-entity>
+        <member-entity entity-alias="ORGRL" entity-name="mantle.party.PartyRole" join-from-alias="PREL">
+            <key-map field-name="toPartyId" related="partyId"/></member-entity>
+        <alias name="userId" entity-alias="USRACT"/>
+        <alias name="username" entity-alias="USRACT"/>
+        <alias name="userFullName" entity-alias="USRACT"/>
+        <alias name="emailAddress" entity-alias="USRACT"/>
+        <alias name="partyId" entity-alias="USRACT"/>
+        <alias name="disabled" entity-alias="USRACT"/>
+        <alias name="disabledDateTime" entity-alias="USRACT"/>
+        <alias name="terminateDate" entity-alias="USRACT"/>
+        <alias name="partyRelationshipId" entity-alias="PREL"/>
+        <alias name="relationshipTypeEnumId" entity-alias="PREL"/>
+        <alias name="organizationPartyId" entity-alias="PREL" field="toPartyId"/>
+        <alias name="fromDate" entity-alias="PREL"/>
+        <alias name="thruDate" entity-alias="PREL"/>
+        <alias name="roleTypeId" entity-alias="ORGRL"/>
+        <entity-condition>
+            <econdition entity-alias="ORGRL" field-name="roleTypeId" value="OrgInternal"/>
+            <econdition entity-alias="PREL" field-name="relationshipTypeEnumId" operator="in" value="PrtAgent,PrtEmployee,PrtMember"/>
+            <date-filter entity-alias="PREL"/>
+        </entity-condition>
+    </view-entity>
+    <view-entity entity-name="InternalOrganization" package="mantle.party">
+        <description>The internal organizations (the OrgInternal role) with their names. A find with authorization on sees the
+            organizations the authorization's filters allow: those a user administers in Mantle's identity scope.</description>
+        <member-entity entity-alias="ORGRL" entity-name="mantle.party.PartyRole"/>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="ORGRL" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias name="organizationPartyId" entity-alias="ORGRL" field="partyId"/>
+        <alias name="roleTypeId" entity-alias="ORGRL"/>
+        <alias name="organizationName" entity-alias="ORG"/>
+        <entity-condition><econdition entity-alias="ORGRL" field-name="roleTypeId" value="OrgInternal"/></entity-condition>
+    </view-entity>
+
     <view-entity entity-name="PartyBadgeAndScan" package="mantle.party">
         <member-entity entity-alias="PBA" entity-name="mantle.party.PartyBadge"/>
         <member-entity entity-alias="PBSC" entity-name="mantle.party.PartyBadgeScan" join-from-alias="PBA">

@@ -12,9 +12,11 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
-<!-- Organization-scoped identity (mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P4): the staff identities of the internal
-    organizations the caller administers (their own, every one for ADMIN), through PartyRelationship and PartyRole, calling the
-    framework's org.moqui.admin guards (AccessServices' grant proposals, IdentityServices' credentials and administration
+<!-- Organization-scoped identity (mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P4 and §4): the staff identities of the
+    internal organizations the caller administers, which are the organization entity filters of the authorization the call runs
+    under applied to the views mantle.party.UserAccountOrganization and InternalOrganization (MANTLE_USER_ORG: the caller's
+    organizations, the active one when set; MANTLE_ACTIVE_ORG: the active organization, every one with none active; nothing
+    when the authorization names neither, but every one for ADMIN), calling the framework's org.moqui.admin guards (AccessServices' grant proposals, IdentityServices' credentials and administration
     path). Reads need ADMIN_IDENTITY_VIEW, changes ADMIN_IDENTITY_MANAGE, and an account-wide change of an identity shared with an
     organization the caller does not administer ADMIN_IDENTITY_GLOBAL. A refusal of a change is answered (applied false,
     reasonCode, reason); a missing permission or an identity out of scope (RECORD_UNAVAILABLE) is an error. Names no app group:
@@ -24,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="find" noun="Users" allow-remote="false">
         <description>The staff identities with a current relationship (agent, employee, member) to an internal organization the
-            caller administers, or to organizationPartyId among them; narrowed by text (name, username, email, ignoring case),
+            caller administers (the filtered find on UserAccountOrganization), or to organizationPartyId among them; narrowed by text (name, username, email, ignoring case),
             userGroupId (a current member) and state (active, ending, locked, disabled, terminated); each with its organizations
             in scope (others counted, never named), state and last sign-in, paged. Public identities (accounts of no internal
             organization) only with includePublic and ADMIN_IDENTITY_GLOBAL, labelled as site relationships. Needs

@@ -21,10 +21,15 @@ along with this software (see the LICENSE.md file). If not, see
         call the services, each refusing without the framework's ADMIN_IDENTITY_VIEW or ADMIN_IDENTITY_MANAGE (ADMIN holds them)
         and outside the organizations the caller administers; inheritable, so their writes (a person, its organization
         relationship, an account, the grant proposal through the framework's AccessServices) are authorized as the service and
-        the security EECAs still decide each membership -->
+        the security EECAs still decide each membership. Which identities and organizations are in scope is the organization
+        entity filters of the authorization the call runs under (the views UserAccountOrganization and InternalOrganization;
+        mr-boss impl-admin §4): an app screen's inheritable ALWAYS grant lends its own (MANTLE_ACTIVE_ORG for an administrator,
+        every organization with none active), and this grant, used where no such screen grant covers the call (an Assistant
+        tool, another app's service), carries MANTLE_USER_ORG: the caller's own organizations, the active one when set. -->
     <moqui.security.ArtifactGroup artifactGroupId="MantleIdentityServices" description="Mantle identity services"/>
     <moqui.security.ArtifactGroupMember artifactGroupId="MantleIdentityServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
             nameIsPattern="Y" artifactName="mantle\.party\.IdentityServices\..*"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleIdentityServicesALL" userGroupId="ALL_USERS"
             artifactGroupId="MantleIdentityServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="MantleIdentityServicesALL" entityFilterSetId="MANTLE_USER_ORG"/>
 </entity-facade-xml>

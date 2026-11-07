@@ -1,15 +1,21 @@
 // Organization-scoped identity, mantle.party.IdentityServices (mr-boss plan/design-admin.md §4.1, §4 Users and UserDetail,
-// §17.2; impl-admin P4). UserAccount and the framework's security records carry no organization: an identity is in scope
-// through its party's relationships to internal organizations (agent, employee or member, to a party with the OrgInternal
-// role), and the caller administers the internal organizations they work in (get#PartyOrganizationInfo: the active one, or
-// every one of theirs and their direct child organizations), or every internal organization as an instance administrator
-// (ADMIN). An identity is readable when one of its organizations is the caller's; an account-wide change (its sign-in, email,
-// allowed addresses, a factor, a lock) of an identity that also works for an organization the caller does not administer
-// needs ADMIN_IDENTITY_GLOBAL besides ADMIN_IDENTITY_MANAGE (design §4.1: one employer's administrator does not take over an
-// identity shared with another). Reads need ADMIN_IDENTITY_VIEW, changes ADMIN_IDENTITY_MANAGE, each checked with the
-// permission, never a group name (ProductAccess has: ADMIN holds all, a Projects client none). A missing identity and one out
-// of scope are refused alike (RECORD_UNAVAILABLE). A refusal of a change is a reason (applied false, reasonCode, reason);
-// a missing permission is an error.
+// §17.2; impl-admin P4 and its follow-up, §4). UserAccount and the framework's security records carry no organization: an
+// identity belongs to the internal organizations its party works for (a current agent, employee or member relationship to a
+// party with the OrgInternal role). Which of them the caller administers is not computed here: it is the organization entity
+// filters of the authorization the call runs under, applied to finds on the views mantle.party.UserAccountOrganization (an
+// account with each of its internal organizations) and mantle.party.InternalOrganization, as every other record of an app is
+// filtered (MANTLE_USER_ORG: the caller's organizations, the active one when set; MANTLE_ACTIVE_ORG: the active organization,
+// every one with none active). An app screen's inheritable ALWAYS grant lends its filters (an administrator's MANTLE_ACTIVE_ORG);
+// otherwise this package's ALL_USERS grant carries MANTLE_USER_ORG (data/PartyAccessData.xml). A call whose authorization
+// names neither filter set (authorization disabled, or a grant without them) has nothing in scope, but for an instance
+// administrator (ADMIN), for whom it is every organization.
+//
+// An identity is readable when one of its organizations is in scope; an account-wide change (its sign-in, email, allowed
+// addresses, a factor, a lock) of an identity that also works for an organization out of scope needs ADMIN_IDENTITY_GLOBAL
+// besides ADMIN_IDENTITY_MANAGE (design §4.1: one employer's administrator does not take over an identity shared with
+// another). Reads need ADMIN_IDENTITY_VIEW, changes ADMIN_IDENTITY_MANAGE, each checked with the permission, never a group name
+// (ProductAccess has: ADMIN holds all, a Projects client none). A missing identity and one out of scope are refused alike
+// (RECORD_UNAVAILABLE). A refusal of a change is a reason (applied false, reasonCode, reason); a missing permission is an error.
 //
 // Grants come only as a proposal of registered bundles the app supplies (impl-admin §4, F11), checked and applied by the
 // framework's AccessServices (check#GrantProposal, apply#GrantProposal), so Mantle names no app group. Passwords: a reset
@@ -56,26 +62,76 @@ function requirePermission(permission) {
     if (!access.has(permission)) denied("PERMISSION_DENIED", permission + " is required")
 }
 const isInternal = partyId => !!partyId && !!one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
-function allInternal() {
-    return rows("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).map(row => row.partyId)
+const ACCOUNT_ORGANIZATION = "mantle.party.UserAccountOrganization"
+const INTERNAL_ORGANIZATION = "mantle.party.InternalOrganization"
+const organizationFilterSets = ["MANTLE_USER_ORG", "MANTLE_ACTIVE_ORG"]
+// The caller's organizations in the user context, which the filter maps read (filterOrgIds, activeOrgId), as an app screen's
+// pre-actions put them; read with authorization off, since its own finds would be filtered by the maps it fills.
+function organizationContext() {
+    if (ec.user.userAccount?.partyId)
+        ec.service.sync().name("mantle.party.PartyServices.setup#UserOrganizationInfo").disableAuthz().call()
+    else Object.assign(ec.user.context, {userOrgIds: [], filterOrgIds: [], activeOrgId: null})
 }
-// The internal organizations the caller administers: every one for an instance administrator, else theirs (the active one
-// when set), as MANTLE_USER_ORG filters.
+// Whether the authorization a find on entityName runs under names an organization filter set. MANTLE_ACTIVE_ORG applies only
+// with an active organization (its applyCond), so with none it is asked with one in the user context for the moment (as
+// CommunicationServices' get#RecordLinkInfo does).
+function organizationFiltered(entityName) {
+    const named = () =>
+        Array.from(ec.artifactExecution.getFindFiltersForUser(entityName) || []).some(filter =>
+            organizationFilterSets.includes(filter.entityFilterSetId)
+        )
+    if (named()) return true
+    if (ec.user.context.activeOrgId) return false
+    const hadActive = "activeOrgId" in ec.user.context
+    const oldActive = ec.user.context.activeOrgId
+    ec.user.context.activeOrgId = "_NA_"
+    try {
+        return named()
+    } finally {
+        if (hadActive) ec.user.context.activeOrgId = oldActive ?? null
+        else delete ec.user.context.activeOrgId
+    }
+}
+// A find on one of the organization views under the caller's authorization, so its organization filters apply; null (nothing
+// in scope) when that authorization names no organization filter, unless the caller is an instance administrator.
+function scopedFind(entityName) {
+    organizationContext()
+    if (!organizationFiltered(entityName) && !access.systemAdmin()) return null
+    return ec.entity.find(entityName)
+}
+// The internal organizations the caller administers (the filtered find on InternalOrganization); all: an instance administrator,
+// for whom an identity of no organization is in scope too.
 function scope() {
-    if (access.systemAdmin()) return {organizationIds: allInternal(), all: true}
-    const partyId = ec.user.userAccount?.partyId
-    if (!partyId) return {organizationIds: [], all: false}
-    const info =
-        ec.service
-            .sync()
-            .name("mantle.party.PartyServices.get#PartyOrganizationInfo")
-            .parameters({partyId})
-            .disableAuthz()
-            .call() || {}
-    const memberIds = Array.from(info.userOrgIds || [])
-    const filterIds = Array.from(info.filterOrgIds || []).filter(id => memberIds.includes(id))
-    return {organizationIds: filterIds.length ? filterIds : memberIds, all: false}
+    const organizations = scopedFind(INTERNAL_ORGANIZATION)
+    const organizationIds = organizations
+        ? Array.from(organizations.selectField("organizationPartyId").list()).map(row => row.organizationPartyId)
+        : []
+    return {organizationIds, all: access.systemAdmin()}
 }
+// The internal organizations of each account in userIds that the caller administers: the filtered find on
+// UserAccountOrganization. A Map of userId to organization ids; an account out of scope is not in it.
+function scopedOrganizations(userIds) {
+    const ids = Array.from(
+        new Set(
+            Array.from(userIds || [])
+                .map(text)
+                .filter(Boolean)
+        )
+    )
+    const found = new Map()
+    const accounts = ids.length ? scopedFind(ACCOUNT_ORGANIZATION) : null
+    if (!accounts) return found
+    for (const row of Array.from(
+        accounts.condition("userId", "in", ids).selectField("userId").selectField("organizationPartyId").list()
+    )) {
+        if (!found.has(row.userId)) found.set(row.userId, [])
+        if (!found.get(row.userId).includes(row.organizationPartyId)) found.get(row.userId).push(row.organizationPartyId)
+    }
+    return found
+}
+// inScope(userId): the internal organizations of the account the caller administers, empty when none (for another package,
+// such as invitations and the lifecycle, to ask the same question).
+const inScope = userId => scopedOrganizations([userId]).get(text(userId)) || []
 function partyName(partyId) {
     if (!partyId) return ""
     const organization = one("mantle.party.Organization", {partyId})
@@ -98,17 +154,17 @@ function partyOrganizations(partyId) {
         )
     )
 }
-// The identity userId as the caller may administer it: its account, its organizations in scope and whether it works for
-// another; refused alike when missing or out of scope. An identity of no organization is in scope for an instance
-// administrator only.
-function identity(userId, userScope = scope()) {
+// The identity userId as the caller may administer it: its account, all of its internal organizations (owners, read without
+// filters), those in scope (the filtered find) and whether it works for another; refused alike when missing or out of scope.
+// An identity of no organization is in scope for an instance administrator only.
+function identity(userId, userScope = null) {
     const account = text(userId) ? one(ACCOUNT, {userId: text(userId)}) : null
     if (!account) denied("RECORD_UNAVAILABLE", "User " + text(userId) + " is not available")
     const owners = partyOrganizations(account.partyId)
-    const inScope = owners.filter(id => userScope.organizationIds.includes(id))
-    if (!(inScope.length || (userScope.all && !owners.length)))
+    const scoped = inScope(account.userId).filter(id => owners.includes(id))
+    if (!(scoped.length || (!owners.length && (userScope ? userScope.all : access.systemAdmin()))))
         denied("RECORD_UNAVAILABLE", "User " + text(userId) + " is not available")
-    return {account, owners, inScope, shared: inScope.length < owners.length}
+    return {account, owners, inScope: scoped, shared: scoped.length < owners.length}
 }
 // An account-wide change of the identity: refused (a reason) when it is shared beyond the caller's scope and the caller
 // lacks ADMIN_IDENTITY_GLOBAL.
@@ -147,60 +203,53 @@ function lastLogin(userId) {
 }
 
 // ===== find#Users =====
-// The staff identities of the organizations the caller administers (one of them, with organizationPartyId), narrowed by text
-// (name, username or email, ignoring case), a group the account is in now and a state; each with its organizations in scope
-// (others counted, never named), state and last sign-in. Public identities (accounts whose party works for no internal
-// organization) only with includePublic and ADMIN_IDENTITY_GLOBAL, labelled as site relationships.
+// The staff identities in scope (the filtered find on UserAccountOrganization; one organization of it with organizationPartyId),
+// narrowed by text (name, username or email, ignoring case), a group the account is in now and a state; each with its
+// organizations in scope (others counted, never named), state and last sign-in. Public identities (accounts whose party works
+// for no internal organization) only with includePublic and ADMIN_IDENTITY_GLOBAL, labelled as site relationships.
 function findUsers(p) {
     requirePermission(VIEW)
-    const userScope = scope()
-    let organizationIds = userScope.organizationIds
-    if (text(p.organizationPartyId)) {
-        if (!organizationIds.includes(text(p.organizationPartyId)))
-            denied("RECORD_UNAVAILABLE", "Organization " + text(p.organizationPartyId) + " is not available")
-        organizationIds = [text(p.organizationPartyId)]
-    }
+    const organizationPartyId = text(p.organizationPartyId)
+    if (organizationPartyId && !scope().organizationIds.includes(organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Organization " + organizationPartyId + " is not available")
     const includePublic = !!p.includePublic
     if (includePublic && !ec.user.hasPermission(GLOBAL))
         denied("PERMISSION_DENIED", GLOBAL + " is required for public identities")
-    const partyIds = organizationIds.length
-        ? Array.from(
-              new Set(
-                  Array.from(
-                      find(RELATIONSHIP)
-                          .condition("toPartyId", "in", organizationIds)
-                          .condition("relationshipTypeEnumId", "in", staffRelationships)
-                          .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
-                          .selectField("fromPartyId")
-                          .list()
-                  ).map(row => row.fromPartyId)
-              )
-          )
-        : []
-    let accounts = find(ACCOUNT)
-    if (!includePublic) accounts = accounts.condition("partyId", "in", partyIds.length ? partyIds : ["_NA_"])
-    else accounts = accounts.condition("partyId", "is-not-null", null)
+    const factory = ec.entity.conditionFactory
     const term = text(p.text)
-    if (term) {
-        const factory = ec.entity.conditionFactory
-        accounts = accounts.condition(
-            factory.makeCondition(
-                ["username", "userFullName", "emailAddress"].map(field =>
-                    factory.makeCondition(field, "like", likeText(term)).ignoreCase()
-                ),
-                "or"
-            )
-        )
-    }
-    if (text(p.userGroupId)) {
-        const memberIds = Array.from(
+    const textCondition = term
+        ? factory.makeCondition(
+              ["username", "userFullName", "emailAddress"].map(field =>
+                  factory.makeCondition(field, "like", likeText(term)).ignoreCase()
+              ),
+              "or"
+          )
+        : null
+    let groupUserIds = null
+    if (text(p.userGroupId))
+        groupUserIds = Array.from(
             find(MEMBER)
                 .condition("userGroupId", text(p.userGroupId))
                 .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
                 .list()
         ).map(row => row.userId)
-        accounts = accounts.condition("userId", "in", memberIds.length ? memberIds : ["_NA_"])
+    // the accounts in scope and their organizations in scope, from the filtered view
+    const scoped = new Map()
+    const staff = scopedFind(ACCOUNT_ORGANIZATION)
+    if (staff) {
+        let rowsFound = staff.selectField("userId").selectField("organizationPartyId")
+        if (textCondition) rowsFound = rowsFound.condition(textCondition)
+        if (groupUserIds) rowsFound = rowsFound.condition("userId", "in", groupUserIds.length ? groupUserIds : ["_NA_"])
+        for (const row of Array.from(rowsFound.limit(5000).list())) {
+            if (!scoped.has(row.userId)) scoped.set(row.userId, [])
+            if (!scoped.get(row.userId).includes(row.organizationPartyId)) scoped.get(row.userId).push(row.organizationPartyId)
+        }
     }
+    let accounts = find(ACCOUNT)
+    if (!includePublic) accounts = accounts.condition("userId", "in", scoped.size ? Array.from(scoped.keys()) : ["_NA_"])
+    else accounts = accounts.condition("partyId", "is-not-null", null)
+    if (textCondition) accounts = accounts.condition(textCondition)
+    if (groupUserIds) accounts = accounts.condition("userId", "in", groupUserIds.length ? groupUserIds : ["_NA_"])
     const limit = Math.max(1, Math.min(200, Number(p.pageSize || 50)))
     const offset = Math.max(0, Number(p.pageIndex || 0)) * limit
     const at = nowMs()
@@ -208,11 +257,12 @@ function findUsers(p) {
     const all = Array.from(accounts.orderBy("userFullName").limit(1000).list())
         .map(account => {
             const owners = partyOrganizations(account.partyId)
-            const inScope = owners.filter(id => userScope.organizationIds.includes(id))
+            const organizations = (scoped.get(account.userId) || []).filter(id => owners.includes(id))
             const site = !owners.length
-            return {account, owners, inScope, site, state: accountState(account, at)}
+            return {account, owners, organizations, site, state: accountState(account, at)}
         })
-        .filter(row => (row.site ? includePublic : row.inScope.length > 0))
+        .filter(row => (row.site ? includePublic : row.organizations.length > 0))
+        .filter(row => !organizationPartyId || row.organizations.includes(organizationPartyId))
         .filter(row => !state || row.state === state)
     const page = all.slice(offset, offset + limit).map(row => ({
         userId: row.account.userId,
@@ -220,10 +270,10 @@ function findUsers(p) {
         userFullName: row.account.userFullName || row.account.username || row.account.userId,
         emailAddress: row.account.emailAddress || "",
         partyId: row.account.partyId || null,
-        organizations: row.inScope.map(partyName).join(", "),
-        organizationPartyIds: row.inScope,
-        otherOrganizationCount: row.owners.length - row.inScope.length,
-        sharedBeyondScope: row.inScope.length < row.owners.length,
+        organizations: row.organizations.map(partyName).join(", "),
+        organizationPartyIds: row.organizations,
+        otherOrganizationCount: row.owners.length - row.organizations.length,
+        sharedBeyondScope: row.organizations.length < row.owners.length,
         relationshipKind: row.site ? "site" : "staff",
         relationshipText: row.site ? "Site relationship" : "Staff",
         state: row.state,
@@ -717,8 +767,15 @@ const operations = {
     resetAuthentication
 }
 ;({
+    // for another package (invitations, the lifecycle): the organizations administered, an identity as the caller may
+    // administer it, and an account's organizations in scope, each the filtered find of the caller's authorization
     scope,
     identity,
+    inScope,
+    scopedOrganizations,
+    // a find on UserAccountOrganization under the caller's organization filters (an account's row for each of its
+    // organizations in scope), or null when nothing is in scope
+    scopedAccounts: () => scopedFind(ACCOUNT_ORGANIZATION),
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown identity operation " + op)
         return operations[op](parameters)
