@@ -17,4 +17,14 @@ along with this software (see the LICENSE.md file). If not, see
         (service/mantle/party/ConstitutionServices.xml); the global document needs the framework's ADMIN_CONSTITUTION_GLOBAL -->
     <moqui.security.UserPermission userPermissionId="ORG_CONSTITUTION_EDIT" description="Change an organization's Constitution"/>
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="ORG_CONSTITUTION_EDIT" fromDate="0"/>
+    <!-- Organization-scoped identity (service/mantle/party/IdentityServices.xml; mr-boss impl-admin P4): every signed-in user may
+        call the services, each refusing without the framework's ADMIN_IDENTITY_VIEW or ADMIN_IDENTITY_MANAGE (ADMIN holds them)
+        and outside the organizations the caller administers; inheritable, so their writes (a person, its organization
+        relationship, an account, the grant proposal through the framework's AccessServices) are authorized as the service and
+        the security EECAs still decide each membership -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleIdentityServices" description="Mantle identity services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleIdentityServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.party\.IdentityServices\..*"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleIdentityServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleIdentityServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
 </entity-facade-xml>
