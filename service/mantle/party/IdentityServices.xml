@@ -86,7 +86,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A dated relationship of a person to an internal organization the caller administers (relationshipTypeEnumId
             PrtEmployee by default, PrtAgent, PrtMember or PrtRepresentative): a new one from fromDate (now when empty), or with
             partyRelationshipId and expectedRevision its end at thruDate (now when empty). Ended rows are kept; the dates are
-            audit-logged with the reason. Refused for an overlapping relationship of the same kind or a stale revision. Needs
+            audit-logged with the reason. Refused for an overlapping relationship of the same kind or a stale revision, and without
+            ADMIN_IDENTITY_GLOBAL for a person with an account of no internal organization (a site identity) or one that works
+            for an organization the caller does not administer (another organization's staff, F78). Needs
             ADMIN_IDENTITY_MANAGE.</description>
         <in-parameters>
             <parameter name="partyRelationshipId"/>

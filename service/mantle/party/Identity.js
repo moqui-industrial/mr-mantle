@@ -473,7 +473,8 @@ function getAccountHistory(p) {
 // A dated relationship of a person to an internal organization the caller administers (employee, agent, member or
 // representative): a new one from fromDate (now when empty), or with partyRelationshipId and its revision an end date set
 // (ended now when thruDate is empty and end is true). Ended rows are kept. Refused (a reason) for an organization out of scope,
-// an overlapping relationship of the same kind or a stale revision.
+// an overlapping relationship of the same kind or a stale revision, and without ADMIN_IDENTITY_GLOBAL for a person whose
+// account works for no internal organization (R2) or for one out of scope (F78).
 function storeOrganizationMembership(p) {
     requirePermission(MANAGE)
     const userScope = scope()
@@ -512,10 +513,19 @@ function storeOrganizationMembership(p) {
     // a person with an account that works for no internal organization (a site identity: a customer, a supplier contact, an
     // administrator of no organization) would come wholly into the caller's scope, account-wide changes and all: that needs
     // ADMIN_IDENTITY_GLOBAL (review R2); a person of another organization stays shared, so its account-wide changes still do
-    if (!userScope.all && one(ACCOUNT, {partyId}) && !partyOrganizations(partyId).length && !ec.user.hasPermission(GLOBAL))
+    const hasAccount = !!one(ACCOUNT, {partyId})
+    const partyOwners = hasAccount ? partyOrganizations(partyId) : []
+    if (!userScope.all && hasAccount && !partyOwners.length && !ec.user.hasPermission(GLOBAL))
         return refused(
             "IDENTITY_GLOBAL",
             partyName(partyId) + " has an account of no organization: bringing it into an organization needs " + GLOBAL
+        )
+    // a person with an account that works for an organization out of the caller's scope (another organization's staff) would
+    // become readable to the caller: that needs ADMIN_IDENTITY_GLOBAL, ADMIN's by default (the user's call, Nov 7, F78)
+    if (hasAccount && partyOwners.some(id => !userScope.organizationIds.includes(id)) && !ec.user.hasPermission(GLOBAL))
+        return refused(
+            "IDENTITY_GLOBAL",
+            partyName(partyId) + " works for an organization you do not administer: relating them to yours needs " + GLOBAL
         )
     const relationshipTypeEnumId = text(p.relationshipTypeEnumId) || "PrtEmployee"
     if (!membershipRelationships.includes(relationshipTypeEnumId))

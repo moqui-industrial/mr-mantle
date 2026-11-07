@@ -5,8 +5,9 @@
 // membership is dated and ended, never deleted; and a staff account comes with its organization relationship and the grant
 // proposal's registered bundles, an unregistered group refused with nothing written. Scope is the organization entity filters
 // of the authorization (impl-admin §4, the P4 follow-up): the operators call under the services' ALL_USERS grant
-// (MANTLE_USER_ORG), the chief under a spec grant naming MANTLE_ACTIVE_ORG (every organization with none active, F65), and an
-// account's notes follow the same filters (F75). The operators hold the framework's ADMIN_IDENTITY_* permissions through spec
+// (MANTLE_USER_ORG), the chief under a spec grant naming MANTLE_ACTIVE_ORG and ADMIN under its own (every organization with
+// none active, F65), an account's notes follow the same filters (F75), and relating another organization's staff to one's own
+// needs ADMIN_IDENTITY_GLOBAL (F78). The operators hold the framework's ADMIN_IDENTITY_* permissions through spec
 // groups, never an app group. New spec, no Groovy original.
 // Run: ./moq test mr-mantle --spec party/StaffIdentity
 const S = "mantle.party.IdentityServices."
@@ -204,25 +205,37 @@ feature(
     "an authorization naming MANTLE_ACTIVE_ORG sees every organization's staff with none active, the active one's with one (F65)",
     {
         when() {
-            return as("sid.chief", () => {
-                const none = {
-                    found: result(S + "find#Users", {text: "sid."}),
-                    shared: result(S + "get#Account", {userId: users.Both})
-                }
-                ec.user.setPreference("ACTIVE_ORGANIZATION", orgId)
-                try {
-                    return {
-                        none,
-                        active: result(S + "find#Users", {text: "sid."}),
-                        other: result(S + "get#Account", {userId: users.Two}),
+            // ADMIN, called directly (as the Assistant's tool is), under its own MANTLE_ACTIVE_ORG grant of the services
+            ec.artifactExecution.enableAuthz()
+            let admin
+            try {
+                admin = result(S + "find#Users", {text: "sid."}).userList.map(row => row.userId)
+            } finally {
+                ec.artifactExecution.disableAuthz()
+            }
+            return Object.assign(
+                {admin},
+                as("sid.chief", () => {
+                    const none = {
+                        found: result(S + "find#Users", {text: "sid."}),
                         shared: result(S + "get#Account", {userId: users.Both})
                     }
-                } finally {
-                    ec.user.setPreference("ACTIVE_ORGANIZATION", null)
-                }
-            })
+                    ec.user.setPreference("ACTIVE_ORGANIZATION", orgId)
+                    try {
+                        return {
+                            none,
+                            active: result(S + "find#Users", {text: "sid."}),
+                            other: result(S + "get#Account", {userId: users.Two}),
+                            shared: result(S + "get#Account", {userId: users.Both})
+                        }
+                    } finally {
+                        ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+                    }
+                })
+            )
         },
-        then({none, active, other, shared}) {
+        then({admin, none, active, other, shared}) {
+            admin.includes(users.One) && admin.includes(users.Two)
             const noneIds = none.found.userList.map(row => row.userId)
             noneIds.includes(users.One) && noneIds.includes(users.Two)
             none.shared.error == "" && none.shared.sharedBeyondScope == false
@@ -273,46 +286,52 @@ feature(
     }
 )
 
-feature("an organization membership is dated and ended, never deleted, and refused for another organization", {
-    when() {
-        return as("sid.operator", () => {
-            const added = result(S + "store#OrganizationMembership", {
-                partyId: parties.Two,
-                organizationPartyId: orgId,
-                relationshipTypeEnumId: "PrtAgent",
-                reason: "Covering"
-            })
-            const duplicate = result(S + "store#OrganizationMembership", {
-                partyId: parties.Two,
-                organizationPartyId: orgId,
-                relationshipTypeEnumId: "PrtAgent"
-            })
-            const elsewhere = result(S + "store#OrganizationMembership", {partyId: parties.One, organizationPartyId: otherOrgId})
-            const stale = result(S + "store#OrganizationMembership", {
-                partyRelationshipId: added.partyRelationshipId,
-                expectedRevision: "1"
-            })
-            const ended = result(S + "store#OrganizationMembership", {
-                partyRelationshipId: added.partyRelationshipId,
-                expectedRevision: added.revision,
-                reason: "Cover over"
-            })
-            return {added, duplicate, elsewhere, stale, ended}
-        })
-    },
-    then({added, duplicate, elsewhere, stale, ended}) {
-        added.applied == true && duplicate.reasonCode == "MEMBERSHIP_EXISTS"
-        elsewhere.error.includes("RECORD_UNAVAILABLE")
-        stale.reasonCode == "REVISION_CHANGED"
-        ended.applied == true
-        const kept = rows("mantle.party.PartyRelationship", {partyRelationshipId: added.partyRelationshipId})
-        kept.length == 1 && kept[0].thruDate != null
-        rows("moqui.entity.EntityAuditLog", {
-            changedEntityName: "mantle.party.PartyRelationship",
-            pkPrimaryValue: added.partyRelationshipId
-        }).some(row => row.changedFieldName == "thruDate" && row.changeReason == "Cover over")
+feature(
+    "an organization membership is dated and ended, never deleted, refused for another organization, and relating another's staff needs ADMIN_IDENTITY_GLOBAL (F78)",
+    {
+        when() {
+            const cover = {partyId: parties.Two, organizationPartyId: orgId, relationshipTypeEnumId: "PrtAgent"}
+            // Two is the other organization's staff: relating it to the operator's organization would make it readable
+            const crossing = as("sid.operator", () => result(S + "store#OrganizationMembership", cover))
+            const {added, duplicate} = as("sid.global", () => ({
+                added: result(S + "store#OrganizationMembership", Object.assign({reason: "Covering"}, cover)),
+                duplicate: result(S + "store#OrganizationMembership", cover)
+            }))
+            return Object.assign(
+                {crossing, added, duplicate},
+                as("sid.operator", () => {
+                    const elsewhere = result(S + "store#OrganizationMembership", {
+                        partyId: parties.One,
+                        organizationPartyId: otherOrgId
+                    })
+                    const stale = result(S + "store#OrganizationMembership", {
+                        partyRelationshipId: added.partyRelationshipId,
+                        expectedRevision: "1"
+                    })
+                    const ended = result(S + "store#OrganizationMembership", {
+                        partyRelationshipId: added.partyRelationshipId,
+                        expectedRevision: added.revision,
+                        reason: "Cover over"
+                    })
+                    return {elsewhere, stale, ended}
+                })
+            )
+        },
+        then({crossing, added, duplicate, elsewhere, stale, ended}) {
+            crossing.applied == false && crossing.reasonCode == "IDENTITY_GLOBAL"
+            added.applied == true && duplicate.reasonCode == "MEMBERSHIP_EXISTS"
+            elsewhere.error.includes("RECORD_UNAVAILABLE")
+            stale.reasonCode == "REVISION_CHANGED"
+            ended.applied == true
+            const kept = rows("mantle.party.PartyRelationship", {partyRelationshipId: added.partyRelationshipId})
+            kept.length == 1 && kept[0].thruDate != null
+            rows("moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.party.PartyRelationship",
+                pkPrimaryValue: added.partyRelationshipId
+            }).some(row => row.changedFieldName == "thruDate" && row.changeReason == "Cover over")
+        }
     }
-})
+)
 
 feature(
     "a staff account comes with its organization and registered bundles; an unregistered group is refused with nothing written",
