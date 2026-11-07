@@ -392,4 +392,123 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('confirmInvitationFactor', context))</script></actions>
     </service>
+
+    <!-- Internal organizations (impl-admin P7; design-admin §7 Organizations and OrganizationDetail): the OrgInternal parties in the
+        caller's scope (the filtered find on mantle.party.InternalOrganization), their profile, dated parent (PrtOrgRollup) and
+        registered defaults. ADMIN_SETTINGS_VIEW reads, ADMIN_SETTINGS_MANAGE changes; memberships are store#OrganizationMembership's.
+        The bodies are Organizations.js. -->
+    <service verb="find" noun="InternalOrganizations" allow-remote="false">
+        <description>The internal organizations (OrgInternal parties) the caller administers, by the organization entity filters of the
+            authorization the call runs under (the find on InternalOrganization), narrowed by text (name or pseudo id, ignoring case)
+            and parentPartyId; each with its current parent and count of child organizations, paged. everyOrganization says whether
+            the caller administers every internal organization. Needs ADMIN_SETTINGS_VIEW.</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="parentPartyId"/>
+            <parameter name="pageIndex" type="Integer" default="0"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationList" type="List"/>
+            <parameter name="organizationListCount" type="Integer"/>
+            <parameter name="everyOrganization" type="Boolean"/>
+            <parameter name="canManage" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('findInternalOrganizations', context))</script></actions>
+    </service>
+    <service verb="get" noun="InternalOrganization" allow-remote="false">
+        <description>One internal organization in scope (another and a missing one refused alike, RECORD_UNAVAILABLE): its name,
+            pseudo id, roles and revision; its dated parent rows (ended ones kept) and child organizations; its staff and
+            representative relationships (named for an ADMIN_IDENTITY_VIEW holder, else counted); and its registered defaults (the
+            setting types of the OrgInternal role, each with its value, source, revision and whether it is changed here). Needs
+            ADMIN_SETTINGS_VIEW.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="organization" type="Map"/>
+            <parameter name="parentPartyId"/>
+            <parameter name="parentName"/>
+            <parameter name="parents" type="List"/>
+            <parameter name="children" type="List"/>
+            <parameter name="members" type="List"/>
+            <parameter name="memberCount" type="Integer"/>
+            <parameter name="membersShown" type="Boolean"/>
+            <parameter name="defaults" type="List"/>
+            <parameter name="everyOrganization" type="Boolean"/>
+            <parameter name="canManage" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('getInternalOrganization', context))</script></actions>
+    </service>
+    <service verb="create" noun="InternalOrganization" allow-remote="false">
+        <description>A new internal organization (PartyServices.create#Organization with the OrgInternal role) and its parent from now
+            (store#OrganizationParent's dated PrtOrgRollup). The parent must be in scope; without one the caller must administer every
+            internal organization (PARENT_REQUIRED). Initializes no accounting, membership, secret or currency. Needs
+            ADMIN_SETTINGS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="organizationName" required="true"/>
+            <parameter name="pseudoId"/>
+            <parameter name="parentPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('createInternalOrganization', context))</script></actions>
+    </service>
+    <service verb="store" noun="InternalOrganization" allow-remote="false">
+        <description>An internal organization's name and pseudo id (PartyServices.update#PartyDetail with those alone), at the revision
+            read (REVISION_CHANGED). Refused for an organization out of scope and a pseudo id another party has. Needs
+            ADMIN_SETTINGS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="organizationName" required="true"/>
+            <parameter name="pseudoId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('storeInternalOrganization', context))</script></actions>
+    </service>
+    <service verb="store" noun="OrganizationParent" allow-remote="false">
+        <description>The parent of an internal organization from fromDate (now when empty): a dated PrtOrgRollup relationship between two
+            OrgInternal parties (NOT_INTERNAL otherwise), the current one ended then and kept; with no parentPartyId the current
+            parent ends. Both organizations in scope; the parent never the organization or one below it (PARENT_CYCLE). Needs
+            ADMIN_SETTINGS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="parentPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="partyRelationshipId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('storeOrganizationParent', context))</script></actions>
+    </service>
+    <service verb="store" noun="OrganizationDefault" allow-remote="false">
+        <description>A registered default of an internal organization in scope (a setting type of the OrgInternal role) that is changed
+            here (typed, or validated against the organization's records), at the revision read; validated by
+            PartyServices.validate#PartySetting and stored by store#PartySetting; an empty value removes the organization's own value.
+            Refused for an unregistered type (NOT_REGISTERED) and one its owner sets (OWNER_SETTING). Needs ADMIN_SETTINGS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="partySettingTypeId" required="true"/>
+            <parameter name="settingValue"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('storeOrganizationDefault', context))</script></actions>
+    </service>
 </services>
