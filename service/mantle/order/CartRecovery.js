@@ -272,6 +272,9 @@ function queueRecovery(p) {
 const handledCodes = ["QUEUED", "ALREADY_SENT", "SEND_LIMIT"]
 function markHandled(row) {
     try {
+        // only while the shopper has not come back since the cart was read: a mark on a newer visit would hide it from the job
+        const access = find(A, {cartAccessId: row.cartAccessId}).useCache(false).one()
+        if (!access || ms(access.lastActivityDate) !== ms(row.lastActivityDate)) return
         lib.probe("update#" + A, {cartAccessId: row.cartAccessId, recoveryHandledDate: row.lastActivityDate})
     } catch (error) {
         ec.logger.warn("Cart recovery of cart " + row.orderId + " not marked handled: " + String(error.message).split("\n")[0])

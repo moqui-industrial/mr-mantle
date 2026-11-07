@@ -611,7 +611,32 @@ feature(
             const writeAgain = op(ids.buyer, K + "submit#Review", input)
             const editDeleted = op(ids.buyer, K + "submit#Review", Object.assign({productReviewId: state.reviewId}, input))
             const afterDelete = op(ids.buyer, K + "get#Reviews", {productId: ids.product})
-            return {requested, claimed, guest, photoRemoved, fileKept, deleted, writeAgain, editDeleted, afterDelete}
+            // a review written again before F101 made deletion final stays the author's own (the live one before the deleted)
+            const legacyId = system(() => {
+                const old = one("mantle.product.ProductReview", {productReviewId: state.reviewId})
+                return make("mantle.product.ProductReview", {
+                    productReviewId: state.reviewId + "Z",
+                    productStoreId: old.productStoreId,
+                    productId: old.productId,
+                    userId: old.userId,
+                    statusId: "PrvwPending",
+                    postedDateTime: ec.user.nowTimestamp
+                }).productReviewId
+            })
+            const legacyOwn = op(ids.buyer, K + "get#Reviews", {productId: ids.product}).result?.own?.id
+            return {
+                requested,
+                claimed,
+                guest,
+                photoRemoved,
+                fileKept,
+                deleted,
+                writeAgain,
+                editDeleted,
+                afterDelete,
+                legacyId,
+                legacyOwn
+            }
         },
         then(r) {
             r.requested.length == 1
@@ -627,6 +652,7 @@ feature(
             r.afterDelete.result.own == null
             r.afterDelete.result.canReview == false
             r.afterDelete.result.reviewRemoved == true
+            r.legacyOwn == r.legacyId
         }
     }
 )

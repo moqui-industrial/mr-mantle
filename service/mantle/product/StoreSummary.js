@@ -19,8 +19,11 @@ const ADMIN = "mantle.product.StoreAdminServices."
 // ===== values =====
 const text = value => (value == null ? "" : String(value).trim())
 const REDACTED = "[redacted]"
-const credentialName = /pass(word|phrase)?|secret|token|api.?key|private.?key|credential|account.?(number|no)|signature/i
-const redact = (name, value) => (credentialName.test(text(name)) ? REDACTED : text(value))
+const credentialName =
+    /pass(word|phrase)?|secret|token|credential|account.?(number|no)|signature|(^|[^a-z])(key|pin)([^a-z]|$)|cvv/i
+// a camel-case or enum id's key ("PsstWebhookKey", "signingKey")
+const credentialKey = /[a-z_](Key|Pin)(?![a-z])/
+const redact = (name, value) => (credentialName.test(text(name)) || credentialKey.test(text(name)) ? REDACTED : text(value))
 const yesNo = value => (value === "Y" || value === true ? "Yes" : value === "N" || value === false ? "No" : text(value))
 // "name = value, ..." with each value whose name reads as a credential redacted
 const redactPairs = pairs =>

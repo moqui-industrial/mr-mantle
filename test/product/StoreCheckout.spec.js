@@ -402,6 +402,29 @@ feature("the configuration summary groups the store's settings for CSV and print
                 fromDate: 0,
                 settingValue: "tok-s3cr3t-value"
             })
+            // a value a spreadsheet would read as a formula, and a camel-case key's name
+            make("moqui.basic.Enumeration", {
+                enumId: prefix + "_LABEL",
+                enumTypeId: "ProductStoreSettingType",
+                description: "Partner label"
+            })
+            make(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: prefix + "_LABEL",
+                fromDate: 0,
+                settingValue: '=HYPERLINK("http://x.example")'
+            })
+            make("moqui.basic.Enumeration", {
+                enumId: prefix + "WebhookKey",
+                enumTypeId: "ProductStoreSettingType",
+                description: "Partner hook"
+            })
+            make(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: prefix + "WebhookKey",
+                fromDate: 0,
+                settingValue: "whk-s3cr3t"
+            })
             call("store#" + S + "ProductStoreShippingGateway", {
                 productStoreId: ids.store,
                 carrierPartyId: "_NA_",
@@ -427,6 +450,8 @@ feature("the configuration summary groups the store's settings for CSV and print
         summary.csvText.includes("Section,Item,Value,State")
         summary.printHtml.includes("<h1>Checkout store (" + ids.store + ")</h1>")
         summary.fileName.startsWith("store-" + ids.store + "-")
+        summary.csvText.includes('"\'=HYPERLINK(""http://x.example"")"')
+        !JSON.stringify(summary).includes("whk-s3cr3t")
         !JSON.stringify(summary).includes("tok-s3cr3t-value")
         !JSON.stringify(summary).includes("987654321")
         !JSON.stringify(summary).includes("alwaysApprove")

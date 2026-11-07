@@ -436,11 +436,13 @@ function qualifyingItems(shop, partyId, productId, first = false) {
 }
 // The author's own review of a product in the store, in any state, or null. A review staff deleted stays the author's one
 // review of the product: deletion is final, so it is neither edited nor written again (F101).
-const ownReview = (shop, productId) =>
-    find(R, {userId: ec.user.userId, productStoreId: shop.productStoreId, productId})
-        .orderBy("productReviewId")
-        .limit(1)
-        .list()[0] || null
+// (an author's live review comes before a deleted one, so one written before F101 after a deletion is still theirs to edit)
+function ownReview(shop, productId) {
+    const found = Array.from(
+        find(R, {userId: ec.user.userId, productStoreId: shop.productStoreId, productId}).orderBy("productReviewId").list()
+    )
+    return found.find(row => row.statusId !== "PrvwDeleted") || found[0] || null
+}
 const removed = row => row?.statusId === "PrvwDeleted"
 // The author's public label for a choice: the first name and the last name's initial, or none.
 function labelOf(partyId, choice) {
