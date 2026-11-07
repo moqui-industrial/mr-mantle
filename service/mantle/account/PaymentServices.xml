@@ -3295,7 +3295,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="get" noun="PaymentFinanceDetail" allow-remote="false">
+    <service verb="get" noun="PaymentFinanceDetail" transaction="cache" allow-remote="false">
         <description>Read a payment the user may read: its identity and totals, masked methods, the applications to records
             the user may read, issued documents, files and history. Ledger and gateway rows only with their read authority;
             check images only with treasury authority.</description>
@@ -4222,7 +4222,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="results" from="retained.result"/>
         </actions>
     </service>
-    <service verb="execute" noun="PaymentGatewayAction" allow-remote="false">
+    <service verb="execute" noun="PaymentGatewayAction" transaction="cache" allow-remote="false">
         <description>Confirm a retained gateway action review: with the payment locked and unchanged since the review, run
             Mantle's authorize#, capture# or release#SinglePayment, or for a refund create#RefundPayment (promised, so it
             counts against the original until the gateway answers) and refund#SinglePayment for it, all with the operation
@@ -4531,7 +4531,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
         </actions>
     </service>
-    <service verb="refund" noun="ReviewedPayment" allow-remote="false">
+    <service verb="refund" noun="ReviewedPayment" transaction="cache" allow-remote="false">
         <description>Confirm a retained manual refund review: with the original locked and unchanged since the review, create
             the delivered refund through create#RefundPayment on its book day, with the reviewed methods, reference and
             reason, so the Payment SECAs post it and it is applied to the original. Refuses another user's, an expired,

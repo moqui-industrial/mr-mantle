@@ -1542,7 +1542,7 @@ along with this software (see the LICENSE.md file). If not, see
                     orderId, {resultCode: 'ADJUSTED', orderId: orderId, sources: adjusted})"/>
         </actions>
     </service>
-    <service verb="receive" noun="ShipmentStock" allow-remote="false">
+    <service verb="receive" noun="ShipmentStock" transaction="cache" allow-remote="false">
         <description>Receive one line of a purchase receipt through mantle.shipment.ShipmentServices.receive#ShipmentProduct,
             atomically: the quantity accepted and rejected in the entered unit (the order line's unit by default; a pack of the
             product, resolved through mantle.product.ProductServices.resolve#ScannedProduct, counts its contents), converted to

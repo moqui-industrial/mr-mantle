@@ -4448,7 +4448,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="notificationMessageId" from="notified.notificationMessageId"/>
         </actions>
     </service>
-    <service verb="approve" noun="Payable" allow-remote="false">
+    <service verb="approve" noun="Payable" transaction="cache" allow-remote="false">
         <description>Approve a bill: its posting day when given (accountingDate, a draft's book day in an open period),
             then change#InvoiceState's approval, which posts it and stamps the approver (self-approved when the approver
             drafted it), its budget commitments converted to actual (change#InvoiceState calls

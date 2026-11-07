@@ -2011,7 +2011,7 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
             <if condition="shipment == null"><return error="true" message="Shipment ${shipmentId} not found"/></if>
             <if condition="['ShipInput', 'ShipScheduled', 'ShipPicked'].includes(shipment.statusId)">
-                <service-call name="mantle.shipment.ShipmentServices.pack#Shipment" in-map="{shipmentId:shipmentId}" transaction="force-new"/></if>
+                <service-call name="mantle.shipment.ShipmentServices.pack#Shipment" in-map="{shipmentId:shipmentId}" transaction="force-cache"/></if>
 
             <!-- if CC payment(s) make sure captured (Delivered) before getting labels, etc -->
             <!-- new logic: get total of invoices, make sure payments greater where CC is Delivered or Confirmed, other instruments in any active status -->
