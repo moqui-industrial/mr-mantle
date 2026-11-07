@@ -262,6 +262,17 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="countsText" from="found.countsText"/>
         </actions>
     </service>
+    <!-- Commerce P15 (F165): commit#ChannelImport's claim of its batch -->
+    <service verb="claim" noun="ChannelImport" allow-remote="false">
+        <description>Internal, for commit#ChannelImport, in a transaction of its own: the batch locked and, while it is still
+            staged, marked committing (claimed true); a batch another commit claimed first answers claimed false.
+            COMMERCE_CHANNEL_OPERATE and the store scope.</description>
+        <in-parameters><parameter name="systemMessageId" required="true"/></in-parameters>
+        <out-parameters><parameter name="claimed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="claimed" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('claimChannelImport', context).claimed"/>
+        </actions>
+    </service>
     <service verb="commit" noun="ChannelImport" allow-remote="false" transaction-timeout="1800">
         <description>ChannelImport's ImportCommit: the staged batch as previewed (digest; another is BATCH_CHANGED) committed with a reason, its orders received through the API's connector path (receive#ChannelOrders with the batch as parent: deduplicated, replays answered, conflicts quarantined) and each consumed in its own transaction, a failing order not stopping the others; the batch Consumed and the commit recorded (PostingOperation ChannelImport:{batch}, its reason and counts). Committing again answers the outcome (alreadyApplied); a commit that fails before its orders are kept leaves the batch staged, and committing it again keeps no order twice. COMMERCE_CHANNEL_OPERATE and the store scope.</description>
         <in-parameters>

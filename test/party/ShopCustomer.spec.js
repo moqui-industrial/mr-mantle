@@ -452,3 +452,104 @@ feature("a signed-in customer turns a store's cart reminders on and off; a guest
         link.oneClickUrl.includes("/account/EmailPreferences/oneClick?token=")
     }
 })
+
+// Commerce P15 (F124, F126): a pending checkout choice is declined on the preferences page by its decline box (an unchecked
+// save leaves it waiting), after which a confirmation grants nothing; a pending news choice is declined the same way; and an
+// unverified account's own pending choice is confirmed once the account verifies its email and signs in.
+feature(
+    "a pending choice is declined by its decline box, not an unchecked save; an unverified account's own choice is confirmed once it verifies",
+    {
+        when() {
+            const H = "mantle.public.AccountHubServices."
+            const C = "mantle.order.StoreCheckout"
+            const pend = (partyId, optInId) =>
+                system(() =>
+                    call(H + "apply#CheckoutOptIn", {
+                        optInId,
+                        mode: "pend",
+                        partyId,
+                        productStoreId: ids.store,
+                        sourceEnumId: "PcsForm",
+                        evidenceText: "Spec: checked at checkout"
+                    })
+                )
+            // the buyer's cart reminders choice waits (they turned the topic off in the feature above)
+            pend(ids.buyer, "cartReminders")
+            const shown = op(ids.buyer, H + "get#EmailPreferences", {})
+            const topicId = "cartReminders:" + ids.store
+            const pendingShown = shown.result?.topics.find(row => row.topicId === topicId)?.confirmPending
+            const unchecked = op(ids.buyer, H + "store#EmailPreferences", {choices: {topics: {[topicId]: false}}})
+            const stillPending = unchecked.result?.topics.find(row => row.topicId === topicId)?.confirmPending
+            const declined = op(ids.buyer, H + "store#EmailPreferences", {choices: {decline: {topics: [topicId]}}})
+            const afterDecline = declined.result?.topics.find(row => row.topicId === topicId)?.confirmPending
+            const confirmLater = system(() =>
+                call(H + "apply#CheckoutOptIn", {
+                    optInId: "cartReminders",
+                    mode: "grant",
+                    partyId: ids.buyer,
+                    productStoreId: ids.store,
+                    sourceEnumId: "PcsEmailLink",
+                    requirePending: true
+                })
+            ).outcome
+            // a pending news list membership, declined
+            const newsListId = system(() => {
+                const contactListId = call("create#mantle.marketing.contact.ContactList", {
+                    contactListName: "Store news",
+                    ownerPartyId: ids.org
+                }).contactListId
+                call("create#mantle.marketing.contact.ContactListParty", {
+                    contactListId,
+                    partyId: ids.buyer,
+                    fromDate: ec.user.nowTimestamp,
+                    statusId: "CLPT_PENDING"
+                })
+                return contactListId
+            })
+            const newsShown = op(ids.buyer, H + "get#EmailPreferences", {}).result?.lists.find(
+                row => row.contactListId === newsListId
+            )?.confirmPending
+            const newsDeclined = op(ids.buyer, H + "store#EmailPreferences", {
+                choices: {decline: {lists: [newsListId]}}
+            }).result?.lists.find(row => row.contactListId === newsListId)
+            // the unverified account's own choice, checked while signed in with its address, waits; verified, its sign-in confirms it
+            const checkoutId = system(() => {
+                pend(ids.unverified, "reviewRequests")
+                return call("create#" + C, {
+                    orderId: state.other.orderId,
+                    siteId: ids.site,
+                    productStoreId: ids.store,
+                    statusId: "ScoCompleted",
+                    customerPartyId: ids.unverified,
+                    accountCheckout: "Y",
+                    contactEmail: "other@shcu.example.test",
+                    optInsJson: JSON.stringify({chosen: ["reviewRequests"], outcome: {reviewRequests: "pending"}}),
+                    optInPending: "Y"
+                }).checkoutId
+            })
+            op(ids.unverified, A + "get#Account", {})
+            const beforeVerify = one(C, {checkoutId}).optInPending
+            system(() =>
+                make("moqui.security.public.VerifiedAddress", {
+                    userId: ids.unverified,
+                    emailAddress: "other@shcu.example.test",
+                    verifiedAt: ec.user.nowTimestamp
+                })
+            )
+            op(ids.unverified, A + "get#Account", {})
+            const verified = one(C, {checkoutId})
+            return {pendingShown, stillPending, afterDecline, confirmLater, newsShown, newsDeclined, beforeVerify, verified}
+        },
+        then(r) {
+            r.pendingShown == true
+            r.stillPending == true
+            r.afterDecline == false
+            r.confirmLater == "withdrawn"
+            r.newsShown == true
+            r.newsDeclined == null
+            r.beforeVerify == "Y"
+            r.verified.optInPending == "N"
+            JSON.parse(r.verified.optInsJson).outcome.reviewRequests == "granted"
+        }
+    }
+)

@@ -384,3 +384,77 @@ feature("the store's tax gateway changes with its reason, and a reader previews 
         r.tax.taxDisplayText == "Prices include tax"
     }
 })
+
+// Commerce P15: the store's readiness and configuration summary (get#StoreSummary; design-commerce §13): the reader's grouped
+// sections, CSV and print, every credential redacted (a setting named as a token, a carrier's account; no gateway
+// configuration); another organization's store refused.
+feature("the configuration summary groups the store's settings for CSV and print with credentials redacted", {
+    when() {
+        system(() => {
+            make("moqui.basic.Enumeration", {
+                enumId: prefix + "_API_TOKEN",
+                enumTypeId: "ProductStoreSettingType",
+                description: "Partner API token"
+            })
+            make(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: prefix + "_API_TOKEN",
+                fromDate: 0,
+                settingValue: "tok-s3cr3t-value"
+            })
+            // a value a spreadsheet would read as a formula, and a camel-case key's name
+            make("moqui.basic.Enumeration", {
+                enumId: prefix + "_LABEL",
+                enumTypeId: "ProductStoreSettingType",
+                description: "Partner label"
+            })
+            make(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: prefix + "_LABEL",
+                fromDate: 0,
+                settingValue: '=HYPERLINK("http://x.example")'
+            })
+            make("moqui.basic.Enumeration", {
+                enumId: prefix + "WebhookKey",
+                enumTypeId: "ProductStoreSettingType",
+                description: "Partner hook"
+            })
+            make(S + "ProductStoreSetting", {
+                productStoreId: ids.store,
+                settingTypeEnumId: prefix + "WebhookKey",
+                fromDate: 0,
+                settingValue: "whk-s3cr3t"
+            })
+            call("store#" + S + "ProductStoreShippingGateway", {
+                productStoreId: ids.store,
+                carrierPartyId: "_NA_",
+                shippingGatewayConfigId: prefix + "_SHIP",
+                billingAccount: "ACCT-987654321"
+            })
+        })
+        return {
+            summary: run(users.reader, A + "get#StoreSummary", {productStoreId: ids.store}),
+            other: run(users.other, A + "get#StoreSummary", {productStoreId: ids.store})
+        }
+    },
+    then({summary, other}) {
+        summary.error == ""
+        summary.sections.map(section => section.key) ==
+            ["readiness", "general", "sites", "facilities", "staff", "emails", "orderChecks", "content", "settings", "checkout"]
+        summary.sections.find(section => section.key == "readiness").rows.length > 0
+        summary.sections.find(section => section.key == "settings").rows.find(entry => entry.item == "Partner API token").value ==
+            "[redacted]"
+        summary.sections.find(section => section.key == "checkout").rows.some(entry => entry.state.includes("[redacted]"))
+        summary.sections.find(section => section.key == "checkout").rows.some(entry => entry.item == "Tax gateway")
+        summary.csvText.startsWith("Store configuration summary,Checkout store (" + ids.store + ")")
+        summary.csvText.includes("Section,Item,Value,State")
+        summary.printHtml.includes("<h1>Checkout store (" + ids.store + ")</h1>")
+        summary.fileName.startsWith("store-" + ids.store + "-")
+        summary.csvText.includes('"\'=HYPERLINK(""http://x.example"")"')
+        !JSON.stringify(summary).includes("whk-s3cr3t")
+        !JSON.stringify(summary).includes("tok-s3cr3t-value")
+        !JSON.stringify(summary).includes("987654321")
+        !JSON.stringify(summary).includes("alwaysApprove")
+        code(other) == "RECORD_UNAVAILABLE"
+    }
+})
