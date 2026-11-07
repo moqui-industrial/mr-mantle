@@ -2049,7 +2049,9 @@ along with this software (see the LICENSE.md file). If not, see
             neither or the user has an entity authorization for Asset; a booked fixed asset follows its book's read. A quality
             inspection and its files (QualityInspectionContent): under an organization filter, its organization or its
             facility's owner is one of the filter's organizations. A return's files (ReturnContent) follow the return. Any
-            other record type has only its entity filters.
+            other record type has only its entity filters, but an account (UserAccount: an ADMIN_IDENTITY_VIEW holder within the
+            organizations mantle.party.IdentityServices lets it administer) and a security group (UserGroup: an
+            ADMIN_ACCESS_VIEW holder).
 
             A client contact (the PROJECT_CLIENT permission) sees only what get#ClientRecordVisibility shows it, with
             authorization disabled too.
@@ -2471,6 +2473,16 @@ along with this software (see the LICENSE.md file). If not, see
                 if (value == null) return false
                 if (isClientUser()) return clientVisible(entityName, id)
                 if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
+                // An account's or a security group's notes (Admin's "Log as note", impl-admin F-P4-11, review R3) are the
+                // identity and access administrators', whatever entity authorization an app root lends: an account for an
+                // ADMIN_IDENTITY_VIEW holder within the organizations it administers (mantle.party.IdentityServices' scope), a
+                // group for an ADMIN_ACCESS_VIEW holder. These rules hold for every caller, a call with no user too.
+                if (entityName === 'moqui.security.UserAccount') {
+                    if (!ec.user.userId || !ec.user.hasPermission('ADMIN_IDENTITY_VIEW')) return false
+                    try { ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').identity(id); return true }
+                    catch (error) { return false }
+                }
+                if (entityName === 'moqui.security.UserGroup') return !!ec.user.userId && ec.user.hasPermission('ADMIN_ACCESS_VIEW')
                 if (entityName === 'mantle.ledger.transaction.AcctgTrans' || entityName === 'mantle.ledger.transaction.AcctgTransContent') {
                     const finance = ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')
                     try { finance.record({kind:'journals', recordId:value.acctgTransId}); return true } catch (error) { return false }

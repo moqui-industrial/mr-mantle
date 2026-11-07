@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Organization-scoped identity (mr-boss plan/design-admin.md §4.1, §17.2; impl-admin P4): the staff identities of the internal
+    organizations the caller administers (their own, every one for ADMIN), through PartyRelationship and PartyRole, calling the
+    framework's org.moqui.admin guards (AccessServices' grant proposals, IdentityServices' credentials and administration
+    path). Reads need ADMIN_IDENTITY_VIEW, changes ADMIN_IDENTITY_MANAGE, and an account-wide change of an identity shared with an
+    organization the caller does not administer ADMIN_IDENTITY_GLOBAL. A refusal of a change is answered (applied false,
+    reasonCode, reason); a missing permission or an identity out of scope (RECORD_UNAVAILABLE) is an error. Names no app group:
+    grants come as a proposal of registered bundles the app supplies. ALL_USERS may call them (data/PartyAccessData.xml): each
+    refuses without its permission. The bodies are Identity.js. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Users" allow-remote="false">
+        <description>The staff identities with a current relationship (agent, employee, member) to an internal organization the
+            caller administers, or to organizationPartyId among them; narrowed by text (name, username, email, ignoring case),
+            userGroupId (a current member) and state (active, ending, locked, disabled, terminated); each with its organizations
+            in scope (others counted, never named), state and last sign-in, paged. Public identities (accounts of no internal
+            organization) only with includePublic and ADMIN_IDENTITY_GLOBAL, labelled as site relationships. Needs
+            ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="userGroupId"/>
+            <parameter name="state"/>
+            <parameter name="includePublic" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer" default="0"/>
+            <parameter name="pageSize" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="userList" type="List"/>
+            <parameter name="userListCount" type="Integer"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('findUsers', context))</script></actions>
+    </service>
+    <service verb="get" noun="Account" allow-remote="false">
+        <description>One identity in scope: its account fields (never a password, hash or secret), state, organizations in scope
+            and the count of others, its dated organization relationships the caller administers, its group memberships, its
+            factors and credentials (metadata only, the framework's get#AccountCredentials) and whether the caller may make an
+            account-wide change (and why not). Needs ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters><parameter name="userId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="account" type="Map"/>
+            <parameter name="organizations" type="List"/>
+            <parameter name="otherOrganizationCount" type="Integer"/>
+            <parameter name="sharedBeyondScope" type="Boolean"/>
+            <parameter name="relationships" type="List"/>
+            <parameter name="memberships" type="List"/>
+            <parameter name="factorList" type="List"/>
+            <parameter name="singleUseCodeCount" type="Integer"/>
+            <parameter name="credentialList" type="List"/>
+            <parameter name="canManage" type="Boolean"/>
+            <parameter name="canChangeAccount" type="Boolean"/>
+            <parameter name="accountChangeReason"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('getAccount', context))</script></actions>
+    </service>
+    <service verb="get" noun="AccountHistory" allow-remote="false">
+        <description>An identity's access events, newest first, at most limit (50): sign-ins (UserLoginHistory, with the session
+            each opened) and the audit log's changes of its account, group memberships and the organization relationships the
+            caller administers, each with actor, time, reason and the session it was made in; no password, token or session
+            secret. Needs ADMIN_IDENTITY_VIEW.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="limit" type="Integer" default="50"/>
+        </in-parameters>
+        <out-parameters><parameter name="eventList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('getAccountHistory', context))</script></actions>
+    </service>
+    <service verb="store" noun="OrganizationMembership" allow-remote="false">
+        <description>A dated relationship of a person to an internal organization the caller administers (relationshipTypeEnumId
+            PrtEmployee by default, PrtAgent, PrtMember or PrtRepresentative): a new one from fromDate (now when empty), or with
+            partyRelationshipId and expectedRevision its end at thruDate (now when empty). Ended rows are kept; the dates are
+            audit-logged with the reason. Refused for an overlapping relationship of the same kind or a stale revision. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="relationshipTypeEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('storeOrganizationMembership', context))</script></actions>
+    </service>
+    <service verb="create" noun="StaffAccount" allow-remote="false">
+        <description>An exceptional direct staff account (invitations are the default): a person (partyId, or a new one from
+            firstName and lastName) with a relationship to an internal organization the caller administers, an account through
+            mantle.party.PartyServices.create#PartyUserAccount with no password (the reset password reset#Password mails, unless
+            sendReset is false, lets the user set one), and the memberships of the grant proposal (bundleGroupIdList, registered
+            bundles the app supplies, checked and applied by the framework's AccessServices), all or nothing. An existing person
+            who works for an organization the caller does not administer needs ADMIN_IDENTITY_GLOBAL. Needs
+            ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="username"/>
+            <parameter name="emailAddress" required="true"><text-email/></parameter>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="relationshipTypeEnumId"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="sendReset" type="Boolean" default="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="userId"/>
+            <parameter name="partyId"/>
+            <parameter name="addedGroupIds" type="List"/>
+            <parameter name="bundleList" type="List"/>
+            <parameter name="resetSent" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('createStaffAccount', context))</script></actions>
+    </service>
+    <service verb="store" noun="Account" allow-remote="false">
+        <description>An identity's account fields (emailAddress, username, ipAllowed, requirePasswordChange, locale, timeZone) at
+            its revision (expectedRevision, get#Account's account.revision), through update#PartyUserAccount. Each is
+            account-wide, so an identity shared with an organization the caller does not administer needs ADMIN_IDENTITY_GLOBAL;
+            ipAllowed is checked against the administration path. The audit log keeps before and after with the reason.
+            Enabling, disabling and the end date are the lifecycle's. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="emailAddress"><text-email/></parameter>
+            <parameter name="username"/>
+            <parameter name="ipAllowed"/>
+            <parameter name="requirePasswordChange"/>
+            <parameter name="locale"/>
+            <parameter name="timeZone"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="revision"/>
+            <parameter name="changed" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('storeAccount', context))</script></actions>
+    </service>
+    <service verb="reset" noun="Authentication" allow-remote="false">
+        <description>A sign-in reset of an identity in scope. resetKind password (the default) sends the change-only reset password
+            org.moqui.impl.UserServices.reset#Password mails (no password is set; the current one stays valid), for any identity
+            in scope; factor ends factorId (invalidate#UserAuthcFactorEntry), checked against the administration path; lock
+            releases a failed-login lock and the account's artifact velocity locks (never a permanent disable). A factor or lock
+            reset is account-wide: an identity shared with an organization the caller does not administer needs
+            ADMIN_IDENTITY_GLOBAL. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="resetKind" default-value="password"/>
+            <parameter name="factorId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="resetKind"/>
+            <parameter name="releasedCount" type="Integer"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Identity.js').execute('resetAuthentication', context))</script></actions>
+    </service>
+</services>
