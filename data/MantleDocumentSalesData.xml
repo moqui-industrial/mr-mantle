@@ -51,6 +51,8 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="45" fieldPath="orderHeader:salesChannelEnumId"/>
         <fields fieldSeqId="46" fieldPath="orderHeader:currencyUomId"/>
         <fields fieldSeqId="47" fieldPath="orderHeader:grandTotal"/>
+        <!-- a RecurringTemplate base is never a sale (X5): orders panels leave it out (impl-insights F61) -->
+        <fields fieldSeqId="48" fieldPath="orderHeader:orderPurposeEnumId"/>
 
         <fields fieldSeqId="51" fieldPath="orderHeader:statusLogs:oldValueText" fieldNameAlias="oldStatusId"/>
         <fields fieldSeqId="52" fieldPath="orderHeader:statusLogs:newValueText" fieldNameAlias="newStatusId"/>

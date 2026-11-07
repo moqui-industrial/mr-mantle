@@ -36,6 +36,19 @@
                   "count"
                 ]
               }
+            ],
+            "filters": [
+              {
+                "query": {
+                  "field": {
+                    "name": "orderPurposeEnumId",
+                    "op": "eq",
+                    "value": "OrpRecurringTemplate"
+                  }
+                },
+                "negated": true,
+                "label": "Not a recurring base order"
+              }
             ]
           }
         ]
@@ -71,6 +84,19 @@
                 "hide": [
                   "count"
                 ]
+              }
+            ],
+            "filters": [
+              {
+                "query": {
+                  "field": {
+                    "name": "orderPurposeEnumId",
+                    "op": "eq",
+                    "value": "OrpRecurringTemplate"
+                  }
+                },
+                "negated": true,
+                "label": "Not a recurring base order"
               }
             ]
           }
@@ -115,6 +141,19 @@
                 "hide": [
                   "count"
                 ]
+              }
+            ],
+            "filters": [
+              {
+                "query": {
+                  "field": {
+                    "name": "orderPurposeEnumId",
+                    "op": "eq",
+                    "value": "OrpRecurringTemplate"
+                  }
+                },
+                "negated": true,
+                "label": "Not a recurring base order"
               }
             ]
           }
