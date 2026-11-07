@@ -246,8 +246,10 @@ function storeInternalOrganization(p) {
 
 // ===== store#OrganizationParent =====
 // The parent of an organization from fromDate (now when empty): its current parent row ended then and a new one started, both
-// kept; with no parentPartyId the current parent ends. Both organizations internal (NOT_INTERNAL) and in scope, the parent not
-// the organization or one below it (PARENT_CYCLE).
+// kept; with no parentPartyId the current parent ends, making it top-level, which (as creating a top-level organization) only a
+// caller administering every internal organization may do (PARENT_REQUIRED): it would leave the scope of its parent's
+// administrators. Both organizations internal (NOT_INTERNAL) and in scope, the parent not the organization or one below it
+// (PARENT_CYCLE); refused while a later parent is already set (PARENT_SCHEDULED), which this change would leave in place.
 function linkParent(partyId, parentPartyId, fromDate) {
     const value = ec.entity.makeValue(RELATIONSHIP)
     value.setSequencedIdPrimary()
@@ -276,8 +278,16 @@ function storeOrganizationParent(p) {
         return refused("NOT_INTERNAL", "A parent links two internal organizations")
     inScope(userScope, partyId)
     if (parentPartyId) inScope(userScope, parentPartyId)
+    if (!parentPartyId && !userScope.everyOrganization)
+        return refused("PARENT_REQUIRED", "Choose the organization it belongs to: you administer only some organizations")
     const fromDate = p.fromDate != null && p.fromDate !== "" ? ms(p.fromDate) : nowMs()
     if (!Number.isFinite(fromDate) || fromDate < nowMs() - 60000) throw new Error("A parent changes now or later")
+    if (
+        rows(RELATIONSHIP, {fromPartyId: partyId, relationshipTypeEnumId: ROLLUP}).some(
+            row => (ms(row.fromDate) ?? -Infinity) > fromDate && (ms(row.thruDate) ?? Infinity) > (ms(row.fromDate) ?? 0)
+        )
+    )
+        return refused("PARENT_SCHEDULED", organizationName(partyId) + " already has a later parent change")
     // the parent and every organization above it, at that date: the organization must not be among them
     if (parentPartyId) {
         let above = parentPartyId

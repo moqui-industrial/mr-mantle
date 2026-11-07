@@ -1,12 +1,12 @@
 // Internal organizations (service/mantle/party/Organizations.js, IdentityServices.xml; mr-boss impl-admin P7, design-admin §7):
 // an organization's settings operator finds its organization and the child it creates, not another organization, and cannot
-// create one outside its scope; a parent links only two internal organizations, dated (the earlier parent ended and kept), never
+// create one outside its scope or make its child top-level; a parent links only two internal organizations, dated (the earlier parent ended and kept), never
 // in a cycle, and moving a child out of the operator's organization takes it out of its scope; the profile and a registered
 // default change at their revision, and a default no one registered for internal organizations, or one its owner sets, is
 // refused. Scope is the organization entity filters of the services' ALL_USERS grant (MANTLE_USER_ORG) for the operator and
 // ADMIN's own grant (every organization with none active). The operator holds the framework's ADMIN_SETTINGS_* through a spec
 // group. New spec, no Groovy original.
-// Run: ./moq test mr-mantle --spec party/InternalOrganizations
+// Run: ./moq test mr-mantle --spec InternalOrganizations
 const S = "mantle.party.IdentityServices."
 const dayMillis = 86400000
 const effectiveTime = Date.now()
@@ -142,17 +142,19 @@ feature("the operator creates a child of its organization and finds both, not an
                     parentPartyId: orgs.two
                 }),
                 other: result(S + "get#InternalOrganization", {organizationPartyId: orgs.two}),
+                // ending its child's parent would make a top-level organization, out of its parent's administrators' scope
+                detach: result(S + "store#OrganizationParent", {organizationPartyId: orgs.child}),
                 member: as("ior.member", () => result(S + "find#InternalOrganizations", {}))
             }
         })
     },
-    then({child, found, topLevel, underOther, other, member}) {
+    then({child, found, topLevel, underOther, other, detach, member}) {
         child.applied && child.error == ""
         rollups(orgs.child).length == 1 && rollups(orgs.child)[0].toPartyId == orgs.one && rollups(orgs.child)[0].thruDate == null
         ids(found.organizationList).includes(orgs.one) && ids(found.organizationList).includes(orgs.child)
         !ids(found.organizationList).includes(orgs.two) && found.everyOrganization == false
         found.organizationList.find(row => row.organizationPartyId == orgs.child).parentName == "Org Rules One"
-        topLevel.applied == false && topLevel.reasonCode == "PARENT_REQUIRED"
+        topLevel.applied == false && topLevel.reasonCode == "PARENT_REQUIRED" && detach.reasonCode == "PARENT_REQUIRED"
         underOther.error.includes("RECORD_UNAVAILABLE") && other.error.includes("RECORD_UNAVAILABLE")
         member.error.includes("ADMIN_SETTINGS_VIEW")
     }

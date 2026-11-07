@@ -108,6 +108,18 @@ function scope() {
         : []
     return {organizationIds, all: access.systemAdmin()}
 }
+// The internal organizations the caller administers by its authorization's organization filters, or null when that
+// authorization names none (and the caller is not an instance administrator), so a caller can fall back to its own rule.
+// readOnly: use the organization context an app screen's pre-actions put in the user context, never setting it up (which may
+// clear a stale active organization preference), for a caller under the read fence; null when there is none.
+function administered(readOnly) {
+    if (readOnly && !("filterOrgIds" in ec.user.context)) return null
+    if (!readOnly) organizationContext()
+    if (!organizationFiltered(INTERNAL_ORGANIZATION) && !access.systemAdmin()) return null
+    return Array.from(ec.entity.find(INTERNAL_ORGANIZATION).selectField("organizationPartyId").list()).map(
+        row => row.organizationPartyId
+    )
+}
 // The internal organizations of each account in userIds that the caller administers: the filtered find on
 // UserAccountOrganization. A Map of userId to organization ids; an account out of scope is not in it.
 function scopedOrganizations(userIds) {
@@ -780,6 +792,7 @@ const operations = {
     // for another package (invitations, the lifecycle): the organizations administered, an identity as the caller may
     // administer it, and an account's organizations in scope, each the filtered find of the caller's authorization
     scope,
+    administered,
     identity,
     inScope,
     scopedOrganizations,

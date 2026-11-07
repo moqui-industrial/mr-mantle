@@ -477,8 +477,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="OrganizationParent" allow-remote="false">
         <description>The parent of an internal organization from fromDate (now when empty): a dated PrtOrgRollup relationship between two
             OrgInternal parties (NOT_INTERNAL otherwise), the current one ended then and kept; with no parentPartyId the current
-            parent ends. Both organizations in scope; the parent never the organization or one below it (PARENT_CYCLE). Needs
-            ADMIN_SETTINGS_MANAGE.</description>
+            parent ends, only for a caller administering every internal organization (PARENT_REQUIRED). Both organizations in
+            scope; the parent never the organization or one below it (PARENT_CYCLE); refused while a later parent is set
+            (PARENT_SCHEDULED). Needs ADMIN_SETTINGS_MANAGE.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="parentPartyId"/>
