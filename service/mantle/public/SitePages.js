@@ -261,10 +261,12 @@ function pageSpaceOf(store, create) {
 // One wiki write into a store's page space, as the system (`ec.artifactExecution.runAsSystem`: no user, authorization
 // off, the caller's transaction; Commerce F72): the space has restrictUpdate, so the user has no right to write it, and
 // get#WikiPageAccess admits a write with no user and authorization off. The caller has made its own permission and store
-// checks first.
+// checks first. action gets the acting user's id, for the wiki to record the save as theirs (update#WikiPage
+// historyUserId).
 function asSpaceWriter(action) {
-    if (!ec.user.userId) refuse("PERMISSION_DENIED", "A signed-in user writes a page")
-    return ec.artifactExecution.runAsSystem(action)
+    const userId = ec.user.userId
+    if (!userId) refuse("PERMISSION_DENIED", "A signed-in user writes a page")
+    return ec.artifactExecution.runAsSystem(() => action(userId))
 }
 // The wiki page of a binding, with its current version name.
 function wikiOf(page) {
@@ -598,13 +600,14 @@ function createSitePage(s, p) {
     const space = pageSpaceOf(store, true)
     const sitePageId = ec.entity.sequencedIdPrimary(PAGE, null, null)
     const pageText = p.pageText != null && String(p.pageText) !== "" ? String(p.pageText) : "# " + title + "\n"
-    const written = asSpaceWriter(() =>
+    const written = asSpaceWriter(userId =>
         call(WIKI + "update#WikiPage", {
             wikiSpaceId: space.wikiSpaceId,
             pageName: "page-" + sitePageId,
             wikiType: "md",
             pageText,
-            versionNote: textOf(p.versionNote, 255, "A version note") || "New page"
+            versionNote: textOf(p.versionNote, 255, "A version note") || "New page",
+            historyUserId: userId
         })
     )
     call(
@@ -632,21 +635,29 @@ function savePageText(page, store, p) {
     if (!space || space.wikiSpaceId !== wiki.wikiSpaceId) refuse("SPACE_UNAVAILABLE", "The page is not in the store's page space")
     const current = currentVersionOf(wiki)
     if (p.baseVersionName && !(p.force === true || p.force === "true") && current && current !== p.baseVersionName) {
-        const change = ec.resource.getLastChange(pageReference(wiki).location)
+        // who saved last: the page's newest history row (a save as the system names its user there), else the file's
+        const saved = Array.from(
+            find("moqui.resource.wiki.WikiPageHistory", {wikiPageId: wiki.wikiPageId})
+                .orderBy("-changeDateTime,-historySeqId")
+                .limit(1)
+                .list()
+        )[0]
+        const savedBy = saved?.userId || ec.resource.getLastChange(pageReference(wiki).location)?.userId
         return {
             conflict: true,
             currentVersionName: current,
-            conflictText: (userText(change?.userId) || "Someone") + " saved this page since you opened it"
+            conflictText: (userText(savedBy) || "Someone") + " saved this page since you opened it"
         }
     }
-    const written = asSpaceWriter(() =>
+    const written = asSpaceWriter(userId =>
         call(WIKI + "update#WikiPage", {
             wikiSpaceId: wiki.wikiSpaceId,
             wikiPageId: wiki.wikiPageId,
             pagePath: wiki.pagePath,
             pageName: wiki.pagePath.slice(wiki.pagePath.lastIndexOf("/") + 1),
             pageText: String(p.pageText ?? ""),
-            versionNote: textOf(p.versionNote, 255, "A version note")
+            versionNote: textOf(p.versionNote, 255, "A version note"),
+            historyUserId: userId
         })
     )
     return {conflict: false, versionName: written.versionName || null, currentVersionName: written.versionName || current}
