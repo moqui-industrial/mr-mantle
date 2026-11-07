@@ -199,8 +199,10 @@ along with this software (see the LICENSE.md file). If not, see
             optional message and expiry (expireDays, 7, at most 30). The token is mailed when the instance can send mail
             (mailSent); otherwise linkPending says the caller shows the link once through reveal#InvitationLink. A pending
             invitation of the address to the organization is refused (resend it); a retry with the same operationKey answers
-            the invitation it made (retried). An existing person who also works for an organization the caller does not
-            administer needs ADMIN_IDENTITY_GLOBAL. Needs ADMIN_IDENTITY_MANAGE.</description>
+            the invitation it made (retried). An existing person (the one chosen, or the owner of the address's account) who works for
+            an organization the caller does not administer, or who has an account and works for no internal organization (a site
+            identity), needs ADMIN_IDENTITY_GLOBAL (IDENTITY_GLOBAL); an address of another person's account is refused
+            (ADDRESS_IN_USE). Needs ADMIN_IDENTITY_MANAGE.</description>
         <in-parameters>
             <parameter name="emailAddress" required="true"><text-email/></parameter>
             <parameter name="partyId"/>
@@ -250,7 +252,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="resend" noun="Invitation" allow-remote="false">
         <description>A new token for a pending or expired invitation at its revision (expectedRevision), with a new expiry: the
-            earlier token no longer matches. Mailed, or linkPending as invite#User. The proposal is checked again as the caller.
+            earlier token no longer matches. Mailed, or linkPending as invite#User. The proposal and invite#User's
+            ADMIN_IDENTITY_GLOBAL rule are checked again as the caller.
             Needs ADMIN_IDENTITY_MANAGE.</description>
         <in-parameters>
             <parameter name="invitationId" required="true"/>
@@ -321,8 +324,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="InvitationSummary" authenticate="anonymous-view" allow-remote="false">
         <description>For the holder of a token: step (invitation, factor, done or spent) and, while open, the organization, the
             inviter, the invited address, the access proposed by name (no group ids), the expiry, how to accept (accountMode:
-            signedIn, wrongAccount, signIn, create), whether a factor will be asked, and on the factor step the authenticator's
-            setup. A spent or unknown token answers step spent and message alone. Read only.</description>
+            signedIn, wrongAccount, signIn, create), whether a factor will be asked, and on the factor step, only for the session
+            that accepted or the account signed in, the authenticator's setup. A spent or unknown token answers step spent and message alone. Read only.</description>
         <in-parameters><parameter name="token" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="open" type="Boolean"/>
@@ -346,7 +349,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Accept an open invitation as its token's holder: the signed-in account with the invited address, or with no
             one signed in a new account (username, userFullName, newPassword, newPasswordVerify; the invited address, through
             create#PartyUserAccount) when no account has the address (else ACCOUNT_EXISTS: sign in first). The inviter's
-            authority and each bundle are checked again; then the organization relationship, the memberships of the proposal
+            authority and each bundle are checked again, and invite#User's ADMIN_IDENTITY_GLOBAL rule for the inviter against
+            the redeeming account's person (IDENTITY_GLOBAL); then the organization relationship, the memberships of the proposal
             (authorization on, so the framework's sealed and privileged EECAs decide each) and, when a bundle's group requires a
             factor the account lacks, an authenticator factor to confirm (step factor); all or nothing. Nothing of the request
             names the organization or the access. A spent token: INVITATION_SPENT, "This invitation is no longer valid".</description>
@@ -370,8 +374,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('acceptInvitation', context))</script></actions>
     </service>
     <service verb="confirm" noun="InvitationFactor" authenticate="anonymous-all" allow-remote="false">
-        <description>The first code (code) of the authenticator factor an acceptance made, from the token's holder, within a day of
-            the acceptance; a wrong code counts as a failed sign-in of the account (CODE_INVALID).</description>
+        <description>The first code (code) of the authenticator factor an acceptance made, from the token's holder in the session
+            that accepted (or signed in as the account), within a day of the acceptance; a wrong code counts as a failed sign-in of the account (CODE_INVALID).</description>
         <in-parameters>
             <parameter name="token" required="true"/>
             <parameter name="code" required="true"/>

@@ -3,8 +3,9 @@
 // right, and a retry with the same key answers the same invitation; acceptance makes exactly one account, in the invitation's
 // organization with its bundles whatever the request says, and the token is single use; a resend invalidates the earlier
 // token, and revoked, expired and wrong-address tokens are refused; an existing account is linked, not duplicated; a proposal
-// changed after it was sent (ADMIN put into it) is refused with nothing written; a bundle requiring a factor leaves the
-// acceptance at the factor step. The operators hold the framework's ADMIN_IDENTITY_* permissions through spec groups, never
+// changed after it was sent (ADMIN put into it) is refused with nothing written; another organization's staff or a site
+// identity needs ADMIN_IDENTITY_GLOBAL to invite, and the inviter's again at acceptance; a bundle requiring a factor leaves
+// the acceptance at the factor step, its key for the accepting session or the account only. The operators hold the framework's ADMIN_IDENTITY_* permissions through spec groups, never
 // an app group. New spec, no Groovy original.
 // Run: ./moq test mr-mantle --spec party/StaffInvitation
 const S = "mantle.party.IdentityServices."
@@ -36,7 +37,7 @@ function result(name, params) {
 }
 // as username (null: no one signed in) with artifact authorization on, as a screen calls the services
 function as(username, action) {
-    if (username) login(username, "moqui1!!")
+    if (username) ec.user.internalLoginUser(username)
     else logout()
     ec.artifactExecution.enableAuthz()
     try {
@@ -50,9 +51,9 @@ const rows = (entityName, conditions) => Array.from(ec.entity.find(entityName).c
 const invitation = invitationId => rows("mantle.party.UserInvitation", {invitationId})[0]
 const tokenOf = acceptUrl => String(acceptUrl || "").split("/i/")[1] || ""
 const email = key => "sinv." + key + "." + run + "@example.com"
-// an invitation by the operator and its link, shown once (no mail server)
-function invite(key, params) {
-    return as("sinv.operator." + run, () => {
+// an invitation by the operator (or another inviter) and its link, shown once (no mail server)
+function invite(key, params, inviter = "sinv.operator." + run) {
+    return as(inviter, () => {
         const sent = result(S + "invite#User", Object.assign({emailAddress: email(key), organizationPartyId: orgId}, params))
         const shown = sent.invitationId ? result(S + "reveal#InvitationLink", {invitationId: sent.invitationId}) : {}
         invitations[key] = sent.invitationId
@@ -103,6 +104,8 @@ feature(
             group("SINV_OPERATORS")
             grant("SINV_OPERATORS", "ADMIN_IDENTITY_VIEW")
             grant("SINV_OPERATORS", "ADMIN_IDENTITY_MANAGE")
+            group("SINV_GLOBAL")
+            grant("SINV_GLOBAL", "ADMIN_IDENTITY_GLOBAL")
             group("SINV_BUNDLE")
             bundle("SINV_BUNDLE")
             group("SINV_FACTOR", {requireAuthcFactor: "Y"})
@@ -132,11 +135,15 @@ feature(
             person("Operator", "sinv.operator." + run, [orgId])
             // a person of the other organization with an account, invited to this one later
             person("Existing", "sinv.existing." + run, [otherOrgId])
-            call("create#moqui.security.UserGroupMember", {
-                userGroupId: "SINV_OPERATORS",
-                userId: users.Operator,
-                fromDate: effectiveTime - dayMillis
-            })
+            // a site identity: an account of no internal organization
+            person("Site", "sinv.site." + run, [])
+            // an operator of this organization who also holds ADMIN_IDENTITY_GLOBAL
+            person("Global", "sinv.global." + run, [orgId])
+            const member = (userGroupId, userId) =>
+                call("create#moqui.security.UserGroupMember", {userGroupId, userId, fromDate: effectiveTime - dayMillis})
+            member("SINV_OPERATORS", users.Operator)
+            member("SINV_OPERATORS", users.Global)
+            member("SINV_GLOBAL", users.Global)
             const server = rows("moqui.basic.email.EmailServer", {emailServerId: "SYSTEM"})[0]
             return {smtpHost: server?.smtpHost || ""}
         },
@@ -345,9 +352,49 @@ feature("a resend invalidates the earlier token; revoked, expired and wrong-addr
     }
 })
 
+feature("another organization's staff and a site identity need ADMIN_IDENTITY_GLOBAL, at invitation and acceptance", {
+    when() {
+        const plain = invite("staff", {emailAddress: "sinv.existing." + run + "@example.com", bundleGroupIdList: ["SINV_BUNDLE"]})
+        const site = invite("site", {emailAddress: "sinv.site." + run + "@example.com", bundleGroupIdList: ["SINV_BUNDLE"]})
+        invite(
+            "siteGlobal",
+            {emailAddress: "sinv.site." + run + "@example.com", bundleGroupIdList: ["SINV_BUNDLE"]},
+            "sinv.global." + run
+        )
+        // the inviter's ADMIN_IDENTITY_GLOBAL ends before the site identity accepts
+        const ended = ec.entity.makeValue("moqui.security.UserGroupMember")
+        ended.setFields(
+            {userGroupId: "SINV_GLOBAL", userId: users.Global, fromDate: effectiveTime - dayMillis, thruDate: Date.now() - 1000},
+            true,
+            null,
+            null
+        )
+        ended.update()
+        const accepted = as("sinv.site." + run, () => result(S + "accept#Invitation", {token: tokens.siteGlobal}))
+        return {plain: plain.sent, site: site.sent, accepted}
+    },
+    then({plain, site, accepted}) {
+        plain.applied == false && plain.reasonCode == "IDENTITY_GLOBAL"
+        site.applied == false && site.reasonCode == "IDENTITY_GLOBAL"
+        accepted.applied == false && accepted.reasonCode == "IDENTITY_GLOBAL"
+        rows("mantle.party.PartyRelationship", {fromPartyId: parties.Site, toPartyId: orgId}).length == 0
+        invitation(invitations.siteGlobal).statusId == "UinvPending"
+    }
+})
+
 feature("an existing account is linked after it signs in, not duplicated; a proposal changed to name ADMIN is refused", {
     when() {
-        invite("existing", {emailAddress: "sinv.existing." + run + "@example.com", bundleGroupIdList: ["SINV_BUNDLE"]})
+        // the inviter of another organization's staff holds ADMIN_IDENTITY_GLOBAL
+        call("create#moqui.security.UserGroupMember", {
+            userGroupId: "SINV_GLOBAL",
+            userId: users.Global,
+            fromDate: Date.now() - 500
+        })
+        invite(
+            "existing",
+            {emailAddress: "sinv.existing." + run + "@example.com", bundleGroupIdList: ["SINV_BUNDLE"]},
+            "sinv.global." + run
+        )
         const anonymous = as(null, () => ({
             summary: result(S + "get#InvitationSummary", {token: tokens.existing}),
             accept: result(S + "accept#Invitation", {
@@ -389,7 +436,7 @@ feature("an existing account is linked after it signs in, not duplicated; a prop
 feature("a bundle whose group requires a factor leaves the acceptance at the factor step, a wrong code refused", {
     when() {
         invite("factor", {firstName: "Fay", lastName: "Factor", bundleGroupIdList: ["SINV_FACTOR"]})
-        return as(null, () => {
+        const steps = as(null, () => {
             const before = result(S + "get#InvitationSummary", {token: tokens.factor})
             const accepted = result(S + "accept#Invitation", {
                 token: tokens.factor,
@@ -397,14 +444,22 @@ feature("a bundle whose group requires a factor leaves the acceptance at the fac
                 newPassword: "Sinv-pass-" + run,
                 newPasswordVerify: "Sinv-pass-" + run
             })
-            const step = result(S + "get#InvitationSummary", {token: tokens.factor})
-            const wrong = result(S + "confirm#InvitationFactor", {token: tokens.factor, code: "000000"})
-            return {before, accepted, step, wrong}
+            // another holder of the link (no session of the acceptance here, no one signed in) never sees the key
+            const elsewhere = result(S + "get#InvitationSummary", {token: tokens.factor})
+            const refusedElsewhere = result(S + "confirm#InvitationFactor", {token: tokens.factor, code: "000000"})
+            return {before, accepted, elsewhere, refusedElsewhere}
         })
+        const own = as("sinv.fay." + run, () => ({
+            step: result(S + "get#InvitationSummary", {token: tokens.factor}),
+            wrong: result(S + "confirm#InvitationFactor", {token: tokens.factor, code: "000000"})
+        }))
+        return Object.assign(steps, own)
     },
-    then({before, accepted, step, wrong}) {
+    then({before, accepted, elsewhere, refusedElsewhere, step, wrong}) {
         before.factorRequired == true
         accepted.applied == true && accepted.step == "factor"
+        elsewhere.step != "factor" && elsewhere.factor == null
+        refusedElsewhere.reasonCode == "INVITATION_SPENT"
         step.step == "factor" && step.factor.qrUri.startsWith("otpauth://totp/")
         wrong.applied == false && wrong.reasonCode == "CODE_INVALID"
         rows("moqui.security.UserAuthcFactor", {userId: accepted.userId}).length == 1

@@ -22,7 +22,13 @@
 // itself, with authorization on so the framework's sealed and privileged EECAs still decide each membership. Nothing in the
 // redemption request names the organization or the access. When a bundle's group requires a second factor and the account has
 // none, the acceptance makes an authenticator factor that the token holder confirms with its first code
-// (confirm#InvitationFactor) within a day. Every spent token (accepted, revoked, expired, superseded or unknown) reads the same.
+// (confirm#InvitationFactor) within a day, in the session that accepted (or signed in as the account). Every spent token
+// (accepted, revoked, expired, superseded or unknown) reads the same.
+//
+// An invitation that would bring an existing identity into the organization (a person with an account and no internal
+// organization, a site identity, or one who works for an organization outside the inviter's) needs ADMIN_IDENTITY_GLOBAL,
+// as relating that person directly does (impl-admin P4 R2, F-P5-8): checked as the inviter when it is sent or resent, and
+// for the inviter from the records, against the account that redeems it, at acceptance.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const identityLib = ec.resource.script("component://mr-mantle/service/mantle/party/Identity.js")
 const {find, one, rows, denied} = lib
@@ -100,6 +106,30 @@ function accountOfAddress(emailAddress) {
     )[0]
 }
 const isInternal = partyId => !!partyId && !!one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
+// the invitation row read again with a lock, so two requests on one invitation (two accepts, two reveals) run one at a time
+const locked = row => (row ? find(INVITATION, {invitationId: row.invitationId}).forUpdate(true).one() : null)
+const internalOrgIds = partyId =>
+    partyId ? Array.from(callService("mantle.party.PartyServices.get#PartyInternalOrgIds", {partyId}).userOrgIds || []) : []
+// Bringing an existing person into an organization through an invitation: one with an account and no internal organization
+// (a site identity) or one who works for an organization outside organizationIds needs ADMIN_IDENTITY_GLOBAL (hasGlobal), as
+// store#OrganizationMembership asks it (impl-admin P4 R2, F-P5-8); the memberships an invitation gives are account-wide.
+function identityRefusal(partyId, organizationIds, hasGlobal, reason) {
+    if (!partyId || hasGlobal) return null
+    const owners = internalOrgIds(partyId)
+    if (owners.some(id => !organizationIds.includes(id)))
+        return refused(
+            "IDENTITY_GLOBAL",
+            reason || partyName(partyId) + " also works for an organization you do not administer: inviting them needs " + GLOBAL
+        )
+    if (!owners.length && one(ACCOUNT, {partyId}))
+        return refused(
+            "IDENTITY_GLOBAL",
+            reason || partyName(partyId) + " has an account of no organization: inviting it into an organization needs " + GLOBAL
+        )
+    return null
+}
+// The existing person an invitation goes to: the one chosen, else the owner of the account with the address.
+const invitedParty = (partyId, emailAddress) => partyId || accountOfAddress(emailAddress)?.partyId || null
 const bundleIds = row => text(row.bundleGroupIds).split(",").map(text).filter(Boolean)
 function bundleSummary(ids) {
     return ids.map(groupId => {
@@ -168,7 +198,7 @@ function holds(userId, permissionId, groups = userGroups(userId)) {
 // At acceptance: what the inviter could do now, from the records (the framework runs a check only as the current user):
 // their account usable, ADMIN_IDENTITY_MANAGE held, the organization one they work for (any for ADMIN), and each bundle still
 // registered, delegable by them, and neither privileged nor carrying a sealed grant. A refusal names what changed.
-function inviterRefusal(row) {
+function inviterRefusal(row, authority = {}) {
     const inviter = row.inviterUserId ? one(ACCOUNT, {userId: row.inviterUserId}) : null
     const at = nowMs()
     if (
@@ -181,14 +211,13 @@ function inviterRefusal(row) {
     if (!holds(inviter.userId, MANAGE, groups))
         return refused("INVITER_UNAVAILABLE", "The person who invited you can no longer give this access")
     if (!isInternal(row.organizationPartyId)) return refused("ORGANIZATION_UNAVAILABLE", "The organization is not available")
+    authority.global = holds(inviter.userId, GLOBAL, groups)
+    authority.organizations = []
     if (!groups.includes("ADMIN")) {
-        const organizations = inviter.partyId
-            ? Array.from(
-                  callService("mantle.party.PartyServices.get#PartyInternalOrgIds", {partyId: inviter.partyId}).userOrgIds || []
-              )
-            : []
+        const organizations = internalOrgIds(inviter.partyId)
         if (!organizations.includes(row.organizationPartyId))
             return refused("INVITER_UNAVAILABLE", "The person who invited you no longer administers the organization")
+        authority.organizations = organizations
     }
     const ids = bundleIds(row)
     if (!ids.length) return refused("GRANT_CHANGED", "The invitation names no access")
@@ -340,18 +369,17 @@ function inviteUser(p) {
         const account = one(ACCOUNT, {partyId})
         if (account && !sameAddress(account.emailAddress, emailAddress))
             return refused("ADDRESS_MISMATCH", partyName(partyId) + "'s account has another address: invite that address")
-        const owners = Array.from(callService("mantle.party.PartyServices.get#PartyInternalOrgIds", {partyId}).userOrgIds || [])
-        if (owners.some(id => !userScope.organizationIds.includes(id)) && !ec.user.hasPermission(GLOBAL))
-            return refused(
-                "IDENTITY_GLOBAL",
-                partyName(partyId) + " also works for an organization you do not administer: inviting them needs " + GLOBAL
-            )
+        const holder = accountOfAddress(emailAddress)
+        if (holder && holder.partyId !== partyId)
+            return refused("ADDRESS_IN_USE", "Another person's account has " + emailAddress + ": invite that person instead")
     } else if (!text(p.firstName) && !text(p.lastName) && !accountOfAddress(emailAddress))
         throw new Error("Give the person's name, or choose a person")
     const pending = Array.from(
         find(INVITATION).condition({organizationPartyId, statusId: "UinvPending"}).condition("emailAddress", emailAddress).list()
     ).find(row => stateOf(row) === "pending")
     if (pending) return refused("INVITATION_EXISTS", emailAddress + " already has a pending invitation: resend it")
+    const outside = identityRefusal(invitedParty(partyId, emailAddress), userScope.organizationIds, ec.user.hasPermission(GLOBAL))
+    if (outside) return outside
     const blocked = invitationRefusal(ids)
     if (blocked) return blocked
     const proposal = callService("org.moqui.admin.AccessServices.check#GrantProposal", {bundleGroupIdList: ids})
@@ -470,7 +498,13 @@ function resendInvitation(p) {
     const state = stateOf(row)
     if (state !== "pending" && state !== "expired")
         return refused("INVITATION_CLOSED", "The invitation is " + stateNames[state].toLowerCase() + ": it cannot be resent")
-    // the grant proposal is checked again as the one who resends it
+    // the grant proposal and the identity it reaches are checked again as the one who resends it
+    const outside = identityRefusal(
+        invitedParty(row.partyId, row.emailAddress),
+        identityLib.scope().organizationIds,
+        ec.user.hasPermission(GLOBAL)
+    )
+    if (outside) return outside
     const ids = bundleIds(row)
     const blocked = invitationRefusal(ids)
     if (blocked) return blocked
@@ -512,7 +546,7 @@ function revokeInvitation(p) {
 // fifteen minutes: a new token is made now and only its hash kept, and linkShownDate (audited) records the showing.
 function revealInvitationLink(p) {
     requirePermission(MANAGE)
-    const row = scopedInvitation(p.invitationId)
+    const row = locked(scopedInvitation(p.invitationId))
     if (row.inviterUserId !== ec.user.userId)
         denied("RECORD_UNAVAILABLE", "The link is shown only to whoever sent the invitation")
     if (
@@ -533,15 +567,29 @@ function revealInvitationLink(p) {
 }
 
 // ===== the token holder: check#InvitationToken, get#InvitationSummary, accept#Invitation, confirm#InvitationFactor =====
+// The session that accepted: the Visit the acceptance ran in, or the account itself signed in. Only it sees the factor step
+// and its key (impl-admin F-P5-9), so a forwarded or later-read email does not give out the account's authenticator key.
+function currentVisitId() {
+    try {
+        return ec.user.visitId || null
+    } catch (error) {
+        return null
+    }
+}
+function acceptingSession(row) {
+    if (ec.user.userId && ec.user.userId === row.userId) return true
+    return !!row.acceptVisitId && currentVisitId() === row.acceptVisitId
+}
 // The step a token is at: invitation (pending and in date), factor (accepted, its new factor not yet confirmed, within a
-// day), done (accepted in the last fifteen minutes) or spent (every other token, an unknown one too).
+// day, for the accepting session), done (accepted in the last fifteen minutes) or spent (every other token, an unknown one
+// too).
 function stepOf(row, at = nowMs()) {
     if (!row) return "spent"
     const state = stateOf(row, at)
     if (state === "pending") return "invitation"
     if (state !== "accepted") return "spent"
     const accepted = ms(row.acceptedDate) ?? 0
-    if (row.factorId && at - accepted <= FACTOR_WINDOW) {
+    if (row.factorId && at - accepted <= FACTOR_WINDOW && acceptingSession(row)) {
         const factor = one("moqui.security.UserAuthcFactor", {factorId: row.factorId})
         if (factor && factor.needsValidation === "Y" && (ms(factor.thruDate) ?? Infinity) > at) return "factor"
     }
@@ -613,13 +661,17 @@ function getInvitationSummary(p) {
 // framework's EECAs decide each) and, when a bundle's group requires a factor the account lacks, an authenticator factor to
 // confirm; all or nothing. A second accept by the same account answers the first.
 function acceptInvitation(p) {
-    const row = byToken(p.token)
+    const row = locked(byToken(p.token))
     const step = stepOf(row)
     if (row && step !== "invitation" && ec.user.userId && row.userId === ec.user.userId)
         return {applied: true, reasonCode: null, reason: null, userId: row.userId, step, retried: true}
     if (step !== "invitation") return refused("INVITATION_SPENT", NOT_VALID)
-    const blocked = inviterRefusal(row)
+    const authority = {}
+    const blocked = inviterRefusal(row, authority)
     if (blocked) return blocked
+    const notTheirs =
+        "The person who invited you cannot add this account to the organization: ask them to have it invited by an administrator of all organizations"
+    const outside = partyId => identityRefusal(partyId, authority.organizations, authority.global, notTheirs)
     const now = nowMs()
     let account
     let created = false
@@ -634,6 +686,8 @@ function acceptInvitation(p) {
             )
         if (row.partyId && account.partyId !== row.partyId)
             return refused("WRONG_ACCOUNT", "This invitation is for another person's account")
+        const held = outside(account.partyId)
+        if (held) return held
     } else {
         if (accountOfAddress(row.emailAddress) || (row.partyId && one(ACCOUNT, {partyId: row.partyId})))
             return refused("ACCOUNT_EXISTS", "An account already has this address: sign in to it, then open the link again")
@@ -642,6 +696,8 @@ function acceptInvitation(p) {
         if (!text(p.newPassword) || text(p.newPassword) !== text(p.newPasswordVerify))
             throw new Error("Enter the password twice, the same both times")
         let partyId = row.partyId
+        const held = outside(partyId)
+        if (held) return held
         const displayName = text(p.userFullName)
         if (!partyId) {
             let firstName = row.firstName
@@ -724,7 +780,8 @@ function acceptInvitation(p) {
         acceptedDate: iso(now),
         userId: account.userId,
         partyId: account.partyId,
-        factorId
+        factorId,
+        acceptVisitId: factorId ? currentVisitId() : null
     })
     ec.logger.info("Invitation " + row.invitationId + " accepted by " + account.username + (created ? " (new account)" : ""))
     return {
@@ -740,7 +797,7 @@ function acceptInvitation(p) {
 // The first code of the authenticator factor the acceptance made, from the token's holder, within a day of the acceptance;
 // a wrong code counts as a failed sign-in of the account.
 function confirmInvitationFactor(p) {
-    const row = byToken(p.token)
+    const row = locked(byToken(p.token))
     if (stepOf(row) !== "factor") return refused("INVITATION_SPENT", NOT_VALID)
     const out = callService("org.moqui.impl.UserServices.validate#UserAuthcFactorCode", {
         userId: row.userId,

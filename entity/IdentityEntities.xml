@@ -55,6 +55,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="revokedDate" type="date-time" enable-audit-log="true"/>
         <field name="factorId" type="id"><description>The authenticator factor the acceptance made when a bundle's group
             requires one, until its first code confirms it.</description></field>
+        <field name="acceptVisitId" type="id"><description>The session (Visit) the acceptance ran in: only it, or the account
+            signed in, sees the factor step and its key.</description></field>
         <field name="inviterUserId" type="id"/>
         <field name="revokedByUserId" type="id"/>
         <field name="operationKey" type="text-medium"><description>The caller's key of the request: a retry with the same
