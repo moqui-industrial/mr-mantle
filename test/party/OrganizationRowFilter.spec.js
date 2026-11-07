@@ -146,3 +146,30 @@ feature("nothing for a user of no organization, everything for a system administ
         expression.includes("is not a field name")
     }
 })
+
+feature("a finance administrator's active organization outside their own widens nothing", {
+    when() {
+        // ACCOUNTING_ADMIN may select any internal organization for Accounting's scope (get#PartyOrganizationInfo); the dataset
+        // filter keeps to the user's own organizations, here none
+        const past = Date.now() - dayMillis
+        call("create#moqui.security.UserGroup", {userGroupId: "ORF_FINANCE", description: "Row filter finance"})
+        call("create#moqui.security.UserGroupPermission", {
+            userGroupId: "ORF_FINANCE",
+            userPermissionId: "ACCOUNTING_ADMIN",
+            fromDate: past
+        })
+        call("create#moqui.security.UserGroupMember", {userGroupId: "ORF_FINANCE", userId: users["orf.none"], fromDate: past})
+        login("orf.none", "moqui1!!")
+        ec.user.setPreference("ACTIVE_ORGANIZATION", "ORF_A")
+        login("john.doe")
+        const selected = filterAs("orf.none")
+        login("orf.none", "moqui1!!")
+        ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+        login("john.doe")
+        return {selected}
+    },
+    then({selected}) {
+        selected.field == null
+        selected.bool.none.length == 1
+    }
+})

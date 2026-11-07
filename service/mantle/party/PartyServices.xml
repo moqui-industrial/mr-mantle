@@ -665,7 +665,11 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="systemAdmin" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js').systemAdmin()"/>
             <if condition="systemAdmin &amp;&amp; !organizationInfo.activeOrgId">
                 <set field="filter" from="{match_all: {}}"/><return/></if>
-            <set field="organizationIds" from="Array.from(organizationInfo.filterOrgIds || [])"/>
+            <!-- the active organization narrows the viewer's own; one outside them (a finance administrator may select any internal
+                organization for Accounting's scope) widens no dataset's rows, so it counts here only for a system administrator -->
+            <set field="userOrgIds" from="Array.from(organizationInfo.userOrgIds || [])"/>
+            <set field="activeOrgId" from="organizationInfo.activeOrgId"/>
+            <set field="organizationIds" from="activeOrgId &amp;&amp; (systemAdmin || userOrgIds.includes(activeOrgId)) ? [activeOrgId] : userOrgIds"/>
             <if condition="!organizationIds.length"><set field="filter" from="nothing"/><return/></if>
             <set field="filter" from="{field: {name: organizationField, op: 'in', values: organizationIds}}"/>
         </actions>
