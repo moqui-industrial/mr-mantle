@@ -240,6 +240,8 @@ feature(
                 wikiSpaceId: wikiPage.wikiSpaceId,
                 userId: users.designer
             })
+            // written as the system, the save is still the designer's in the wiki's history
+            const saved = one("moqui.resource.wiki.WikiPageHistory", {wikiPageId: binding.wikiPageId})
             const taken = run(users.designer, T + "store#SitePage", {
                 siteId: ids.site,
                 title: "Other",
@@ -266,6 +268,8 @@ feature(
                 draft,
                 space,
                 grantLeft,
+                wikiPage,
+                saved,
                 taken,
                 roleTaken,
                 designerPublishes,
@@ -282,6 +286,8 @@ feature(
             code(r.draft) == "NOT_FOUND"
             r.space.restrictUpdate == "Y"
             r.grantLeft == null
+            r.wikiPage.createdByUserId == users.designer
+            r.saved.userId == users.designer
             code(r.taken) == "ROUTE_TAKEN"
             code(r.roleTaken) == "ROLE_TAKEN"
             code(r.designerPublishes) == "PERMISSION_DENIED"

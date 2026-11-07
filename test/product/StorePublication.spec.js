@@ -405,8 +405,8 @@ feature("storefront details start a new dated row of a published product; an unp
         code(unpublished) == "NOT_PUBLISHED"
         after.length == 2
         after.filter(row => row.thruDate == null).map(row => row.badgeText) == ["New"]
-        after.filter(row => row.thruDate == null).map(row => row.changeReason) == ["Launch"]
-        audit.some(row => row.newValueText === "New")
+        // the new row's reason is on its fields' audit rows (a create's too, F63)
+        audit.some(row => row.newValueText === "New" && row.changeReason === "Launch")
     }
 })
 

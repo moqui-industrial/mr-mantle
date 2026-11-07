@@ -29,13 +29,9 @@
             <moqui.basic.EnumerationType description="Store channel import format" enumTypeId="StoreChannelImportFormat"/>
             <moqui.basic.Enumeration enumId="SciCsv" description="Channel orders, CSV (one row per line)" enumTypeId="StoreChannelImportFormat"/>
             <moqui.basic.Enumeration enumId="SciJson" description="Channel orders, JSON (as the API takes them)" enumTypeId="StoreChannelImportFormat"/>
-
-            <!-- a channel import batch, staged by prepare#ChannelImport and consumed by commit#ChannelImport: a status of
-                its own, so no framework job consumes a batch nobody committed -->
-            <moqui.basic.StatusItem description="Staged" sequenceNum="19" statusId="SmsgStaged" statusTypeId="SystemMessage"/>
-            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgStaged" toStatusId="SmsgConsuming" transitionName="Consuming"/>
-            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgConsuming" toStatusId="SmsgStaged" transitionName="Back to Staged"/>
-            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmsgStaged" toStatusId="SmsgCancelled" transitionName="Cancel"/>
+            <!-- a channel import batch is staged by prepare#ChannelImport and consumed by commit#ChannelImport in the
+                framework's SmsgStaged status (ServiceEntities.xml, Commerce F162), so no framework job consumes a batch
+                nobody committed -->
         </seed-data>
     </entity>
 

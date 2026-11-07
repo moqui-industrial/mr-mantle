@@ -121,3 +121,10 @@ UPDATE screen_path_alias SET thru_date = CURRENT_TIMESTAMP WHERE alias_path = '/
 ```
 
 (MySQL: the same statements with the table and column names in upper case.)
+
+## ProductStoreProduct's changeReason: the reason is on the audit rows (framework follow-up, November 2026)
+
+The framework now records a `<field>_changeReason` passed to an entity-auto `create#` on that field's audit row, as it
+did for `update#` (Commerce F63). Store publication writes its reason only there: a new or ended `ProductStoreProduct`
+row no longer fills its own `changeReason` field. The column stays, with the reasons of rows written before, and nothing
+reads it; no data change is needed.

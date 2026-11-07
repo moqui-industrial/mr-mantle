@@ -505,7 +505,7 @@ feature("a preview needs the site's preview host and answers only its token on t
         asset.asset.text === "body { color: #222; }"
         code(otherHost) === "NOT_AVAILABLE"
         code(forged) === "NOT_AVAILABLE"
-        hostKind.preview === true
+        hostKind.preview === true && hostKind.restricted === true
     }
 })
 
