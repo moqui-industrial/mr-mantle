@@ -387,10 +387,12 @@ feature("an image must be its type and is scanned; an export of a release with a
             expectedActiveRevision: 0
         })
         const exported = run(state.publisher, T + "export#ThemeRelease", {releaseId: published.releaseId, includeFiles: true})
-        Object.assign(state, {mismatch, noScanner, svg, assets, validated, published, exported})
+        // Shop F55: the release pins the image by its bytes; the export still carries the base64 an import takes
+        const pinned = one("mantle.public.PublicThemeReleaseFile", {releaseId: published.releaseId, filePath: "assets/hero.png"})
+        Object.assign(state, {mismatch, noScanner, svg, assets, validated, published, exported, pinned})
     },
     then() {
-        const {mismatch, noScanner, svg, assets, validated, published, exported} = state
+        const {mismatch, noScanner, svg, assets, validated, published, exported, pinned} = state
         code(mismatch) === "ASSET_TYPE_MISMATCH"
         code(noScanner) === "SCANNER_UNAVAILABLE"
         svg.error === ""
@@ -400,6 +402,9 @@ feature("an image must be its type and is scanned; an export of a release with a
         validated.ok === true
         published.error === ""
         exported.files["assets/hero.png"] === png
+        pinned.digest !== ec.resource.digestText(png, "sha256")
+        Number(pinned.fileSize) === 70
+        pinned.contentType === "image/png"
         !/password|secret|apiKey|credential|organizationPartyId|THMAUT_ORG|dbresource:/i.test(JSON.stringify(exported))
     }
 })
