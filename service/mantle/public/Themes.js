@@ -54,8 +54,14 @@ const requiredComponents = {
     // P3: the search form (a theme has no <form>)
     "shop.search": ["search"]
 }
-// The engines and versions this authority publishes for (design-shop §12.7: readiness blocks unsupported versions).
-const renderers = {"js-fancy": {rendererVersion: 1, viewApiVersions: [1]}}
+// The engines and versions this authority publishes for (design-shop §12.7: readiness blocks unsupported versions): the
+// framework's engines with their renderer versions (Shop F57).
+const renderers = Object.fromEntries(
+    Array.from(ec.resource.theme.engineInfo()).map(engine => [
+        engine.id,
+        {rendererVersion: Number(engine.rendererVersion), viewApiVersions: Array.from(engine.viewApiVersions).map(Number)}
+    ])
+)
 const viewApiVersion = 1
 // A package's bounds: files, bytes of one file and of all, and the paths a package may hold.
 const packageLimits = {maxFiles: 300, maxFileBytes: 512 * 1024, maxPackageBytes: 8 * 1024 * 1024}
