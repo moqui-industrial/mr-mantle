@@ -122,6 +122,13 @@ function accountWideRefusal(found) {
         )
     return null
 }
+// An account-wide change of an identity holding access the caller could not be given (a privileged group the caller is not
+// in, a sealed permission the caller lacks): refused (a reason), so a delegated operator cannot change an administrator's
+// email or username and mail it a reset, end its factor or release its lock (review R1; the framework's rule, as for Login as).
+function heldBeyondRefusal(found) {
+    const held = ec.resource.script("component://framework/service/org/moqui/admin/Identity.js").heldBeyond(found.account.userId)
+    return held ? refused("IDENTITY_PRIVILEGED", held + ": this account-wide change is refused") : null
+}
 function accountState(account, at = nowMs()) {
     if (account.terminateDate && ms(account.terminateDate) < at) return "terminated"
     if (account.disabled === "Y") return account.disabledDateTime ? "locked" : "disabled"
@@ -286,6 +293,7 @@ function getAccount(p) {
             .call() || {}
     const manage = access.has(MANAGE)
     const global = ec.user.hasPermission(GLOBAL)
+    const held = manage ? heldBeyondRefusal(found) : null
     const state = accountState(account)
     return {
         account: {
@@ -317,11 +325,13 @@ function getAccount(p) {
         singleUseCodeCount: credentials.singleUseCodeCount || 0,
         credentialList: credentials.credentialList || [],
         canManage: manage,
-        canChangeAccount: manage && (!found.shared || global),
+        canChangeAccount: manage && (!found.shared || global) && !held,
         accountChangeReason:
             manage && found.shared && !global
                 ? "This identity also works for an organization you do not administer: account-wide changes need " + GLOBAL
-                : null
+                : held
+                  ? held.reason
+                  : null
     }
 }
 // get#AccountHistory: the identity's access events, newest first and bounded: sign-ins (successful or not, with the session
@@ -449,6 +459,14 @@ function storeOrganizationMembership(p) {
     if (!partyId || !one("mantle.party.Person", {partyId})) throw new Error("A membership is of a person")
     if (!organizationPartyId || !isInternal(organizationPartyId) || !userScope.organizationIds.includes(organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Organization " + organizationPartyId + " is not available")
+    // a person with an account that works for no internal organization (a site identity: a customer, a supplier contact, an
+    // administrator of no organization) would come wholly into the caller's scope, account-wide changes and all: that needs
+    // ADMIN_IDENTITY_GLOBAL (review R2); a person of another organization stays shared, so its account-wide changes still do
+    if (!userScope.all && one(ACCOUNT, {partyId}) && !partyOrganizations(partyId).length && !ec.user.hasPermission(GLOBAL))
+        return refused(
+            "IDENTITY_GLOBAL",
+            partyName(partyId) + " has an account of no organization: bringing it into an organization needs " + GLOBAL
+        )
     const relationshipTypeEnumId = text(p.relationshipTypeEnumId) || "PrtEmployee"
     if (!membershipRelationships.includes(relationshipTypeEnumId))
         throw new Error("A membership is an employee, agent, member or representative relationship")
@@ -559,7 +577,7 @@ function storeAccount(p) {
     requirePermission(MANAGE)
     const found = identity(p.userId)
     const account = found.account
-    const wide = accountWideRefusal(found)
+    const wide = accountWideRefusal(found) || heldBeyondRefusal(found)
     if (wide) return wide
     if (text(p.expectedRevision) !== stamp(account))
         return refused("REVISION_CHANGED", "The account changed since you read it; reload it", {revision: stamp(account)})
@@ -620,7 +638,7 @@ function resetAuthentication(p) {
             message: "A reset password was mailed to the account's address; its current password stays valid"
         }
     }
-    const wide = accountWideRefusal(found)
+    const wide = accountWideRefusal(found) || heldBeyondRefusal(found)
     if (wide) return wide
     if (kind === "factor") {
         const factorId = text(p.factorId)

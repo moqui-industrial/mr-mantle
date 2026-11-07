@@ -273,3 +273,66 @@ feature(
         }
     }
 )
+
+feature(
+    "bounded delegation: an account holding a sealed permission the operator lacks, or a site identity, is refused (review R1, R2)",
+    {
+        when() {
+            // a person with an account and no organization: a site identity
+            parties.Site = call("mantle.party.PartyServices.create#Person", {firstName: "Site", lastName: "Staff"}).partyId
+            users.Site = call("mantle.party.PartyServices.create#PartyUserAccount", {
+                partyId: parties.Site,
+                emailAddress: "sid.site@example.com",
+                username: "sid.site"
+            }).userId
+            const before = rows("moqui.security.UserAccount", {userId: users.Global})[0]
+            const operator = as("sid.operator", () => ({
+                account: result(S + "store#Account", {
+                    userId: users.Global,
+                    expectedRevision: result(S + "get#Account", {userId: users.Global}).account.revision,
+                    emailAddress: "sid.taken@example.com"
+                }),
+                lock: result(S + "reset#Authentication", {userId: users.Global, resetKind: "lock"}),
+                site: result(S + "store#OrganizationMembership", {partyId: parties.Site, organizationPartyId: orgId})
+            }))
+            const global = as("sid.global", () =>
+                result(S + "store#OrganizationMembership", {partyId: parties.Site, organizationPartyId: orgId})
+            )
+            return {before, operator, global, after: rows("moqui.security.UserAccount", {userId: users.Global})[0]}
+        },
+        then({before, operator, global, after}) {
+            // sid.global holds the sealed ADMIN_IDENTITY_GLOBAL, which sid.operator does not
+            operator.account.applied == false && operator.account.reasonCode == "IDENTITY_PRIVILEGED"
+            operator.lock.reasonCode == "IDENTITY_PRIVILEGED"
+            after.emailAddress == before.emailAddress
+            operator.site.applied == false && operator.site.reasonCode == "IDENTITY_GLOBAL"
+            global.applied == true
+        }
+    }
+)
+
+feature("an account's notes are read by an identity viewer within its scope only (review R3)", {
+    when() {
+        // as the user with authorization off, as under an app root's inherited grant: the record rule alone decides
+        const visible = (username, userId) => {
+            login(username, "moqui1!!")
+            try {
+                return result("mantle.party.CommunicationServices.get#RecordLinkInfo", {
+                    recordEntityName: "moqui.security.UserAccount",
+                    recordId: userId,
+                    checkOnly: true
+                }).recordVisible
+            } finally {
+                login("john.doe")
+            }
+        }
+        return {
+            inScope: visible("sid.operator", users.One),
+            outOfScope: visible("sid.operator", users.Two),
+            noPermission: visible("sid.one", users.Both)
+        }
+    },
+    then({inScope, outOfScope, noPermission}) {
+        inScope == true && outOfScope == false && noPermission == false
+    }
+})
