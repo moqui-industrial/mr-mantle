@@ -1910,7 +1910,7 @@ General Order Placement and eCommerce Usage
             <service-call name="mantle.order.OrderServices.checkCancelComplete#Order" in-map="{orderId:orderId}"/>
         </actions>
     </service>
-    <service verb="cancel" noun="OrderItem" no-tx-cache="true">
+    <service verb="cancel" noun="OrderItem">
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderItemSeqId" required="true"/>
@@ -2206,7 +2206,7 @@ General Order Placement and eCommerce Usage
             <service-call name="mantle.order.OrderServices.checkRejectedComplete#Order" in-map="{orderId:orderId}"/>
         </actions>
     </service>
-    <service verb="reject" noun="OrderItem" no-tx-cache="true">
+    <service verb="reject" noun="OrderItem">
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderItemSeqId" required="true"/>

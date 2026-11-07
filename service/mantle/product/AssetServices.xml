@@ -531,7 +531,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="update" noun="AssetFromDetail" no-tx-cache="true">
+    <service verb="update" noun="AssetFromDetail">
         <description>Called by EECA rule to update Asset quantities when an AssetDetail record is created.</description>
         <in-parameters>
             <parameter name="assetId" required="true"/>
@@ -674,7 +674,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="reserve" noun="AssetsForOrder" no-tx-cache="true">
+    <service verb="reserve" noun="AssetsForOrder">
         <description>Triggered by an SECA rule on OrderHeader status change to OrderPlaced (see ProductAsset.secas.xml)</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
@@ -787,7 +787,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.product.AssetServices.reserve#AssetForOrderItem" in-map="context"/>
         </actions>
     </service>
-    <service verb="reserve" noun="AssetForOrderItem" no-tx-cache="true">
+    <service verb="reserve" noun="AssetForOrderItem">
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderItemSeqId" required="true"/>
@@ -1338,7 +1338,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="reduce" noun="AssetReservation" no-tx-cache="true">
+    <service verb="reduce" noun="AssetReservation">
         <description>Reduce quantity on AssetReservation, if reduced to zero delete.</description>
         <in-parameters>
             <parameter name="assetReservationId" required="true"/>
@@ -1449,7 +1449,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="reserve" noun="IncreasedAsset" no-tx-cache="true">
+    <service verb="reserve" noun="IncreasedAsset">
         <description>For Asset with availableToPromiseTotal > 0 find AssetReservation with quantityNotAvailable and reserve against it</description>
         <in-parameters><parameter name="assetId" required="true"/></in-parameters>
         <out-parameters><parameter name="quantityMoved" type="BigDecimal"/></out-parameters>
@@ -1505,7 +1505,7 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
         </actions>
     </service>
-    <service verb="move" noun="AssetReservation" no-tx-cache="true">
+    <service verb="move" noun="AssetReservation">
         <description>Move partial or full reservation quantity to another asset.</description>
         <in-parameters>
             <parameter name="assetReservationId" required="true"/>
@@ -1852,7 +1852,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="displace" noun="AssetReservations" no-tx-cache="true">
+    <service verb="displace" noun="AssetReservations">
         <description>When forcing the use of a certain Asset for an OrderItem, move other reservations as needed to
             handle quantity that the given OrderItem will be using (note that this doesn't do an additional reservation,
             just removes reservations from other OrderItems).</description>
@@ -1950,7 +1950,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="change" noun="AssetQuantity" no-tx-cache="true">
+    <service verb="change" noun="AssetQuantity">
         <in-parameters>
             <auto-parameters entity-name="mantle.product.asset.AssetDetail" include="nonpk">
                 <exclude field-name="quantityOnHandDiff"/><exclude field-name="availableToPromiseDiff"/></auto-parameters>
@@ -2062,7 +2062,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Issuance Services ========== -->
     <!-- ======================================= -->
 
-    <service verb="issue" noun="AssetReservation" no-tx-cache="true">
+    <service verb="issue" noun="AssetReservation">
         <description>Issue an Asset based on a reservation (AssetReservation). This is currently called by
             ShipmentServices.pack#ShipmentItemSource and pack#ShipmentAssemblyComponent.
             All callers should query and lock all Asset records planned to
@@ -2157,7 +2157,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
         </actions>
     </service>
-    <service verb="issue" noun="Asset" no-tx-cache="true">
+    <service verb="issue" noun="Asset">
         <description>Issue an Asset (with no reservation) to a Shipment.</description>
         <in-parameters>
             <parameter name="assetId"><description>Optional assetId, issues against this first if specified.</description></parameter>
@@ -2354,7 +2354,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="issue" noun="AssetToWorkEffort" no-tx-cache="true">
+    <service verb="issue" noun="AssetToWorkEffort">
         <!-- NOTE: tested with transaction="cache" and works fine, but only a small performance improvement (this is a fairly small service) -->
         <description>Issue an Asset to a WorkEffort (production run, etc).</description>
         <in-parameters>
@@ -2472,7 +2472,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="issue" noun="AnyAssetToWorkEffort" no-tx-cache="true">
+    <service verb="issue" noun="AnyAssetToWorkEffort">
         <in-parameters>
             <parameter name="productId" required="true"/>
             <parameter name="facilityId" required="true"/>
@@ -2502,7 +2502,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="toDecimal(remainingQuantity).compare(0) &gt; 0"><message>Could not find available inventory for ${remainingQuantity} out of ${quantity}</message></if>
         </actions>
     </service>
-    <service verb="issue" noun="AnyAssetForShipmentItemSource" no-tx-cache="true">
+    <service verb="issue" noun="AnyAssetForShipmentItemSource">
         <description>Issue from available inventory only, if not able to issue all returns quantityRemaining</description>
         <in-parameters>
             <parameter name="shipmentItemSourceId" required="true"/>
@@ -2868,7 +2868,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Receipt Services ========== -->
     <!-- ====================================== -->
 
-    <service verb="receive" noun="Asset" no-tx-cache="true">
+    <service verb="receive" noun="Asset">
         <!-- NOTE: tested with transaction="cache" and works fine, but only a small performance improvement (this is a fairly small service) -->
         <description>Receive an Asset</description>
         <in-parameters>
@@ -3096,7 +3096,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="update" noun="AssetAndReceipt" no-tx-cache="true">
+    <service verb="update" noun="AssetAndReceipt">
         <in-parameters>
             <parameter name="assetId" required="true"/>
             <parameter name="assetReceiptId"><description>If not specified will look it up with assetId and shipmentId.</description></parameter>
@@ -3634,7 +3634,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Physical Inventory Services ========== -->
     <!-- ================================================= -->
 
-    <service verb="record" noun="PhysicalInventoryQuantity" no-tx-cache="true">
+    <service verb="record" noun="PhysicalInventoryQuantity">
         <in-parameters>
             <auto-parameters entity-name="mantle.product.asset.Asset" include="nonpk"><exclude field-name="classEnumId"/>
                 <exclude field-name="quantityOnHandTotal"/><exclude field-name="availableToPromiseTotal"/>
@@ -3701,7 +3701,7 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
         </actions>
     </service>
-    <service verb="record" noun="PhysicalInventoryChange" no-tx-cache="true">
+    <service verb="record" noun="PhysicalInventoryChange">
         <in-parameters>
             <auto-parameters entity-name="mantle.product.asset.Asset" include="nonpk"><exclude field-name="classEnumId"/>
                 <exclude field-name="quantityOnHandTotal"/><exclude field-name="availableToPromiseTotal"/>
