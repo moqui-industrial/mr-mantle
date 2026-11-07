@@ -783,6 +783,10 @@ const operations = {
     identity,
     inScope,
     scopedOrganizations,
+    // the account-wide refusals of an identity identity() found (a reason, or null): shared beyond the caller's scope without
+    // ADMIN_IDENTITY_GLOBAL, or holding access the caller could not be given (for the lifecycle, P6)
+    accountWideRefusal,
+    heldBeyondRefusal,
     // a find on UserAccountOrganization under the caller's organization filters (an account's row for each of its
     // organizations in scope), or null when nothing is in scope
     scopedAccounts: () => scopedFind(ACCOUNT_ORGANIZATION),
