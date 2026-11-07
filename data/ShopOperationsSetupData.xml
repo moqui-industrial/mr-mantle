@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's operations (mr-pass impl-shop P8; ShopOperationsServices.xml): the job that retires expired carts through the order
+    path and searches recent hosted references for a later second approval, each item in its own transaction; and the
+    permission to resolve a stuck placement (impl-commerce F108: retry it, or release or refund its payment), with its ADMIN
+    grant (BOSS grants it to the Commerce administrator). -->
+<entity-facade-xml type="seed-initial">
+    <moqui.security.UserPermission userPermissionId="COMMERCE_PLACEMENT_RESOLVE" description="Commerce Placement Resolve"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="COMMERCE_PLACEMENT_RESOLVE" fromDate="0"/>
+    <moqui.service.job.ServiceJob jobName="run_ShopOperations" description="Retire expired Shop carts; search recent hosted references"
+            serviceName="mantle.order.ShopOperationsServices.run#ShopOperations" cronExpression="0 40 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

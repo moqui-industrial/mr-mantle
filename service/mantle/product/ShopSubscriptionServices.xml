@@ -80,7 +80,7 @@
         </actions>
     </service>
 
-    <service verb="dispatch" noun="Renewal" authenticate="anonymous-all" allow-remote="false">
+    <service verb="dispatch" noun="Renewal" authenticate="anonymous-all" allow-remote="false" operation="shop.renewal.dispatch">
         <description>create_RecurringOrders' hand-off of a Shop-linked base: its contract's due period claimed once (unique by contract and period, under the contract's lock) and advanced: the base cloned with copyPayment=false, charged only with recorded off-session consent through Accounting's coordinator (purpose shopRenewal), then placed. handled false for a base of no contract (the native path's).</description>
         <in-parameters><parameter name="baseOrderId" required="true"/></in-parameters>
         <out-parameters>
@@ -95,7 +95,7 @@
             </script>
         </actions>
     </service>
-    <service verb="run" noun="Renewals" authenticate="anonymous-all" allow-remote="false">
+    <service verb="run" noun="Renewals" authenticate="anonymous-all" allow-remote="false" operation="shop.renewal.run">
         <description>The run_StoreRenewals job: renewal occurrences in flight (claimed, charging, placed) and retries that are due, each on its own (a pending payment looked up, never charged again); one that fails is named and the rest go on.</description>
         <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
         <out-parameters>

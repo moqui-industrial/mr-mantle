@@ -140,7 +140,8 @@ function respond(response, answer) {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         response.setContentType(file.contentType)
-        response.setHeader('Cache-Control', 'no-store')
+        // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
+        response.setHeader('Cache-Control', file.cacheControl || 'no-store')
         response.setHeader(
             'Content-Disposition',
             file.disposition +

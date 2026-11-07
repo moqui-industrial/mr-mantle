@@ -288,4 +288,7 @@
     ['POST', 'shop/subscriptions/method', 'changeSubscriptionMethod'],
     ['POST', 'shop/subscriptions/cancel', 'cancelSubscription'],
     ['POST', 'shop/subscriptions/resume', 'resumeRenewal'],
+    // Commerce P14: a store feed's active build at the Shop mount's feed path (feeds/{feedKey}.{extension}), checked against
+    // the site's current generation
+    ['GET', 'shop/feeds', 'getShopFeed'],
 ]

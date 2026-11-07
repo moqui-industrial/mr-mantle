@@ -164,7 +164,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getOrderConfirmation", input)</script>
         </actions>
     </service>
-    <service verb="run" noun="Step" transaction="cache" authenticate="anonymous-all" allow-remote="false">
+    <service verb="run" noun="Step" transaction="cache" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.step">
         <description>Internal to ShopCheckout.js, always called in a transaction of its own: one step of a checkout's freeze,
             authorization, outcome, placement, a placement's failure, a lookup's count or expiry (input.step), so each commits
             or rolls back alone and no provider is asked while the checkout, cart or order is locked.</description>
@@ -178,7 +178,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("runStep", input)</script>
         </actions>
     </service>
-    <service verb="reconcile" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+    <service verb="reconcile" noun="Checkouts" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.reconcile">
         <description>The reconcile_StoreCheckouts job: each Shop checkout attempt due for a lookup (bounded backoff, oldest
             first) asked of its provider and its outcome applied, and each checkout waiting for placement placed (at most five
             tries), each in its own transactions; one that fails is named and the rest go on.</description>
@@ -198,7 +198,7 @@
             <set field="failed" from="out.failed"/>
         </actions>
     </service>
-    <service verb="expire" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+    <service verb="expire" noun="Checkouts" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.expire">
         <description>The expire_StoreCheckouts job: checkouts never submitted past their expiry are expired, each in its own
             transaction; a submitted one is the reconciliation's.</description>
         <in-parameters>

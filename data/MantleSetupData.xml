@@ -811,4 +811,10 @@ along with this software (see the LICENSE.md file). If not, see
         administrator already. Granted to the Commerce administrator group by the app's setup data. -->
     <userPermissions userPermissionId="COMMERCE_ALL_ORGANIZATIONS" description="Commerce store work in every organization"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_ALL_ORGANIZATIONS" fromDate="0"/>
+    <!-- Commerce P14 (impl-commerce): the feed job; it builds only feeds an operator scheduled (hourly or daily), each in its own
+        transaction, and publishes a complete build with no errors; a failing feed is recorded and the others go on
+        (mantle.product.StoreChannelServices.run#StoreFeeds) -->
+    <moqui.service.job.ServiceJob jobName="run_StoreFeeds" description="Build and publish scheduled store product feeds"
+            serviceName="mantle.product.StoreChannelServices.run#StoreFeeds" cronExpression="0 7 * * * ?" paused="N"
+            errorHistoryOnly="Y"/>
 </entity-facade-xml>

@@ -203,7 +203,7 @@ function cancelRequestOrderIds(storeIds) {
 // (impl-shop F85); the job no longer retries it
 const stuck = checkout =>
     checkout.statusId === "ScoPlacementPending" &&
-    (checkout.failureCode === "ORDER_CHANGED" || num(checkout.placementTries) >= limits.placementTries)
+    (["ORDER_CHANGED", "REFUND_PENDING"].includes(checkout.failureCode) || num(checkout.placementTries) >= limits.placementTries)
 function stuckCheckouts(storeIds) {
     if (!storeIds.length) return []
     return Array.from(
@@ -385,7 +385,9 @@ function stuckOrders(s, storeIds, p) {
             failureText:
                 checkout.failureCode === "ORDER_CHANGED"
                     ? "The order changed after it was paid"
-                    : "Placement failed " + num(checkout.placementTries) + " times",
+                    : checkout.failureCode === "REFUND_PENDING"
+                      ? "A refund was started and not finished"
+                      : "Placement failed " + num(checkout.placementTries) + " times",
             placedText: dateText(checkout.frozenDate)
         })
     })
@@ -1238,6 +1240,27 @@ function addStoreRequestNote(p) {
     return {communicationEventId: out.communicationEventId}
 }
 
+// Commerce P13 (impl-commerce F111, design §1.4's "Log as note"): an internal note on a store order or cart (OrderNote,
+// internalNote Y, the user's), filed from an Assist answer; never sent to the customer and changing nothing else.
+function addStoreOrderNote(p) {
+    const s = scope()
+    const order = p.orderId ? one(ORDER, {orderId: p.orderId}) : null
+    storeOrder(s, p.orderId, order?.statusId === "OrderOpen")
+    const noteText = text(p.noteText)
+    if (!noteText) denied("VALUE_REQUIRED", "The note is empty")
+    if (noteText.length > 4000) denied("VALUE_INVALID", "A note is at most 4000 characters")
+    // two notes of one order in the same millisecond keep their own keys
+    const taken = new Set(rows("mantle.order.OrderNote", {orderId: order.orderId}).map(row => ms(row.noteDate)))
+    let noteDate = nowMs()
+    while (taken.has(noteDate)) noteDate += 1
+    call("create#mantle.order.OrderNote", {orderId: order.orderId, noteDate, noteText, internalNote: "Y", userId: ec.user.userId})
+    return {
+        orderId: order.orderId,
+        noteDate,
+        message: "Note logged on " + (order.statusId === "OrderOpen" ? "cart " : "order ") + order.orderId
+    }
+}
+
 // ===== get#StoreWorkSummary (Home's WorkCards) =====
 // The work counts of the user's stores (or one): to approve (placed, not yet approved), payment holds, to fulfill
 // (approved, not completed), unpaid (of the recent submitted orders, computed), open carts, stuck placements and notice
@@ -1364,6 +1387,7 @@ const operations = {
     findStoreRequests,
     getStoreRequest,
     addStoreRequestNote,
+    addStoreOrderNote,
     findStoreDeliveries,
     getStoreWorkSummary,
     storeCallRecords

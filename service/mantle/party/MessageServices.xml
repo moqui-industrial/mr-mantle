@@ -39,7 +39,7 @@
             <set field="stateEnumId" from="out.stateEnumId"/>
         </actions>
     </service>
-    <service verb="attempt" noun="Delivery" allow-remote="false">
+    <service verb="attempt" noun="Delivery" allow-remote="false" operation="message.delivery.attempt">
         <description>One attempt of a queued or retrying delivery, under its lock: its source builds the message, the consent
             is snapshotted, send#EmailTemplate hands it off, and its outcome is recorded (sent; retryable, again later;
             permanent, failed; anything else uncertain, kept for review). Another state is left as it is.</description>
@@ -62,7 +62,7 @@
             <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('receipt', context).stateEnumId"/>
         </actions>
     </service>
-    <service verb="run" noun="Deliveries" allow-remote="false">
+    <service verb="run" noun="Deliveries" allow-remote="false" operation="message.delivery.run">
         <description>The run_MessageDeliveries job: the queued and retrying deliveries that are due, oldest first, each in its
             own transaction; an uncertain one is never tried again here.</description>
         <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
