@@ -560,19 +560,13 @@ along with this software (see the LICENSE.md file). If not, see
 
         </actions>
     </service>
-    <service verb="get" noun="PartyOrganizationInfo">
-        <in-parameters><parameter name="partyId" default="ec.user.userAccount?.partyId"/></in-parameters>
-        <out-parameters>
-            <parameter name="activeOrgId"/>
-            <parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter>
-            <parameter name="filterOrgIds" type="List"><parameter name="userOrgId"/></parameter>
-        </out-parameters>
+    <service verb="get" noun="PartyInternalOrgIds">
+        <description>The internal organizations a party works in: the targets of its agent, employee and member
+            relationships that have the OrgInternal role, and their direct child organizations (PrtOrgRollup). Reads only,
+            so a read-fenced caller (an agent's Constitution provider) may use it.</description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters><parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter></out-parameters>
         <actions>
-            <if condition="!partyId">
-                <set field="userOrgIds" from="[]"/><set field="filterOrgIds" from="[]"/>
-                <return/>
-            </if>
-
             <!-- get user organizations data (agent/employee/member rel from member to org) -->
             <entity-find entity-name="mantle.party.PartyRelationship" list="userOrgRelList" cache="true">
                 <date-filter/>
@@ -605,6 +599,22 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
                 </if>
             </iterate>
+        </actions>
+    </service>
+    <service verb="get" noun="PartyOrganizationInfo">
+        <in-parameters><parameter name="partyId" default="ec.user.userAccount?.partyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="activeOrgId"/>
+            <parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter>
+            <parameter name="filterOrgIds" type="List"><parameter name="userOrgId"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!partyId">
+                <set field="userOrgIds" from="[]"/><set field="filterOrgIds" from="[]"/>
+                <return/>
+            </if>
+
+            <service-call name="mantle.party.PartyServices.get#PartyInternalOrgIds" in-map="{partyId: partyId}" out-map="context"/>
 
             <!-- active org -->
             <set field="activeOrgId" from="ec.user.getPreference('ACTIVE_ORGANIZATION')"/>

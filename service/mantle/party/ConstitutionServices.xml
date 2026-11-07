@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- An internal organization's own Constitution (mr-moqui docs/ai/Constitution.md): one PartyContent of type
+    PcntConstitution per organization, its whole JSON document in the resource its contentLocation names (a document is
+    larger than description holds). The framework's org.moqui.admin.ConstitutionServices owns the format, the global
+    document and the agent runtime; it reads organizations through get#ScopedConstitution, named in MoquiConf.xml.
+    Reading: the organization's members, and holders of ADMIN_CONSTITUTION_GLOBAL for any internal organization.
+    Changing: ORG_CONSTITUTION_EDIT within the same scope. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="ScopedConstitution" authenticate="false" allow-remote="false">
+        <implements service="org.moqui.admin.ConstitutionServices.get#ScopedConstitution"/>
+        <description>The framework's constitution-provider: the Constitution of userId's active internal organization
+            (its ACTIVE_ORGANIZATION preference, when the user may use that organization as get#PartyOrganizationInfo
+            decides, read without clearing anything), or of organizationPartyId when the user may read it. none when there
+            is no such organization; inherit when it has no document of its own; override with its documentText. Reads
+            only (it runs under the agent runtime's read fence).</description>
+        <actions>
+            <set field="scopeStatus" value="none"/>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount" disable-authz="true">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="!userAccount?.partyId"><return/></if>
+            <service-call name="mantle.party.PartyServices.get#PartyInternalOrgIds" out-map="orgInfo"
+                    in-map="{partyId: userAccount.partyId}" disable-authz="true"/>
+            <set field="userOrgIds" from="orgInfo.userOrgIds || []"/>
+            <set field="isCurrentUser" from="userId == ec.user.userId"/>
+
+            <if condition="organizationPartyId"><then>
+                <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess"
+                        in-map="{organizationPartyId: organizationPartyId, userOrgIds: userOrgIds, isCurrentUser: isCurrentUser}"
+                        out-map="access"/>
+                <if condition="!access.canRead"><set field="organizationPartyId" from="null"/><return/></if>
+            </then><else>
+                <entity-find-one entity-name="moqui.security.UserPreference" value-field="activePref" disable-authz="true">
+                    <field-map field-name="userId"/><field-map field-name="preferenceKey" value="ACTIVE_ORGANIZATION"/></entity-find-one>
+                <set field="activeOrgId" from="activePref?.preferenceValue || null"/>
+                <if condition="!activeOrgId"><return/></if>
+                <!-- the rule of get#PartyOrganizationInfo: a member, or an administrator choosing any internal organization -->
+                <set field="activeAllowed" from="userOrgIds.includes(activeOrgId)"/>
+                <if condition="!activeAllowed &amp;&amp; isCurrentUser &amp;&amp; (ec.user.isInGroup('ADMIN') || ec.user.hasPermission('ACCOUNTING_ADMIN'))">
+                    <entity-find-one entity-name="mantle.party.PartyRole" value-field="internalRole" cache="true" disable-authz="true">
+                        <field-map field-name="partyId" from="activeOrgId"/><field-map field-name="roleTypeId" value="OrgInternal"/></entity-find-one>
+                    <set field="activeAllowed" from="!!internalRole"/>
+                </if>
+                <if condition="!activeAllowed"><return/></if>
+                <set field="organizationPartyId" from="activeOrgId"/>
+            </else></if>
+
+            <entity-find-one entity-name="mantle.party.PartyDetail" value-field="orgDetail" cache="true" disable-authz="true">
+                <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
+            <set field="organizationName" from="orgDetail ? (orgDetail.organizationName || orgDetail.pseudoId || organizationPartyId) : organizationPartyId"/>
+            <service-call name="mantle.party.ConstitutionServices.read#OrganizationConstitutionText" out-map="stored"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="stored.documentText"><then>
+                <set field="scopeStatus" value="override"/>
+                <set field="documentText" from="stored.documentText"/>
+            </then><else>
+                <set field="scopeStatus" value="inherit"/>
+            </else></if>
+        </actions>
+    </service>
+
+    <service verb="check" noun="OrganizationConstitutionAccess" authenticate="false" allow-remote="false">
+        <description>Whether the current user may read and change an organization's Constitution: read as a member
+            (userOrgIds) or, for an internal organization, as a holder of ADMIN_CONSTITUTION_GLOBAL; change with
+            ORG_CONSTITUTION_EDIT in that same scope. isCurrentUser false (another user's scope) reads as a member only.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="userOrgIds" type="List"/>
+            <parameter name="isCurrentUser" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="canRead" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="isInternal" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <if condition="userOrgIds == null">
+                <set field="userOrgIds" from="[]"/>
+                <if condition="ec.user.userAccount?.partyId">
+                    <service-call name="mantle.party.PartyServices.get#PartyInternalOrgIds" out-map="orgInfo"
+                            in-map="{partyId: ec.user.userAccount.partyId}" disable-authz="true"/>
+                    <set field="userOrgIds" from="orgInfo.userOrgIds || []"/>
+                </if>
+            </if>
+            <entity-find-one entity-name="mantle.party.PartyRole" value-field="internalRole" cache="true" disable-authz="true">
+                <field-map field-name="partyId" from="organizationPartyId"/><field-map field-name="roleTypeId" value="OrgInternal"/></entity-find-one>
+            <set field="isInternal" from="!!internalRole"/>
+            <set field="member" from="userOrgIds.includes(organizationPartyId)"/>
+            <set field="instanceEditor" from="isCurrentUser &amp;&amp; isInternal &amp;&amp; ec.user.hasPermission('ADMIN_CONSTITUTION_GLOBAL')"/>
+            <set field="canRead" from="isInternal &amp;&amp; (member || instanceEditor)"/>
+            <set field="canEdit" from="canRead &amp;&amp; isCurrentUser &amp;&amp; ec.user.hasPermission('ORG_CONSTITUTION_EDIT')"/>
+        </actions>
+    </service>
+
+    <service verb="read" noun="OrganizationConstitutionText" authenticate="false" allow-remote="false">
+        <description>The stored document of an organization (no access check: callers check first). Reads only.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="partyContentId"/>
+            <parameter name="contentLocation"/>
+            <parameter name="documentText"/>
+        </out-parameters>
+        <actions>
+            <entity-find entity-name="mantle.party.PartyContent" list="contentList" limit="1" disable-authz="true">
+                <econdition field-name="partyId" from="organizationPartyId"/>
+                <econdition field-name="partyContentTypeEnumId" value="PcntConstitution"/>
+                <order-by field-name="-contentDate"/></entity-find>
+            <if condition="!contentList.length"><return/></if>
+            <set field="partyContentId" from="contentList[0].partyContentId"/>
+            <set field="contentLocation" from="contentList[0].contentLocation"/>
+            <if condition="contentLocation"><then>
+                <set field="documentText" from="ec.resource.getLocationText(contentLocation, false)"/>
+            </then><else>
+                <set field="documentText" from="contentList[0].description"/>
+            </else></if>
+        </actions>
+    </service>
+
+    <service verb="get" noun="OrganizationConstitution">
+        <description>An organization's Constitution for its editor: its own document (customized) or the global one it
+            inherits, as JSON, with the hash store#OrganizationConstitution and reset#OrganizationConstitution expect.
+            Refused unless the user may read it.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="customized" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="documentText"/>
+            <parameter name="contentHash"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess" out-map="access"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="!access.canRead"><return error="true" message="You may not read the Constitution of organization ${organizationPartyId}"/></if>
+            <set field="canEdit" from="access.canEdit"/>
+            <service-call name="mantle.party.ConstitutionServices.read#OrganizationConstitutionText" out-map="stored"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <set field="customized" from="!!stored.partyContentId"/>
+            <if condition="customized"><then>
+                <set field="documentText" from="stored.documentText"/>
+                <service-call name="org.moqui.admin.ConstitutionServices.validate#Constitution" out-map="checked"
+                        in-map="{documentText: documentText || '{}'}"/>
+                <set field="contentHash" from="checked.contentHash || 'invalid'"/>
+            </then><else>
+                <service-call name="org.moqui.admin.ConstitutionServices.get#Constitution" out-map="global"
+                        in-map="{scope: 'global', includeDocument: true}"/>
+                <set field="documentText" from="global.documentText"/>
+                <set field="contentHash" from="global.contentHash"/>
+            </else></if>
+        </actions>
+    </service>
+
+    <service verb="store" noun="OrganizationConstitution">
+        <description>Save documentText as an organization's own Constitution, replacing the global document for it in
+            full, when expectedHash is the hash of what it uses now (its own document, else the global one). Refuses
+            without ORG_CONSTITUTION_EDIT in the organization's scope, an invalid document, a new or changed reference URL
+            of an untrusted origin, or a stale hash, leaving the previous document. One PartyContent per organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="documentText" required="true" allow-html="any"/>
+            <parameter name="expectedHash" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentHash"/></out-parameters>
+        <actions>
+            <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess" out-map="access"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="!access.canEdit"><return error="true" message="Changing the Constitution of organization ${organizationPartyId} needs ORG_CONSTITUTION_EDIT for that organization"/></if>
+            <!-- lock the organization's row so two saves are one after the other -->
+            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-update="true" disable-authz="true">
+                <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
+            <service-call name="mantle.party.ConstitutionServices.get#OrganizationConstitution" out-map="current"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="expectedHash != current.contentHash"><return error="true" message="The Constitution changed since it was read; reload it and make the change again"/></if>
+            <service-call name="org.moqui.admin.ConstitutionServices.validate#Constitution" out-map="checked"
+                    in-map="{documentText: documentText, previousText: current.documentText}"/>
+            <if condition="checked.valid != 'Y'">
+                <iterate list="checked.errorList" entry="problem"><message error="true">${problem.message}</message></iterate>
+                <return error="true" message="The Constitution was not saved"/>
+            </if>
+            <service-call name="mantle.party.ConstitutionServices.read#OrganizationConstitutionText" out-map="stored"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" from="stored.contentLocation || (contentRoot + '/party/' + organizationPartyId + '/constitution/Constitution.json')"/>
+            <script>ec.resource.getLocationReference(contentLocation).putText(documentText)</script>
+            <if condition="stored.partyContentId"><then>
+                <service-call name="update#mantle.party.PartyContent" disable-authz="true"
+                        in-map="{partyContentId: stored.partyContentId, contentLocation: contentLocation, contentDate: ec.user.nowTimestamp, userId: ec.user.userId}"/>
+            </then><else>
+                <service-call name="create#mantle.party.PartyContent" disable-authz="true"
+                        in-map="{partyId: organizationPartyId, partyContentTypeEnumId: 'PcntConstitution', contentLocation: contentLocation, description: 'Constitution', contentDate: ec.user.nowTimestamp, userId: ec.user.userId}"/>
+            </else></if>
+            <set field="contentHash" from="checked.contentHash"/>
+            <service-call name="org.moqui.admin.ConstitutionServices.record#ConstitutionChange"
+                    in-map="{action: 'store', organizationPartyId: organizationPartyId, beforeText: current.documentText, afterText: documentText}"/>
+        </actions>
+    </service>
+
+    <service verb="reset" noun="OrganizationConstitution">
+        <description>Remove an organization's own Constitution, when expectedHash is its hash now, so it uses the global
+            document again. Refuses without ORG_CONSTITUTION_EDIT in the organization's scope, or when it has none.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="expectedHash" required="true"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess" out-map="access"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="!access.canEdit"><return error="true" message="Changing the Constitution of organization ${organizationPartyId} needs ORG_CONSTITUTION_EDIT for that organization"/></if>
+            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-update="true" disable-authz="true">
+                <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
+            <service-call name="mantle.party.ConstitutionServices.get#OrganizationConstitution" out-map="current"
+                    in-map="{organizationPartyId: organizationPartyId}"/>
+            <if condition="!current.customized"><return error="true" message="Organization ${organizationPartyId} uses the global Constitution already"/></if>
+            <if condition="expectedHash != current.contentHash"><return error="true" message="The Constitution changed since it was read; reload it and reset again"/></if>
+            <entity-find entity-name="mantle.party.PartyContent" list="contentList" disable-authz="true">
+                <econdition field-name="partyId" from="organizationPartyId"/>
+                <econdition field-name="partyContentTypeEnumId" value="PcntConstitution"/></entity-find>
+            <iterate list="contentList" entry="content">
+                <if condition="content.contentLocation"><script>
+                    try { ec.resource.getLocationReference(content.contentLocation).delete() }
+                    catch (e) { ec.logger.warn("The Constitution file " + content.contentLocation + " was not removed: " + e) }
+                </script></if>
+                <entity-delete value-field="content"/>
+            </iterate>
+            <service-call name="org.moqui.admin.ConstitutionServices.record#ConstitutionChange"
+                    in-map="{action: 'reset', organizationPartyId: organizationPartyId, beforeText: current.documentText}"/>
+        </actions>
+    </service>
+</services>

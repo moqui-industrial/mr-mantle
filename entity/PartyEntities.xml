@@ -434,6 +434,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Identity Document"  enumId="PcntIdentityDocument" enumTypeId="PartyContentType"/>
             <moqui.basic.Enumeration description="Employment Authorization Document"  enumId="PcntEmplAuthzDocument" enumTypeId="PartyContentType"/>
             <moqui.basic.Enumeration description="Bio"  enumId="PcntBio" enumTypeId="PartyContentType"/>
+            <!-- an internal organization's own Constitution (mr-moqui docs/ai/Constitution.md), one per organization -->
+            <moqui.basic.Enumeration description="Constitution" enumId="PcntConstitution" enumTypeId="PartyContentType"/>
         </seed-data>
     </entity>
     <entity entity-name="PartyGeoPoint" package="mantle.party">
