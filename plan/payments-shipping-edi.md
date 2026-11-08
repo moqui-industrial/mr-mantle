@@ -587,7 +587,7 @@ The Authorize.Net gateway on the Phase 0 contracts. Nothing is committed yet; th
 repository.
 
 **Source and API baseline.** Ported from [AuthorizeDotNet](https://github.com/moqui/AuthorizeDotNet/tree/eaa351c) 1.2.5,
-commit `eaa351c` (CC0 with the patent grant, the license of Mantle; its authors are in Mantle's `AUTHORS`): the CIM
+commit `eaa351c` (CC0 with the patent grant, the license of Mantle; its authors are in Mantle's `AUTHORS.md`): the CIM
 payment operations, the profile mapping (`billTo`, customer type, `merchantCustomerId`), the configuration fields, the
 AIM reason-code mapping (6/37 card number, 7/8 expiry) and the transaction-status map. Not ported: AIM `x_` requests,
 raw-card CIM requests, the `create#`/`update#CreditCard` SECAs that sent card numbers, the user-preference gateway
@@ -716,7 +716,7 @@ test runs is in mr-moqui (amending Phase 0, see its record).
 
 **Source and API baseline.** Ported from [mantle-paytrace](https://github.com/moqui/mantle-paytrace/tree/5dbe616) 1.0.3,
 commit `5dbe616` (CC0 with the patent grant, written by David E. Jones, Anderson Urrego Restrepo and Michael Jones; the
-new files' headers keep the dedication and name them, and Mantle's `AUTHORS` is left to its signers): the vault payment
+new files' headers keep the dedication and name them, and Mantle's `AUTHORS.md` is left to its signers): the vault payment
 operations, the response code mapping (101..125 success and decline sets, errors 35/43/44), the level 3 mapping from the
 order lines (customer PO, tax, freight, discounts, quantities, the UoM table, item data) and the transaction status map.
 Not ported: the v1 paths and password grant, raw-card vault requests and the `create#`/`update#CreditCard` SECAs that sent

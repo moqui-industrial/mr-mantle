@@ -46,3 +46,9 @@ There is an overview of the Universal Data Model and of Mantle Business Artifact
 Download the PDF here:
 
 <http://www.moqui.org/MakingAppsWithMoqui-1.0.pdf>
+
+## License and Contributing
+
+[CC0 1.0 Universal with a Grant of Patent License](LICENSE.md). To contribute code, sign
+[AUTHORS.md](AUTHORS.md) in a commit from the account that submits the pull request; its Contributing
+section has the details.
