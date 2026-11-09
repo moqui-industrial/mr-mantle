@@ -536,6 +536,8 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="TENT" name="rateTypeEnumId"/>
         <alias entity-alias="TENT" name="hours"/>
         <alias entity-alias="TENT" name="breakHours"/>
+        <alias entity-alias="TENT" name="clientHourRate"/>
+        <alias entity-alias="TENT" name="vendorHourRate"/>
         <alias entity-alias="CRA" name="clientRateAmount" field="rateAmount"/>
         <alias entity-alias="CRA" name="clientRateCurrencyUomId" field="rateCurrencyUomId"/>
         <alias entity-alias="VRA" name="vendorRateAmount" field="rateAmount"/>

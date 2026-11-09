@@ -1248,10 +1248,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="actualCost" from="toDecimal(0)"/>
             <iterate list="tearList" entry="tear">
                 <set field="actualWorkTime" from="actualWorkTime.add(tear.hours ?? 0)"/>
-                <if condition="tear.clientRateAmount != null">
-                    <set field="actualClientCost" from="actualClientCost.add(toDecimal(tear.hours ?? 0).multiply(tear.clientRateAmount))"/></if>
-                <if condition="tear.vendorRateAmount != null">
-                    <set field="actualCost" from="actualCost.add(toDecimal(tear.hours ?? 0).multiply(tear.vendorRateAmount))"/></if>
+                <set field="clientRate" from="tear.clientHourRate ?? tear.clientRateAmount"/>
+                <set field="vendorRate" from="tear.vendorHourRate ?? tear.vendorRateAmount"/>
+                <if condition="clientRate != null">
+                    <set field="actualClientCost" from="actualClientCost.add(toDecimal(tear.hours ?? 0).multiply(clientRate))"/></if>
+                <if condition="vendorRate != null">
+                    <set field="actualCost" from="actualCost.add(toDecimal(tear.hours ?? 0).multiply(vendorRate))"/></if>
             </iterate>
             <!-- <log level="warn" message="======== time for ${workEffortId}: ${actualWorkTime}, ${actualCost}, ${actualClientCost}\n${tearList}"/> -->
             <service-call name="update#mantle.work.effort.WorkEffort"

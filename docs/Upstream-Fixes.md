@@ -4,6 +4,18 @@ Defects found here in behaviour that Mantle carries over from the Java component
 [mantle-udm](https://github.com/moqui/mantle-udm) and [mantle-usl](https://github.com/moqui/mantle-usl), with what was
 changed here. Each is a candidate to take back upstream. Add one entry per fix, newest first.
 
+## Manual hourly rates were missing from project actuals (Nov 9, 2026)
+
+- **Behavior:** `mantle.work.TaskServices.update#TaskFromTime` summed only joined RateAmount values from
+  `TimeEntryAndRates`. An explicit hourly rate on TimeEntry could correctly bill the client while task/project
+  actual client value and worker cost used a different referenced rate or zero.
+- **Fixed here:** the view exposes `clientHourRate` and `vendorHourRate`; actuals use each explicit value before
+  the referenced rate, including an explicit zero. Existing time-entry EECAs propagate the corrected totals.
+- **Verification:** standalone Mantle regression `WorkManualTimeRates` checks explicit rates, zero, referenced
+  fallback and deletion at task and project level. `WorkTimeEntries` prepares its own visibility fixtures.
+- **Upstream candidate:** apply the same precedence where the corresponding view/rollup uses only joined rates;
+  no physical schema migration or service parameter change is needed.
+
 ## Two subscriptions to one resource share their terms (Nov 6, 2026)
 
 - **Upstream:** `mantle.product.SubscriptionServices.fulfill#ProductSubscriptionResource` (mantle-usl) extends the
