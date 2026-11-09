@@ -4,6 +4,20 @@ Defects found here in behaviour that Mantle carries over from the Java component
 [mantle-udm](https://github.com/moqui/mantle-udm) and [mantle-usl](https://github.com/moqui/mantle-usl), with what was
 changed here. Each is a candidate to take back upstream. Add one entry per fix, newest first.
 
+## Grouped invoices did not link manual-rate time sources (Nov 9, 2026)
+
+- **Behavior:** `mantle.account.InvoiceServices.create#TimeEntryInvoiceItems` included manual hourly and piece
+  amounts in worker/all totals, but linked sources only when they had an hourly RateAmount ID. Those entries
+  remained unbilled and could be invoiced again.
+- **Fixed here:** each aggregate retains the sources whose calculation resolved an hourly or piece rate,
+  including explicit zero rates, and links them to the created item. Unresolved piece-only sources stay unbilled.
+  Existing locking, amount calculation and transaction errors remain in place.
+- **Verification:** standalone Mantle `WorkManualTimeBilling` covers both groupings, manual/zero/piece sources,
+  a missing-piece-rate control, retry, item removal, recreation and invoice cancellation; `WorkProjectBilling`
+  checks the ordinary referenced-rate flow.
+- **Upstream candidate:** replace the hourly RateAmount-ID guard with resolved contributor tracking in both
+  aggregate branches; no schema or service parameter change is needed.
+
 ## Manual hourly rates were missing from project actuals (Nov 9, 2026)
 
 - **Behavior:** `mantle.work.TaskServices.update#TaskFromTime` summed only joined RateAmount values from

@@ -2016,10 +2016,15 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="createSingleItem"><then>
                 <set field="amountTotal" from="toDecimal(0)"/>
+                <set field="ratedTimeEntryList" from="[]"/>
                 <iterate list="timeEntryList" entry="timeEntry">
                     <service-call name="mantle.work.TimeServices.get#TimeEntryAmount" out-map="getTeaOut" out-map-add-to-existing="false"
                             in-map="{timeEntryId:timeEntry.timeEntryId, timeEntry:timeEntry, ratePurposeEnumId:ratePurposeEnumId}"/>
                     <set field="amountTotal" from="amountTotal.add(getTeaOut.amountTotal ?? 0)"/>
+                    <if condition="(!toDecimal(getTeaOut.hours ?? 0).isZero() &amp;&amp; getTeaOut.hourlyAmount != null)
+                            || (!toDecimal(getTeaOut.pieceCount ?? 0).isZero() &amp;&amp; getTeaOut.pieceAmount != null)">
+                        <script>ratedTimeEntryList.push(timeEntry)</script>
+                    </if>
                 </iterate>
                 <if condition="!amountTotal.isZero()">
                     <set field="description" value="Time entries for task ${ec.resource.expand('WorkEffortNameTemplate','',workEffort)}"/>
@@ -2028,31 +2033,33 @@ along with this software (see the LICENSE.md file). If not, see
                                 amount:amountTotal, quantity:1, description:description}"/>
                     <set field="invoiceItemCreatedCount" from="invoiceItemCreatedCount + 1"/>
 
-                    <!-- set invoice item IDs on TimeEntry records -->
-                    <iterate list="timeEntryList" entry="timeEntry">
-                        <set field="rateAmountId" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorRateAmountId : timeEntry.rateAmountId"/>
-                        <if condition="rateAmountId">
-                            <if condition="ratePurposeEnumId == 'RaprVendor'"><then>
-                                <set field="timeEntry.vendorInvoiceId" from="invoiceId"/>
-                                <set field="timeEntry.vendorInvoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
-                            </then><else>
-                                <set field="timeEntry.invoiceId" from="invoiceId"/>
-                                <set field="timeEntry.invoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
-                            </else></if>
-                            <entity-update value-field="timeEntry"/>
-                        </if>
+                    <!-- Link rated contributors, including explicit zero rates; unresolved piece rates remain unbilled. -->
+                    <iterate list="ratedTimeEntryList" entry="timeEntry">
+                        <if condition="ratePurposeEnumId == 'RaprVendor'"><then>
+                            <set field="timeEntry.vendorInvoiceId" from="invoiceId"/>
+                            <set field="timeEntry.vendorInvoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
+                        </then><else>
+                            <set field="timeEntry.invoiceId" from="invoiceId"/>
+                            <set field="timeEntry.invoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
+                        </else></if>
+                        <entity-update value-field="timeEntry"/>
                     </iterate>
                 </if>
             </then><else-if condition="createItemPerWorker">
                 <set field="workerPartyIdSet" from="Array.from(new Set(Array.from(timeEntryList).map((it) => it.partyId))).sort()"/>
                 <iterate list="workerPartyIdSet" entry="curWorkerId">
                     <set field="amountTotal" from="toDecimal(0)"/>
+                    <set field="ratedTimeEntryList" from="[]"/>
                     <filter-map-list list="timeEntryList" to-list="curWorkerEntryList">
                         <field-map field-name="partyId" from="curWorkerId"/></filter-map-list>
                     <iterate list="curWorkerEntryList" entry="timeEntry">
                         <service-call name="mantle.work.TimeServices.get#TimeEntryAmount" out-map="getTeaOut" out-map-add-to-existing="false"
                                 in-map="{timeEntryId:timeEntry.timeEntryId, timeEntry:timeEntry, ratePurposeEnumId:ratePurposeEnumId}"/>
                         <set field="amountTotal" from="amountTotal.add(getTeaOut.amountTotal ?? 0)"/>
+                        <if condition="(!toDecimal(getTeaOut.hours ?? 0).isZero() &amp;&amp; getTeaOut.hourlyAmount != null)
+                                || (!toDecimal(getTeaOut.pieceCount ?? 0).isZero() &amp;&amp; getTeaOut.pieceAmount != null)">
+                            <script>ratedTimeEntryList.push(timeEntry)</script>
+                        </if>
                     </iterate>
                     <if condition="!amountTotal.isZero()">
                         <entity-find-one entity-name="mantle.party.PartyDetail" value-field="curWorkerDetail">
@@ -2062,19 +2069,16 @@ along with this software (see the LICENSE.md file). If not, see
                                 in-map="{invoiceId:invoiceId, itemTypeEnumId:itemTypeEnumId, amount:amountTotal, quantity:1, description:description}"/>
                         <set field="invoiceItemCreatedCount" from="invoiceItemCreatedCount + 1"/>
 
-                        <!-- set invoice item IDs on TimeEntry records -->
-                        <iterate list="curWorkerEntryList" entry="timeEntry">
-                            <set field="rateAmountId" from="ratePurposeEnumId == 'RaprVendor' ? timeEntry.vendorRateAmountId : timeEntry.rateAmountId"/>
-                            <if condition="rateAmountId">
-                                <if condition="ratePurposeEnumId == 'RaprVendor'"><then>
-                                    <set field="timeEntry.vendorInvoiceId" from="invoiceId"/>
-                                    <set field="timeEntry.vendorInvoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
-                                </then><else>
-                                    <set field="timeEntry.invoiceId" from="invoiceId"/>
-                                    <set field="timeEntry.invoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
-                                </else></if>
-                                <entity-update value-field="timeEntry"/>
-                            </if>
+                        <!-- Link only the rated contributors from this worker's aggregate. -->
+                        <iterate list="ratedTimeEntryList" entry="timeEntry">
+                            <if condition="ratePurposeEnumId == 'RaprVendor'"><then>
+                                <set field="timeEntry.vendorInvoiceId" from="invoiceId"/>
+                                <set field="timeEntry.vendorInvoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
+                            </then><else>
+                                <set field="timeEntry.invoiceId" from="invoiceId"/>
+                                <set field="timeEntry.invoiceItemSeqId" from="iiOut.invoiceItemSeqId"/>
+                            </else></if>
+                            <entity-update value-field="timeEntry"/>
                         </iterate>
                     </if>
                 </iterate>
