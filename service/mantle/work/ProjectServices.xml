@@ -104,6 +104,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <if condition="estimatedStartDate != null &amp;&amp; estimatedCompletionDate != null &amp;&amp;
                            Number(estimatedCompletionDate) &lt; Number(estimatedStartDate)">
                 <return error="true" message="Project date range is not valid."/>
@@ -162,6 +164,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="managerPartyId"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffort" list="tasksList">
                 <econdition field-name="rootWorkEffortId" from="workEffortId"/>
             </entity-find>
@@ -494,6 +498,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="settingValue" allow-html="any"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="settingType" cache="true">
                 <field-map field-name="enumId" from="settingTypeEnumId"/></entity-find-one>
             <if condition="settingType == null || settingType.enumTypeId != 'WorkEffortSettingType'">
@@ -1426,7 +1432,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId" default-value="WeInPlanning"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const kinds = {WetMilestone: 'milestone', WetRelease: 'release', WetComponent: 'component'}
             if (!kinds[workEffortTypeEnumId]) { ec.message.addError(ec.resource.expand('${workEffortTypeEnumId} is not a kind of plan item', '', {workEffortTypeEnumId})); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
@@ -1525,7 +1534,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId"/>
             <parameter name="clearFields" type="Object"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const plan = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (plan == null || !['WetMilestone', 'WetRelease', 'WetComponent'].includes(plan.workEffortTypeEnumId)) {
                 ec.message.addError(ec.resource.expand('Plan item ${workEffortId} not found', '', {workEffortId})); return
@@ -1747,7 +1759,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="notesText" allow-html="any"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortContentId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
             const content = Array.from(ec.entity.find('mantle.work.effort.WorkEffortContent').condition('workEffortId', workEffortId)
@@ -1793,7 +1808,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="publishedList" type="List"/>
             <parameter name="failedList" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             publishedList = []; failedList = []; notifiedCount = 0
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
@@ -1942,7 +1960,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="commitId"/>
             <parameter name="publishedList" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             movedCount = 0; movedToWorkEffortId = null; publishedList = []
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
@@ -2217,7 +2238,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="capacity" type="BigDecimal"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${rootWorkEffortId} not found', '', {rootWorkEffortId})); return }
             const defaults = ec.service.sync().name('mantle.work.ProjectServices.get#SprintDefaults').parameters({rootWorkEffortId: rootWorkEffortId}).call() || {}
@@ -2244,7 +2268,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedCompletionDate" type="Timestamp" format="yyyy-MM-dd"/>
             <parameter name="capacity"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
             const fields = {workEffortId: workEffortId}
@@ -2280,7 +2307,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedCompletionDate" type="Timestamp" format="yyyy-MM-dd"/>
         </in-parameters>
         <out-parameters><parameter name="itemCount" type="Integer"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
             if (!['WeInPlanning', 'WeApproved'].includes(sprint.statusId)) {
@@ -2323,7 +2353,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="carriedToSprintId"/>
             <parameter name="carriedIds" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             doneCount = 0; notDoneCount = 0; carriedToSprintId = null; carriedIds = []
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
@@ -3344,7 +3377,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="approvalRequired"/>
             <parameter name="approverPartyId"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'gate'}).call() || {}
             if (ec.message.hasError()) return
             const required = approvalRequired === 'Y' || approvalRequired === true || approvalRequired === 'true'
