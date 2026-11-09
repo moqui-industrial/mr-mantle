@@ -813,7 +813,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!timePeriodList?.length">
                 <service-call name="mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods" out-map="context" in-map="{organizationPartyId:acctgTrans.organizationPartyId, filterDate:acctgTrans.transactionDate, accountingDate:acctgTrans.accountingDate}"/>
                 <if condition="!timePeriodList?.length">
-                    <return message="Not un-posting transaction ${acctgTransId}, could not find time period for organization ${acctgTrans.organizationPartyId} at ${ec.l10n.format(acctgTrans.transactionDate, null)}"/>
+                    <return message="Not un-posting transaction ${acctgTransId}, could not find time period for organization ${acctgTrans.organizationPartyId} at ${ec.l10n.format(acctgTrans.transactionDate, null)}."/>
                 </if>
             </if>
             <set field="subsequentPeriodIdsByPeriodId" from="{}"/>
@@ -978,7 +978,9 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </if>
             <if condition="acctgTrans.reversedByAcctgTransId">
-                <return error="true" message="Not reversing transaction ${acctgTransId}, already reversed by transaction ${acctgTrans.reversedByAcctgTransId}"/>
+                <set field="reversedTransId" from="acctgTransId"/>
+                <set field="reversedByTransId" from="acctgTrans.reversedByAcctgTransId"/>
+                <return error="true" message="Not reversing transaction ${reversedTransId}, already reversed by transaction ${reversedByTransId}"/>
             </if>
             <entity-find entity-name="mantle.ledger.transaction.AcctgTransEntry" list="acctgTransEntryList">
                 <econdition field-name="acctgTransId"/>
@@ -1498,7 +1500,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <message error="true">Not closing period ${ec.resource.expand('TimePeriodNameTemplate','',timePeriod)}, already closed.</message>
             </if>
             <if condition="Number(ec.user.nowTimestamp) &lt; Number(timePeriod.thruDate)">
-                <message error="true">Not closing period ${ec.resource.expand('TimePeriodNameTemplate','',timePeriod)}, period has not ended (ends on ${timePeriod.thruDate}).</message>
+                <message error="true">Not closing period ${ec.resource.expand('TimePeriodNameTemplate','',timePeriod)}, period has not ended (ends on ${ec.l10n.format(timePeriod.thruDate, 'yyyy-MM-dd')}).</message>
             </if>
             <!-- don't allow a period to close if the previous period is not closed -->
             <set field="previousTimePeriod" from="timePeriod.previous"/>

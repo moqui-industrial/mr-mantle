@@ -38,7 +38,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="systemMessageRemoteId" from="systemMessage.systemMessageRemoteId"/>
             </entity-find>
             <if condition="!pmftList.length">
-                <return error="true" message="Could not find paymentMethodId from PaymentMethodFileType record for file type PmftOfx message type ${systemMessage.systemMessageTypeId} remote ${systemMessage.systemMessageRemoteId}"/>
+                <set field="fileType" value="PmftOfx"/>
+                <return error="true" message="Could not find paymentMethodId from PaymentMethodFileType record for file type ${fileType} message type ${systemMessage.systemMessageTypeId} remote ${systemMessage.systemMessageRemoteId}"/>
             </if>
 
             <!-- weird but allow multiple in case transactions should be added for more than one BankAccount -->

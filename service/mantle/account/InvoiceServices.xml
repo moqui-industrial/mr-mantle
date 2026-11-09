@@ -1921,7 +1921,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!createResult.invoiceItemCreatedCount"><then>
                 <message error="true">No time entries found for worker ${ec.resource.expand('PartyNameTemplate','',workerParty)}, not creating invoice or adding items to existing invoice.</message>
             </then><else>
-                <message>Added ${createResult.invoiceItemCreatedCount} items to Invoice ${invoiceId}</message>
+                <set field="invoiceItemCreatedCount" from="createResult.invoiceItemCreatedCount"/><message>Added ${invoiceItemCreatedCount} items to Invoice ${invoiceId}</message>
             </else></if>
         </actions>
     </service>
@@ -3028,7 +3028,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 setFinalizedInvoiceSent = false
                             }
                         ]]></script></if>
-                        <message>Email sent to ${toAddressesCur}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
+                        <set field="sentTo" from="toAddressesCur"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                     </iterate>
                 </iterate>
             </if>
@@ -3224,7 +3224,7 @@ along with this software (see the LICENSE.md file). If not, see
                                         .parameter("emailMessageId", sendOut.emailMessageId).disableAuthz().call()
                             }
                         ]]></script></if>
-                        <message>Email sent to ${toAddressesCur}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
+                        <set field="sentTo" from="toAddressesCur"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                     </iterate>
                 </iterate>
             </iterate>
