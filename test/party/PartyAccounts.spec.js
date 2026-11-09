@@ -18,7 +18,8 @@ const account = (id) => ec.entity.find("moqui.security.UserAccount").condition("
 
 feature("a person with a user account, found by the person search", {
     when() {
-        personId = call("mantle.party.PartyServices.create#Person", { firstName: "Searchy", lastName: "McSearchface" }).partyId
+        personId = call("mantle.party.PartyServices.create#Person", { salutation: "Dr", firstName: "Searchy", middleName: "Q",
+            lastName: "McSearchface", personalTitle: "Engineer", suffix: "Jr" }).partyId
         userId = call("mantle.party.PartyServices.create#PartyUserAccount", { partyId: personId, emailAddress: "searchy@example.com", username: "searchy",
                 newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" }).userId
         const byFirst = call("mantle.party.PartyServices.search#Person", { term: "searchy" })
@@ -57,14 +58,29 @@ feature("party search over the index with several criteria, and the user notice 
 feature("update#Account changes the person, user and primary email", {
     when() {
         call("mantle.party.PartyServices.update#Account", { partyId: personId, firstName: "Searchier", emailAddress: "searchier@example.com", timeZone: "America/Denver", locale: "en_US" })
+        const firstRenamedName = account(userId).userFullName
         const byUser = call("mantle.party.PartyServices.update#Account", { userId, lastName: "Renamed" })
         const person = ec.entity.find("mantle.party.Person").condition("partyId", personId).one()
+        const renamedName = account(userId).userFullName
+        // A deliberate display name survives settings-only and unchanged-name saves.
+        call("org.moqui.impl.UserServices.update#UserAccount", {userId, userFullName: "Preferred identity"})
+        call("mantle.party.PartyServices.update#Account", {userId, currencyUomId: "USD"})
+        const settingsOnlyName = account(userId).userFullName
+        call("mantle.party.PartyServices.update#Account", {userId, firstName: "Searchier", lastName: "Renamed"})
         const info = call("mantle.party.ContactServices.get#PartyContactInfo", { partyId: personId, emailContactMechPurposeId: "EmailPrimary" })
-        return { person, user: account(userId), info }
+        return { person, user: account(userId), firstRenamedName, renamedName, settingsOnlyName, info }
     },
-    then({ person, user, info }) {
+    then({ person, user, firstRenamedName, renamedName, settingsOnlyName, info }) {
         person.firstName == "Searchier"
         person.lastName == "Renamed"
+        person.salutation == "Dr"
+        person.middleName == "Q"
+        person.personalTitle == "Engineer"
+        person.suffix == "Jr"
+        firstRenamedName == "Searchier Q McSearchface"
+        renamedName == "Searchier Q Renamed"
+        settingsOnlyName == "Preferred identity"
+        user.userFullName == "Preferred identity"
         user.timeZone == "America/Denver"
         info.emailAddress == "searchier@example.com"
     },

@@ -763,7 +763,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="update" noun="Account">
-        <description>Update Person, UserAccount, and EmailPrimary.</description>
+        <description>Update Person, UserAccount, and EmailPrimary. A change to the person's name refreshes the user's full
+            name from PartyFullNameTemplate; other account changes preserve the user's existing display name.</description>
         <in-parameters>
             <parameter name="userId"/>
             <parameter name="partyId"/>
@@ -788,10 +789,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount"/>
                 <set field="partyId" from="userAccount.partyId"/>
             </else-if></if>
+            <set field="accountNameFields" from="['salutation', 'firstName', 'middleName', 'lastName', 'personalTitle', 'suffix', 'nickname']"/>
+            <set field="accountPersonBefore" from="partyId ? ec.entity.find('mantle.party.Person').condition('partyId', partyId).one() : null"/>
+            <set field="accountNameBefore" from="accountNameFields.map(name =&gt; accountPersonBefore?.[name] ?? '')"/>
             <if condition="userId"><service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="context"/></if>
             <set field="prePartyId" from="partyId"/>
             <service-call name="store#mantle.party.Party" in-map="context" out-map="context"/>
             <service-call name="store#mantle.party.Person" in-map="context"/>
+            <entity-find-one entity-name="mantle.party.Person" value-field="accountPersonAfter"/>
+            <if condition="userId &amp;&amp; accountNameFields.some((name, index) =&gt; (accountPersonAfter?.[name] ?? '') !== accountNameBefore[index])">
+                <set field="userFullName" value="${ec.resource.expand('PartyFullNameTemplate','',accountPersonAfter||{})}"/>
+                <service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="{userId:userId, userFullName:userFullName}"/>
+            </if>
             <if condition="!prePartyId"><service-call name="store#moqui.security.UserAccount"
                     in-map="{userId:userId, partyId:partyId}"/></if>
             <if condition="emailAddress"><service-call name="mantle.party.ContactServices.store#PartyContactInfo"
