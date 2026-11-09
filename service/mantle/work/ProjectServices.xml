@@ -2751,6 +2751,8 @@ along with this software (see the LICENSE.md file). If not, see
             services), over the projects the user sees (get#VisibleProjectInfo; template projects left out):
             - myOpen: the open work items the user is an Assignee of; dueWeek: those due from today through seven days;
               overdue: those due before today (as WorkItems' smart lists mine, week and overdue);
+            - myDoneRecent: the Complete or Closed work items completed in the last seven days through now, with the same
+              current assignments, visible projects and template exclusions as myOpen;
             - reviewsWaiting: the open merge requests of the repositories the user may view where the user is a requested
               reviewer who has not reviewed yet (org.moqui.impl.GitReviewServices.find#MergeRequests waitingForUserId); null
               when the build has no git hosting;
@@ -2776,7 +2778,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="failedParts" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
-            counts = {myOpen: null, dueWeek: null, overdue: null, reviewsWaiting: null, hoursWeek: null, expectedWeek: null, timesheetStatusId: null,
+            counts = {myOpen: null, myDoneRecent: null, dueWeek: null, overdue: null, reviewsWaiting: null, hoursWeek: null, expectedWeek: null, timesheetStatusId: null,
                 projectsAtRisk: null, milestonesSoon: null, timesheetsToApprove: null, allocationRequests: null, unbilledAmount: null, unbilledCurrencyUomId: null}
             atRiskProjectIds = []
             failedParts = []
@@ -2799,17 +2801,21 @@ along with this software (see the LICENSE.md file). If not, see
             const open = ['WeComplete', 'WeClosed', 'WeCancelled']
 
             part('myWork', () => {
-                if (!me || (!all && !visibleIds.length)) { counts.myOpen = 0; counts.dueWeek = 0; counts.overdue = 0; return }
+                if (!me || (!all && !visibleIds.length)) { counts.myOpen = 0; counts.myDoneRecent = 0; counts.dueWeek = 0; counts.overdue = 0; return }
                 const assigned = Array.from(new Set(Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('partyId', me).condition('roleTypeId', 'Assignee')
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).condition(cf.makeCondition('statusId', 'not-in', ['WeptDeclined', 'WeptUnassigned'], true))
                         .selectField('workEffortId').list()).map((row) => row.workEffortId)))
-                if (!assigned.length) { counts.myOpen = 0; counts.dueWeek = 0; counts.overdue = 0; return }
+                if (!assigned.length) { counts.myOpen = 0; counts.myDoneRecent = 0; counts.dueWeek = 0; counts.overdue = 0; return }
                 const base = [cf.makeCondition('workEffortId', 'in', assigned), cf.makeCondition('workEffortTypeEnumId', 'equals', 'WetTask'),
-                    cf.makeCondition('rootWorkEffortId', 'is-not-null', null), cf.makeCondition('statusId', 'not-in', open)]
+                    cf.makeCondition('rootWorkEffortId', 'is-not-null', null)]
                 if (!all) base.push(cf.makeCondition('rootWorkEffortId', 'in', visibleIds))
                 if (templateIds.length) base.push(cf.makeCondition('rootWorkEffortId', 'not-in', templateIds))
-                const count = (more) => ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition(base.concat(more), 'and')).count()
+                const countBase = (more) => ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition(base.concat(more), 'and')).count()
+                const count = (more) => countBase([cf.makeCondition('statusId', 'not-in', open)].concat(more))
                 counts.myOpen = count([])
+                counts.myDoneRecent = countBase([cf.makeCondition('statusId', 'in', ['WeComplete', 'WeClosed']),
+                    cf.makeCondition('actualCompletionDate', 'greater-equals', new Date(nowMillis - 7 * 86400000)),
+                    cf.makeCondition('actualCompletionDate', 'less-equals', new Date(nowMillis))])
                 counts.dueWeek = count([cf.makeCondition('estimatedCompletionDate', 'greater-equals', new Date(todayStart)),
                     cf.makeCondition('estimatedCompletionDate', 'less-than', new Date(todayStart + 7 * 86400000))])
                 counts.overdue = count([cf.makeCondition('estimatedCompletionDate', 'less-than', new Date(todayStart))])
