@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- An account's lifecycle (mantle.party.IdentityServices; mr-boss impl-admin P6, design-admin §4.1 Offboarding, §17.2), named to
+    load after MantleSetupData (its filter sets): the operation's kinds and states, the steps' states, the organization filters
+    of the operations, and the owner change of calendars and contact books (F31). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="UserLifecycleKind" description="Account lifecycle operation"/>
+    <moqui.basic.Enumeration enumId="UlkDisable" enumTypeId="UserLifecycleKind" description="Disable" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="UlkOrgRemoval" enumTypeId="UserLifecycleKind" description="Organization removal" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="UlkRestore" enumTypeId="UserLifecycleKind" description="Restore" sequenceNum="3"/>
+
+    <moqui.basic.StatusType statusTypeId="UserLifecycleOperation" description="Account lifecycle operation"/>
+    <moqui.basic.StatusItem statusId="UlopCompleted" statusTypeId="UserLifecycleOperation" description="Completed" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="UlopScheduled" statusTypeId="UserLifecycleOperation" description="Scheduled" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="UlopAttention" statusTypeId="UserLifecycleOperation" description="Needs attention" sequenceNum="3"/>
+    <moqui.basic.StatusType statusTypeId="UserLifecycleStep" description="Account lifecycle step"/>
+    <moqui.basic.StatusItem statusId="UlstDone" statusTypeId="UserLifecycleStep" description="Done" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="UlstWaiting" statusTypeId="UserLifecycleStep" description="Waiting for a new owner" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="UlstFailed" statusTypeId="UserLifecycleStep" description="Failed" sequenceNum="3"/>
+    <moqui.basic.StatusItem statusId="UlstSkipped" statusTypeId="UserLifecycleStep" description="Skipped" sequenceNum="4"/>
+
+    <!-- An operation is read under an app's organization filters by the organization it was requested for (the Users area's
+        MANTLE_USER_ORG for the identity operator, MANTLE_ACTIVE_ORG for the administrator), beside the services' own checks; its
+        steps are read only through it -->
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_ULOP" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.UserLifecycleOperation" filterMap="({organizationPartyId: filterOrgIds})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_ULOP" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.UserLifecycleOperation" filterMap="({organizationPartyId: activeOrgId})"/>
+
+    <!-- The owner change of a calendar and of a shared contact book (CalendarServices, ContactBookServices; impl-admin P6, F31):
+        their owner, or a manager of a shared one, hands them over; another user's need these permissions, granted to ADMIN (an
+        app grants them to its identity operators). The services check the permission and the new owner themselves, so
+        ALL_USERS may call them. -->
+    <moqui.security.UserPermission userPermissionId="CALENDAR_OWNER_CHANGE" description="Calendars: change the owner of another user's calendar"/>
+    <moqui.security.UserPermission userPermissionId="CONTACT_BOOK_OWNER_CHANGE" description="Contacts: change the manager of another user's shared contact book"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="CALENDAR_OWNER_CHANGE" fromDate="0"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="CONTACT_BOOK_OWNER_CHANGE" fromDate="0"/>
+    <moqui.security.ArtifactGroup artifactGroupId="MantleResourceOwnerServices" description="Mantle owned resource lookup and owner change"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleResourceOwnerServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.(work\.CalendarServices\.(find#OwnedCalendars|transfer#CalendarOwner)|party\.ContactBookServices\.(find#OwnedContactBooks|transfer#ContactBookOwner))"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleResourceOwnerServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleResourceOwnerServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

@@ -205,6 +205,17 @@ function storeEmailPreferences(p) {
         return getEmailPreferences({siteId: site.siteId, token: p.token})
     }
     const partyId = signedIn()
+    // F124: a pending checkout choice declined on the page (its decline box, never an unchecked box: a pending choice shows
+    // unchecked) ends that pending membership, so neither the receipt's link nor a verified sign-in confirms it later
+    const declined = choices.decline || {}
+    const listOf = value => (Array.isArray(value) ? value : value ? [value] : []).map(text).filter(Boolean)
+    for (const contactListId of listOf(declined.lists)) storeTopics().declinePending(contactListId, partyId)
+    const declineStores = siteStores(site.siteId)
+    for (const topicId of listOf(declined.topics)) {
+        const [topic, productStoreId] = topicId.split(":")
+        if (topicOrder.includes(topic) && declineStores.some(row => row.productStoreId === productStoreId))
+            storeTopics().endTopicPending(topic, partyId, productStoreId)
+    }
     for (const [contactListId, subscribed] of Object.entries(choices.lists || {})) {
         const row = rows("mantle.marketing.contact.ContactListParty", {partyId, contactListId: text(contactListId)}).find(item =>
             lib.active(item)

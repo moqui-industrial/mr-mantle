@@ -69,6 +69,8 @@ const fail = (kind, message) => {
     e.moquiErrorKind = kind
     throw e
 }
+/* The bytes a ranged download reads and writes at a time. */
+const RANGE_WINDOW = 1024 * 1024
 /* A ranged file (Shop P6, a granted download): Accept-Ranges, a 206 of the range asked or a 416 outside the file, the bytes
    read as the authority (the file may sit in the database resource store). */
 function streamRanged(response, file) {
@@ -93,11 +95,15 @@ function streamRanged(response, file) {
     response.setContentType(file.contentType)
     const wasDisabled = ec.artifactExecution.disableAuthz()
     try {
-        // the framework's resource stream reads whole (no partial read, impl-shop F-SP6), so the range is cut from it
+        // only the range is read, a window at a time (Shop F88)
         const stream = ec.resource.getLocationReference(file.location).openStream()
         try {
-            const bytes = stream.readAllBytes()
-            response.write(start === 0 && end === file.size - 1 ? bytes : bytes.slice(start, end + 1))
+            for (let at = start; at <= end; ) {
+                const bytes = stream.read(at, Math.min(RANGE_WINDOW, end - at + 1))
+                if (!bytes.length) break
+                response.write(bytes)
+                at += bytes.length
+            }
         } finally {
             stream.close()
         }
@@ -140,7 +146,8 @@ function respond(response, answer) {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         response.setContentType(file.contentType)
-        response.setHeader('Cache-Control', 'no-store')
+        // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
+        response.setHeader('Cache-Control', file.cacheControl || 'no-store')
         response.setHeader(
             'Content-Disposition',
             file.disposition +

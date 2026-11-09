@@ -434,6 +434,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Identity Document"  enumId="PcntIdentityDocument" enumTypeId="PartyContentType"/>
             <moqui.basic.Enumeration description="Employment Authorization Document"  enumId="PcntEmplAuthzDocument" enumTypeId="PartyContentType"/>
             <moqui.basic.Enumeration description="Bio"  enumId="PcntBio" enumTypeId="PartyContentType"/>
+            <!-- an internal organization's own Constitution (mr-moqui docs/ai/Constitution.md), one per organization -->
+            <moqui.basic.Enumeration description="Constitution" enumId="PcntConstitution" enumTypeId="PartyContentType"/>
         </seed-data>
     </entity>
     <entity entity-name="PartyGeoPoint" package="mantle.party">
@@ -520,7 +522,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="toPartyId" type="id"/>
         <field name="toRoleTypeId" type="id"/>
         <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
+        <!-- audit-logged: ending an organization membership keeps who ended it, when and why (impl-admin P4, F23); a create
+            with no end writes no row -->
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="statusId" type="id" enable-audit-log="true"/>
         <!-- not used: <field name="priorityTypeEnumId" type="id"/> -->
         <!-- not used: <field name="permissionsEnumId" type="id"/> -->

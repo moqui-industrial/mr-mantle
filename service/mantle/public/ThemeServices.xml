@@ -208,7 +208,9 @@
     <service verb="get" noun="ShopThemeFiles" authenticate="anonymous-all" allow-remote="false">
         <description>getShopThemeFiles (impl-shop P2): up to 50 files of a published site's active Shop release (paths, a
             list or comma-separated), each read at its pinned version with its digest; a file whose text no longer matches is
-            RELEASE_DAMAGED. Over the authority, only for a registered frontend.</description>
+            RELEASE_DAMAGED. A binary file is {path, digest, size, contentType}, its bytes read by getShopThemeAsset (Shop
+            F55); one of a release published before is its base64 text. Over the authority, only for a registered
+            frontend.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
         </in-parameters>
@@ -217,6 +219,23 @@
         </out-parameters>
         <actions>
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getShopThemeFiles", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ShopThemeAsset" authenticate="anonymous-all" allow-remote="false">
+        <description>getShopThemeAsset (Shop F55): a binary asset (an image or font) of a published site's active Shop
+            release, by its path and the digest of its bytes the release pins: result.file (mimeType, filename, inline,
+            cacheControl public, max-age=31536000, immutable) and result.location, its pinned version, which the frontend or
+            the authority's transport streams. Any other path or digest, or a release published before (its binaries are
+            base64 text in getShopThemeFiles), is NotFound (NOT_AVAILABLE). Over the authority, only for a registered
+            frontend.</description>
+        <in-parameters>
+            <parameter name="input" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/public/Themes.js").execute("getShopThemeAsset", input)</script>
         </actions>
     </service>
 
@@ -873,17 +892,20 @@
         </actions>
     </service>
     <service verb="get" noun="PreviewHost" authenticate="anonymous-all" allow-remote="false">
-        <description>Whether a host of a site is the site's theme preview host (PublicSiteHost PshkPreview): PASS's route and shell refuse every other route on it. Anonymous.</description>
+        <description>Whether a host of a site is the site's theme preview host (PublicSiteHost PshkPreview): PASS's route and shell refuse every other route on it. As a public-site's host-check-service (Commerce F87) it answers restricted for the preview host, so the framework's own routes are 404 there. Anonymous.</description>
         <in-parameters>
             <parameter name="siteId" required="true"/>
             <parameter name="hostname" required="true"/>
+            <parameter name="path"><description>The request's path, when the framework's host check calls; not read</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="preview" type="Boolean"/>
+            <parameter name="restricted" type="Boolean"><description>The same as preview: the framework's routes are refused on the host</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/public/ThemeAuthoring.js').execute('getPreviewHost', context)"/>
             <set field="preview" from="out.preview"/>
+            <set field="restricted" from="out.preview"/>
         </actions>
     </service>
     <service verb="get" noun="ThemePreviewPage" authenticate="anonymous-all" allow-remote="false">

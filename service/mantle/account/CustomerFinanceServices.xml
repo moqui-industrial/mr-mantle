@@ -92,7 +92,7 @@ along with this software (see the LICENSE.md file). If not, see
                 lastName:party.lastName}"/>
         </actions>
     </service>
-    <service verb="get" noun="CustomerFinance" allow-remote="false">
+    <service verb="get" noun="CustomerFinance" transaction="cache" allow-remote="false">
         <description>A customer's finance with an organization for a finance reader (ACCOUNTING_VIEW, ACCOUNTING_ADMIN or
             RECEIVABLE_VIEW): contacts (get#PartyContactInfoList), the billing addresses invoices go to (sendTo), orders,
             receivables (find#Receivables), payments, agreements and, by currency, the open balance with its aging by due

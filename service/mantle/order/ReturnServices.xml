@@ -1585,7 +1585,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="settlementRequired" from="preferenceOut.partyAcctgPreference?.returnSettlementRequired == 'Y'"/>
         </actions>
     </service>
-    <service verb="record" noun="ReturnSettlement" allow-remote="false">
+    <service verb="record" noun="ReturnSettlement" transaction="cache" allow-remote="false">
         <description>The settlement of settle#Return in one transaction: the plan under lock, the credit, the promised
             refunds (those without a gateway delivered) and the operation record. Its result names the gateway refunds that
             settle#Return then calls, each in its own transaction.</description>

@@ -1086,12 +1086,106 @@ feature("Accept Hosted profile page: a form token for a new customer profile; th
     then({form, synced, again, byMerchant, methods}) {
         form.fields.token == "spec-profile-token-1"
         form.formUrl == "https://test.authorize.net/customer/addPayment"
-        byMerchant.merchantCustomerId != null
+        // Shop P8 (F97): read by the profile this instance made, never by merchantCustomerId
+        byMerchant.customerProfileId == "70100"
+        byMerchant.merchantCustomerId == null
         synced.added == 1
         again.added == 0
         methods.length == 1
         methods[0].gatewayCimId == "80100"
         methods[0].description == "Card ending 4242"
+    }
+})
+
+// Shop P8 (impl-shop F97): a profile the gateway already has under the party's id (another system's, a reloaded database's)
+// is never adopted or imported; the party gets a profile of its own, and a party with none here imports nothing
+feature("Shop P8: an existing profile under the party's id is not adopted; the sync reads only this instance's profile", {
+    when() {
+        const partyId = call("mantle.party.PartyServices.create#Person", {firstName: "Paz", lastName: "Shared", roleTypeId: "Customer"}).partyId
+        const nothing = call(A + "sync#CustomerProfile", {partyId, paymentGatewayConfigId: "ANET_SPEC"})
+        const sentBefore = sent().length
+        answer("createCustomerProfileRequest", {messages: failed("E00039", "A duplicate record with ID 70900 already exists.")})
+        answer("createCustomerProfileRequest", {customerProfileId: "70901", messages: ok})
+        answer("getHostedProfilePageRequest", {token: "spec-profile-token-2", messages: ok})
+        call(A + "get#HostedProfileForm", {partyId, paymentGatewayConfigId: "ANET_SPEC", returnUrl: "https://shop.example.test/shop/PaymentMethods/return"})
+        const creates = sent()
+            .filter(body => body.createCustomerProfileRequest)
+            .map(body => body.createCustomerProfileRequest.profile.merchantCustomerId)
+        const page = sent().find(body => body.getHostedProfilePageRequest)?.getHostedProfilePageRequest
+        return {nothing, sentBefore, creates, page, partyId}
+    },
+    then({nothing, sentBefore, creates, page, partyId}) {
+        nothing.added == 0
+        sentBefore == 0
+        creates.length == 2
+        creates[0] == partyId
+        creates[1] != partyId && creates[1].startsWith(partyId) && creates[1].length <= 20
+        page.customerProfileId == "70901"
+    }
+})
+
+// Shop P8 (impl-shop F95): an approved hosted payment's reference searched once, after its form tokens expired, for a second
+// approval that landed after the first was confirmed
+feature("Shop P8: a later second approval under a hosted reference is flagged by the sweep's search; a clean one is searched once", {
+    when() {
+        const hosted = amount => {
+            const paymentId = cardPayment(amount, "ANET_SPEC_HOSTED")
+            const auth = call(P + "authorize#SinglePayment", {
+                paymentId,
+                operationKey: "anet-sweep-" + amount,
+                returnUrl: "https://shop.example.test/Checkout/return?ref=9&key=" + "k".repeat(40)
+            })
+            const pending = response(auth.paymentGatewayResponseId)
+            // approved on its page, and its last form token issued long ago
+            call("update#mantle.account.payment.Payment", {paymentId, statusId: "PmntAuthorized", paymentRefNum: "6090" + amount})
+            call("update#mantle.account.method.PaymentGatewayResponse", {
+                paymentGatewayResponseId: pending.paymentGatewayResponseId,
+                transactionDate: new Date(Date.now() - 3600000),
+                hostedFormDate: new Date(Date.now() - 3600000)
+            })
+            return {paymentId, reference: pending.idempotencyKey.slice(0, 20)}
+        }
+        const twice = hosted(41)
+        answer("pendingApproval", {messages: noRecords})
+        answer("getUnsettledTransactionListRequest", {
+            transactions: [
+                {transId: "609041", invoiceNumber: twice.reference, transactionStatus: "authorizedPendingCapture"},
+                {transId: "609099", invoiceNumber: twice.reference, transactionStatus: "authorizedPendingCapture"}
+            ],
+            totalNumInResultSet: 2,
+            messages: ok
+        })
+        answer("getSettledBatchListRequest", {messages: noRecords})
+        const flagged = call(A + "check#HostedDuplicates", {paymentId: twice.paymentId})
+        const once = hosted(42)
+        answer("pendingApproval", {messages: noRecords})
+        answer("getUnsettledTransactionListRequest", {
+            transactions: [{transId: "609042", invoiceNumber: once.reference, transactionStatus: "authorizedPendingCapture"}],
+            totalNumInResultSet: 1,
+            messages: ok
+        })
+        answer("getSettledBatchListRequest", {messages: noRecords})
+        const clean = call(A + "check#HostedDuplicates", {paymentId: once.paymentId})
+        const asked = sent().length
+        const again = call(A + "check#HostedDuplicates", {paymentId: once.paymentId})
+        return {
+            flagged,
+            clean,
+            again,
+            askedAgain: sent().length - asked,
+            note: Array.from(
+                ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition({paymentId: twice.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).list()
+            )
+        }
+    },
+    then({flagged, clean, again, askedAgain, note}) {
+        flagged.flagged == true
+        note.length == 1
+        note[0].reasonMessage.includes("609099")
+        clean.flagged == false
+        clean.checked == true
+        again.checked == false
+        askedAgain == 0
     }
 })
 
@@ -1157,5 +1251,41 @@ feature("no card number, browser token or secret is in a gateway response or a s
         messageCount >= 1
         card.cardNumber == "XXXX1111" && card.cardSecurityCode == null
         leaks.length == 0
+    }
+})
+
+feature("Shop P7: a renewal charges the kept profile with the stored-credential indicators, also on an Accept Hosted gateway", {
+    when() {
+        const card = ec.resource
+            .script("component://mr-mantle/service/mantle/ext/account/gateway/GatewayLib.js")
+            .createCardMethod(customerId, {paymentGatewayConfigId: "ANET_SPEC_HOSTED", gatewayCimId: "80070", gatewayCustomerId: "70070"}, "1111", "CctVisa")
+        const paymentId = cardPayment(12, "ANET_SPEC_HOSTED", {paymentMethodId: card})
+        answer("authOnlyTransaction", transaction("1", "60070"))
+        const auth = call(P + "authorize#SinglePayment", {
+            paymentId,
+            operationKey: "shop-renew-" + paymentId,
+            storedCredential: {kind: "recurring", originalNetworkTransId: "NTI-FIRST-1", originalAuthAmount: "12"}
+        })
+        const request = requestOf(sent()[0]).transactionRequest
+        // a customer-initiated profile charge sends none of them
+        const plainId = cardPayment(5, "ANET_SPEC", {paymentMethodId: card})
+        call("update#mantle.account.method.PaymentMethod", {paymentMethodId: card, paymentGatewayConfigId: "ANET_SPEC"})
+        answer("authOnlyTransaction", transaction("1", "60071"))
+        call(P + "authorize#SinglePayment", {paymentId: plainId})
+        return {auth: response(auth.paymentGatewayResponseId), request, keys: Object.keys(request), plain: requestOf(sent()[1]).transactionRequest}
+    },
+    then({auth, request, keys, plain}) {
+        auth.resultSuccess == "Y"
+        request.profile.customerProfileId == "70070"
+        request.processingOptions.isSubsequentAuth == "true"
+        request.processingOptions.isStoredCredentials == "true"
+        request.subsequentAuthInformation.originalNetworkTransId == "NTI-FIRST-1"
+        request.subsequentAuthInformation.originalAuthAmount == "12.00" || request.subsequentAuthInformation.originalAuthAmount == "12"
+        request.authorizationIndicatorType.authorizationIndicator == "pre"
+        // the schema's order: after the order and the customer's facts
+        keys.indexOf("processingOptions") > keys.indexOf("order")
+        keys.indexOf("subsequentAuthInformation") > keys.indexOf("processingOptions")
+        keys.indexOf("authorizationIndicatorType") == keys.length - 1
+        plain.processingOptions == null
     }
 })

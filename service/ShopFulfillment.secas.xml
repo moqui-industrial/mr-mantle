@@ -11,6 +11,10 @@
         <actions>
             <entity-find-count entity-name="mantle.order.StoreCheckout" count-field="shopCheckoutCount" disable-authz="true">
                 <econdition field-name="orderId"/><econdition field-name="statusId" value="ScoCompleted"/></entity-find-count>
+            <!-- Shop P7: a renewal order of a contract's period is Shop's too (its paid access) -->
+            <if condition="shopCheckoutCount == 0">
+                <entity-find-count entity-name="mantle.product.subscription.StoreRenewalOccurrence" count-field="shopCheckoutCount"
+                        disable-authz="true"><econdition field-name="orderId"/></entity-find-count></if>
             <if condition="shopCheckoutCount &gt; 0">
                 <service-call name="mantle.product.ShopFulfillmentServices.fulfill#ShopOrder" disable-authz="true"
                         in-map="{orderId:orderId}" ignore-error="true"/>

@@ -157,7 +157,14 @@ const urls = {
     categories: shop => shop.base + "/Categories",
     search: shop => shop.base + "/Search",
     // P4 (F61): a product image's public route, served after the resolver's check (get#ProductImage)
-    image: (shop, productContentId) => shop.base + "/media?productContentId=" + encodeURIComponent(productContentId)
+    // Shop P8 (impl-shop F75): with the site's generation, so a shared cache keeps an image only under the generation that
+    // published it (get#ProductImage answers a public cache only for the current one)
+    image: (shop, productContentId) =>
+        shop.base +
+        "/media?productContentId=" +
+        encodeURIComponent(productContentId) +
+        "&v=" +
+        encodeURIComponent(String(shop.publication?.generation ?? 0))
 }
 const answer = (shop, body) => Object.assign(body, shop.publication)
 
@@ -330,6 +337,10 @@ function imagesOf(shop, productIds) {
             row =>
                 imageTypes.includes(row.productContentTypeEnumId) &&
                 row.contentLocation &&
+                // Shop P8 (F75): only the resource stores staff upload to, never a file, http or other location scheme
+                /^(?:dbresource|component):\/\//.test(String(row.contentLocation)) &&
+                // review (R5): and no step out of that store (a component:// path climbing to another file)
+                !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(String(row.contentLocation)) &&
                 imageMimeTypes[imageExtension(row.contentLocation)] &&
                 activeAt(row, shop.at) &&
                 (!row.productStoreId || row.productStoreId === shop.productStoreId)
@@ -1048,8 +1059,15 @@ function getProductImage(p) {
             : null
     if (!image) notAvailable("This image")
     const extension = imageExtension(image.contentLocation)
+    // Shop P8 (F75): a public image is the same for every visitor, so a request naming the current generation may be kept by
+    // a shared cache for a minute (as the catalog pages); any other is no-store
+    const current = text(p.v) !== "" && text(p.v) === String(shop.publication?.generation ?? "")
     return {
-        file: {mimeType: imageMimeTypes[extension], filename: productContentId + "." + extension},
+        file: {
+            mimeType: imageMimeTypes[extension],
+            filename: productContentId + "." + extension,
+            cacheControl: current ? "public, max-age=60" : "no-store"
+        },
         location: image.contentLocation
     }
 }
@@ -1081,6 +1099,11 @@ const operations = {
     unavailablePrice,
     // P4 (F67): the index query of a visitor's text
     simpleQuery,
+    // Commerce P14 (StoreFeeds.js): a feed build's rows are this projection: the cards of the public products and their store
+    // descriptions as plain text
+    cards,
+    contentTexts,
+    plainText,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop catalog operation " + op)
         return operations[op](parameters || {})

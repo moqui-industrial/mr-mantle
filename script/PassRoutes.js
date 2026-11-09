@@ -212,6 +212,7 @@
     ['GET', 'shop/page', 'getShopPage'],
     ['GET', 'shop/theme/release', 'getShopThemeRelease'],
     ['GET', 'shop/theme/files', 'getShopThemeFiles'],
+    ['GET', 'shop/theme/asset', 'getShopThemeAsset'],
     ['GET', 'site/generation', 'getSiteGeneration'],
     // Shop P3
     ['GET', 'shop/home', 'getShopHome'],
@@ -281,4 +282,14 @@
     ['GET', 'shop/media/review', 'getShopReviewImage'],
     // Commerce P10: a cart recovery link's one-time token spent (a token write)
     ['POST', 'shop/cart/recovery', 'recoverCart'],
+    // Shop P7: the signed-in account's subscriptions (no capability: reads are GETs)
+    ['GET', 'shop/subscriptions', 'getSubscriptions'],
+    ['GET', 'shop/subscriptions/view', 'getSubscription'],
+    ['POST', 'shop/subscriptions/purchase', 'beginSubscriptionPurchase'],
+    ['POST', 'shop/subscriptions/method', 'changeSubscriptionMethod'],
+    ['POST', 'shop/subscriptions/cancel', 'cancelSubscription'],
+    ['POST', 'shop/subscriptions/resume', 'resumeRenewal'],
+    // Commerce P14: a store feed's active build at the Shop mount's feed path (feeds/{feedKey}.{extension}), checked against
+    // the site's current generation
+    ['GET', 'shop/feeds', 'getShopFeed'],
 ]

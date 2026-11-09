@@ -51,6 +51,8 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="45" fieldPath="orderHeader:salesChannelEnumId"/>
         <fields fieldSeqId="46" fieldPath="orderHeader:currencyUomId"/>
         <fields fieldSeqId="47" fieldPath="orderHeader:grandTotal"/>
+        <!-- a RecurringTemplate base is never a sale (X5): orders panels leave it out (impl-insights F61) -->
+        <fields fieldSeqId="48" fieldPath="orderHeader:orderPurposeEnumId"/>
 
         <fields fieldSeqId="51" fieldPath="orderHeader:statusLogs:oldValueText" fieldNameAlias="oldStatusId"/>
         <fields fieldSeqId="52" fieldPath="orderHeader:statusLogs:newValueText" fieldNameAlias="newStatusId"/>
@@ -114,6 +116,8 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="44" fieldPath="header:productStoreId"/>
         <fields fieldSeqId="45" fieldPath="header:salesChannelEnumId"/>
         <fields fieldSeqId="46" fieldPath="header:currencyUomId"/>
+        <!-- a RecurringTemplate base is never a sale (X5; mr-pass impl-shop P7, impl-commerce F139): the summaries leave it out -->
+        <fields fieldSeqId="47" fieldPath="header:orderPurposeEnumId"/>
 
         <fields fieldSeqId="51" fieldPath="issuances:issuedDate"/>
         <fields fieldSeqId="52" fieldPath="issuances:quantity" fieldNameAlias="issuedQuantity"/>

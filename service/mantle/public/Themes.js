@@ -54,16 +54,29 @@ const requiredComponents = {
     // P3: the search form (a theme has no <form>)
     "shop.search": ["search"]
 }
-// The engines and versions this authority publishes for (design-shop §12.7: readiness blocks unsupported versions).
-const renderers = {"js-fancy": {rendererVersion: 1, viewApiVersions: [1]}}
+// The engines and versions this authority publishes for (design-shop §12.7: readiness blocks unsupported versions): the
+// framework's engines with their renderer versions (Shop F57).
+const renderers = Object.fromEntries(
+    Array.from(ec.resource.theme.engineInfo()).map(engine => [
+        engine.id,
+        {rendererVersion: Number(engine.rendererVersion), viewApiVersions: Array.from(engine.viewApiVersions).map(Number)}
+    ])
+)
 const viewApiVersion = 1
 // A package's bounds: files, bytes of one file and of all, and the paths a package may hold.
 const packageLimits = {maxFiles: 300, maxFileBytes: 512 * 1024, maxPackageBytes: 8 * 1024 * 1024}
 const pathPattern = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*(\/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$/
 const textExtensions = [".json", ".html.fancy-locked", ".css", ".svg"]
-// Commerce P5 (F55): images and fonts under assets/, kept as bytes; in a package (the adapter's, a release read, a remote
-// frontend's file) a binary file's text is the base64 of its bytes, and its digest is of that text.
+// Commerce P5 (F55): images and fonts under assets/, kept as bytes. In a draft (and a package export) a binary file's text
+// is the base64 of its bytes, and its digest is of that text. Shop F55: a release pins a binary file by the SHA-256 of its
+// bytes, and the frontend's release reads name it {digest, size, contentType} (the adapter's binary asset by reference),
+// its bytes read by digest (getShopThemeAsset), so the render package stays text. A release published before keeps the
+// digest of the base64 text and is read as before.
 const binaryExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff2"]
+// The content type of each binary extension (the adapter's: package.rs BINARY_TYPES).
+const binaryTypes = {png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", woff2: "font/woff2"}
+// What a release's binary asset may be cached as: its bytes are read by digest and never change (Shop F55).
+const assetCacheControl = "public, max-age=31536000, immutable"
 // A starter is a component's theme/{name} directory, named "component/name".
 const starterPattern = /^([a-z0-9][a-z0-9-]{0,60})\/([a-z0-9][a-z0-9-]{0,60})$/
 // Files a remote frontend may read in one call.
@@ -115,6 +128,18 @@ function fileText(location, path, versionName) {
     return streamBase64(ec.resource.getLocationReference(versionName ? location + "#" + versionName : location).openStream())
 }
 const rootOf = themeId => "dbresource://mantle/public/theme/" + themeId
+// The binary type of a package path, by its extension.
+const binaryTypeOf = path => binaryTypes[path.slice(path.lastIndexOf(".") + 1).toLowerCase()]
+// The location of a package file, at its version when named.
+const versioned = (location, versionName) => (versionName ? location + "#" + versionName : location)
+// The SHA-256 of the bytes at a location (a binary file's digest in a release), null when there are none.
+function bytesDigest(location) {
+    try {
+        return ec.resource.digest(location, "sha256")
+    } catch (error) {
+        return null
+    }
+}
 
 // ===== scope =====
 // The user's scope with a theme permission: COMMERCE_VIEW (StoreAdmin's scope) and the permission asked, any of a list.
@@ -219,21 +244,28 @@ function putDraftFiles(theme, changes, note) {
     return draftRevision
 }
 // A release's pinned files, each read at its version and checked against its digest: {path: text}. A file whose text no
-// longer matches is RELEASE_DAMAGED.
-function releaseFiles(release, paths) {
+// longer matches is RELEASE_DAMAGED. A binary file is its base64 text, or with byReference (the frontend's reads) the
+// adapter's {digest, size, contentType} when the release pins the digest of its bytes (Shop F55); a release published
+// before pins the digest of the base64 text, which is answered as before.
+function releaseFiles(release, paths, byReference = false) {
     const theme = one(THEME, {themeId: release.themeId})
     const pinned = rows(RELEASE_FILE, {releaseId: release.releaseId})
     const wanted = paths ? new Set(paths) : null
     const out = {}
+    const damaged = file =>
+        refuse("RELEASE_DAMAGED", "Release " + release.releaseId + " file " + file.filePath + " does not match its digest")
     asSystem(() => {
         for (const file of pinned) {
             if (wanted && !wanted.has(file.filePath)) continue
-            const content = fileText(theme.packageRoot + "/" + file.filePath, file.filePath, file.versionName)
-            if (content == null || digestOf(content) !== file.digest)
-                refuse(
-                    "RELEASE_DAMAGED",
-                    "Release " + release.releaseId + " file " + file.filePath + " does not match its digest"
-                )
+            const location = theme.packageRoot + "/" + file.filePath
+            if (isBinaryPath(file.filePath) && bytesDigest(versioned(location, file.versionName)) === file.digest) {
+                out[file.filePath] = byReference
+                    ? {digest: file.digest, size: Number(file.fileSize), contentType: binaryTypeOf(file.filePath)}
+                    : fileText(location, file.filePath, file.versionName)
+                continue
+            }
+            const content = fileText(location, file.filePath, file.versionName)
+            if (content == null || digestOf(content) !== file.digest) damaged(file)
             out[file.filePath] = content
         }
     })
@@ -602,13 +634,19 @@ function makeRelease(theme, entries, files, engine, validationDigest) {
         createdDate: ec.user.nowTimestamp
     })
     const releaseId = created.releaseId
-    const fileRows = entries.map(entry => ({
-        path: entry.path,
-        versionName: entry.versionName,
-        digest: entry.digest,
-        size: entry.text.length,
-        contentType: ec.resource.contentTypeOf(entry.path.split("/").pop()) || "text/plain"
-    }))
+    // a binary file is pinned by the digest and size of its bytes at its version (Shop F55), read by digest
+    const fileRows = entries.map(entry => {
+        const binary = isBinaryPath(entry.path)
+        const digest = binary ? asSystem(() => bytesDigest(versioned(theme.packageRoot + "/" + entry.path, entry.versionName))) : null
+        if (binary && !digest) refuse("RELEASE_DAMAGED", entry.path + " cannot be read")
+        return {
+            path: entry.path,
+            versionName: entry.versionName,
+            digest: binary ? digest : entry.digest,
+            size: binary ? StringUtilities.base64Decode(entry.text).length : entry.text.length,
+            contentType: binary ? binaryTypeOf(entry.path) : ec.resource.contentTypeOf(entry.path.split("/").pop()) || "text/plain"
+        }
+    })
     for (const file of fileRows)
         call("create#" + RELEASE_FILE, {
             releaseId,
@@ -708,16 +746,50 @@ function getShopThemeRelease(p) {
     const release = liveRelease(p)
     return {releaseId: release.releaseId, manifestDigest: release.manifestDigest, manifestText: release.manifestText}
 }
-// getShopThemeFiles: files of the active release (at most filesPerRead a call), each with its digest.
+// getShopThemeFiles: files of the active release (at most filesPerRead a call): a text file's text with its digest, a
+// binary file by reference, {path, digest, size, contentType}, its bytes read by getShopThemeAsset (Shop F55; a release
+// published before answers its base64 text as a text file).
 function getShopThemeFiles(p) {
     const release = liveRelease(p)
     const paths = (Array.isArray(p.paths) ? p.paths : text(p.paths).split(",")).map(path => text(path)).filter(Boolean)
     if (!paths.length || paths.length > filesPerRead)
         refuse("INVALID_PATHS", "Ask for 1 to " + filesPerRead + " files", "Unprocessable")
-    const files = releaseFiles(release, paths)
+    const files = releaseFiles(release, paths, true)
     const missing = paths.filter(path => files[path] == null)
     if (missing.length) refuse("UNKNOWN_FILE", "The release has no " + missing[0], "NotFound")
-    return {releaseId: release.releaseId, files: paths.map(path => ({path, text: files[path], digest: digestOf(files[path])}))}
+    return {
+        releaseId: release.releaseId,
+        files: paths.map(path =>
+            typeof files[path] === "string"
+                ? {path, text: files[path], digest: digestOf(files[path])}
+                : Object.assign({path}, files[path])
+        )
+    }
+}
+// getShopThemeAsset (Shop F55): a binary asset of the active release, by its path and the digest of its bytes the release
+// pins, for the transport to stream: result.file (mimeType, filename, inline, cacheControl immutable) and result.location,
+// the file at its pinned version, whose bytes are checked against the digest first. Any other path or digest, a release
+// published before (its digest is of base64 text) or bytes that no longer match is NotFound.
+function getShopThemeAsset(p) {
+    const release = liveRelease(p)
+    const path = text(p.path)
+    const notFound = () => refuse("NOT_AVAILABLE", "This asset is not available", "NotFound")
+    const file = path && isBinaryPath(path) ? one(RELEASE_FILE, {releaseId: release.releaseId, filePath: path}) : null
+    if (!file || !text(p.digest) || file.digest !== text(p.digest)) notFound()
+    const theme = one(THEME, {themeId: release.themeId})
+    const location = versioned(theme.packageRoot + "/" + path, file.versionName)
+    if (asSystem(() => bytesDigest(location)) !== file.digest) notFound()
+    return {
+        releaseId: release.releaseId,
+        file: {
+            mimeType: binaryTypeOf(path),
+            filename: path.split("/").pop(),
+            size: Number(file.fileSize),
+            inline: true,
+            cacheControl: assetCacheControl
+        },
+        location
+    }
 }
 // getSiteGeneration (F43): a published site's generation and its Shop mount's active release, for a frontend to key
 // its caches by; nothing personal, so it may be cached.
@@ -742,6 +814,7 @@ const operations = {
     exportThemeRelease,
     getShopThemeRelease,
     getShopThemeFiles,
+    getShopThemeAsset,
     getSiteGeneration
 }
 ;({

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The adoption preview of an existing store (mr-pass impl-shop P8; design-shop §17.1; StoreAdoption.js): read only, it
+    enables, publishes and writes nothing. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="preview" noun="StoreAdoption" allow-remote="false">
+        <description>What moving an existing (PopRestStore) store to Shop takes: its categories and their roles, settings (each
+            mapped to Commerce's store settings or named as not used), template roles and wiki spaces mapped to the theme
+            package's sections with conversion findings (FreeMarker, Groovy and server context, Vue 2, scripts: never run),
+            Shop's paths, gateways (hosted or not), facilities, email templates, the sites that mount it, and the publication
+            rows Commerce P3's propose#StorePublication proposes for a publisher to approve (none for a store that already
+            publishes). Each finding has a code, a severity (error, warning, info) and its source. COMMERCE_VIEW and the
+            store's scope. Nothing is enabled, published or written.</description>
+        <in-parameters>
+            <parameter name="productStoreId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="preview" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreAdoption.js').execute('previewStoreAdoption', context)"/>
+        </actions>
+    </service>
+</services>

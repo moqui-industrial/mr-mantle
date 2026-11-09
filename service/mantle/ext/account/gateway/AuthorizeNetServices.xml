@@ -23,7 +23,10 @@ along with this software (see the LICENSE.md file). If not, see
             dataDescriptor and dataValue), else with the payment method's customer payment profile (gatewayCustomerId and
             gatewayCimId at this gateway). A payment with neither is refused (NO_PAYMENT_PROFILE): card numbers are not
             sent from the server. The idempotency key's first 20 characters go in refId and order.invoiceNumber, which a
-            lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference.</description>
+            lookup searches after a lost answer; a held transaction (fraud review) is pending with its reference. With
+            storedCredential (Shop P7's renewals), a profile charge carries the stored-credential, merchant-initiated
+            indicators: processingOptions (isSubsequentAuth, isStoredCredentials), subsequentAuthInformation (the original
+            network transaction id and amount) and authorizationIndicatorType.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorize', context).paymentGatewayResponseId"/>
@@ -43,7 +46,8 @@ along with this software (see the LICENSE.md file). If not, see
             hosted page (a response with transactionStatus HostedPending and no result), which the frontend's relay opens
             with a fresh form token (get#HostedPaymentForm), and the details lookup finds the payer's transaction by the
             attempt's reference (the idempotency key's first 20 characters, in refId and order.invoiceNumber). Needs the
-            https returnUrl Mantle builds.</description>
+            https returnUrl Mantle builds. A merchant-initiated renewal (storedCredential, Shop P7) is a profile charge
+            of the payment's kept method, as authorize#Payment's.</description>
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
             <set field="paymentGatewayResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('authorizeHosted', context).paymentGatewayResponseId"/>
@@ -81,8 +85,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="sync" noun="CustomerProfile" allow-remote="false">
         <description>Shop P6 (F40): the party's customer profile read after the hosted profile page (getCustomerProfileRequest,
-            by its kept reference or the party as merchantCustomerId); each payment profile not kept yet is kept as a masked
-            card method. A party with no profile adds none.</description>
+            by its kept reference, or the profile this instance made for the party: Shop P8, F97, never one found by
+            merchantCustomerId alone); each payment profile not kept yet is kept as a masked card method. A party with no
+            profile here adds none.</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="paymentGatewayConfigId" required="true"/>
@@ -91,6 +96,22 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="added" type="Integer"/></out-parameters>
         <actions>
             <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('syncCustomerProfile', context).added"/>
+        </actions>
+    </service>
+    <service verb="check" noun="HostedDuplicates" allow-remote="false">
+        <description>Shop P8 (impl-shop F95): an approved Accept Hosted payment's reference searched again for another approval
+            under it (a second page paid after the first was confirmed), flagged once on the payment as the details lookup
+            flags it (DUPLICATE_APPROVAL naming the other transactions). Nothing for a payment never sent to a hosted page,
+            not approved or already flagged; a search that cannot tell flags nothing.</description>
+        <in-parameters><parameter name="paymentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="flagged" type="Boolean"/>
+            <parameter name="checked" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/ext/account/gateway/AuthorizeNet.js').execute('checkHostedDuplicates', context)"/>
+            <set field="flagged" from="!!out.flagged"/>
+            <set field="checked" from="!!out.checked"/>
         </actions>
     </service>
     <service verb="get" noun="HostedPaymentForm" allow-remote="false">

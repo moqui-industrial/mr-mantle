@@ -1053,6 +1053,22 @@ along with this software (see the LICENSE.md file). If not, see
                 moveAll("mantle.order.StoreCheckout", "customerPartyId", "customerPartyId")
                 if (grantCount) ec.message.addMessage(`Moved ${grantCount} Shop download records from Party ${fromPartyId} to ${toPartyId}`)
 
+                // Shop P7 (impl-shop F23): a recurring contract follows its customer as its orders do, but its off-session
+                // consent was given by the merged party for its own card and is never carried to another party: it is
+                // cleared, and the next renewal waits for the customer to choose a method again (ChangeMethod)
+                let contractCount = 0
+                for (const contract of ec.entity.find("mantle.product.subscription.StoreRecurringContract")
+                        .condition("customerPartyId", fromPartyId).list()) {
+                    contract.set("customerPartyId", toPartyId)
+                    contract.set("consentDate", null)
+                    contract.set("consentMethodId", null)
+                    contract.set("consentEndedReason", "PARTY_MERGED")
+                    contract.set("revision", Number(contract.revision || 0) + 1)
+                    contract.update()
+                    contractCount++
+                }
+                if (contractCount) ec.message.addMessage(`Moved ${contractCount} Shop subscriptions from Party ${fromPartyId} to ${toPartyId}; each asks for its renewal consent again`)
+
                 // PartyNotDuplicate: the from Party's decisions become the to Party's (the lower id first); one between the two is
                 // dropped, as they are now one party
                 for (const row of ec.entity.find("mantle.party.PartyNotDuplicate").condition(cf.makeCondition([

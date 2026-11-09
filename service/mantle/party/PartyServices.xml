@@ -560,19 +560,13 @@ along with this software (see the LICENSE.md file). If not, see
 
         </actions>
     </service>
-    <service verb="get" noun="PartyOrganizationInfo">
-        <in-parameters><parameter name="partyId" default="ec.user.userAccount?.partyId"/></in-parameters>
-        <out-parameters>
-            <parameter name="activeOrgId"/>
-            <parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter>
-            <parameter name="filterOrgIds" type="List"><parameter name="userOrgId"/></parameter>
-        </out-parameters>
+    <service verb="get" noun="PartyInternalOrgIds">
+        <description>The internal organizations a party works in: the targets of its agent, employee and member
+            relationships that have the OrgInternal role, and their direct child organizations (PrtOrgRollup). Reads only,
+            so a read-fenced caller (an agent's Constitution provider) may use it.</description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters><parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter></out-parameters>
         <actions>
-            <if condition="!partyId">
-                <set field="userOrgIds" from="[]"/><set field="filterOrgIds" from="[]"/>
-                <return/>
-            </if>
-
             <!-- get user organizations data (agent/employee/member rel from member to org) -->
             <entity-find entity-name="mantle.party.PartyRelationship" list="userOrgRelList" cache="true">
                 <date-filter/>
@@ -605,6 +599,22 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
                 </if>
             </iterate>
+        </actions>
+    </service>
+    <service verb="get" noun="PartyOrganizationInfo">
+        <in-parameters><parameter name="partyId" default="ec.user.userAccount?.partyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="activeOrgId"/>
+            <parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter>
+            <parameter name="filterOrgIds" type="List"><parameter name="userOrgId"/></parameter>
+        </out-parameters>
+        <actions>
+            <if condition="!partyId">
+                <set field="userOrgIds" from="[]"/><set field="filterOrgIds" from="[]"/>
+                <return/>
+            </if>
+
+            <service-call name="mantle.party.PartyServices.get#PartyInternalOrgIds" in-map="{partyId: partyId}" out-map="context"/>
 
             <!-- active org -->
             <set field="activeOrgId" from="ec.user.getPreference('ACTIVE_ORGANIZATION')"/>
@@ -625,6 +635,43 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- get org ids to filter by (for queries, etc) -->
             <set field="filterOrgIds" from="activeOrgId ? [activeOrgId] : userOrgIds"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="OrganizationRowFilter" allow-remote="false">
+        <description>The report engine's row filter for a business dataset's organization field (a framework rowFilterService,
+            registered as the ReportScopePolicy MantleOrganization in MonitoringSalesSecurityData.xml): the dataset names the field
+            in its rowFilterParameters (organizationField, organizationPartyId by default), and the filter keeps the rows of the
+            viewer's organizations as get#PartyOrganizationInfo computes them (their agent, employee and member organizations and
+            the direct children, MANTLE_USER_ORG), only the active organization when one is set; a system administrator sees every
+            organization, or the active one (MANTLE_ACTIVE_ORG). A viewer of no organization matches nothing. The engine calls it
+            with the signed-in viewer; a userId of another user is refused, and the dataset's id is not used.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="filter" type="Map"/></out-parameters>
+        <actions>
+            <set field="nothing" from="{bool: {none: [{match_all: {}}]}}"/>
+            <if condition="!ec.user.userId"><set field="filter" from="nothing"/><return/></if>
+            <if condition="userId &amp;&amp; userId != ec.user.userId">
+                <return error="true" message="The organization row filter is computed for the signed-in user only"/></if>
+            <set field="organizationField" from="rowFilterParameters?.organizationField || 'organizationPartyId'"/>
+            <if condition="!/^[A-Za-z][A-Za-z0-9_.]{0,63}$/.test(organizationField)">
+                <return error="true" message="Organization field ${organizationField} is not a field name"/></if>
+            <service-call name="mantle.party.PartyServices.get#PartyOrganizationInfo" out-map="organizationInfo"
+                    disable-authz="true"/>
+            <set field="systemAdmin" from="ec.resource.script('component://mr-mantle/service/mantle/product/ProductAccess.js').systemAdmin()"/>
+            <if condition="systemAdmin &amp;&amp; !organizationInfo.activeOrgId">
+                <set field="filter" from="{match_all: {}}"/><return/></if>
+            <!-- the active organization narrows the viewer's own; one outside them (a finance administrator may select any internal
+                organization for Accounting's scope) widens no dataset's rows, so it counts here only for a system administrator -->
+            <set field="userOrgIds" from="Array.from(organizationInfo.userOrgIds || [])"/>
+            <set field="activeOrgId" from="organizationInfo.activeOrgId"/>
+            <set field="organizationIds" from="activeOrgId &amp;&amp; (systemAdmin || userOrgIds.includes(activeOrgId)) ? [activeOrgId] : userOrgIds"/>
+            <if condition="!organizationIds.length"><set field="filter" from="nothing"/><return/></if>
+            <set field="filter" from="{field: {name: organizationField, op: 'in', values: organizationIds}}"/>
         </actions>
     </service>
 

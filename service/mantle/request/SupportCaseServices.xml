@@ -148,7 +148,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <!-- ===== the case (SUPPORT_CASE_EDIT) ===== -->
-    <service verb="create" noun="Case">
+    <service verb="create" noun="Case" transaction="cache">
         <description>A case for a customer the organization serves, atomically (design NewCase SubmitCase): the Request
             (create#Request, Submitted, in a service queue of the organization: the one given, else the type's default, else
             the policy's), its Customer, Reporter (the contact, when given) and OrgInternal parties, the records it is on

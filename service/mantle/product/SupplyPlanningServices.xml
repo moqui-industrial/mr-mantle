@@ -30,7 +30,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="facilityId"/>
         </in-parameters>
     </service>
-    <service verb="run" noun="SupplyPlan" allow-remote="false">
+    <service verb="run" noun="SupplyPlan" transaction="cache" allow-remote="false">
         <description>Calculate the supply plan of an organization's facility set (one current run per organization and
             facility set; the last one is superseded, its unconverted suggestions ended and their requirements reused or
             rejected). Nets each product once, after its parents, at each facility with the facilities under it: open sales
@@ -246,7 +246,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="failedCount" from="out.failedCount"/>
         </actions>
     </service>
-    <service verb="convert" noun="PlanningSuggestion" allow-remote="false">
+    <service verb="convert" noun="PlanningSuggestion" transaction="cache" allow-remote="false">
         <description>One group of convert#PlanningSuggestions: one suggestion, under its requirement's lock, with its own
             operation key; its checks and refusals are convert#PlanningSuggestions'.</description>
         <in-parameters>

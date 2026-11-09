@@ -233,7 +233,25 @@ function authorize(p, sale) {
         request.transactionSettings = {
             setting: [{settingName: "duplicateWindow", settingValue: String(gw.options.duplicateWindow)}]
         }
+    if (p.storedCredential && request.profile) storedCredentialFields(request, p.storedCredential, sale)
     return transact(base, {refId, transactionRequest: request})
+}
+// Shop P7 (F14, F41): a merchant-initiated charge of a kept profile under the customer's recorded off-session consent
+// (a renewal): the stored-credential indicators, in the schema's order after transactionSettings (processingOptions,
+// subsequentAuthInformation, then authorizationIndicatorType): a subsequent authorization of stored credentials, the
+// original customer-initiated transaction's network id and amount, and a final authorization (pre for an authorization
+// captured later). The reason field is for resubmissions and delayed charges, not a scheduled recurring charge, so it
+// is not sent.
+function storedCredentialFields(request, credential, sale) {
+    request.processingOptions = {isSubsequentAuth: "true", isStoredCredentials: "true"}
+    const original = credential.originalNetworkTransId ? clip(String(credential.originalNetworkTransId), 255) : null
+    if (original) {
+        request.subsequentAuthInformation = {originalNetworkTransId: original}
+        const amount =
+            credential.originalAuthAmount != null ? amountText(credential.originalAuthAmount, request.currencyCode) : null
+        if (amount) request.subsequentAuthInformation.originalAuthAmount = amount
+    }
+    request.authorizationIndicatorType = {authorizationIndicator: sale ? "final" : "pre"}
 }
 
 function capture(p) {
@@ -581,16 +599,79 @@ function billTo(method, partyId) {
     for (const [key, value] of Object.entries(values)) if (value) out[key] = clip(value, 50)
     return {customerType: contact.person ? "individual" : "business", billTo: Object.keys(out).length ? out : null}
 }
-// The customer profile of a party at this gateway: kept on its payment methods (gatewayCustomerId).
+// The customer profile of a party at this gateway: kept on its payment methods (gatewayCustomerId), else the one this
+// instance made for it (Shop P8, F97: recorded when made, so a profile is never found by merchantCustomerId alone).
 function customerProfileOf(partyId, gatewayId) {
     const methods = Array.from(
         find(PM, {ownerPartyId: partyId, paymentGatewayConfigId: gatewayId})
             .condition("gatewayCustomerId", "is-not-null", null)
             .list()
     )
-    return methods.length ? methods[0].gatewayCustomerId : null
+    if (methods.length) return methods[0].gatewayCustomerId
+    const made = Array.from(
+        find(R, {paymentGatewayConfigId: gatewayId, subReference: partyId, reasonCode: PROFILE_MADE})
+            .orderBy("-transactionDate")
+            .limit(1)
+            .list()
+    )[0]
+    return made ? made.referenceNum : null
 }
 const duplicateId = text => (/ID (\d+)/.exec(String(text || "")) || [])[1] || null
+// Shop P8 (impl-shop F97): a customer profile this instance made, recorded once with the party (subReference) and its
+// merchantCustomerId (altReference). A profile is the party's here only when this instance made it or a method of the
+// party keeps it, so a gateway account shared with another system, or a reloaded database reusing party ids, never hands
+// over another person's profile and cards.
+const PROFILE_MADE = "CUSTOMER_PROFILE_MADE"
+function ownProfile(gw, partyId, customerProfileId) {
+    if (!customerProfileId) return false
+    return (
+        find(PM, {ownerPartyId: partyId, paymentGatewayConfigId: gw.id, gatewayCustomerId: customerProfileId}).count() > 0 ||
+        find(R, {paymentGatewayConfigId: gw.id, subReference: partyId, reasonCode: PROFILE_MADE, referenceNum: customerProfileId})
+            .count() > 0
+    )
+}
+// A new customer profile of the party (with a first payment profile when given): the party id as merchantCustomerId; when
+// the gateway already has a profile of that id (E00039) that is not the party's here, a new one under a merchantCustomerId
+// of its own (the party id and a random suffix), never the existing one. Recorded as this instance's.
+// {customerProfileId, paymentProfileId, sent}.
+function makeCustomerProfile(gw, partyId, extra, validationMode) {
+    const attempt = merchantCustomerId => {
+        const profile = Object.assign(
+            {merchantCustomerId, description: clip("Party " + partyId + (merchantCustomerId === clip(partyId, REF_LENGTH) ? "" : " " + merchantCustomerId), 255)},
+            extra || {}
+        )
+        return send(gw, "createCustomerProfileRequest", Object.assign({profile}, validationMode ? {validationMode} : {}))
+    }
+    let merchantCustomerId = clip(partyId, REF_LENGTH)
+    let sent = attempt(merchantCustomerId)
+    let result = sent.data ? resultOf(sent.data) : {}
+    if (result.code === "E00039") {
+        const existing = duplicateId(result.text)
+        if (ownProfile(gw, partyId, existing)) return {customerProfileId: existing, paymentProfileId: null, sent}
+        merchantCustomerId = clip(partyId, REF_LENGTH - 7) + "-" + ec.user.randomString(6).replace(/[^A-Za-z0-9]/g, "x")
+        sent = attempt(merchantCustomerId)
+        result = sent.data ? resultOf(sent.data) : {}
+    }
+    if (!result.ok) return {customerProfileId: null, paymentProfileId: null, sent}
+    const customerProfileId = String(sent.data.customerProfileId)
+    record(
+        {gw, operationEnumId: "PgoStoreCim"},
+        {
+            resultSuccess: "Y",
+            responseCode: "Ok",
+            reasonCode: PROFILE_MADE,
+            reasonMessage: "Customer profile made",
+            referenceNum: customerProfileId,
+            altReference: merchantCustomerId,
+            subReference: clip(partyId, 60)
+        }
+    )
+    return {
+        customerProfileId,
+        paymentProfileId: String([].concat(sent.data.customerPaymentProfileIdList || [])[0] || "") || null,
+        sent
+    }
+}
 
 // store#CustomerPaymentProfile: a reusable payment profile from a single-use browser token, on the party's customer
 // profile at the gateway (made when it has none). The method keeps the profile references and the masked card only.
@@ -622,20 +703,11 @@ function storeProfile(p) {
     let sent
     if (!customerProfileId) {
         const email = p.emailAddress ? {email: clip(p.emailAddress)} : {}
-        const profile = Object.assign(
-            {merchantCustomerId: clip(partyId, REF_LENGTH), description: clip("Party " + partyId, 255)},
-            email,
-            {paymentProfiles: paymentProfile}
-        )
-        sent = send(gw, "createCustomerProfileRequest", {profile, validationMode})
-        const result = sent.data && resultOf(sent.data)
-        if (result?.ok) {
-            customerProfileId = String(sent.data.customerProfileId)
-            paymentProfileId = String([].concat(sent.data.customerPaymentProfileIdList || [])[0] || "") || null
-        } else if (result?.code === "E00039") {
-            // the party already has a customer profile there (made before its methods kept it)
-            customerProfileId = duplicateId(result.text)
-        }
+        // Shop P8 (F97): a profile the gateway already has under the party's id is adopted only when it is the party's here
+        const made = makeCustomerProfile(gw, partyId, Object.assign(email, {paymentProfiles: paymentProfile}), validationMode)
+        sent = made.sent
+        customerProfileId = made.customerProfileId
+        paymentProfileId = made.paymentProfileId
     }
     if (customerProfileId && !paymentProfileId) {
         sent = send(gw, "createCustomerPaymentProfileRequest", {customerProfileId, paymentProfile, validationMode})
@@ -846,6 +918,9 @@ function hostedPendingOf(gatewayIds) {
 // (transactionStatus HostedPending, no result), which the frontend's relay opens with a fresh token (get#HostedPaymentForm)
 // and whose transaction the details lookup finds by the attempt's reference.
 function authorizeHosted(p, sale) {
+    // Shop P7: a merchant-initiated renewal of a kept profile is a profile charge with its indicators, whatever page the
+    // gateway shows a payer
+    if (p.storedCredential) return authorize(p, sale)
     const {payment, base, problem} = start(p, sale ? "PgoAuthAndCapture" : "PgoAuthorize")
     if (problem) return refuse(base, "GATEWAY_NOT_AVAILABLE", problem)
     if (!amountText(payment.amount, payment.amountUomId))
@@ -950,12 +1025,13 @@ function hostedDetails(gw, payment, pending) {
     if (!tokenUsable) return {gatewayStatusId: "PmntCancelled"}
     return {}
 }
+// "flagged" (now or before), "none" (searched, no other approval) or "problem" (the search could not tell)
 function flagDuplicates(gw, payment, pending, refId, transId) {
-    if (find(R, {paymentId: payment.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).count() > 0) return
+    if (find(R, {paymentId: payment.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).count() > 0) return "flagged"
     const listed = referenceTransactions(gw, refId, ms(pending.transactionDate))
-    if (listed.problem) return
+    if (listed.problem) return "problem"
     const others = listed.transactions.filter(row => approvedStatuses.includes(row.transactionStatus) && row.transId !== transId)
-    if (!others.length) return
+    if (!others.length) return "none"
     record(
         {gw, payment, operationEnumId: "PgoTxDetails", amount: payment.amount},
         {
@@ -967,7 +1043,39 @@ function flagDuplicates(gw, payment, pending, refId, transId) {
             resultDeclined: "N"
         }
     )
+    return "flagged"
 }
+// check#HostedDuplicates (Shop P8, impl-shop F95): an approved hosted payment's reference searched again for another
+// approval that landed after the first was confirmed (a second page paid after the lookup); flagged once as the lookup
+// flags it (DUPLICATE_APPROVAL with the other transactions). A payment never sent to a hosted page, one not approved or
+// already flagged, and a search that cannot tell flag nothing. {flagged, checked}.
+function checkHostedDuplicates(p) {
+    const payment = one(P, {paymentId: p.paymentId})
+    if (!payment || !payment.paymentRefNum || !["PmntAuthorized", "PmntDelivered", "PmntConfirmed"].includes(payment.statusId))
+        return {flagged: false, checked: false}
+    if (find(R, {paymentId: payment.paymentId, reasonCode: "DUPLICATE_APPROVAL"}).count() > 0) return {flagged: true, checked: false}
+    const pending = Array.from(
+        find(R, {paymentId: payment.paymentId, transactionStatus: "HostedPending"})
+            .condition("paymentOperationEnumId", "in", ["PgoAuthorize", "PgoAuthAndCapture"])
+            .orderBy("-transactionDate")
+            .limit(1)
+            .list()
+    )[0]
+    const gw = gateway(payment.paymentGatewayConfigId)
+    if (!pending || gw.problem) return {flagged: false, checked: false}
+    if (find(R, {paymentId: payment.paymentId, reasonCode: DUPLICATES_CHECKED}).count() > 0) return {flagged: false, checked: false}
+    // a second page can be paid only while a form token of the reference can still be used: searched once after that
+    const last = ms(pending.hostedFormDate) ?? ms(pending.transactionDate) ?? 0
+    if (ms(ec.user.nowTimestamp) - last <= (HOSTED_TOKEN_SECONDS + graceSeconds(gw)) * 1000) return {flagged: false, checked: false, wait: true}
+    const found = flagDuplicates(gw, payment, pending, reference(pending.idempotencyKey), String(payment.paymentRefNum))
+    if (found === "none")
+        record(
+            {gw, payment, operationEnumId: "PgoTxDetails"},
+            {reasonCode: DUPLICATES_CHECKED, reasonMessage: "No other approval under the reference", resultSuccess: "N"}
+        )
+    return {flagged: found === "flagged", checked: found !== "problem"}
+}
+const DUPLICATES_CHECKED = "DUPLICATES_CHECKED"
 // store#HostedPaymentProfile (F40): after an approved hosted payment a signed-in buyer asked to keep, the transaction's
 // customer payment profile (when the page made one), else one made from the transaction
 // (createCustomerProfileFromTransactionRequest, onto the party's customer profile when it has one); the method keeps the
@@ -1011,18 +1119,18 @@ const PROFILE_PAGE = {
     sandbox: "https://test.authorize.net/customer/addPayment",
     production: "https://accept.authorize.net/customer/addPayment"
 }
-// The party's customer profile at the gateway: its methods' reference, else one made now with the party as its
-// merchantCustomerId (a profile the party already has, E00039, is taken as it is).
+// The party's customer profile at the gateway: its methods' reference or the one this instance made, else one made now (F97)
+// with the party as its merchantCustomerId.
 function ensureCustomerProfile(gw, partyId) {
     const kept = customerProfileOf(partyId, gw.id)
     if (kept) return kept
-    const sent = send(gw, "createCustomerProfileRequest", {
-        profile: {merchantCustomerId: clip(partyId, REF_LENGTH), description: clip("Party " + partyId, 255)}
-    })
-    const result = sent.data ? resultOf(sent.data) : {}
-    if (result.ok) return String(sent.data.customerProfileId)
-    if (result.code === "E00039") return duplicateId(result.text)
-    throw new Error("PROFILE_NOT_STORED: " + clip(sent.unknown || sent.refused || result.text || "No customer profile", 200))
+    // Shop P8 (F97): an existing profile under the party's id is the party's only when this instance made it
+    const made = makeCustomerProfile(gw, partyId, null, null)
+    if (made.customerProfileId) return made.customerProfileId
+    const result = made.sent.data ? resultOf(made.sent.data) : {}
+    throw new Error(
+        "PROFILE_NOT_STORED: " + clip(made.sent.unknown || made.sent.refused || result.text || "No customer profile", 200)
+    )
 }
 // get#HostedProfileForm: a form token of the hosted profile page (getHostedProfilePageRequest) where the payer adds a card
 // to their customer profile, returning to returnUrl; never stored. {formUrl, fields: {token}}.
@@ -1054,12 +1162,11 @@ function hostedProfileForm(p) {
 function syncCustomerProfile(p) {
     const gw = gateway(p.paymentGatewayConfigId)
     if (gw.problem) throw new Error("GATEWAY_NOT_AVAILABLE: " + gw.problem)
+    // Shop P8 (F97): only the party's own profile here (kept on its methods or made by this instance), never one found by
+    // merchantCustomerId, which another system or a reloaded database may share
     const kept = customerProfileOf(p.partyId, gw.id)
-    const sent = send(
-        gw,
-        "getCustomerProfileRequest",
-        kept ? {customerProfileId: kept} : {merchantCustomerId: clip(p.partyId, REF_LENGTH)}
-    )
+    if (!kept) return {added: 0}
+    const sent = send(gw, "getCustomerProfileRequest", {customerProfileId: kept})
     const result = sent.data ? resultOf(sent.data) : {}
     if (!result.ok) {
         if (result.code === "E00040") return {added: 0}
@@ -1128,6 +1235,7 @@ const operations = {
     hostedProfile,
     hostedProfileForm,
     syncCustomerProfile,
+    checkHostedDuplicates,
     capture,
     release,
     refund,

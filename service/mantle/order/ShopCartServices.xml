@@ -29,7 +29,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("getCart", input)</script>
         </actions>
     </service>
-    <service verb="add" noun="CartItem" authenticate="anonymous-all" allow-remote="false">
+    <service verb="add" noun="CartItem" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>addCartItem: input.productId with its listed option (variantId) and quantity (1 to 999) added at the store's authority price; the cart is made on the first add (a guest's with an anonymous customer party), its new capability in result.token. A product not public in the store is NotFound, one that cannot be bought now ITEM_UNAVAILABLE; expectedRevision is checked when given (STALE_REVISION), a cart with a payment in progress is CHECKOUT_PENDING; cart creation is rate limited.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -89,7 +89,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCart.js").execute("removePromoCode", input)</script>
         </actions>
     </service>
-    <service verb="attach" noun="Cart" authenticate="anonymous-all" allow-remote="false">
+    <service verb="attach" noun="Cart" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>attachCart (sign-in): the session's guest cart attached to the signed-in account, or merged once into the account's open cart of the same site, store and currency when neither has a payment in progress (lines re-added at the account's prices, codes tried again, unavailable lines named in unavailableItems); the cart's capability rotated (result.token). SIGN_IN_REQUIRED without a signed-in account.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>

@@ -1215,6 +1215,11 @@
         service: 'mantle.public.ThemeServices.get#ShopThemeFiles',
         fields: ['siteId', 'releaseId', 'paths'],
     },
+    // Shop F55: a binary asset of the active release, by its path and the digest its manifest pins (a download)
+    getShopThemeAsset: {
+        service: 'mantle.public.ThemeServices.get#ShopThemeAsset',
+        fields: ['siteId', 'releaseId', 'path', 'digest'],
+    },
     getSiteGeneration: {
         service: 'mantle.public.SiteServices.get#SiteGeneration',
         fields: ['siteId'],
@@ -1341,7 +1346,8 @@
     // Shop P4 (F61): a product image of a public product, streamed by the frontend
     getShopProductImage: {
         service: 'mantle.product.ShopCatalogServices.get#ProductImage',
-        fields: ['siteId', 'productContentId'],
+        // Shop P8 (F75): v, the generation the image's link was made at (a shared cache keeps only the current one's)
+        fields: ['siteId', 'productContentId', 'v'],
     }, // Shop P5: checkout and payment (input.token is the session's cart capability; reference and key are the checkout's
     // return reference and its key, from a provider's return or a refreshed frontend; orderToken is a guest's SalesOrder
     // OrderView capability). No operation takes an order, price, total, customer, store or status.
@@ -1434,6 +1440,7 @@
             'acceptTerms',
             'operationId',
             'optIns',
+            'recurringConsent',
         ],
     },
     getCheckoutPaymentResult: {
@@ -1578,5 +1585,50 @@
     recoverCart: {
         service: 'mantle.order.ShopCartServices.recover#Cart',
         fields: ['siteId', 'token'],
+    },
+    // Shop P7: prepaid and recurring access (mantle.product.ShopSubscriptionServices), the signed-in verified account's own
+    getSubscriptions: {
+        service: 'mantle.product.ShopSubscriptionServices.get#Subscriptions',
+        fields: ['siteId'],
+    },
+    getSubscription: {
+        service: 'mantle.product.ShopSubscriptionServices.get#Subscription',
+        fields: ['siteId', 'contractId'],
+    },
+    beginSubscriptionPurchase: {
+        service:
+            'mantle.product.ShopSubscriptionServices.begin#SubscriptionPurchase',
+        fields: ['siteId', 'offerId', 'contractId', 'operationId'],
+    },
+    changeSubscriptionMethod: {
+        service:
+            'mantle.product.ShopSubscriptionServices.change#SubscriptionMethod',
+        fields: [
+            'siteId',
+            'contractId',
+            'paymentMethodId',
+            'consent',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    cancelSubscription: {
+        service: 'mantle.product.ShopSubscriptionServices.cancel#Subscription',
+        fields: [
+            'siteId',
+            'contractId',
+            'reason',
+            'expectedRevision',
+            'operationId',
+        ],
+    },
+    resumeRenewal: {
+        service: 'mantle.product.ShopSubscriptionServices.resume#Renewal',
+        fields: ['siteId', 'contractId', 'operationId'],
+    },
+    // Commerce P14: a store feed's active build served at the Shop mount's feed path (its key and the format's extension)
+    getShopFeed: {
+        service: 'mantle.product.StoreChannelServices.get#ShopFeed',
+        fields: ['siteId', 'feedKey', 'extension'],
     },
 })

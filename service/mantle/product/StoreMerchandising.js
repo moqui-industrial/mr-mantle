@@ -579,15 +579,14 @@ function staleCheck(expected, row) {
         denied("STALE_REVISION", "Changed by someone else since it was read (now " + dateText(row.lastUpdatedStamp) + "); reload")
 }
 // A new row of a product from a time: the open row ends there, a row starting on that instant is changed in place, a row
-// starting later is refused. Each field change carries the reason to the audit log.
+// starting later is refused. Each field change carries the reason to its audit row (`<field>_changeReason`, on a create
+// as on an update, F63); the row's own changeReason field is no longer written.
 function startRow(productStoreId, productId, values, from, why) {
     const key = {productStoreId, productId}
     const existing = rows(PUBLICATION, key)
     if (existing.some(row => (ms(row.fromDate) ?? -Infinity) > from))
         denied("DATED_OVERLAP", "A row of it starts later; withdraw or change that one first")
-    const reasons = why
-        ? Object.assign({changeReason: why}, Object.fromEntries(Object.keys(values).map(field => [field + "_changeReason", why])))
-        : {}
+    const reasons = why ? Object.fromEntries(Object.keys(values).map(field => [field + "_changeReason", why])) : {}
     const same = existing.find(row => ms(row.fromDate) === from)
     for (const row of existing)
         if (row !== same && (ms(row.fromDate) ?? -Infinity) < from && (ms(row.thruDate) ?? Infinity) > from)
@@ -597,7 +596,7 @@ function startRow(productStoreId, productId, values, from, why) {
                     {},
                     key,
                     {fromDate: row.fromDate, thruDate: from},
-                    why ? {changeReason: why, thruDate_changeReason: why} : {}
+                    why ? {thruDate_changeReason: why} : {}
                 )
             )
     if (same) call("update#" + PUBLICATION, Object.assign({}, key, values, reasons, {fromDate: same.fromDate}))
@@ -611,7 +610,7 @@ function endRow(row, at, why) {
         call("delete#" + PUBLICATION, key)
         return {withdrawn: true}
     }
-    call("update#" + PUBLICATION, Object.assign(key, {thruDate: at}, why ? {changeReason: why, thruDate_changeReason: why} : {}))
+    call("update#" + PUBLICATION, Object.assign(key, {thruDate: at}, why ? {thruDate_changeReason: why} : {}))
     return {withdrawn: false}
 }
 

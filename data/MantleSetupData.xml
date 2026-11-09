@@ -284,6 +284,13 @@ along with this software (see the LICENSE.md file). If not, see
         <filters entityFilterId="MANTLE_USER_ORG_FG" entityName="mantle.product.feature.ProductFeatureGroup" filterMap="({_join:'or',_list:[{ownerPartyId:null},{ownerPartyId:['_NA_'].concat(filterOrgIds || [])}]})"/>
         <filters entityFilterId="MANTLE_USER_ORG_D" entityName="mantle.product.store.ProductStore" filterMap="({organizationPartyId: filterOrgIds})"/>
         <filters entityFilterId="MANTLE_USER_ORG_F" entityName="mantle.facility.Facility" filterMap="({ownerPartyId: filterOrgIds})"/>
+        <!-- Records of no organization of their own, through views joining them back to their internal organizations
+            (PartyViewEntities; mr-boss impl-admin §4): a user account by the organizations its party works for, and the internal
+            organizations themselves (Mantle's identity scope, mantle.party.IdentityServices) -->
+        <filters entityFilterId="MANTLE_USER_ORG_UAO" entityName="mantle.party.UserAccountOrganization"
+                filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+        <filters entityFilterId="MANTLE_USER_ORG_IORG" entityName="mantle.party.InternalOrganization"
+                filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
     </moqui.security.EntityFilterSet>
     <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_ACTIVE_ORG" description="Active Organization Filters" applyCond="activeOrgId" allowMissingAlias="Y">
         <filters entityFilterId="MANTLE_ACTIVE_ORG_1" entityName="mantle.account.invoice.Invoice" joinOr="Y"
@@ -320,6 +327,12 @@ along with this software (see the LICENSE.md file). If not, see
         <filters entityFilterId="MANTLE_ACTIVE_ORG_FG" entityName="mantle.product.feature.ProductFeatureGroup" filterMap="({_join:'or',_list:[{ownerPartyId:null},{ownerPartyId:(activeOrgId ? [activeOrgId,'_NA_'] : null)}]})"/>
         <filters entityFilterId="MANTLE_ACTIVE_ORG_D" entityName="mantle.product.store.ProductStore"
                 filterMap="({organizationPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/>
+        <!-- a user account and an internal organization through their organization views (as MANTLE_USER_ORG_UAO): with no
+            organization active the set does not apply, so an authorization naming it sees every one -->
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_UAO" entityName="mantle.party.UserAccountOrganization"
+                filterMap="({organizationPartyId: activeOrgId})"/>
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_IORG" entityName="mantle.party.InternalOrganization"
+                filterMap="({organizationPartyId: activeOrgId})"/>
         <!-- allow these for 3rd party facilities regardless of active org:
         <filters entityFilterId="MANTLE_ACTIVE_ORG_F" entityName="mantle.facility.Facility"
                 filterMap="({ownerPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/> -->
@@ -811,4 +824,10 @@ along with this software (see the LICENSE.md file). If not, see
         administrator already. Granted to the Commerce administrator group by the app's setup data. -->
     <userPermissions userPermissionId="COMMERCE_ALL_ORGANIZATIONS" description="Commerce store work in every organization"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="COMMERCE_ALL_ORGANIZATIONS" fromDate="0"/>
+    <!-- Commerce P14 (impl-commerce): the feed job; it builds only feeds an operator scheduled (hourly or daily), each in its own
+        transaction, and publishes a complete build with no errors; a failing feed is recorded and the others go on
+        (mantle.product.StoreChannelServices.run#StoreFeeds) -->
+    <moqui.service.job.ServiceJob jobName="run_StoreFeeds" description="Build and publish scheduled store product feeds"
+            serviceName="mantle.product.StoreChannelServices.run#StoreFeeds" cronExpression="0 7 * * * ?" paused="N"
+            errorHistoryOnly="Y"/>
 </entity-facade-xml>

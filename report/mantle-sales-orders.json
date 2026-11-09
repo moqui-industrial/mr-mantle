@@ -6,6 +6,10 @@
     "documentType": "MantleSalesOrderPart",
     "timeField": "placedDate",
     "signal": "business",
+    "rowFilterService": "mantle.party.PartyServices.get#OrganizationRowFilter",
+    "rowFilterParameters": {
+      "organizationField": "vendorPartyId"
+    },
     "fieldDefaults": {
       "approvedHours": {
         "decimals": 1

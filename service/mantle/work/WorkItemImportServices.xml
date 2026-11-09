@@ -127,7 +127,7 @@ along with this software (see the LICENSE.md file). If not, see
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
             const cf = ec.entity.conditionFactory
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
-            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(L('Project ${id} not found', {id: rootWorkEffortId})); return }
+            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(L('Project ${workEffortId} not found', {workEffortId: rootWorkEffortId})); return }
             const devFlow = project.statusFlowId === 'WorkEffortDevelopment'
             // the project's items by their original keys, and their own ids
             const existingByKey = new Map()
@@ -318,7 +318,7 @@ along with this software (see the LICENSE.md file). If not, see
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
             if (!['skip', 'update'].includes(existingPolicy)) { ec.message.addError(L('Rows already imported are skipped or updated, not ${policy}', {policy: existingPolicy})); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
-            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(L('Project ${id} not found', {id: rootWorkEffortId})); return }
+            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(L('Project ${workEffortId} not found', {workEffortId: rootWorkEffortId})); return }
             const read = ec.service.sync().name('mantle.work.WorkItemImportServices.read#WorkItemRows').parameters({workItemFile: workItemFile,
                 fileText: fileText, fileLocation: fileLocation, characterSet: characterSet, presetId: presetId, columnMapping: columnMapping,
                 valueMaps: valueMaps, estimateUnit: estimateUnit}).call()

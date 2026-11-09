@@ -191,7 +191,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Costs.js').execute('print',context))</script>
         </actions>
     </service>
-    <service verb="preview" noun="ProductCostRollup" allow-remote="false">
+    <service verb="preview" noun="ProductCostRollup" transaction="cache" allow-remote="false">
         <implements service="mantle.product.CostServices.define#CostRollupPreviewParameters"/>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/Costs.js').execute('preview',context))</script>

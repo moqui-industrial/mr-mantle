@@ -35,6 +35,9 @@
  *   saying what it is and is not; the submit keeps what was checked and the placement records it, granted for a verified
  *   account, else pending until the receipt's link or a verified sign-in confirms it. Never a prerequisite: the receipt and
  *   the order's notices are transactional whatever is chosen.
+ * - Subscriptions (Shop P7; ShopSubscriptions.js): a checkout begun for a recurring offer needs a signed-in verified account
+ *   and, for an automatic offer, the buyer's consent to the renewal charges at submit; the freeze records the consent with
+ *   what was shown and keeps the card, which renews off-session.
  * Reads and writes are the authority's own (authorization disabled), after these checks.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -45,6 +48,7 @@ const attempts = () => ec.resource.script("component://mr-mantle/service/mantle/
 const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
 const storeTopics = () => ec.resource.script("component://mr-mantle/service/mantle/public/StoreTopics.js")
+const subscriptions = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopSubscriptions.js")
 const {find, one, rows, ms} = lib
 const C = "mantle.order.StoreCheckout"
 const A = "mantle.order.StoreCartAccess"
@@ -524,6 +528,8 @@ function view(reached, extra) {
                 terms: terms ? {required: true, version: terms.version, title: terms.title, url: terms.url} : {required: false},
                 // the store's opt-ins, none checked but by the buyer (StoreTopics.js)
                 optIns: storeTopics().checkoutView(checkout),
+                // Shop P7: the subscription it buys, with its renewal terms and the consent they need
+                recurring: subscriptions().checkoutView(checkout),
                 lines: cartView.items,
                 promoCodes: cartView.promoCodes,
                 totals: {
@@ -948,7 +954,8 @@ function submitCheckout(p) {
     const askedOptIns = storeTopics().askedOf(p.optIns)
     const request = Object.assign(
         {revision: text(p.expectedRevision), termsVersion: text(p.termsVersion), acceptTerms: yes(p.acceptTerms)},
-        askedOptIns.length ? {optIns: askedOptIns} : {}
+        askedOptIns.length ? {optIns: askedOptIns} : {},
+        checkout.recurringOfferId ? {recurringConsent: yes(p.recurringConsent)} : {}
     )
     // a retry of a submit answers its first result, also once the order is placed (the cart's capability then reads it)
     const replay = replayOf(checkout.checkoutId, "submitCheckout", p, request)
@@ -965,6 +972,8 @@ function submitCheckout(p) {
     if (policyOf(checkout).termsRequired !== "false" && !terms)
         refuse("Unavailable", "PROVIDER_UNAVAILABLE", "This store cannot take orders now")
     if (terms && !request.acceptTerms) invalid("acceptTerms", "Accept the terms of sale to place your order")
+    // Shop P7: a subscription needs the verified account and, renewing automatically, the buyer's consent to its charges
+    subscriptions().submitCheck(checkout, p)
     const missing = missingOf(shop, checkout, cart.order, cart.part)
     if (missing.length) invalid(missing[0], "Complete your " + missing[0] + " first")
     // the delivery re-quoted outside the freeze's lock (a carrier may be asked)
@@ -1087,6 +1096,9 @@ function freeze(p) {
     // the terms the shopper accepted are the ones in effect
     const terms = policyOf(checkout).termsRequired === "false" ? null : termsOf(shop)
     if (terms && terms.version !== text(p.termsVersion)) changes.push({kind: "terms"})
+    // Shop P7: the subscription's offer still as shown, and its consent with what was shown
+    const recurring = subscriptions().freezeValues(checkout, order.orderId)
+    changes.push(...recurring.changes)
     if (changes.length) {
         call("update#" + C, {
             checkoutId: checkout.checkoutId,
@@ -1133,7 +1145,8 @@ function freeze(p) {
         failureMessage: null,
         returnKeyDigest: p.returnKeyDigest,
         // what the buyer checked of the store's opt-ins (only those; none is ever assumed), recorded at placement
-        optInsJson: JSON.stringify({chosen: Array.from(p.optIns || [])})
+        optInsJson: JSON.stringify({chosen: Array.from(p.optIns || [])}),
+        ...recurring.values
     }
     if (due.compare(0) <= 0) {
         // nothing due: no gateway, placement next
@@ -1227,6 +1240,8 @@ const placedStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "Orde
 function placeStep(p) {
     const checkout = checkoutRow(p.checkoutId, true)
     if (!checkout || checkout.statusId !== "ScoPlacementPending") return {statusId: checkout?.statusId}
+    // Shop P8 review (R1): staff are giving its payment back (ShopOperations.js resolve#StuckPlacement): never placed meanwhile
+    if (checkout.failureCode === "REFUND_PENDING") return {statusId: checkout.statusId}
     const order = orderOf(checkout.orderId)
     if (!placedStatuses.includes(order.statusId)) {
         // only the order that was frozen and paid for is placed: one changed since (a staff edit, a raced cart write) is
@@ -1688,6 +1703,10 @@ const operations = {
 }
 ;({
     limits,
+    // Shop P8 (ShopOperations.js): a checkout's attempt refreshed and placed (a stuck placement's retry), and the Payment
+    // hold of a placed order (a second approval found by the sweep)
+    refreshAttempt: (siteId, checkoutId) => refreshAttempt({siteId}, checkoutId, "job"),
+    holdPayment,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown Shop checkout operation " + op)
         return operations[op](parameters || {})

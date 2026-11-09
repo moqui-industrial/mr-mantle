@@ -94,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="ediDocumentId" from="answer.ediDocumentId"/>
         </actions>
     </service>
-    <service verb="apply" noun="InboundDocument" allow-remote="false">
+    <service verb="apply" noun="InboundDocument" transaction="cache" allow-remote="false">
         <description>A validated document (or one in exception, retried) through its profile's mapping
             service, which applies it with Mantle's services and sets its status. The connection is locked, so two
             deliveries of one business document apply one after the other. A refusal throws its reason code.</description>

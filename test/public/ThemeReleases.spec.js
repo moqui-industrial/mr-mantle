@@ -3,7 +3,8 @@
 // advances the binding's revision and the site's generation together (a retry by its operation key answers the first
 // result), restore switches back through the same gate with an audit record, and a stale active revision or validation digest is refused with nothing changed; a designer validates
 // but cannot publish, another organization's publisher cannot see the theme; the live reads give only the active
-// release, and the page view keeps to the view contract.
+// release, and the page view keeps to the view contract; a release's image is read by digest, immutable, and one
+// published before reads its base64 as before (Shop F55).
 // Standalone: spec-local organizations, users, store, site and a small package written into the theme's draft (the
 // starter theme is mr-pass's; its spec is ShopThemes). Run: ./moq test mr-mantle --spec ThemeReleases
 const T = "mantle.public.ThemeServices."
@@ -453,5 +454,80 @@ feature("the live reads give only the active release, and the page view keeps to
                     productList: [{id: "1", price: {amount: "1.00"}}]
                 })
         )
+    }
+})
+
+// Shop F55: a release pins an image by the digest of its bytes; the frontend's file read names it by reference and its
+// bytes are read by that digest, immutable. A release published before (its pin the digest of the base64 text) is read
+// as before, as text, and has no read by digest.
+const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+feature("a release's image is read by digest, immutable; a release published before reads its base64 as before", {
+    when() {
+        const live = name => input => {
+            login("john.doe")
+            ec.message.pushErrors()
+            try {
+                const out = ec.service.sync().name(T + name).parameters({input}).requireNewTransaction(true).call() || {}
+                return ec.message.hasError() ? {error: ec.message.getErrorsString()} : out.result
+            } catch (error) {
+                return {error: String(error.message || error)}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        change(state.themeId, {"assets/hero.png": png})
+        const digest = run(state.publisher, T + "validate#Theme", {themeId: state.themeId}).validationDigest
+        const published = run(state.publisher, T + "publish#Theme", {
+            operationKey: key(),
+            themeId: state.themeId,
+            siteId: site,
+            validationDigest: digest,
+            expectedActiveRevision: Number(binding().revision)
+        })
+        const releaseId = published.releaseId
+        const files = () => live("get#ShopThemeFiles")({siteId: site, releaseId, paths: "assets/hero.png,assets/store.css"})
+        const asset = (path, assetDigest) => live("get#ShopThemeAsset")({siteId: site, releaseId, path, digest: assetDigest})
+        const byDigest = files()
+        const hero = byDigest.files[0]
+        const served = asset("assets/hero.png", hero.digest)
+        const bytes = system(() => {
+            const stream = ec.resource.getLocationReference(served.location).openStream()
+            try {
+                return stream.readAllBytes()
+            } finally {
+                stream.close()
+            }
+        })
+        const wrongDigest = asset("assets/hero.png", "0".repeat(64))
+        const textFile = asset("assets/store.css", byDigest.files[1].digest)
+        // as publish pinned before: the digest of the image's base64 text
+        system(() =>
+            call("update#mantle.public.PublicThemeReleaseFile", {
+                releaseId,
+                filePath: "assets/hero.png",
+                digest: ec.resource.digestText(png, "sha256")
+            })
+        )
+        const before = files()
+        const beforeAsset = asset("assets/hero.png", ec.resource.digestText(png, "sha256"))
+        return {hero, served, bytes, wrongDigest, textFile, before, beforeAsset}
+    },
+    then({hero, served, bytes, wrongDigest, textFile, before, beforeAsset}) {
+        hero.text === undefined
+        hero.digest.length === 64
+        hero.digest !== ec.resource.digestText(png, "sha256")
+        hero.size === 70
+        hero.contentType === "image/png"
+        served.file.mimeType === "image/png"
+        served.file.cacheControl === "public, max-age=31536000, immutable"
+        served.file.inline === true
+        bytes.length === 70
+        bytes[0] === 0x89
+        String(wrongDigest.error).includes("NOT_AVAILABLE")
+        String(textFile.error).includes("NOT_AVAILABLE")
+        before.files[0].text === png
+        before.files[0].digest === ec.resource.digestText(png, "sha256")
+        String(beforeAsset.error).includes("NOT_AVAILABLE")
     }
 })

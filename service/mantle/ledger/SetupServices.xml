@@ -560,7 +560,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- ========== Setup and activation (AC-01) ========== -->
-    <service verb="store" noun="SetupRun" allow-remote="false">
+    <service verb="store" noun="SetupRun" transaction="cache" allow-remote="false">
         <description>Start or change the organization's accounting setup run. An organization with no accounting
             preference, its own or one inherited through its rollup, is set up from a chart template
             (init#PartyAccountingConfiguration with sourcePartyId, the base currency, fiscal year start and costing
@@ -1024,7 +1024,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" value="created"/>
         </actions>
     </service>
-    <service verb="check" noun="Readiness" allow-remote="false">
+    <service verb="check" noun="Readiness" transaction="cache" allow-remote="false">
         <description>Whether the organization's accounting can be activated, as rows each with its state (ready, check
             or blocks activation), message and the items it names: preferences, chart, the open periods of the opening
             day, the posting guard, the migration clearing, receivable and payable accounts, mappings to summary

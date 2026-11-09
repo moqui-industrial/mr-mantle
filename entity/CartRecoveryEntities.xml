@@ -8,5 +8,8 @@
   <extend-entity entity-name="StoreCartAccess" package="mantle.order">
     <field name="recoveryExpireDate" type="date-time"><description>When the recovery link's token stops working (the end of
       the store's recovery window); a spent, expired or replaced token reaches nothing.</description></field>
+    <field name="recoveryHandledDate" type="date-time"><description>The shopper activity (lastActivityDate) whose recovery the
+      job handled (queued, already sent or at the store's most sends; impl-commerce F133), so later runs skip the cart until
+      the shopper is active again, which clears it.</description></field>
   </extend-entity>
 </entities>

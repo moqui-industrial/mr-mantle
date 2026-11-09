@@ -1,7 +1,7 @@
 // Accounting's typed payment-attempt coordinator (AC-02, X9; mr-pass impl-shop P5, F13, F15, F32): each worker selects its
 // own purpose, so Billing's job, result and refresh never touch a Shop checkout attempt and Shop's reconciliation never
-// touches an invoice attempt; authorize#OrderPayments skips a promised payment whose attempt is unresolved and authorizes
-// one with none as before; a hosted page's pending payment with no reference is looked up, and one with neither still has
+// touches an invoice attempt; authorize#OrderPayments skips a promised payment whose attempt is unresolved and a declined
+// one whose attempt is settled, and authorizes one with none as before; a hosted page's pending payment with no reference is looked up, and one with neither still has
 // nothing to look up; the Payment hold is placed by the reconciliation (and a failed capture of a Shop payment after
 // placement) and released only with PAYMENT_HOLD_RELEASE, a failed capture of any other payment holding nothing.
 // Standalone: spec-local organization, customer, store, gateways, orders and payments. Run:
@@ -191,21 +191,31 @@ feature("authorize#OrderPayments skips a promised payment with an unresolved att
         const held = payment({orderId, orderPartSeqId: "01", paymentMethodId: state.methodId})
         attempt(held, "PapShopCheckout", {orderId})
         const plain = payment({orderId, orderPartSeqId: "01", paymentMethodId: state.methodId})
+        // (Shop P7 review) a declined payment whose attempt settled is closed; one with no attempt is authorized as before
+        const closed = payment({orderId, orderPartSeqId: "01", paymentMethodId: state.methodId, statusId: "PmntDeclined"})
+        attempt(closed, "PapShopRenewal", {orderId, settledDate: ec.user.nowTimestamp, outcome: "declined"})
+        const declined = payment({orderId, orderPartSeqId: "01", paymentMethodId: state.methodId, statusId: "PmntDeclined"})
         const out = sys("mantle.account.PaymentServices.authorize#OrderPayments", {orderId})
         return {
             out,
             held: status(held),
             heldResponses: responses(held).length,
             plain: status(plain),
-            plainResponses: responses(plain).length
+            plainResponses: responses(plain).length,
+            closed: status(closed),
+            closedResponses: responses(closed).length,
+            declined: status(declined)
         }
     },
-    then({out, held, heldResponses, plain, plainResponses}) {
+    then({out, held, heldResponses, plain, plainResponses, closed, closedResponses, declined}) {
         held == "PmntPromised"
         heldResponses == 0
         plain == "PmntAuthorized"
         plainResponses == 1
         out.authFailed == false
+        closed == "PmntDeclined"
+        closedResponses == 0
+        declined == "PmntAuthorized"
     }
 })
 

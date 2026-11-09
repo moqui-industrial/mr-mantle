@@ -88,12 +88,22 @@ One page per reference (Shop P6): `get#HostedPaymentForm` searches the reference
 lists) and issues no new token once one exists, paid, declined or held, so two pages open at once cannot each take a
 payment; a search that cannot tell issues none. A lookup that finds an approval also lists the reference's transactions
 and, finding another approved one, records a `DUPLICATE_APPROVAL` response naming it (resultSuccess N), which Shop's
-checkout holds the placed order for (OhtPayment), as it does an amount mismatch.
+checkout holds the placed order for (OhtPayment), as it does an amount mismatch. A second page paid after the first was
+confirmed is found by `check#HostedDuplicates` (Shop P8), which Shop's `run_ShopOperations` job calls once for each
+recently completed checkout after its last form token expired: the same search and flag, or a `DUPLICATES_CHECKED` response
+when there is no other approval.
 
 **Hosted profile page** (Shop P6, F40): `get#HostedProfileForm` gives a payer's frontend a form token of
 `getHostedProfilePageRequest` (the customer profile made with the party as `merchantCustomerId` when it has none) with the
 canonical return address; after the page, `sync#CustomerProfile` reads the profile (`getCustomerProfileRequest`, by the
-kept reference or the merchantCustomerId) and keeps each new payment profile as a masked card method.
+kept reference) and keeps each new payment profile as a masked card method.
+
+**Whose profile** (Shop P8, F97): a customer profile is a party's here only when a payment method of the party keeps it
+or this instance made it (recorded as a `PgoStoreCim` response, reason `CUSTOMER_PROFILE_MADE`, with the party in
+`subReference` and the merchantCustomerId in `altReference`). A profile is never found by merchantCustomerId: on a gateway
+account shared with another system, or a reloaded database reusing party ids, that would be another person's cards. When
+the gateway already has a profile under the party's id (E00039) that is not the party's here, a new one is made under a
+merchantCustomerId of its own (the party id and a random suffix). Profiles kept on methods keep working as before.
 
 ## Tests
 
@@ -105,3 +115,15 @@ fixtures ([Build-Test](../../../../docs/Build-Test.md#http-fixtures)):
 ```
 
 Sandbox and live calls are deployment exercises, not regression tests.
+
+## Stored-credential renewals (Shop P7)
+
+A merchant-initiated charge of a kept customer payment profile, made under the customer's recorded off-session consent
+(Shop's subscription renewals), passes `storedCredential` to `authorize#SinglePayment`: `{kind: "recurring",
+originalNetworkTransId, originalAuthAmount}`, the original being the customer-initiated transaction that kept the card
+(its `PaymentGatewayResponse.networkTransId`). The adapter then sends, after `transactionSettings` in the schema's order,
+`processingOptions` (`isSubsequentAuth`, `isStoredCredentials`), `subsequentAuthInformation` (the original network
+transaction id and amount; no `reason`, which is for resubmissions and delayed charges) and `authorizationIndicatorType`
+(`pre` for an authorization, `final` for a sale). On an Accept Hosted gateway such a charge is the same profile charge,
+not a hosted page. These were checked against the request shape in `test/ext/AuthorizeNetGateway`, not yet against the
+sandbox.

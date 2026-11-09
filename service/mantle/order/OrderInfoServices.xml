@@ -1418,6 +1418,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return/></if>
+            <!-- a recurring base (RecurringTemplate, X5) sends no store email: it is never placed for the customer (mr-pass impl-shop P7) -->
+            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
             <set field="productStoreId" from="orderHeader.productStoreId"/>
             <if condition="!productStoreId"><return/></if>
 
@@ -1479,7 +1481,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 bccAddresses:bccAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.order.OrderEmailMessage").parameter("orderId", orderId)
                         .parameter("emailMessageId", sendOut.emailMessageId).parameter("orderRevision", orderHeader.orderRevision).disableAuthz().call() }</script>
-                    <message>Email sent to ${toAddresses}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
+                    <set field="sentTo" from="toAddresses"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                 </iterate>
             </if>
         </actions>

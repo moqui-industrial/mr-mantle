@@ -144,7 +144,7 @@ along with this software (see the LICENSE.md file). If not, see
                 .execute('balance', context).balance"/>
         </actions>
     </service>
-    <service verb="release" noun="PurchaseAgreement" allow-remote="false">
+    <service verb="release" noun="PurchaseAgreement" transaction="cache" allow-remote="false">
         <description>Release a quantity of an active purchase agreement's item to a draft purchase order (design
             ReleaseAgreement): a new draft of the organization from the supplier in the agreement's currency
             (create#PurchaseOrder, with the facility given), or the draft given of the same organization, supplier and

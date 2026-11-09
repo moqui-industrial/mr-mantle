@@ -69,7 +69,12 @@ const TOKEN_WRITES = [
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
-const CLIENT_READS = ['getShopThemeRelease', 'getShopThemeFiles']
+const CLIENT_READS = [
+    'getShopThemeRelease',
+    'getShopThemeFiles',
+    // Shop F55: a release's binary asset by digest (a download)
+    'getShopThemeAsset',
+]
 /* Operations answered as a file (download: the result's location stays here, the transport streams it). */
 const DOWNLOADS = [
     'getAttachment',
@@ -82,7 +87,20 @@ const DOWNLOADS = [
     'getShopDownload',
     // Commerce P9: an approved review's image
     'getShopReviewImage',
+    // Shop F55: a theme release's binary asset by digest, inline and immutable
+    'getShopThemeAsset',
 ]
+/* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
+   generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
+   transports pass only these (pass_authority.rs download_cache_control). */
+const DOWNLOAD_CACHE = {
+    'public, max-age=60': null,
+    'public, max-age=31536000, immutable': 'getShopThemeAsset',
+}
+const downloadCache = (operation, value) =>
+    typeof value === 'string' &&
+    Object.hasOwn(DOWNLOAD_CACHE, value) &&
+    (DOWNLOAD_CACHE[value] == null || DOWNLOAD_CACHE[value] === operation)
 /* account.<action>: the framework's account service verb of each. */
 const ACCOUNT_ACTIONS = {
     session: 'start',
@@ -325,9 +343,14 @@ function run(p) {
                 contentType: file.mimeType,
                 filename: String(file.filename),
                 disposition:
-                    file.variant === 'thumbnail' ? 'inline' : 'attachment',
+                    file.variant === 'thumbnail' || file.inline === true
+                        ? 'inline'
+                        : 'attachment',
                 // Shop P6: a ranged file's size and the range asked
                 ...(file.ranged ? { size: file.size, range: range || null } : {}),
+                // Shop P8 (F75): a public product image of the current generation may be kept by a shared cache, and a
+                // theme asset by digest (F55) kept for good
+                ...(downloadCache(operation, file.cacheControl) ? { cacheControl: file.cacheControl } : {}),
             },
         }
     }
@@ -417,4 +440,6 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     SSO_ACTIONS,
     // Shop P4: the list PassApi.js and PASS's Transport.js keep equal
     TOKEN_WRITES,
+    // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
+    downloadCache,
 })

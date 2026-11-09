@@ -8,7 +8,7 @@
     confirmation). Over Mantle's order, payment and gateway services and Accounting's payment attempts
     (ShopCheckout.js); the jobs and the capture check are Mantle's own. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
-    <service verb="begin" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+    <service verb="begin" noun="Checkout" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>beginCheckout: the cart's checkout, made when there is none (the store's checkout policy as it is now, the account's contact for a signed-in buyer), else the current one. An empty cart or a line that cannot be bought is refused (VALUE_INVALID, ITEM_UNAVAILABLE); a store that takes account checkouts only refuses a guest (SIGN_IN_REQUIRED).</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -20,7 +20,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("beginCheckout", input)</script>
         </actions>
     </service>
-    <service verb="get" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+    <service verb="get" noun="Checkout" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>getCheckout: the CheckoutView of the checkout the cart reaches (or its reference and key, or a placed cart's capability): each step's values and whether it is done, the lines and totals, the terms, what changed at the last freeze and the payment's progress. NotFound without one.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -44,7 +44,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("resumeCheckout", input)</script>
         </actions>
     </service>
-    <service verb="set" noun="CheckoutContact" authenticate="anonymous-all" allow-remote="false">
+    <service verb="set" noun="CheckoutContact" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>setCheckoutContact: the buyer's email address, name and phone (the store's phone policy); a guest's go on the cart's guest party, an account's email is the account's. VALUE_INVALID names its field; a submitted checkout is CHECKOUT_PENDING.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -104,7 +104,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getPaymentOptions", input)</script>
         </actions>
     </service>
-    <service verb="select" noun="Payment" authenticate="anonymous-all" allow-remote="false">
+    <service verb="select" noun="Payment" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>selectPayment: one of the options (paymentOptionId); a signed-in buyer may ask to keep the card (savePaymentMethod), saved after an approved payment.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -116,7 +116,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("selectPayment", input)</script>
         </actions>
     </service>
-    <service verb="submit" noun="Checkout" authenticate="anonymous-all" allow-remote="false">
+    <service verb="submit" noun="Checkout" transaction="cache" authenticate="anonymous-all" allow-remote="false">
         <description>submitCheckout: a ready checkout at the revision (expectedRevision) and terms version (termsVersion, acceptTerms) the shopper saw is frozen under the order's lock and committed with its promised payment and payment attempt, then authorized through the store's hosted gateway; a change found at the freeze is REVIEW_REQUIRED (Conflict) with the change kept for the shopper, a submitted checkout answers its attempt again (one order, one payment), and nothing due skips the gateway. The return key is in the first answer only.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
@@ -164,7 +164,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("getOrderConfirmation", input)</script>
         </actions>
     </service>
-    <service verb="run" noun="Step" authenticate="anonymous-all" allow-remote="false">
+    <service verb="run" noun="Step" transaction="cache" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.step">
         <description>Internal to ShopCheckout.js, always called in a transaction of its own: one step of a checkout's freeze,
             authorization, outcome, placement, a placement's failure, a lookup's count or expiry (input.step), so each commits
             or rolls back alone and no provider is asked while the checkout, cart or order is locked.</description>
@@ -178,7 +178,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/order/ShopCheckout.js").execute("runStep", input)</script>
         </actions>
     </service>
-    <service verb="reconcile" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+    <service verb="reconcile" noun="Checkouts" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.reconcile">
         <description>The reconcile_StoreCheckouts job: each Shop checkout attempt due for a lookup (bounded backoff, oldest
             first) asked of its provider and its outcome applied, and each checkout waiting for placement placed (at most five
             tries), each in its own transactions; one that fails is named and the rest go on.</description>
@@ -198,7 +198,7 @@
             <set field="failed" from="out.failed"/>
         </actions>
     </service>
-    <service verb="expire" noun="Checkouts" authenticate="anonymous-all" allow-remote="false">
+    <service verb="expire" noun="Checkouts" authenticate="anonymous-all" allow-remote="false" operation="shop.checkout.expire">
         <description>The expire_StoreCheckouts job: checkouts never submitted past their expiry are expired, each in its own
             transaction; a submitted one is the reconciliation's.</description>
         <in-parameters>

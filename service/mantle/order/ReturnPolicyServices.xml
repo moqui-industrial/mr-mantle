@@ -242,7 +242,7 @@ along with this software (see the LICENSE.md file). If not, see
                 context[field] = found[field] ?? null</script>
         </actions>
     </service>
-    <service verb="authorize" noun="Return" allow-remote="false">
+    <service verb="authorize" noun="Return" transaction="cache" allow-remote="false">
         <description>The return authorizer's authorization of an open customer return (D11; design ReturnDetail Authorize), at
             its revision when one is given (STALE_REVISION naming the current one): its lines checked again under their locks
             (QUANTITY_EXCEEDS_ELIGIBLE), its exceptions approved at this revision first (EXCEPTION_REQUIRED), with no policy a

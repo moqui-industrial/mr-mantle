@@ -50,7 +50,18 @@ function exposure(organizationPartyId, customerPartyId, currencyUomId, overdue =
     )
     const parts = {vendorPartyId: organizationPartyId, customerPartyId, currencyUomId}
     const openParts = query => query.condition("partStatusId", "in", OPEN_ORDER_STATUSES)
-    const ordered = sum("mantle.order.CreditOpenOrderSum", parts, "partTotalSum", openParts)
+    // a recurring base (RecurringTemplate, X5) is the next period's template, never an open order (mr-pass impl-shop P7)
+    const notBase = query =>
+        openParts(query).condition(
+            ec.entity.conditionFactory.makeCondition(
+                [
+                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "is-null", null),
+                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+                ],
+                "or"
+            )
+        )
+    const ordered = sum("mantle.order.CreditOpenOrderSum", parts, "partTotalSum", notBase)
     const billed = sum("mantle.order.CreditOrderBillingSum", parts, "billedSum", openParts)
     const payments = {fromPartyId: customerPartyId, toPartyId: organizationPartyId, amountUomId: currencyUomId}
     const unapplied = sum("mantle.account.payment.CreditPaymentSum", payments, "unappliedSum", query =>

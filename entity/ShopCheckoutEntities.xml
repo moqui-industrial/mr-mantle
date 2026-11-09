@@ -75,7 +75,7 @@
     <relationship type="one" related="mantle.order.OrderHeader"/>
     <relationship type="one" related="mantle.order.StoreCartAccess"/>
     <relationship type="one" related="mantle.public.PublicSite"/>
-    <relationship type="one" related="mantle.product.store.ProductStore"/>
+    <relationship type="one" related="mantle.product.store.ProductStore" short-alias="productStore"/>
     <relationship type="one" related="mantle.account.payment.Payment"/>
     <relationship type="one" title="StoreCheckout" related="moqui.basic.StatusItem">
       <key-map field-name="statusId"/>
@@ -93,6 +93,11 @@
     </index>
     <index name="STORE_CHECKOUT_REF" unique="true">
       <index-field name="returnReference"/>
+    </index>
+    <!-- Shop P8 (impl-shop F100): the one-account claim's query, a store's completed guest checkouts of a verified email -->
+    <index name="STORE_CHECKOUT_EMAIL">
+      <index-field name="contactEmail"/>
+      <index-field name="productStoreId"/>
     </index>
     <seed-data>
       <!-- design-shop §7.2's typed states, beside (never instead of) the order's and the payment's -->
@@ -121,6 +126,8 @@
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPaymentPending" toStatusId="ScoPlacementPending" transitionName="Paid"/>
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPaymentPending" toStatusId="ScoReady" transitionName="Not paid"/>
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPlacementPending" toStatusId="ScoCompleted" transitionName="Placed"/>
+      <!-- Shop P8 (impl-commerce F108): a stuck placement whose payment staff released or refunded -->
+      <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoPlacementPending" toStatusId="ScoCancelled" transitionName="Refunded"/>
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoEditing" toStatusId="ScoExpired" transitionName="Expire"/>
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReady" toStatusId="ScoExpired" transitionName="Expire"/>
       <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="ScoReviewRequired" toStatusId="ScoExpired" transitionName="Expire"/>

@@ -98,7 +98,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('store',context))</script>
         </actions>
     </service>
-    <service verb="store" noun="RoutingOperation" allow-remote="false">
+    <service verb="store" noun="RoutingOperation" transaction="cache" allow-remote="false">
         <implements service="mantle.work.RoutingServices.define#RoutingParameters"/>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('operation',context))</script>
@@ -116,7 +116,7 @@
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('validate',context))</script>
         </actions>
     </service>
-    <service verb="release" noun="RoutingDraft" allow-remote="false">
+    <service verb="release" noun="RoutingDraft" transaction="cache" allow-remote="false">
         <implements service="mantle.work.RoutingServices.define#RoutingParameters"/>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/Routings.js').execute('release',context))</script>

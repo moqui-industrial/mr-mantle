@@ -433,7 +433,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Create Payment Services ========== -->
     <!-- ============================================= -->
 
-    <service verb="create" noun="Payment">
+    <service verb="create" noun="Payment" transaction="cache">
         <in-parameters>
             <auto-parameters entity-name="mantle.account.payment.Payment" include="nonpk">
                 <exclude field-name="acctgTransResultEnumId"/><exclude field-name="reconcileStatusId"/>
@@ -913,9 +913,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="payment.amountUomId != invoice.currencyUomId">
                 <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment has a different currency (${payment.amountUomId}) than invoice (${invoice.currencyUomId})"/></if>
             <if condition="payment.fromPartyId != invoice.toPartyId">
-                <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is from a different party (${payment.fromPartyId}) than invoice is to (${invoice.toPartyId})"/></if>
+                <return type="danger" message="Cannot apply payment ${payment.paymentId} to invoice ${invoiceId}, payment is from a different party (${payment.fromPartyId}) than invoice is to (${invoice.toPartyId})"/></if>
             <if condition="payment.toPartyId != invoice.fromPartyId">
-                <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is to a different party (${payment.toPartyId}) than invoice is from (${invoice.fromPartyId})"/></if>
+                <return type="danger" message="Cannot apply payment ${payment.paymentId} to invoice ${invoiceId}, payment is to a different party (${payment.toPartyId}) than invoice is from (${invoice.fromPartyId})"/></if>
 
             <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <return type="warning" message="Not applying payment ${paymentId} in status ${payment.statusId} to invoice ${invoiceId}, payment must be Delivered or Confirmed to be applied"/>
@@ -1400,6 +1400,11 @@ along with this software (see the LICENSE.md file). If not, see
                 Protect.js hpf_token and enc_key, a provider payment method id). Never stored or logged; a reusable
                 provider reference the adapter gets back goes on the PaymentMethod (gatewayCimId the payment profile,
                 gatewayCustomerId its customer profile).</description></parameter>
+            <parameter name="storedCredential" type="Map"><description>A merchant-initiated charge of the payment's kept method
+                under the customer's recorded off-session consent (mr-pass impl-shop P7, F14, F41): kind (recurring), the
+                originalNetworkTransId and originalAuthAmount of the customer-initiated transaction that first used it. An
+                adapter with stored-credential indicators sends them (Authorize.Net's processingOptions,
+                subsequentAuthInformation and authorizationIndicatorType); one without ignores it. Empty, as before.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="paymentGatewayResponseId"/>
@@ -1631,6 +1636,18 @@ along with this software (see the LICENSE.md file). If not, see
                         <continue/>
                     </if>
                 </if>
+                <!-- a declined payment whose payment attempt is settled (its coordinator's outcome: a Shop renewal's or
+                    checkout's failed attempt, followed by a new payment) is closed, never authorized again here (mr-pass
+                    impl-shop P7 review); a declined payment with no attempt is authorized as before -->
+                <if condition="payment.statusId == 'PmntDeclined'">
+                    <entity-find-count entity-name="mantle.account.payment.PortalPaymentAttempt" count-field="settledAttemptCount" disable-authz="true">
+                        <econdition field-name="paymentId" from="payment.paymentId"/>
+                        <econdition field-name="settledDate" operator="is-not-null"/></entity-find-count>
+                    <if condition="settledAttemptCount &gt; 0">
+                        <log message="Not authorizing payment ${payment.paymentId}: its declined payment attempt is settled"/>
+                        <continue/>
+                    </if>
+                </if>
                 <if condition="!payment.paymentMethodId &amp;&amp; !payment.finAccountId">
                     <log message="Not authorizing payment ${payment.paymentId} with no paymentMethodId or finAccountId"/>
                     <continue/>
@@ -1722,6 +1739,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="returnUrl"><description>Passed to a hosted gateway (authorize#Payment).</description></parameter>
             <parameter name="paymentToken" type="Map"><description>Single-use browser tokenization output, passed to the
                 gateway (authorize#Payment) and never stored.</description></parameter>
+            <parameter name="storedCredential" type="Map"><description>A merchant-initiated charge under recorded off-session
+                consent, passed to the gateway (authorize#Payment; Shop's renewals, mr-pass impl-shop P7).</description></parameter>
             <parameter name="payment" type="EntityValue"/>
         </in-parameters>
         <out-parameters>
@@ -1803,7 +1822,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="${paymentGatewayConfig.authorizeServiceName}" out-map="authOut"
                     in-map="{paymentId:payment.paymentId, cardSecurityCode:cardSecurityCode, returnUrl:returnUrl,
                         paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId, operationKey:operationKey,
-                        idempotencyKey:keyOut.idempotencyKey, paymentToken:paymentToken}"/>
+                        idempotencyKey:keyOut.idempotencyKey, paymentToken:paymentToken, storedCredential:storedCredential}"/>
 
             <set field="paymentGatewayResponseId" from="authOut.paymentGatewayResponseId"/>
             <if condition="!paymentGatewayResponseId"><then>
@@ -3200,7 +3219,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
     </service>
-    <service verb="apply" noun="Settlement" allow-remote="false">
+    <service verb="apply" noun="Settlement" transaction="cache" allow-remote="false">
         <description>Confirm the user's own retained settlement review once: recheck it against current balances, postings
             and policy, then apply each allocation through apply#InvoicePayment, apply#PaymentToPayment or
             apply#InvoiceToInvoice on the reviewed date and book day, and each adjustment as a credit memo through
@@ -3276,7 +3295,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="get" noun="PaymentFinanceDetail" allow-remote="false">
+    <service verb="get" noun="PaymentFinanceDetail" transaction="cache" allow-remote="false">
         <description>Read a payment the user may read: its identity and totals, masked methods, the applications to records
             the user may read, issued documents, files and history. Ledger and gateway rows only with their read authority;
             check images only with treasury authority.</description>
@@ -4203,7 +4222,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="results" from="retained.result"/>
         </actions>
     </service>
-    <service verb="execute" noun="PaymentGatewayAction" allow-remote="false">
+    <service verb="execute" noun="PaymentGatewayAction" transaction="cache" allow-remote="false">
         <description>Confirm a retained gateway action review: with the payment locked and unchanged since the review, run
             Mantle's authorize#, capture# or release#SinglePayment, or for a refund create#RefundPayment (promised, so it
             counts against the original until the gateway answers) and refund#SinglePayment for it, all with the operation
@@ -4512,7 +4531,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
         </actions>
     </service>
-    <service verb="refund" noun="ReviewedPayment" allow-remote="false">
+    <service verb="refund" noun="ReviewedPayment" transaction="cache" allow-remote="false">
         <description>Confirm a retained manual refund review: with the original locked and unchanged since the review, create
             the delivered refund through create#RefundPayment on its book day, with the reviewed methods, reference and
             reason, so the Payment SECAs post it and it is applied to the original. Refuses another user's, an expired,

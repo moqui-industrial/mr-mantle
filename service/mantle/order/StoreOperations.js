@@ -203,7 +203,7 @@ function cancelRequestOrderIds(storeIds) {
 // (impl-shop F85); the job no longer retries it
 const stuck = checkout =>
     checkout.statusId === "ScoPlacementPending" &&
-    (checkout.failureCode === "ORDER_CHANGED" || num(checkout.placementTries) >= limits.placementTries)
+    (["ORDER_CHANGED", "REFUND_PENDING"].includes(checkout.failureCode) || num(checkout.placementTries) >= limits.placementTries)
 function stuckCheckouts(storeIds) {
     if (!storeIds.length) return []
     return Array.from(
@@ -335,10 +335,19 @@ function findStoreOrders(p) {
     return Object.assign({}, page, {orders: shape(page.rows), rows: undefined, truncated: false})
 }
 // RecurringTemplate bases (F112) are never a store's orders: Shop P7 marks them (Sales' RecurringTemplate marker, X5), and
-// the condition goes here, in the one function the order worklist and the store reports (StoreReports.js) call. Until a
-// base is marked nothing is left out.
+// the condition is here, in the one function the order worklist, Home's counts and the store reports (StoreReports.js) call.
 function withoutRecurringBases(query) {
-    return query
+    // Shop P7 (F112): a RecurringTemplate base is the next period's template, never an order of the store's worklists
+    const cf = ec.entity.conditionFactory
+    return query.condition(
+        cf.makeCondition(
+            [
+                cf.makeCondition("orderPurposeEnumId", "is-null", null),
+                cf.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+            ],
+            "or"
+        )
+    )
 }
 function orderQuery(s, p, storeIds) {
     let query = withoutRecurringBases(
@@ -376,7 +385,9 @@ function stuckOrders(s, storeIds, p) {
             failureText:
                 checkout.failureCode === "ORDER_CHANGED"
                     ? "The order changed after it was paid"
-                    : "Placement failed " + num(checkout.placementTries) + " times",
+                    : checkout.failureCode === "REFUND_PENDING"
+                      ? "A refund was started and not finished"
+                      : "Placement failed " + num(checkout.placementTries) + " times",
             placedText: dateText(checkout.frozenDate)
         })
     })
@@ -963,8 +974,7 @@ function getStoreCustomer(p) {
     if (!party || party.disabled === "Y" || !storeIds.length) unavailable("Customer", partyId)
     const names = lib.partyNames([partyId])
     const orders = Array.from(
-        s
-            .own(find(ORDER))
+        withoutRecurringBases(s.own(find(ORDER)))
             .condition("productStoreId", "in", storeIds)
             .condition(
                 "orderId",
@@ -1057,8 +1067,20 @@ function getStoreCustomer(p) {
         carts,
         requests,
         returns,
-        // P12 (Subscriptions)
-        subscriptions: []
+        // P12: the customer's recurring contracts in these stores (StoreSubscriptions.js), billing and access apart
+        subscriptions: customerSubscriptions(storeIds, partyId)
+    }
+}
+
+// a customer's contracts, failing alone (the rest of Customer360 still shows)
+function customerSubscriptions(storeIds, partyId) {
+    try {
+        return ec.resource
+            .script("component://mr-mantle/service/mantle/product/StoreSubscriptions.js")
+            .customerSubscriptions(storeIds, partyId)
+    } catch (error) {
+        ec.logger.error("Subscriptions of customer " + partyId + " not read: " + error.message)
+        return []
     }
 }
 
@@ -1218,6 +1240,27 @@ function addStoreRequestNote(p) {
     return {communicationEventId: out.communicationEventId}
 }
 
+// Commerce P13 (impl-commerce F111, design §1.4's "Log as note"): an internal note on a store order or cart (OrderNote,
+// internalNote Y, the user's), filed from an Assist answer; never sent to the customer and changing nothing else.
+function addStoreOrderNote(p) {
+    const s = scope()
+    const order = p.orderId ? one(ORDER, {orderId: p.orderId}) : null
+    storeOrder(s, p.orderId, order?.statusId === "OrderOpen")
+    const noteText = text(p.noteText)
+    if (!noteText) denied("VALUE_REQUIRED", "The note is empty")
+    if (noteText.length > 4000) denied("VALUE_INVALID", "A note is at most 4000 characters")
+    // two notes of one order in the same millisecond keep their own keys
+    const taken = new Set(rows("mantle.order.OrderNote", {orderId: order.orderId}).map(row => ms(row.noteDate)))
+    let noteDate = nowMs()
+    while (taken.has(noteDate)) noteDate += 1
+    call("create#mantle.order.OrderNote", {orderId: order.orderId, noteDate, noteText, internalNote: "Y", userId: ec.user.userId})
+    return {
+        orderId: order.orderId,
+        noteDate,
+        message: "Note logged on " + (order.statusId === "OrderOpen" ? "cart " : "order ") + order.orderId
+    }
+}
+
 // ===== get#StoreWorkSummary (Home's WorkCards) =====
 // The work counts of the user's stores (or one): to approve (placed, not yet approved), payment holds, to fulfill
 // (approved, not completed), unpaid (of the recent submitted orders, computed), open carts, stuck placements and notice
@@ -1227,7 +1270,7 @@ function getStoreWorkSummary(p) {
     const storeIds = storesFor(s, p.productStoreId)
     const count = (conditions, extra) => {
         if (!storeIds.length) return 0
-        let query = s.own(find(ORDER, conditions).condition("productStoreId", "in", storeIds))
+        let query = withoutRecurringBases(s.own(find(ORDER, conditions).condition("productStoreId", "in", storeIds)))
         if (extra) query = extra(query)
         return Number(query.count())
     }
@@ -1259,8 +1302,7 @@ function getStoreWorkSummary(p) {
     each("unpaid", () => {
         if (!storeIds.length) return 0
         const recent = Array.from(
-            s
-                .own(find(ORDER))
+            withoutRecurringBases(s.own(find(ORDER)))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "in", ["OrderPlaced", "OrderApproved", "OrderSent", "OrderHold", "OrderProcessing"])
                 .orderBy("-placedDate")
@@ -1280,8 +1322,7 @@ function getStoreWorkSummary(p) {
     let recentOrders = []
     if (s.canOrders && storeIds.length) {
         const list = Array.from(
-            s
-                .own(find(ORDER))
+            withoutRecurringBases(s.own(find(ORDER)))
                 .condition("productStoreId", "in", storeIds)
                 .condition("statusId", "!=", "OrderOpen")
                 .orderBy("-placedDate")
@@ -1346,6 +1387,7 @@ const operations = {
     findStoreRequests,
     getStoreRequest,
     addStoreRequestNote,
+    addStoreOrderNote,
     findStoreDeliveries,
     getStoreWorkSummary,
     storeCallRecords

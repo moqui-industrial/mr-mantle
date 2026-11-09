@@ -204,7 +204,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="orderId" from="ec.resource.script(module).execute('update', context).orderId"/>
         </actions>
     </service>
-    <service verb="store" noun="PurchaseOrderItem" allow-remote="false">
+    <service verb="store" noun="PurchaseOrderItem" transaction="cache" allow-remote="false">
         <description>A draft purchase order's line. A new line names a product usable for buying (check#ProductUsable,
             usage Purchase; PRODUCT_NOT_USABLE with its reason) at the supplier's price from the resolver unless a price is
             given (PRICE_UNAVAILABLE when there is none the user may read); a pack is ordered as its pack product. A line

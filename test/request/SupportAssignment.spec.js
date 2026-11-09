@@ -92,6 +92,8 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        // Date-effective defaults and rules must exist before the scenarios advance into their November dates.
+        now("2026-11-02", "00:00")
         party(org, "Assignment Spec Org", "OrgInternal")
         party(otherOrg, "Assignment Spec Other Org", "OrgInternal")
         party(customer, "Assignment Spec Customer", "Customer", org)
@@ -137,6 +139,7 @@ spec({
     },
     setup() {
         ec.artifactExecution.disableAuthz()
+        now("2026-11-02", "00:00")
     },
     cleanup() {
         ec.user.setEffectiveTime(null)
@@ -357,6 +360,7 @@ feature("two intakes at once take two slots: the rule's cursor is locked with th
         const made = parallel(
             2,
             (thread, args) => {
+                ec.user.setEffectiveTime(args.fixtureTime)
                 login(args.admin)
                 ec.artifactExecution.disableAuthz()
                 return call(args.service, {
@@ -366,7 +370,8 @@ feature("two intakes at once take two slots: the rule's cursor is locked with th
                     requestName: "Parallel " + thread
                 }).requestId
             },
-            {admin: state.admin, service: S + "create#Case", org, customer, queue: parallelQueue},
+            {admin: state.admin, service: S + "create#Case", org, customer, queue: parallelQueue,
+                fixtureTime: chicago("2026-11-02", "00:00")},
             {transaction: false}
         )
         return {assignees: made.map(assigneeOf)}

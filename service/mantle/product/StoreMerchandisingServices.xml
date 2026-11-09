@@ -485,7 +485,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="reply" noun="Review" allow-remote="false">
         <description>The store's public reply to an approved review (plain text, up to 2,000 characters) at its expected
             revision, its author and time kept and audit-logged; withdraw=true removes it. Refused: a review not approved
-            (NOT_APPROVED), a stale revision (STALE_REVISION). COMMERCE_MERCHANDISE and the store's scope; advances the store's
+            (NOT_APPROVED), a stale revision (STALE_REVISION) or none given (REVISION_REQUIRED, F102). COMMERCE_MERCHANDISE and the store's scope; advances the store's
             site generations.</description>
         <in-parameters>
             <parameter name="productReviewId" required="true"/>
@@ -542,6 +542,17 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="toAddress" from="out.toAddress"/>
             <set field="bodyParameters" from="out.bodyParameters"/>
             <set field="suppress" from="out.suppress"/>
+        </actions>
+    </service>
+    <!-- Commerce P15 (F105): a removed review image's file, deleted after the removal commits -->
+    <service verb="remove" noun="ReviewImageFile" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, registered on commit by submit#Review's photo removal: deletes the file at contentLocation when it
+            is under the store reviews' content root and no review image names it any more (a rolled-back removal never runs
+            this, so its file stays).</description>
+        <in-parameters><parameter name="contentLocation" required="true"/></in-parameters>
+        <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="removed" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreReviews.js').execute('removeImageFile', context).removed"/>
         </actions>
     </service>
 </services>

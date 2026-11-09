@@ -803,7 +803,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <service verb="repost" noun="Invoice">
+    <service verb="repost" noun="Invoice" transaction="cache">
         <description>For use when Invoice and its Accounting Transactions get out of whack.
             Delete existing and post a new one (possibly multiple if it has adjustment items).</description>
         <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>

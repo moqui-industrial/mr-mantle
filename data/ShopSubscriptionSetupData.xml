@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Shop's prepaid and recurring access (mr-pass impl-shop P7): the renewal notices' delivery ledger source (its
+    parameters queued with it, no secret among them; their store email types PsetPaymentRetry and PsetSubscriptionRenewal
+    are ProductStoreEmailType seed already), and the job that advances renewal occurrences in flight and due retries, each
+    in its own transaction (create_RecurringOrders hands Shop's bases to the coordinator). -->
+<entity-facade-xml type="seed-initial">
+    <moqui.basic.Enumeration enumId="MdsrcShopRenewals" description="Shop subscription renewal notice" sequenceNum="2"
+            enumTypeId="MessageDeliverySource"/>
+
+    <moqui.service.job.ServiceJob jobName="run_StoreRenewals" description="Advance Shop subscription renewals"
+            serviceName="mantle.product.ShopSubscriptionServices.run#Renewals" cronExpression="0 15 * * * ?"
+            paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

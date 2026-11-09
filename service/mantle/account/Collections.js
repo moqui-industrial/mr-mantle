@@ -374,10 +374,42 @@ function invoiceRows(invoices, asOf) {
             }
         })
 }
+// The invoices of a Shop renewal still in retry (mr-pass impl-shop P7; review X5, R-SC-03): its occurrence's payment is
+// being retried or waits for the customer, whose payment-attempt notices are the reminders then, so Dunning never sends a
+// second one; once the retries end (or the renewal is closed) the invoice is Dunning's again. Through the occurrence's
+// invoice or its order's billing.
+const RENEWAL_RETRY_STATES = ["SrsCharging", "SrsRetry", "SrsActionRequired"]
+function renewalsInRetry(invoiceIds) {
+    const ids = [...new Set(invoiceIds)]
+    const out = new Set()
+    if (!ids.length) return out
+    const OCCURRENCE = "mantle.product.subscription.StoreRenewalOccurrence"
+    for (let index = 0; index < ids.length; index += 500) {
+        const chunk = ids.slice(index, index + 500)
+        for (const row of find(OCCURRENCE)
+            .condition("invoiceId", "in", chunk)
+            .condition("stateEnumId", "in", RENEWAL_RETRY_STATES)
+            .list())
+            out.add(row.invoiceId)
+        const orderOf = new Map()
+        for (const row of find("mantle.order.OrderItemBilling").condition("invoiceId", "in", chunk).list())
+            if (row.orderId) orderOf.set(row.invoiceId, row.orderId)
+        const orderIds = [...new Set(orderOf.values())]
+        if (!orderIds.length) continue
+        const retrying = new Set(
+            Array.from(
+                find(OCCURRENCE).condition("orderId", "in", orderIds).condition("stateEnumId", "in", RENEWAL_RETRY_STATES).list()
+            ).map(row => row.orderId)
+        )
+        for (const [invoiceId, orderId] of orderOf) if (retrying.has(orderId)) out.add(invoiceId)
+    }
+    return out
+}
 // Preview a reminder run as of a day (default today): for each customer and currency with overdue invoices, the level of
 // its most overdue invoice that is not disputed, and a notice of its overdue invoices; left out, with the reason: disputed
 // invoices (unless the level includes them), a customer whose unapplied payments and credits cover what is overdue, one
-// with an open promise, and a notice of the same level sent within its cadence. Stores the run and its notices.
+// with an open promise, a notice of the same level sent within its cadence, and the invoice of a Shop renewal still in
+// retry (renewalsInRetry). Stores the run and its notices.
 function previewDunning(p) {
     const organizationPartyId = lib.organization(p.organizationPartyId, "RECEIVABLE_EDIT")
     const asOf = dayText(p.asOfDate) || today()
@@ -424,10 +456,14 @@ function previewDunning(p) {
               find(PROMISE, {organizationPartyId, statusId: "CprOpen"}).condition("customerPartyId", "in", customerIds).list()
           ).filter(row => row.state === "open")
         : []
+    const inRetry = renewalsInRetry(invoices.map(row => row.invoiceId))
     for (const [key, list] of groups) {
         const [customerPartyId, currencyUomId] = key.split("|")
-        const lines = invoiceRows(list, asOf)
-        if (!lines.length) continue
+        const overdueLines = invoiceRows(list, asOf)
+        if (!overdueLines.length) continue
+        // a renewal in retry is left out (Shop's attempt notices remind the customer until its retries end)
+        const renewalLeftOut = overdueLines.filter(line => inRetry.has(line.invoiceId))
+        const lines = overdueLines.filter(line => !inRetry.has(line.invoiceId))
         const base = {customerPartyId, currencyUomId}
         const undisputed = lines.filter(line => !line.disputed)
         const days = undisputed.length ? Math.max(...undisputed.map(line => line.daysOverdue)) : 0
@@ -448,6 +484,7 @@ function previewDunning(p) {
                 })
             )
         }
+        if (renewalLeftOut.length) excludedRow("RENEWAL_RETRY", renewalLeftOut)
         if (disputedLeftOut.length) excludedRow("DISPUTED", disputedLeftOut)
         if (!level || !included.length) continue
         const overdueAmount = included.reduce((sum, line) => sum.add(line.overdueAmount), toDecimal(0))
@@ -718,7 +755,8 @@ function getRun(p) {
         COVERED: "Covered by payments or credits",
         PROMISED: "Promised to pay",
         RECENT_NOTICE: "Reminded recently",
-        PAID: "Paid since the preview"
+        PAID: "Paid since the preview",
+        RENEWAL_RETRY: "Renewal payment being retried"
     }
     return {
         run: Object.assign(lib.display(run), {

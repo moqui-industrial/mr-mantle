@@ -238,6 +238,85 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <!-- A shared book's manager (impl-admin P6, F31): when the user who alone manages a shared contact book leaves, a new manager
+        takes their place, through the owned-resource contract of org.moqui.admin.IdentityServices. A personal book and its
+        personal contacts stay with their user (design-admin §4.1: disablement never authorizes deleting or handing over personal
+        contacts; design-drawers-commons §21). -->
+    <service verb="find" noun="OwnedContactBooks" allow-remote="false">
+        <description>The shared contact books userId alone manages (a direct CbpManage share and no other current manage share),
+            each {resourceId (the contactBookId), resourceName, resourceKind contactBook, transferable, note (its member count)};
+            names only, never contacts. The caller's own, or another user's with CONTACT_BOOK_OWNER_CHANGE.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <actions><script><![CDATA[
+            resourceList = []
+            if (!ec.user.userId) { ec.message.addError('Sign in to see owned contact books'); return }
+            if (userId !== ec.user.userId && !ec.user.hasPermission('CONTACT_BOOK_OWNER_CHANGE')) {
+                ec.message.addError('CONTACT_BOOK_OWNER_CHANGE is required for another user\'s contact books'); return }
+            const cf = ec.entity.conditionFactory
+            for (const share of ec.entity.find('mantle.party.contact.ContactBookShare').condition('userId', userId)
+                    .condition('permissionEnumId', 'CbpManage').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list()) {
+                const book = ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', share.contactBookId).disableAuthz().one()
+                if (book == null || book.visibilityEnumId !== 'CbvShared' || resourceList.some((item) => item.resourceId === book.contactBookId)) continue
+                const others = Array.from(ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', book.contactBookId)
+                        .condition('permissionEnumId', 'CbpManage').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list())
+                        .filter((other) => other.userId !== userId)
+                if (others.length) continue
+                const members = ec.entity.find('mantle.party.contact.ContactBookParty').condition('contactBookId', book.contactBookId).disableAuthz().count()
+                resourceList.push({resourceId: book.contactBookId, resourceName: book.contactBookName || book.contactBookId,
+                    resourceKind: 'contactBook', transferable: true, note: members + ' contact(s)'})
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="transfer" noun="ContactBookOwner" allow-remote="false">
+        <description>A shared contact book's management handed from fromUserId to toUserId: toUserId gets a CbpManage
+            share and fromUserId's direct shares end. By fromUserId, or with CONTACT_BOOK_OWNER_CHANGE. The new manager must
+            be an enabled account, not ended, not an external user (EXTERNAL_USER), and for a book an organization owns work
+            for that organization (a current agent, employee or member relationship). A personal book is refused: it and its
+            personal contacts stay with their user. Logged with the reason.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <in-parameters><parameter name="contactBookId" required="true"/></in-parameters>
+        <actions><script><![CDATA[
+            transferred = false
+            const me = ec.user.userId
+            if (!me) { ec.message.addError('Sign in to change a contact book\'s manager'); return }
+            if (fromUserId !== me && !ec.user.hasPermission('CONTACT_BOOK_OWNER_CHANGE')) {
+                ec.message.addError('CONTACT_BOOK_OWNER_CHANGE is required to change another user\'s contact book'); return }
+            const cf = ec.entity.conditionFactory
+            const book = ec.entity.find('mantle.party.contact.ContactBook').condition('contactBookId', contactBookId).disableAuthz().one()
+            if (book == null) { ec.message.addError(`Contact book ${contactBookId} not found`); return }
+            const label = book.contactBookName || contactBookId
+            if (book.visibilityEnumId !== 'CbvShared') { ec.message.addError(`Contact book ${label} is personal: it and its contacts stay with their user`); return }
+            if (toUserId === fromUserId) { ec.message.addError('The new manager is the current one'); return }
+            const shares = Array.from(ec.entity.find('mantle.party.contact.ContactBookShare').condition('contactBookId', contactBookId)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list())
+            if (!shares.some((share) => share.userId === fromUserId && share.permissionEnumId === 'CbpManage')) {
+                ec.message.addError(`Contact book ${label} is not managed by ${fromUserId}`); return }
+            const to = ec.entity.find('moqui.security.UserAccount').condition('userId', toUserId).disableAuthz().one()
+            const now = Number(ec.user.nowTimestamp)
+            const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
+            if (to == null || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
+                ec.message.addError(`User ${toUserId} cannot manage a contact book: the account is not enabled`); return }
+            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+                    .disableAuthz().call()?.anyExternal !== false) {
+                ec.message.addError(`User ${toUserId} cannot manage a contact book: an external user`); return }
+            if (book.ownerPartyId && (!to.partyId || ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', to.partyId)
+                    .condition('toPartyId', book.ownerPartyId).condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']))
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().count() === 0)) {
+                ec.message.addError(`User ${toUserId} cannot manage ${label}: they do not work for its organization`); return }
+            for (const share of shares) if (share.userId === fromUserId) { share.set('thruDate', ec.user.nowTimestamp); share.update() }
+            const existing = shares.find((share) => share.userId === toUserId)
+            if (existing != null) { existing.set('permissionEnumId', 'CbpManage'); existing.set('thruDate', null); existing.update() }
+            else {
+                const share = ec.entity.makeValue('mantle.party.contact.ContactBookShare')
+                share.setSequencedIdPrimary()
+                share.setFields({contactBookId: contactBookId, userId: toUserId, permissionEnumId: 'CbpManage', fromDate: ec.user.nowTimestamp}, true, null, null)
+                share.create()
+            }
+            transferred = true
+            ec.logger.info(`Contact book ${contactBookId} manager ${fromUserId} -> ${toUserId} by ${ec.user.username}${reason ? ': ' + reason : ''}`)
+        ]]></script></actions>
+    </service>
+
     <service verb="share" noun="ContactBook">
         <description>Needs manage permission; a shared book only. Opens the book to a user or a user group; when that user
             or group already has a current share, its permission (and thruDate) change instead. The last manage share

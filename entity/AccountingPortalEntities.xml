@@ -75,6 +75,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="nextCheckDate" type="date-time"><description>When its worker looks it up next (bounded backoff).</description></field>
         <relationship type="one" related="mantle.account.payment.Payment"/>
         <relationship type="one" related="mantle.account.invoice.Invoice"/>
+        <!-- a checkout attempt's store, whose organization scopes Commerce's payment attempts dataset (BOSS impl-insights F30) -->
+        <relationship type="one-nofk" related="mantle.product.store.ProductStore" short-alias="productStore"/>
         <relationship type="one" title="PaymentAttemptPurpose" related="moqui.basic.Enumeration">
             <key-map field-name="purposeEnumId" related="enumId"/></relationship>
         <index name="PORTAL_PAY_INVOICE"><index-field name="invoiceId"/></index>

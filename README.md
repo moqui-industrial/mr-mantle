@@ -35,6 +35,9 @@ The two suites are described in `docs/Build-Test.md` (The two suites) in the mr-
 A database made before an entity's key changed needs its table rebuilt once: see [docs/Upgrading.md](docs/Upgrading.md)
 (ProductStoreProduct, dated store publication; PublicSitePage, pages by mount and route).
 
+Fixes made here to behaviour carried over from mantle-udm and mantle-usl, candidates to take upstream, are in
+[docs/Upstream-Fixes.md](docs/Upstream-Fixes.md).
+
 For details about Mantle see its page on moqui.org:
 
 <http://www.moqui.org/mantle.html>
@@ -43,3 +46,9 @@ There is an overview of the Universal Data Model and of Mantle Business Artifact
 Download the PDF here:
 
 <http://www.moqui.org/MakingAppsWithMoqui-1.0.pdf>
+
+## License and Contributing
+
+[CC0 1.0 Universal with a Grant of Patent License](LICENSE.md). To contribute code, sign
+[AUTHORS.md](AUTHORS.md) in a commit from the account that submits the pull request; its Contributing
+section has the details.

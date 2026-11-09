@@ -42,7 +42,7 @@
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").execute("getDownloadFile", input)</script>
         </actions>
     </service>
-    <service verb="fulfill" noun="ShopOrder" allow-remote="false">
+    <service verb="fulfill" noun="ShopOrder" allow-remote="false" operation="shop.fulfillment.order" operation-ref="orderId">
         <description>The ShopOrderApprovedFulfillDigital SECA and the job: an approved Shop order's plain digital lines
             (StoreItemFulfillment, each step in a transaction of its own and resumable by its marker): the payment captured,
             the lines invoiced (create#FulfillmentInvoice), the invoice finalized (its receipt) and paid, the part checked
@@ -53,9 +53,11 @@
             <set field="fulfilled" from="ec.resource.script('component://mr-mantle/service/mantle/product/ShopFulfillment.js').execute('fulfillOrder', context).fulfilled"/>
         </actions>
     </service>
-    <service verb="fulfill" noun="StoreItems" allow-remote="false">
-        <description>The fulfill_StoreItems job: the Shop orders whose digital lines are not done and are due a try, each on
-            its own; one that fails is named and the rest go on.</description>
+    <service verb="fulfill" noun="StoreItems" allow-remote="false" operation="shop.fulfillment.run">
+        <description>The fulfill_StoreItems job: the Shop orders whose digital lines are not done and are due a try, and
+            (Shop P8, impl-shop F96) the approved Shop orders completed in the last days with a line Shop fulfills and no
+            fulfillment row (the approval SECA never ran), and (Shop P9, impl-shop F126) the renewal orders made in those days with no
+            row, each on its own; one that fails is named and the rest go on.</description>
         <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
         <out-parameters>
             <parameter name="orders" type="Integer"/>
@@ -69,7 +71,7 @@
             <set field="failed" from="out.failed"/>
         </actions>
     </service>
-    <service verb="run" noun="FulfillmentStep" allow-remote="false">
+    <service verb="run" noun="FulfillmentStep" transaction="cache" allow-remote="false" operation="shop.fulfillment.step">
         <description>One fulfillment step of an order in its own transaction (called by fulfill#ShopOrder).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>

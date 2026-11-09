@@ -182,7 +182,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.resource.script(runs).execute('claim', context)</script>
         </actions>
     </service>
-    <service verb="pay" noun="RunSupplier" allow-remote="false">
+    <service verb="pay" noun="RunSupplier" transaction="cache" allow-remote="false">
         <description>Pay one supplier's bills of an executing run with one payment (execute#Run calls it in a new
             transaction for each supplier). Needs PAYMENT_EDIT.</description>
         <implements service="mantle.account.PaymentRunServices.define#RunParameters"/>
@@ -193,7 +193,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.resource.script(runs).execute('paySupplier', context)</script>
         </actions>
     </service>
-    <service verb="apply" noun="RunPayment" allow-remote="false">
+    <service verb="apply" noun="RunPayment" transaction="cache" allow-remote="false">
         <description>Apply a delivered ACH payment of the run to its bills, each bill's discount first. Needs
             PAYMENT_EDIT.</description>
         <implements service="mantle.account.PaymentRunServices.define#RunParameters"/>

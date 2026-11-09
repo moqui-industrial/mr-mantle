@@ -275,6 +275,101 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <!-- A calendar's owner (impl-admin P6, F31): when its owner leaves, a shared or resource calendar the owner's person owns moves to
+        a new owner, and a calendar an organization owns gets a new manager where the leaving user was its only one, through the
+        owned-resource contract of org.moqui.admin.IdentityServices. A personal calendar stays with its user. -->
+    <service verb="find" noun="OwnedCalendars" allow-remote="false">
+        <description>What userId owns of calendars: the shared and resource calendars their party owns, and the calendars an
+            organization owns that they alone manage (a direct CalpManage share and no other current manage share), each
+            {resourceId (the calendarId), resourceName, resourceKind calendar, transferable, note}; names only, never events.
+            The caller's own, or another user's with CALENDAR_OWNER_CHANGE.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <actions><script><![CDATA[
+            resourceList = []
+            if (!ec.user.userId) { ec.message.addError('Sign in to see owned calendars'); return }
+            if (userId !== ec.user.userId && !ec.user.hasPermission('CALENDAR_OWNER_CHANGE')) {
+                ec.message.addError('CALENDAR_OWNER_CHANGE is required for another user\'s calendars'); return }
+            const cf = ec.entity.conditionFactory
+            const partyId = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).disableAuthz().one()?.partyId
+            if (partyId) for (const row of ec.entity.find('mantle.work.calendar.Calendar').condition('ownerPartyId', partyId)
+                    .condition(cf.makeCondition('calendarKindEnumId', 'in', ['CalkShared', 'CalkResource'])).orderBy('calendarName').disableAuthz().list())
+                resourceList.push({resourceId: row.calendarId, resourceName: row.calendarName || row.calendarId, resourceKind: 'calendar',
+                    transferable: true, note: row.calendarKindEnumId === 'CalkResource' ? 'Resource calendar' : 'Shared calendar'})
+            const managed = Array.from(ec.entity.find('mantle.work.calendar.CalendarShare').condition('userId', userId)
+                    .condition('permissionEnumId', 'CalpManage').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list())
+            for (const share of managed) {
+                const row = ec.entity.find('mantle.work.calendar.Calendar').condition('calendarId', share.calendarId).disableAuthz().one()
+                if (row == null || row.ownerPartyId === partyId || resourceList.some((item) => item.resourceId === row.calendarId)) continue
+                const others = Array.from(ec.entity.find('mantle.work.calendar.CalendarShare').condition('calendarId', row.calendarId)
+                        .condition('permissionEnumId', 'CalpManage').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list())
+                        .filter((other) => other.userId !== userId)
+                if (others.length) continue
+                resourceList.push({resourceId: row.calendarId, resourceName: row.calendarName || row.calendarId, resourceKind: 'calendar',
+                    transferable: true, note: 'Only manager'})
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="transfer" noun="CalendarOwner" allow-remote="false">
+        <description>A calendar handed from fromUserId to toUserId: a shared or resource calendar fromUserId's party
+            owns gets toUserId's party as its owner; a calendar an organization owns that fromUserId manages (a direct
+            CalpManage share) gets toUserId as its manager in fromUserId's place (fromUserId's direct shares end). By
+            fromUserId, or with CALENDAR_OWNER_CHANGE. The new owner must be an enabled account with a party, not ended, not
+            an external user (EXTERNAL_USER), and for an organization's calendar work for that organization (a current
+            agent, employee or member relationship). A personal calendar stays with its user. Logged with the
+            reason.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
+        <actions><script><![CDATA[
+            transferred = false
+            const me = ec.user.userId
+            if (!me) { ec.message.addError('Sign in to change a calendar\'s owner'); return }
+            if (fromUserId !== me && !ec.user.hasPermission('CALENDAR_OWNER_CHANGE')) {
+                ec.message.addError('CALENDAR_OWNER_CHANGE is required to change another user\'s calendar'); return }
+            const cf = ec.entity.conditionFactory
+            const account = (userId) => ec.entity.find('moqui.security.UserAccount').condition('userId', userId).disableAuthz().one()
+            const from = account(fromUserId)
+            const to = account(toUserId)
+            const row = ec.entity.find('mantle.work.calendar.Calendar').condition('calendarId', calendarId).disableAuthz().one()
+            if (row == null || from == null) { ec.message.addError(`Calendar ${calendarId} not found`); return }
+            if (toUserId === fromUserId) { ec.message.addError('The new owner is the current owner'); return }
+            const now = Number(ec.user.nowTimestamp)
+            const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
+            if (to == null || !to.partyId || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
+                ec.message.addError(`User ${toUserId} cannot own a calendar: the account is not enabled or has no party`); return }
+            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+                    .disableAuthz().call()?.anyExternal !== false) {
+                ec.message.addError(`User ${toUserId} cannot own a calendar: an external user`); return }
+            const label = row.calendarName || calendarId
+            if (from.partyId && row.ownerPartyId === from.partyId) {
+                if (row.calendarKindEnumId === 'CalkPersonal' || row.calendarKindEnumId === 'CalkSubscription') {
+                    ec.message.addError(`Calendar ${label} is personal: it stays with its user`); return }
+                row.set('ownerPartyId', to.partyId)
+                row.update()
+            } else {
+                const shares = Array.from(ec.entity.find('mantle.work.calendar.CalendarShare').condition('calendarId', calendarId)
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().list())
+                if (!shares.some((share) => share.userId === fromUserId && share.permissionEnumId === 'CalpManage')) {
+                    ec.message.addError(`Calendar ${label} is not owned or managed by ${fromUserId}`); return }
+                const organization = ec.entity.find('mantle.party.Organization').condition('partyId', row.ownerPartyId).disableAuthz().one()
+                if (organization != null && ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', to.partyId)
+                        .condition('toPartyId', row.ownerPartyId).condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().count() === 0) {
+                    ec.message.addError(`User ${toUserId} cannot manage ${label}: they do not work for ${organization.organizationName || row.ownerPartyId}`); return }
+                for (const share of shares) if (share.userId === fromUserId) { share.set('thruDate', ec.user.nowTimestamp); share.update() }
+                const existing = shares.find((share) => share.userId === toUserId)
+                if (existing != null) { existing.set('permissionEnumId', 'CalpManage'); existing.set('thruDate', null); existing.update() }
+                else {
+                    const share = ec.entity.makeValue('mantle.work.calendar.CalendarShare')
+                    share.setSequencedIdPrimary()
+                    share.setFields({calendarId: calendarId, userId: toUserId, permissionEnumId: 'CalpManage', fromDate: ec.user.nowTimestamp}, true, null, null)
+                    share.create()
+                }
+            }
+            transferred = true
+            ec.logger.info(`Calendar ${calendarId} owner ${fromUserId} -> ${toUserId} by ${ec.user.username}${reason ? ': ' + reason : ''}`)
+        ]]></script></actions>
+    </service>
+
     <service verb="share" noun="Calendar">
         <description>
             Needs manage permission. Opens the calendar to a user, a user group or a party (a person, or an organization

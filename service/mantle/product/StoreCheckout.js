@@ -63,8 +63,10 @@ const gatewayCapabilities = {
     // Shop P6: a hosted test gateway also keeps a payer's card and sets one up on its hosted setup page (a test card)
     PgtTest: config => {
         const hosted = String(config.authorizeServiceName || "").includes("hostedPending")
+        // Shop P7: hostedPendingOrApprove charges a kept card off-session (approves a payment that names its method)
+        const offSession = String(config.authorizeServiceName || "").includes("hostedPendingOrApprove")
         return Object.assign(
-            {hostedCheckout: hosted, savedMethods: hosted, offSession: false},
+            {hostedCheckout: hosted, savedMethods: hosted, offSession},
             hosted
                 ? {
                       hostedProfileService: "mantle.account.PaymentTestServices.store#HostedPaymentProfile",
@@ -79,12 +81,15 @@ const gatewayCapabilities = {
     PgtAuthorizeNet: config => ({
         hostedCheckout: /Hosted#Payment$/.test(String(config.authorizeServiceName || "")),
         savedMethods: true,
-        offSession: false,
+        // Shop P7 (F14, F41): profile charges carry the stored-credential, merchant-initiated indicators
+        offSession: true,
         hostedFormService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedPaymentForm",
         hostedProfileService: "mantle.ext.account.gateway.AuthorizeNetServices.store#HostedPaymentProfile",
         // Shop P6 (F40): the hosted profile page for a card kept outside a checkout, and its profile read after it
         hostedSetupService: "mantle.ext.account.gateway.AuthorizeNetServices.get#HostedProfileForm",
-        setupSyncService: "mantle.ext.account.gateway.AuthorizeNetServices.sync#CustomerProfile"
+        setupSyncService: "mantle.ext.account.gateway.AuthorizeNetServices.sync#CustomerProfile",
+        // Shop P8 (impl-shop F95): an approved hosted payment's reference searched again for a later second approval
+        duplicateCheckService: "mantle.ext.account.gateway.AuthorizeNetServices.check#HostedDuplicates"
     }),
     PgtPayTrace: () => ({hostedCheckout: false, savedMethods: false, offSession: false})
 }
