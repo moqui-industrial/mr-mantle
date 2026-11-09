@@ -16,6 +16,37 @@ function invoiceDisplay(record) {
     } else out.invoiceDateValue = record.invoiceDate ? ec.l10n.format(record.invoiceDate, "yyyy-MM-dd") : null
     return out
 }
+// Calendar labels for invoices the caller already authorized. Keep their book days and a single issued portion's
+// immutable due day independent of the viewer's zone. Legacy stamps and multiple portions retain their existing
+// presentation; their calendar meaning cannot be reconstructed from one timestamp. Read schedules in batches.
+function invoiceCalendarDays(invoiceIds) {
+    const ids = Array.from(new Set(Array.from(invoiceIds || []).filter(Boolean)))
+    const out = {}
+    for (let offset = 0; offset < ids.length; offset += 1000) {
+        const part = ids.slice(offset, offset + 1000)
+        for (const invoice of find(invoiceEntity)
+            .condition("invoiceId", "in", part)
+            .selectField("invoiceId")
+            .selectField("accountingDate")
+            .list())
+            out[invoice.invoiceId] = {
+                invoiceDay: invoice.accountingDate ? policy.calendarDateText(invoice.accountingDate) : null,
+                dueDay: null
+            }
+        const portions = {}
+        for (const row of find("mantle.account.invoice.InvoiceDueSchedule")
+            .condition("invoiceId", "in", part)
+            .selectField("invoiceId")
+            .selectField("dueDate")
+            .list()) {
+            const entry = portions[row.invoiceId] || (portions[row.invoiceId] = {count: 0, day: null})
+            entry.count++
+            entry.day = row.dueDate ? policy.calendarDateText(row.dueDate) : null
+        }
+        for (const [id, entry] of Object.entries(portions)) if (out[id] && entry.count === 1) out[id].dueDay = entry.day
+    }
+    return out
+}
 function requirePermission(permission) {
     if (!has(permission)) denied("PERMISSION_DENIED", permission + " authority is required")
 }
@@ -89,7 +120,9 @@ function projectEditor(p, memo = {}) {
     const linked = rows("mantle.work.effort.WorkEffortInvoice", {invoiceId: p.invoiceId})
     const projectIds = new Set(linked.map(row => rootOf(row.workEffortId)))
     for (const field of ["invoiceId", "vendorInvoiceId"]) {
-        const timeRows = find("mantle.work.time.TimeEntry", {[field]: p.invoiceId}).selectField("workEffortId").list()
+        const timeRows = find("mantle.work.time.TimeEntry", {[field]: p.invoiceId})
+            .selectField("workEffortId")
+            .list()
         for (const row of Array.from(timeRows)) projectIds.add(rootOf(row.workEffortId))
     }
     projectIds.delete(null)
@@ -283,6 +316,7 @@ function escapeHtml(value) {
     map,
     display,
     invoiceDisplay,
+    invoiceCalendarDays,
     hash,
     has,
     denied,
