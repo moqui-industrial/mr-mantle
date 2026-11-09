@@ -913,9 +913,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="payment.amountUomId != invoice.currencyUomId">
                 <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment has a different currency (${payment.amountUomId}) than invoice (${invoice.currencyUomId})"/></if>
             <if condition="payment.fromPartyId != invoice.toPartyId">
-                <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is from a different party (${payment.fromPartyId}) than invoice is to (${invoice.toPartyId})"/></if>
+                <return type="danger" message="Cannot apply payment ${payment.paymentId} to invoice ${invoiceId}, payment is from a different party (${payment.fromPartyId}) than invoice is to (${invoice.toPartyId})"/></if>
             <if condition="payment.toPartyId != invoice.fromPartyId">
-                <return type="danger" message="Cannot apply payment ${paymentId} to invoice ${invoiceId}, payment is to a different party (${payment.toPartyId}) than invoice is from (${invoice.fromPartyId})"/></if>
+                <return type="danger" message="Cannot apply payment ${payment.paymentId} to invoice ${invoiceId}, payment is to a different party (${payment.toPartyId}) than invoice is from (${invoice.fromPartyId})"/></if>
 
             <if condition="!(['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId))">
                 <return type="warning" message="Not applying payment ${paymentId} in status ${payment.statusId} to invoice ${invoiceId}, payment must be Delivered or Confirmed to be applied"/>

@@ -688,7 +688,7 @@ along with this software (see the LICENSE.md file). If not, see
             }
             if (!workEffortId) { ec.message.addError('Choose the project or queue of the form'); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
-            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(`Project ${workEffortId} not found`); return }
+            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
             token = ec.user.randomString(32).replace(/[^A-Za-z0-9_-]/g, 'x')
             ec.service.sync().name('mantle.work.ProjectServices.store#ProjectSetting').parameters({workEffortId: workEffortId,
                 settingTypeEnumId: 'WstIntakeToken', settingValue: token}).call()
@@ -1616,7 +1616,7 @@ along with this software (see the LICENSE.md file). If not, see
             // a purchase RFQ is Purchasing's, never a project's (impl-purchasing P11, R-PUR-13)
             if (request.requestTypeEnumId === 'RqtPurchaseRfq') { ec.message.addError('REQUEST_TYPE_FIXED: ' + ec.l10n.localize('An RFQ is not converted to a project')); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
-            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(`Project ${workEffortId} not found`); return }
+            if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
             ec.service.sync().name('mantle.request.RequestServices.update#Request').parameters({requestId: requestId, rootWorkEffortId: workEffortId,
                 statusId: 'ReqInProgress'}).call()
         ]]></script></actions>

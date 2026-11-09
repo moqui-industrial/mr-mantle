@@ -842,7 +842,10 @@ along with this software (see the LICENSE.md file). If not, see
                     </iterate>
 
                     <if condition="toDecimal(quantityToPick).compare(0) &gt; 0">
-                        <message type="danger">Only ${toDecimal(quantity).subtract(quantityToPick)} found to pick out of the ${quantity} requested, ${quantityToPick} should be returned to the shelf</message>
+                        <set field="foundQty" from="toDecimal(quantity).subtract(quantityToPick)"/>
+                        <set field="requestedQty" from="quantity"/>
+                        <set field="returnQty" from="quantityToPick"/>
+                        <message type="danger">Only ${foundQty} found to pick out of the ${requestedQty} requested, ${returnQty} should be returned to the shelf</message>
                     </if>
                 </else></if>
             </else></if>
@@ -1001,7 +1004,10 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <if condition="insufficientQtyWarn &amp;&amp; quantityPicked.compare(quantity) &lt; 0">
-                <message type="danger">Only ${quantityPicked} found to pick out of the ${quantity} requested, ${toDecimal(quantity).subtract(quantityPicked)} should be returned to the shelf</message>
+                <set field="foundQty" from="quantityPicked"/>
+                <set field="requestedQty" from="quantity"/>
+                <set field="returnQty" from="toDecimal(quantity).subtract(quantityPicked)"/>
+                <message type="danger">Only ${foundQty} found to pick out of the ${requestedQty} requested, ${returnQty} should be returned to the shelf</message>
             </if>
         </actions>
     </service>
@@ -2451,7 +2457,7 @@ along with this software (see the LICENSE.md file). If not, see
                                 toAddresses:toAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.shipment.ShipmentEmailMessage")
                             .parameter("shipmentId", shipmentId).parameter("emailMessageId", sendOut.emailMessageId).disableAuthz().call() }</script>
-                    <message>Email sent to ${toAddresses}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
+                    <set field="sentTo" from="toAddresses"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                 </iterate>
             </if>
         </actions>

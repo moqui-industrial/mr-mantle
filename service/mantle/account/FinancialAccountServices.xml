@@ -453,7 +453,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="postBalance" from="toDecimal(totalsOut.actualBalance)"/>
             <set field="differAmount" from="postBalance.subtract(preBalance)"/>
             <if condition="!differAmount.eq(amount)">
-                <return error="true" message="Error withdrawing from financial account ${ec.resource.expand('FinancialAccountNameTemplate','',financialAccount)}, pre balance ${preBalance} and post balance ${postBalance} differ by ${differAmount} and not by transaction amount ${amount}"/></if>
+                <set field="withdrawAmount" from="amount"/>
+                <return error="true" message="Error withdrawing from financial account ${ec.resource.expand('FinancialAccountNameTemplate','',financialAccount)}, pre balance ${preBalance} and post balance ${postBalance} differ by ${differAmount} and not by transaction amount ${withdrawAmount}"/></if>
 
             <set field="responseCode" value="success"/>
             <set field="responseMessage" value="Withdrew ${ec.l10n.format(amount, '0.00')} from account ${ec.resource.expand('FinancialAccountNameTemplate','',financialAccount)}"/>
@@ -513,7 +514,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.account.financial.FinancialAccountTrans" value-field="faTrans" for-update="true"/>
             <if condition="faTrans.reversedByTransId">
-                <return error="true" message="Not reversing transaction ${finAccountTransId}, already reversed by transaction ${faTrans.reversedByTransId}"/></if>
+                <set field="reversedTransId" from="finAccountTransId"/>
+                <set field="reversedByTransId" from="faTrans.reversedByTransId"/>
+                <return error="true" message="Not reversing transaction ${reversedTransId}, already reversed by transaction ${reversedByTransId}"/></if>
 
             <!-- do a for-update query to lock the FinancialAccount record -->
             <set field="finAccountId" from="faTrans.finAccountId"/>
@@ -542,7 +545,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="postBalance" from="toDecimal(totalsOut.actualBalance)"/>
             <set field="differAmount" from="postBalance.subtract(preBalance)"/>
             <if condition="!differAmount.eq(reverseMap.amount)">
-                <return error="true" message="Error withdrawing from financial account ${ec.resource.expand('FinancialAccountNameTemplate','',financialAccount)}, pre balance ${preBalance} and post balance ${postBalance} differ by ${differAmount} and not by transaction amount ${reverseMap.amount}"/></if>
+                <set field="withdrawAmount" from="reverseMap.amount"/>
+                <return error="true" message="Error withdrawing from financial account ${ec.resource.expand('FinancialAccountNameTemplate','',financialAccount)}, pre balance ${preBalance} and post balance ${postBalance} differ by ${differAmount} and not by transaction amount ${withdrawAmount}"/></if>
 
             <!-- set the out value -->
             <set field="finAccountTransId" from="reverseTransId"/>
