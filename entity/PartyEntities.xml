@@ -897,6 +897,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <mantle.party.PartySettingType partySettingTypeId="OrgTemplateInvoicePrint" description="Template Location Invoice Print">
                 <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="OrgTemplateProjectInvoicePrint" description="Trusted Project Invoice Print Screen">
+                <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
             <mantle.party.PartySettingType partySettingTypeId="OrgTemplateOrderPrint" description="Template Location Order Print">
                 <roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
 

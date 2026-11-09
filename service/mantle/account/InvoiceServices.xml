@@ -3854,11 +3854,13 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The invoice or credit memo as issued, rendered by a print template over get#InvoicePrintInfo: the
             template a store or party setting names (TemplateInvoicePrint) when it is an html.fancy template, else Mantle's
             template/account/Invoice.print.html.fancy. With asPdf the PDF is stored and its location returned. Needs a read
-            of the invoice.</description>
+            of the invoice. projectBilling instead requires its side's editor and a visible linked project, for a
+            project's checked delivery wrapper; it grants no general invoice read authority.</description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
             <parameter name="organizationPartyId"/>
             <parameter name="asPdf" type="Boolean" default="false"/>
+            <parameter name="projectBilling" type="Boolean" default="false"/>
             <parameter name="templateLocation"><description>An html.fancy template in place of the one the settings
                 name.</description></parameter>
         </in-parameters>
@@ -3875,7 +3877,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="workflow" value="component://mr-mantle/service/mantle/account/InvoiceWorkflow.js"/>
             <set field="scope" from="ec.resource.script(workflow).execute('scope',
-                {invoiceId:invoiceId, organizationPartyId:organizationPartyId, version:true})"/>
+                {invoiceId:invoiceId, organizationPartyId:organizationPartyId, need:projectBilling ? 'projectRead' : 'read', version:true})"/>
+            <if condition="projectBilling &amp;&amp; templateLocation">
+                <return error="true" message="PROJECT_INVOICE_PRINT_INVALID: Project output uses its configured invoice template"/>
+            </if>
             <service-call name="mantle.account.InvoiceServices.get#InvoicePrintInfo" in-map="{invoiceId:invoiceId}"
                     out-map="printInfo" disable-authz="true"/>
             <set field="defaultTemplate" value="component://mr-mantle/template/account/Invoice.print.html.fancy"/>
@@ -3964,6 +3969,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="printLocation"><description>The print to send in place of get#InvoiceOutput's: a screen
                 (.xml), rendered as html-print with invoiceId and organizationPartyId, or an html.fancy template, rendered
                 over get#InvoicePrintInfo as get#InvoiceOutput renders its own. A location, never HTML.</description></parameter>
+            <parameter name="projectBilling" type="Boolean" default="false"><description>Use project-scoped output
+                authority: the invoice's side editor must see a linked project. A custom print screen must match
+                OrgTemplateProjectInvoicePrint. Rechecked before replay or sending.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="invoiceId"/>
@@ -3981,6 +3989,16 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="workflow" value="component://mr-mantle/service/mantle/account/InvoiceWorkflow.js"/>
             <set field="scope" from="ec.resource.script(workflow).execute('scope', {invoiceId:invoiceId,
                 organizationPartyId:organizationPartyId, need:'write', version:true})"/>
+            <if condition="projectBilling"><script>ec.resource.script(workflow).execute('scope', {invoiceId:invoiceId,
+                organizationPartyId:scope.organizationPartyId, need:'projectRead'})</script></if>
+            <if condition="projectBilling &amp;&amp; printLocation">
+                <service-call name="mantle.party.PartyServices.get#PartySettingValue" out-map="projectPrint"
+                        in-map="{partyId:scope.organizationPartyId, partySettingTypeId:'OrgTemplateProjectInvoicePrint'}"
+                        disable-authz="true"/>
+                <if condition="!String(printLocation).endsWith('.xml') || printLocation != projectPrint.settingValue">
+                    <return error="true" message="PROJECT_INVOICE_PRINT_INVALID: Choose the configured project invoice print screen"/>
+                </if>
+            </if>
             <if condition="!scope.receivable">
                 <return error="true" message="INVOICE_DIRECTION_INVALID: Only a customer invoice is sent here"/></if>
             <set field="draftStatuses" from="['InvoiceInProcess', 'InvoiceIncoming', 'InvoiceReceived']"/>
@@ -4007,7 +4025,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="request" from="{invoiceId:invoiceId, recipients:recipientList, note:note || null, subject:subject || null,
                 emailTemplateId:emailTemplateId, printLocation:printLocation || null,
                 attachmentContentIdList:Array.from(attachmentContentIdList ?? []).map(String).sort(),
-                attachmentVersions:attachmentVersions ?? {}}"/>
+                attachmentVersions:attachmentVersions ?? {}, ...(projectBilling ? {projectBilling:true} : {})}"/>
             <set field="replay" from="ec.resource.script(workflow).execute('replay', {operationKey:operationKey,
                 operationType:'InvoiceSend', organizationPartyId:scope.organizationPartyId, request:request})"/>
             <if condition="replay.previous">
@@ -4042,7 +4060,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="printScreen" from="String(printLocation || '').endsWith('.xml')"/>
             <service-call name="mantle.account.InvoiceServices.get#InvoiceOutput" out-map="output" disable-authz="true"
                     in-map="{invoiceId:invoiceId, organizationPartyId:scope.organizationPartyId,
-                        templateLocation:(printLocation &amp;&amp; !printScreen ? printLocation : null)}"/>
+                        templateLocation:(printLocation &amp;&amp; !printScreen ? printLocation : null), projectBilling:projectBilling}"/>
             <set field="printHtml" from="output.printHtml"/>
             <if condition="printScreen">
                 <set field="printHtml" from="ec.screen.render({rootScreen:printLocation, renderMode:'html-print',

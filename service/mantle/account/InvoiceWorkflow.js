@@ -54,8 +54,15 @@ function creditCap(record) {
 // with its party and status names and stored totals; version adds its sourceVersion, capabilities what the user may do.
 function scope(p) {
     const need = p.need || "read"
+    if (need === "projectRead" && !lib.projectEditor(p)) denied("PERMISSION_DENIED", "Project invoice view authority is required")
     const found =
-        need === "read" ? lib.readInvoice(p) : need === "approve" ? lib.invoice(p, "INVOICE_APPROVE", true) : lib.writeInvoice(p)
+        need === "read"
+            ? lib.readInvoice(p)
+            : need === "projectRead"
+              ? lib.invoice(p)
+              : need === "approve"
+                ? lib.invoice(p, "INVOICE_APPROVE", true)
+                : lib.writeInvoice(p)
     const record = found.record
     if (need === "draft") {
         requireDraft(found)
