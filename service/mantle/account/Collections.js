@@ -598,7 +598,7 @@ function sendDunning(p) {
                 sent =
                     ec.service
                         .sync()
-                        .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                        .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                         .parameters(prepared.email)
                         .disableAuthz()
                         .requireNewTransaction(true)

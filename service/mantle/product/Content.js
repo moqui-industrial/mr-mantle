@@ -348,7 +348,7 @@ function store(p, translation = false) {
         if (type?.enumTypeId !== c.enumType) throw new Error("Choose a valid catalog content type")
     }
     if (p.sourceDriveId || p.sourcePath) {
-        const source = call("org.moqui.impl.FileServices.get#ResourceInfo", {
+        const source = call("org.moqui.resource.FileServices.get#ResourceInfo", {
             driveId: p.sourceDriveId,
             path: p.sourcePath
         }).resource

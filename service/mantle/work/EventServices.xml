@@ -1294,7 +1294,7 @@ along with this software (see the LICENSE.md file). If not, see
                         // the REPLY names the replier only, not the other attendees
                         const ics = ec.factory.getTool('ICalendar').write({method: 'REPLY', attendee: fromAddress, events: maps})
                         const subject = `${responderName} ${wordsOf[String(response).toLowerCase()]}: ${event.workEffortName || workEffortId}`
-                        ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',
+                        ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',
                             toAddresses: organizerEmail, bodyParameters: {subject: subject, fromAddress: fromAddress, fromName: responderName},
                             body: `<html><body><p>${escape(subject)}</p>${message ? `<p>${escape(message)}</p>` : ''}</body></html>`,
                             bodyText: subject + (message ? `\n\n${message}` : ''),
@@ -1533,7 +1533,7 @@ along with this software (see the LICENSE.md file). If not, see
                             `When: ${whenText}`].concat(whereText ? [`Where: ${whereText}`] : [], message ? ['', String(message)] : [],
                             event.description && !removal ? ['', String(event.description)] : [])
                         const attachment = icsOf(toAddress)
-                        ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({
+                        ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({
                             emailTemplateId: 'MANTLE_CALENDAR_EMAIL', toAddresses: toAddress,
                             bodyParameters: {subject: subject, fromAddress: fromAddressOf(), fromName: organizerName},
                             body: '<html><body>' + lines.map((line) => line ? `<p>${escape(line)}</p>` : '').join('') + '</body></html>',
@@ -2199,7 +2199,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (toAddress && fromAddress) {
                     const subject = `Reminder: ${name}, ${whenText}`
                     const when = ec.l10n.format(String(startMs), 'EEE, MMM d, yyyy h:mm a z')
-                    ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',
+                    ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',
                         toAddresses: toAddress, bodyParameters: {subject: subject, fromAddress: fromAddress, fromName: 'Reminder'},
                         body: `<html><body><p>${String(subject).replace(/[<>&]/g, (ch) => ({'<': '&lt;', '>': '&gt;', '&': '&amp;'})[ch])}</p><p>${when}</p></body></html>`,
                         bodyText: `${subject}\n${when}`}).call()

@@ -6,7 +6,7 @@ function errorOf(name, params) {
     return null
 }
 const COMM = "mantle.party.CommunicationServices"
-const MAIL = "org.moqui.impl.EmailClientServices"
+const MAIL = "org.moqui.mail.EmailClientServices"
 const JOIN = "mantle.party.communication.CommunicationEventPartyLabel"
 const names = (list) => Array.from(list || []).map((label) => label.labelName)
 // a fresh pair each run, so a second run does not collide with the users of the first

@@ -600,7 +600,7 @@ weekHours = {}
         ]]></script></actions>
     </service>
 
-    <!-- the decision services of the AllocationRequest topic (org.moqui.impl.NotificationServices approve# and refuse#NotificationMessage) -->
+    <!-- the decision services of the AllocationRequest topic (org.moqui.ui.NotificationServices approve# and refuse#NotificationMessage) -->
     <service verb="approve" noun="AllocationNotice">
         <in-parameters>
             <parameter name="recordEntityName"/><parameter name="recordId" required="true"/>

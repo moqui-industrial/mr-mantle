@@ -265,7 +265,7 @@ function sendMail(row, token, baseUrl) {
         const out =
             ec.service
                 .sync()
-                .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                 .parameters({
                     emailTemplateId: TEMPLATE,
                     toAddresses: row.emailAddress,

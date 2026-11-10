@@ -513,7 +513,7 @@ function mail(v, scope, build) {
     const out = ec.service
         .sync()
         .throwOnError(true)
-        .name('org.moqui.impl.EmailServices.send#EmailTemplate')
+        .name('org.moqui.mail.EmailServices.send#EmailTemplate')
         .parameters({
             emailTemplateId: settings.templateId,
             toAddresses: ua.emailAddress,

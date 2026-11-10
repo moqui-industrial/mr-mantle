@@ -218,7 +218,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="suggest" noun="ArticleEdit">
         <description>Suggest edit (F15) by an agent who may not edit the page: a task on the article for its source's review team
             with what should change (NOTE_REQUIRED), linked to the case when given. An editor instead saves a draft version and
-            asks for its review (org.moqui.impl.WikiServices.request#WikiPageReview, Commons Knowledge's Request review). Needs
+            asks for its review (org.moqui.resource.WikiServices.request#WikiPageReview, Commons Knowledge's Request review). Needs
             SUPPORT_CASE_EDIT and a page of the user's organizations' sources the wiki lets them view
             (ARTICLE_UNAVAILABLE).</description>
         <in-parameters>

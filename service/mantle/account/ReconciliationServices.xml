@@ -795,7 +795,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
             <parameter name="statementText" allow-html="any"/>
-            <parameter name="statementFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="statementFile" type="FileItem"/>
             <parameter name="dateColumn"/>
             <parameter name="amountColumn"/>
             <parameter name="debitColumn"/>
@@ -843,7 +843,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentMethodId" required="true"/>
             <parameter name="formatEnumId" required="true"/>
             <parameter name="statementText" allow-html="any"/>
-            <parameter name="statementFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="statementFile" type="FileItem"/>
             <parameter name="fileName"/>
             <parameter name="dateColumn"/>
             <parameter name="amountColumn"/>

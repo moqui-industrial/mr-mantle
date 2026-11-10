@@ -31,7 +31,7 @@ along with this software (see the LICENSE.md file). If not, see
             owner, with or without a limit. A mailbox post (contactListId of a MAILBOX list) shows, with or without a
             limit, to those who may read the mailbox (its members; any user for a public mailbox that is not a help
             mailbox) and otherwise only to the parties it is from, to or a recipient of. A wiki page shows, with or without
-            a limit and for every user, by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiViewScope, the rule of
+            a limit and for every user, by the wiki's view rule (org.moqui.resource.WikiServices.get#WikiViewScope, the rule of
             get#WikiPageAccess that get#RecordLinkInfo asks): its space has no restrictView Y or the user has a
             WikiSpaceUser row with allowView or allowAdmin Y for it, and the page has no restrictView Y or the user has a
             WikiPageUser row with allowView Y for it; the ADMIN group sees every page.
@@ -167,11 +167,11 @@ along with this software (see the LICENSE.md file). If not, see
                 documents[documentId] = {name: document.documentName, primaryEntityName: document.primaryEntityName,
                         limit: trustedLimit, roles: {}, links: []}
             }
-            // a wiki page by the wiki's view rule (org.moqui.impl.WikiServices.get#WikiViewScope): a space the user may view,
+            // a wiki page by the wiki's view rule (org.moqui.resource.WikiServices.get#WikiViewScope): a space the user may view,
             // and not a restricted page hidden from the user; no space the user may view leaves the type out
             const wikiClauses = []
             if (documents.MantleWikiPage) {
-                const scope = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiViewScope').call() || {}
+                const scope = ec.service.sync().name('org.moqui.resource.WikiServices.get#WikiViewScope').call() || {}
                 const spaceIds = Array.from(scope.viewSpaceIdList || [])
                 const hiddenPageIds = Array.from(scope.hiddenPageIdList || [])
                 if (spaceIds.length === 0) delete documents.MantleWikiPage

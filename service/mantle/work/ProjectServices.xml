@@ -1701,7 +1701,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const canView = (repositoryId) => {
                     if (!(repositoryId in viewable)) {
                         ec.message.pushErrors()
-                        try { viewable[repositoryId] = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canView && !ec.message.hasError() }
+                        try { viewable[repositoryId] = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canView && !ec.message.hasError() }
                         catch (err) { viewable[repositoryId] = false }
                         finally { ec.message.clearErrors(); ec.message.popErrors() }
                     }
@@ -1793,7 +1793,7 @@ along with this software (see the LICENSE.md file). If not, see
             title the project and version and the date, a new version of it when it is there already, linked to the release by
             WikiPageWorkEffort; toChangelog, the section of the version at the top of CHANGELOG.md (made when missing; a section
             of the version already there is replaced) in repositoryId, a repository of the project (by default the first the user
-            may update), committed by the user (org.moqui.impl.GitServices.commit#GitFiles, which checks the right to update);
+            may update), committed by the user (org.moqui.git.GitServices.commit#GitFiles, which checks the right to update);
             notify, the topic ReleasePublished to the followers of the release and of the project (but the user).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -1861,7 +1861,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (space == null || !space.rootPageLocation) throw new Error(ec.resource.expand('documentation space ${spaceId} not found', '', {spaceId}))
                 const rootDir = String(space.rootPageLocation).replace(/\.[^/.]*$/, '')
                 if (!ec.resource.getLocationReference(rootDir + '/Releases.md').exists) {
-                    ec.service.sync().name('org.moqui.impl.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, pageName: 'Releases',
+                    ec.service.sync().name('org.moqui.resource.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, pageName: 'Releases',
                         pageText: '# ' + L('Releases') + '\n\n' + L('The notes of each release of the project.') + '\n', versionNote: L('Releases')}).call()
                     if (ec.message.hasError()) return
                 }
@@ -1870,12 +1870,12 @@ along with this software (see the LICENSE.md file). If not, see
                 const pageText = '# ' + (project?.workEffortName || release.rootWorkEffortId) + ' ' + version + '\n\n'
                     + (dateText ? '_' + (released ? L('Released') : L('Planned for')) + ' ' + dateText + '_\n\n' : '')
                     + body.replace(/^###(?=\s)/gm, '##') + '\n'
-                const saved = ec.service.sync().name('org.moqui.impl.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, parentPath: 'Releases',
+                const saved = ec.service.sync().name('org.moqui.resource.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, parentPath: 'Releases',
                     pageName: pageName, pageText: pageText, versionNote: ec.resource.expand('Release notes for ${version}', '', {version})}).call() || {}
                 if (ec.message.hasError()) return
                 wikiSpaceId = spaceId
                 pagePath = saved.pagePath || ('Releases/' + pageName)
-                wikiPageId = saved.wikiPageId || ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageId').parameters({wikiSpaceId: spaceId,
+                wikiPageId = saved.wikiPageId || ec.service.sync().name('org.moqui.resource.WikiServices.get#WikiPageId').parameters({wikiSpaceId: spaceId,
                     pagePath: pagePath, createIfMissing: true}).call()?.wikiPageId
                 if (wikiPageId && ec.entity.find('mantle.work.effort.WikiPageWorkEffort').condition({wikiPageId: wikiPageId, workEffortId: workEffortId}).count() === 0)
                     ec.service.sync().name('create#mantle.work.effort.WikiPageWorkEffort').parameters({wikiPageId: wikiPageId, workEffortId: workEffortId}).call()
@@ -1886,7 +1886,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const access = (id) => {
                     if (!ec.factory.hasFeature('git')) return {}
                     ec.message.pushErrors()
-                    try { const out = ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: id}).call() || {}; return ec.message.hasError() ? {} : out }
+                    try { const out = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: id}).call() || {}; return ec.message.hasError() ? {} : out }
                     finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
                 if (repositoryId && !linked.includes(repositoryId)) throw new Error(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId}))
@@ -1894,7 +1894,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!target) throw new Error(L('the project has no repository you may update'))
                 const repoAccess = access(target)
                 if (!repoAccess.canUpdate) throw new Error(ec.resource.expand('you may not update ${target}', '', {target}))
-                const current = ec.service.sync().name('org.moqui.impl.GitServices.get#GitBlob').parameters({repositoryId: target, path: 'CHANGELOG.md'}).call()?.text
+                const current = ec.service.sync().name('org.moqui.git.GitServices.get#GitBlob').parameters({repositoryId: target, path: 'CHANGELOG.md'}).call()?.text
                 if (ec.message.hasError()) return
                 const section = '## ' + version + (dateText ? ' - ' + dateText : '') + '\n\n' + body + '\n'
                 let text = current == null || !String(current).trim() ? '# ' + L('Changelog') + '\n\n' + section : String(current).replace(/\r\n/g, '\n')
@@ -1916,7 +1916,7 @@ along with this software (see the LICENSE.md file). If not, see
                     text = lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n')
                 }
                 repositoryId = target
-                commitId = ec.service.sync().name('org.moqui.impl.GitServices.commit#GitFiles').parameters({repositoryId: target,
+                commitId = ec.service.sync().name('org.moqui.git.GitServices.commit#GitFiles').parameters({repositoryId: target,
                     message: ec.resource.expand('Release notes for ${version}', '', {version}), fileMap: {'CHANGELOG.md': text}}).call()?.commitId || null
             })
             if (notify) step('followers', () => {
@@ -2022,7 +2022,7 @@ along with this software (see the LICENSE.md file). If not, see
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.repositoryId)
                     if (!repositoryId || !linked.includes(repositoryId)) throw new Error(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId: repositoryId || '-'}))
                     const name = String(tagName || '').trim() || (/^\d/.test(version) ? 'v' + version : version)
-                    const out = ec.service.sync().name('org.moqui.impl.GitServices.create#GitRef').parameters({repositoryId: repositoryId, refName: name, refType: 'tag',
+                    const out = ec.service.sync().name('org.moqui.git.GitServices.create#GitRef').parameters({repositoryId: repositoryId, refName: name, refType: 'tag',
                         revision: revision || null, message: ec.resource.expand('Release ${version}', '', {version})}).call() || {}
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                     tagRefName = out.refName || ('refs/tags/' + name)
@@ -2084,7 +2084,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!repositoryId || !linked.includes(repositoryId)) { ec.message.addError(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId: repositoryId || '-'})); return }
                 ec.message.pushErrors()
                 let canUpdate = false
-                try { canUpdate = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canUpdate && !ec.message.hasError() }
+                try { canUpdate = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canUpdate && !ec.message.hasError() }
                 catch (err) { canUpdate = false }
                 finally { ec.message.clearErrors(); ec.message.popErrors() }
                 if (!canUpdate) { ec.message.addError(ec.resource.expand('You may not update the repository ${repositoryId}', '', {repositoryId})); return }
@@ -2108,7 +2108,7 @@ along with this software (see the LICENSE.md file). If not, see
                     ? L('These pages are markdown files in the docs folder of the repository, beside the code: each save is a commit.')
                     : L('The pages of the project: guides, decisions and release notes.')) + '\n')
             const restricted = !['WevAllUsers', 'WevGeneral'].includes(project.visibilityEnumId)
-            ec.service.sync().name('org.moqui.impl.WikiServices.create#WikiSpace').parameters({wikiSpaceId: wikiSpaceId, description: name + ' ' + L('documentation'),
+            ec.service.sync().name('org.moqui.resource.WikiServices.create#WikiSpace').parameters({wikiSpaceId: wikiSpaceId, description: name + ' ' + L('documentation'),
                 rootPageDirectory: rootPageDirectory, rootPageLocation: rootPageLocation, restrictView: restricted ? 'Y' : 'N', restrictUpdate: 'Y'}).call()
             if (ec.message.hasError()) return
             ec.service.sync().name('mantle.work.ProjectServices.store#ProjectSetting').parameters({workEffortId: workEffortId, settingTypeEnumId: 'WstDocsWikiSpace',
@@ -2610,7 +2610,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const contact of contactList) {
                 ec.message.pushErrors()
                 try {
-                    const sent = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_UPDATE',
+                    const sent = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_UPDATE',
                         toAddresses: contact.emailAddress, bodyParameters: {subject: subject, fromAddress: contacts.fromAddress, fromName: contacts.fromName},
                         body: body, bodyText: bodyText}).requireNewTransaction(true).call() || {}
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
@@ -2766,7 +2766,7 @@ along with this software (see the LICENSE.md file). If not, see
               the day six days ago) through now, with the same current assignments, visible projects and template
               exclusions as myOpen;
             - reviewsWaiting: the open merge requests of the repositories the user may view where the user is a requested
-              reviewer who has not reviewed yet (org.moqui.impl.GitReviewServices.find#MergeRequests waitingForUserId); null
+              reviewer who has not reviewed yet (org.moqui.git.GitReviewServices.find#MergeRequests waitingForUserId); null
               when the build has no git hosting;
             - hoursWeek: the hours of the user's time entries this week (the week of the user's timesheet policy,
               TimesheetServices.get#WeekRange), with expectedWeek (the week's working hours) and timesheetStatusId (TmshInProcess
@@ -2842,7 +2842,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!ec.factory.hasFeature('git')) return
                 ec.message.pushErrors()
                 try {
-                    const out = ec.service.sync().name('org.moqui.impl.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId,
+                    const out = ec.service.sync().name('org.moqui.git.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId,
                         pageSize: 1}).requireNewTransaction(true).call() || {}
                     if (ec.message.hasError()) {
                         const errors = ec.message.getErrorsString()
@@ -3184,7 +3184,7 @@ along with this software (see the LICENSE.md file). If not, see
             })
             part('reviews', () => {
                 // in a transaction of its own: without git hosting the call fails, which would leave this one rollback-only
-                const out = ec.service.sync().name('org.moqui.impl.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId, pageSize: 10})
+                const out = ec.service.sync().name('org.moqui.git.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId, pageSize: 10})
                         .requireNewTransaction(true).call() || {}
                 if (ec.message.hasError()) {
                     // git hosting is a build feature: without it there are no reviews, not a failure
@@ -3579,7 +3579,7 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
-    <!-- the decision services of the MilestoneApproval topic (org.moqui.impl.NotificationServices approve# and refuse#NotificationMessage) -->
+    <!-- the decision services of the MilestoneApproval topic (org.moqui.ui.NotificationServices approve# and refuse#NotificationMessage) -->
     <service verb="approve" noun="MilestoneApprovalNotice">
         <in-parameters>
             <parameter name="recordEntityName"/><parameter name="recordId" required="true"/>
@@ -3926,7 +3926,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const contact of contactList) {
                 ec.message.pushErrors()
                 try {
-                    const sent = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_ESTIMATE',
+                    const sent = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_ESTIMATE',
                         toAddresses: contact.emailAddress, bodyParameters: {subject: subject, fromAddress: contacts.fromAddress, fromName: contacts.fromName},
                         body: body, bodyText: bodyText, attachments: [{fileName: fileName, contentType: 'text/html; charset=UTF-8', contentText: page}]})
                         .requireNewTransaction(true).call() || {}

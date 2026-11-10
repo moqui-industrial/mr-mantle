@@ -302,7 +302,7 @@ feature("the shell counts: Today, overdue, unviewed notifications, approvals, un
         settled()
         const rows = unviewed()
         const counts = as("Ada", () => call(COUNTS, {}))
-        const framework = as("Ada", () => call("org.moqui.impl.ShellServices.get#ShellCounts", {}))
+        const framework = as("Ada", () => call("org.moqui.ui.ShellServices.get#ShellCounts", {}))
         const internal = call(COUNTS, { userId: user.Ada })
         as("Ada", () => call("mantle.party.CommunicationServices.set#InternalMessageState", { communicationEventId: messageId, read: true }))
         const afterRead = as("Ada", () => call(COUNTS, {}))
@@ -422,7 +422,7 @@ feature("another user's Today and counts only with authorization disabled; one's
     },
 })
 
-// The rules call handle#ShellCountsChange, which publishes through org.moqui.impl.ShellServices.publish#ShellCounts; that sends
+// The rules call handle#ShellCountsChange, which publishes through org.moqui.ui.ShellServices.publish#ShellCounts; that sends
 // on a thread of its own after the commit, coalesced, so the spec reads its decisions from the service and checks that the
 // writes through each rule (above: assignment, snooze, update#Task, a notification and its view, a message and its read) left
 // no error.

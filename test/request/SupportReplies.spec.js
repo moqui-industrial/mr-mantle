@@ -83,7 +83,7 @@ function email(partyId, address) {
 function block(username, title, bodyHtml, userGroupId = null, actions = []) {
     login(username)
     ec.artifactExecution.disableAuthz()
-    const emailTextBlockId = call("org.moqui.impl.EmailClientServices.create#EmailTextBlock", {
+    const emailTextBlockId = call("org.moqui.mail.EmailClientServices.create#EmailTextBlock", {
         title,
         bodyHtml,
         userGroupId
@@ -287,11 +287,11 @@ feature("a personal reply is its owner's only, a team's reply its members'; Comm
         const otherAgent = run(state.agent2, S + "preview#SavedReply", {requestId: state.caseA, emailTextBlockId: state.personal})
         const nonMember = run(state.agent2, S + "preview#SavedReply", {requestId: state.caseA, emailTextBlockId: state.teamReply})
         login(state.agent)
-        const listed = call("org.moqui.impl.EmailClientServices.find#EmailTextBlocks", {}).textBlockList.map(
+        const listed = call("org.moqui.mail.EmailClientServices.find#EmailTextBlocks", {}).textBlockList.map(
             row => row.emailTextBlockId
         )
         login(state.agent2)
-        const listed2 = call("org.moqui.impl.EmailClientServices.find#EmailTextBlocks", {}).textBlockList.map(
+        const listed2 = call("org.moqui.mail.EmailClientServices.find#EmailTextBlocks", {}).textBlockList.map(
             row => row.emailTextBlockId
         )
         login("john.doe")

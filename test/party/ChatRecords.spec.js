@@ -1,5 +1,5 @@
 // Chat on the Mantle side of IronStone M10: the chat part of the shell counts (mantle.party.PartyServices.get#ShellCounts
-// over org.moqui.impl.ChatServices.get#UnreadCounts) and their publishing by the framework's chat services, the ChatMention
+// over org.moqui.chat.ChatServices.get#UnreadCounts) and their publishing by the framework's chat services, the ChatMention
 // topic as the framework sends it, a record room's messages in the record's timeline
 // (mantle.party.CommunicationServices.get#RecordTimeline, kind chat), and a task, request or event made from a chat message
 // (findOrCreate#ChatCommunicationEvent, create#RecordFromChatMessage), and what an end-to-end encrypted room gives up.
@@ -12,7 +12,7 @@ const effectiveTime = Date.now()
 const minute = 60000
 // each message at its own minute, so the timeline order is known
 const at = (minutes) => ec.user.setEffectiveTime(effectiveTime + minutes * minute)
-const CHAT = "org.moqui.impl.ChatServices"
+const CHAT = "org.moqui.chat.ChatServices"
 const COMM = "mantle.party.CommunicationServices"
 const COUNTS = "mantle.party.PartyServices.get#ShellCounts"
 const REQUEST = "mantle.request.Request"
@@ -115,7 +115,7 @@ feature("the chat part of the shell counts: the unread messages from others by e
         const tia = counts("Tia")
         const vik = counts("Vik")
         const uri = counts("Uri")
-        const framework = as("Tia", () => call("org.moqui.impl.ShellServices.get#ShellCounts", {}))
+        const framework = as("Tia", () => call("org.moqui.ui.ShellServices.get#ShellCounts", {}))
         const internal = call(COUNTS, { userId: user.Tia })
         at(3)
         send("Uri", room.ops, `<p>${mention("Vik")} and you</p>`)
@@ -174,7 +174,7 @@ feature("a mention is a ChatMention notification as the seed has it: its title, 
 })
 
 // The framework's chat services publish the counts of the users whose chat counts change (publish#ChatCounts through
-// org.moqui.impl.ShellServices.publish#ShellCounts, after the commit, on a thread of the server, coalesced per user), so
+// org.moqui.ui.ShellServices.publish#ShellCounts, after the commit, on a thread of the server, coalesced per user), so
 // Mantle adds no entity ECA for them. The spec hears the shellCounts notifications through the notification capture,
 // which listens on the topic as the server's socket does (without a listener nothing is sent; docs/Build-Test.md).
 feature("the counts go to the users whose chat counts change: a new message and a read marker publish them", {

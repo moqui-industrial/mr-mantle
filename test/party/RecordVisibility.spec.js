@@ -3,7 +3,7 @@
 // a communication event and an order have no entity filter of their own, so under an organization filter they follow
 // per-user rules (IronStone R4, R5); ADMIN and an explicit entity authorization see them all; without an organization filter
 // they are seen as found, except a post of a mailbox the user may not read. A wiki page follows the wiki's own view rule for
-// every user (org.moqui.impl.WikiServices.get#WikiPageAccess and get#WikiViewScope: a member of a restricted space with view
+// every user (org.moqui.resource.WikiServices.get#WikiPageAccess and get#WikiViewScope: a member of a restricted space with view
 // or admin, a restricted page's own viewers, the ADMIN group). The universal search's organization limit under the active
 // organization filter with no active organization,
 // and its wiki rule. And the timeline cursor (beforeDate with seenKeys) across entries of one date. New spec, no Groovy

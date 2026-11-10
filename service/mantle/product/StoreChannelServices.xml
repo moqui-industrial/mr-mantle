@@ -227,7 +227,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="systemMessageRemoteId" required="true"/>
             <parameter name="formatEnumId" required="true"/>
-            <parameter name="importFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="importFile" type="FileItem"/>
             <parameter name="importText"/>
             <parameter name="fileName"/>
         </in-parameters>

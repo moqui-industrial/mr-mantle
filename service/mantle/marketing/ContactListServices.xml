@@ -859,7 +859,7 @@ along with this software (see the LICENSE.md file). If not, see
                     + ` <a href="${encode(unsubscribeUrl)}">Unsubscribe</a></p>`
             let text = bodyText ? expand(bodyText, false) : null
             if (text && !text.includes(unsubscribeUrl)) text += `\n\n--\nYou receive this email because you subscribed to ${params.contactListName}. Unsubscribe: ${unsubscribeUrl}\n`
-            const out = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: emailTemplateId,
+            const out = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: emailTemplateId,
                 toAddresses: emailAddress, body: html, bodyText: text, bodyParameters: params, extraHeaders: listUnsubscribeHeaders,
                 createEmailMessage: true}).call()
             if (ec.message.hasError()) return

@@ -1961,7 +1961,7 @@ methods.getSitePage = (p) => {
     const out = ec.service
         .sync()
         .throwOnError(true)
-        .name('org.moqui.impl.WikiServices.get#PublishedWikiPageText')
+        .name('org.moqui.resource.WikiServices.get#PublishedWikiPageText')
         .parameters({
             wikiSpaceId: page.wikiSpaceId,
             pagePath: page.pagePath,
@@ -3224,7 +3224,7 @@ methods.publishSitePage = (p) => {
     const access = ec.service
         .sync()
         .throwOnError(true)
-        .name('org.moqui.impl.WikiServices.get#WikiPageAccess')
+        .name('org.moqui.resource.WikiServices.get#WikiPageAccess')
         .parameters({ wikiPageId: p.wikiPageId })
         .call()
     if (!access.canUpdate)
@@ -4860,7 +4860,7 @@ methods.testRoute = (p) => {
     const out = ec.service
         .sync()
         .throwOnError(true)
-        .name('org.moqui.impl.EmailServices.send#EmailTemplate')
+        .name('org.moqui.mail.EmailServices.send#EmailTemplate')
         .parameters({
             emailTemplateId: settings.templateId,
             toAddresses: ua.emailAddress,
@@ -5286,7 +5286,7 @@ function feedback(siteId, ua, text) {
             .sync()
             .requireNewTransaction(true)
             .throwOnError(true)
-            .name('org.moqui.impl.EmailServices.send#EmailTemplate')
+            .name('org.moqui.mail.EmailServices.send#EmailTemplate')
             .parameters({
                 emailTemplateId: settings.templateId,
                 toAddresses: ua.emailAddress,

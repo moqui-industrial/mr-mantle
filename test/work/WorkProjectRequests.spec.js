@@ -13,7 +13,7 @@ const effectiveTime = Date.now()
 const REQ = "mantle.request.RequestServices"
 const PROJECT = "mantle.work.ProjectServices"
 const TASK = "mantle.work.TaskServices"
-const MAIL = "org.moqui.impl.EmailClientServices"
+const MAIL = "org.moqui.mail.EmailClientServices"
 const made = {}
 
 spec({

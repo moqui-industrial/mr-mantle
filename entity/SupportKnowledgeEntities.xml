@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Service knowledge (design-customer-service §3 CaseDetail Knowledge, §6 Knowledge, ArticleFeedback, CaseToArticle, §9
     KnowledgeSources; impl-customer-service P12, CS-KNOWLEDGE, F15, F59): articles are Commons wiki pages, which keep their
-    own view and update rules (org.moqui.impl.WikiServices.get#WikiPageAccess); a ServiceKnowledgeSource says which spaces, or
+    own view and update rules (org.moqui.resource.WikiServices.get#WikiPageAccess); a ServiceKnowledgeSource says which spaces, or
     parts of a space, an organization's service desk suggests and sends, to whom and in which language, so a source never
     widens who may read a page. ArticleFeedback is a record of its own (a reader's report on one version of a page), reviewed
     by a knowledge author, whose review makes or links a task and never changes the article. The rules are

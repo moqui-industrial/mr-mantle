@@ -37,7 +37,7 @@ const REDIRECT = P + "PublicSiteRedirect"
 const SPACE = "moqui.resource.wiki.WikiSpace"
 const WIKI_PAGE = "moqui.resource.wiki.WikiPage"
 const STORE_SPACE = "mantle.product.store.ProductStoreWikiSpace"
-const WIKI = "org.moqui.impl.WikiServices."
+const WIKI = "org.moqui.resource.WikiServices."
 
 // ===== tables =====
 // The Forum's page roles, bound by Forum.js alone; Commerce's policy roles (design-commerce §5 PageDetail), version
