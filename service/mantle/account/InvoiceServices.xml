@@ -2021,8 +2021,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <service-call name="mantle.work.TimeServices.get#TimeEntryAmount" out-map="getTeaOut" out-map-add-to-existing="false"
                             in-map="{timeEntryId:timeEntry.timeEntryId, timeEntry:timeEntry, ratePurposeEnumId:ratePurposeEnumId}"/>
                     <set field="amountTotal" from="amountTotal.add(getTeaOut.amountTotal ?? 0)"/>
-                    <if condition="(!toDecimal(getTeaOut.hours ?? 0).isZero() &amp;&amp; getTeaOut.hourlyAmount != null)
-                            || (!toDecimal(getTeaOut.pieceCount ?? 0).isZero() &amp;&amp; getTeaOut.pieceAmount != null)">
+                    <if condition="getTeaOut.rated">
                         <script>ratedTimeEntryList.push(timeEntry)</script>
                     </if>
                 </iterate>
@@ -2056,8 +2055,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <service-call name="mantle.work.TimeServices.get#TimeEntryAmount" out-map="getTeaOut" out-map-add-to-existing="false"
                                 in-map="{timeEntryId:timeEntry.timeEntryId, timeEntry:timeEntry, ratePurposeEnumId:ratePurposeEnumId}"/>
                         <set field="amountTotal" from="amountTotal.add(getTeaOut.amountTotal ?? 0)"/>
-                        <if condition="(!toDecimal(getTeaOut.hours ?? 0).isZero() &amp;&amp; getTeaOut.hourlyAmount != null)
-                                || (!toDecimal(getTeaOut.pieceCount ?? 0).isZero() &amp;&amp; getTeaOut.pieceAmount != null)">
+                        <if condition="getTeaOut.rated">
                             <script>ratedTimeEntryList.push(timeEntry)</script>
                         </if>
                     </iterate>

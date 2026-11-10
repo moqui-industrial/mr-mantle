@@ -772,6 +772,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pieceAmount" type="BigDecimal"/>
             <parameter name="hours" type="BigDecimal"/>
             <parameter name="pieceCount" type="BigDecimal"/>
+            <parameter name="rated" type="Boolean"><description>True when its hours have an hourly rate or its pieces a
+                piece rate, an explicit zero rate included: the entries an invoice item links.</description></parameter>
         </out-parameters>
         <actions>
             <if condition="timeEntry == null"><entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry"/></if>
@@ -868,6 +870,7 @@ along with this software (see the LICENSE.md file). If not, see
                     amount = hourlyAmount
                     quantity = hours
                 }
+                rated = (!hours.isZero() && hourlyAmount != null) || (!pieceCount.isZero() && pieceAmount != null)
             ]]></script>
         </actions>
     </service>

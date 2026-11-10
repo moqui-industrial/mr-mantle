@@ -12,9 +12,8 @@ changed here. Each is a candidate to take back upstream. Add one entry per fix, 
 - **Fixed here:** each aggregate retains the sources whose calculation resolved an hourly or piece rate,
   including explicit zero rates, and links them to the created item. Unresolved piece-only sources stay unbilled.
   Existing locking, amount calculation and transaction errors remain in place.
-- **Verification:** standalone Mantle `WorkManualTimeBilling` covers both groupings, manual/zero/piece sources,
-  a missing-piece-rate control, retry, item removal, recreation and invoice cancellation; `WorkProjectBilling`
-  checks the ordinary referenced-rate flow.
+- **Verification:** standalone Mantle `WorkManualTimeBilling` covers both groupings, manual/zero/piece sources and
+  a referenced-rate source, a missing-piece-rate control, retry, item removal, recreation and invoice cancellation.
 - **Upstream candidate:** replace the hourly RateAmount-ID guard with resolved contributor tracking in both
   aggregate branches; no schema or service parameter change is needed.
 
@@ -26,7 +25,7 @@ changed here. Each is a candidate to take back upstream. Add one entry per fix, 
 - **Fixed here:** the view exposes `clientHourRate` and `vendorHourRate`; actuals use each explicit value before
   the referenced rate, including an explicit zero. Existing time-entry EECAs propagate the corrected totals.
 - **Verification:** standalone Mantle regression `WorkManualTimeRates` checks explicit rates, zero, referenced
-  fallback and deletion at task and project level. `WorkTimeEntries` prepares its own visibility fixtures.
+  fallback and deletion at task and project level.
 - **Upstream candidate:** apply the same precedence where the corresponding view/rollup uses only joined rates;
   no physical schema migration or service parameter change is needed.
 

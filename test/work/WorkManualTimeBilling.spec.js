@@ -1,4 +1,5 @@
-// Regression: grouped client invoice lines retain rated sources, including manual hourly, zero and piece rates.
+// Regression: grouped client invoice lines retain rated sources, including manual hourly, zero and piece rates and a
+// referenced rate (rateAmountId, no hourly rate on the entry).
 const INVOICE = "mantle.account.InvoiceServices"
 const made = {projects: [], invoices: []}
 const one = (entity, fields) => ec.entity.find(entity).condition(fields).one()
@@ -93,6 +94,32 @@ feature("#grouping grouping links manual-rate sources exactly once and releases 
                     hasModifiedRates: "Y"
                 }).timeEntryId
             )
+        // a referenced rate, on this task only so no other spec's rate lookup finds it
+        const rateAmountId = call("create#mantle.humanres.rate.RateAmount", {
+            rateAmountId: "TMB_RATE_" + grouping,
+            rateTypeEnumId: "RatpStandard",
+            ratePurposeEnumId: "RaprClient",
+            rateCurrencyUomId: "USD",
+            timePeriodUomId: "TF_hr",
+            workEffortId: taskId,
+            partyId: "ORG_ZIZI_JD",
+            fromDate: stamp("2026-10-01 00:00:00"),
+            rateAmount: 50
+        }).rateAmountId
+        ids.push(
+            call("create#mantle.work.time.TimeEntry", {
+                partyId: "ORG_ZIZI_JD",
+                vendorPartyId: "ORG_ZIZI_SERVICES",
+                workEffortId: taskId,
+                timesheetId,
+                fromDate: stamp("2026-10-12 12:00:00"),
+                thruDate: stamp("2026-10-12 13:00:00"),
+                hours: 1,
+                rateAmountId,
+                rateTypeEnumId: "RatpStandard",
+                hasModifiedRates: "Y"
+            }).timeEntryId
+        )
         const unratedId = call("create#mantle.work.time.TimeEntry", {
             partyId: "ORG_ZIZI_JD",
             vendorPartyId: "ORG_ZIZI_SERVICES",
@@ -189,12 +216,12 @@ feature("#grouping grouping links manual-rate sources exactly once and releases 
         cancelled
     }) {
         created.invoiceItemCreatedCount == 1
-        amount == 375
+        amount == 425
         linked.every(row => row.invoiceId === created.invoiceId && row.seq)
         new Set(linked.map(row => row.seq)).size == 1
         unratedAfterCreate.invoiceId == null && unratedAfterCreate.seq == null
         detail.entryList.map(row => row.timeEntryId).sort() == ids.slice().sort()
-        Number(String(detail.hours)) == 3
+        Number(String(detail.hours)) == 4
         again.invoiceItemCreatedCount == 0
         itemsAfterRetry == 1
         unbilledAfterRetry == 1
