@@ -30,6 +30,9 @@ spec({
             if (parties.homeControlTaskIds?.length) ec.entity.find("mantle.work.effort.WorkEffortParty")
                     .condition("workEffortId", "in", parties.homeControlTaskIds).condition("thruDate", null)
                     .updateAll({ thruDate: ec.user.nowTimestamp })
+            // the counter projects are cancelled, so no later spec counts them among a user's projects
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", "in", ["PHCNT", "PHCNTH", "PHCNTT"])
+                    .updateAll({ statusId: "WeCancelled" })
             const taskIds = Array.from(ec.entity.find("mantle.work.effort.WorkEffort").condition("rootWorkEffortId", "PHA")
                     .condition("workEffortTypeEnumId", "WetTask").list()).map((row) => row.workEffortId)
             if (taskIds.length) ec.entity.find("mantle.work.effort.WorkEffortParty").condition("workEffortId", "in", taskIds)
@@ -178,6 +181,14 @@ feature("get#ProjectHomeCounts: my open, due this week and overdue items, my hou
         assigned("PHCNT", "Recently complete counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime - dayMillis})
         assigned("PHCNT", "Recently closed counter control", {statusId: "WeClosed", actualCompletionDate: effectiveTime - dayMillis})
         assigned("PHCNT", "Old completion counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime - 8 * dayMillis})
+        // the window is calendar days in the user's zone: the first minute of the day six days ago counts, the minute before does not
+        login("ph.hana", "moqui1!!")
+        ec.user.setEffectiveTime(effectiveTime)
+        const recentStart = Number(String(ec.user.getPeriodRange("day", "-6")[0]))
+        login("john.doe")
+        ec.user.setEffectiveTime(effectiveTime)
+        assigned("PHCNT", "Six days ago counter control", {statusId: "WeComplete", actualCompletionDate: recentStart + 60000})
+        assigned("PHCNT", "Seven days ago counter control", {statusId: "WeComplete", actualCompletionDate: recentStart - 60000})
         assigned("PHCNT", "Future completion counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime + dayMillis})
         const hanaDone = hanaCounts()
         const after = homeCounts(true)
@@ -201,7 +212,7 @@ feature("get#ProjectHomeCounts: my open, due this week and overdue items, my hou
         team.myOpen == after.myOpen
         hanaOpen.myOpen == hanaBefore.myOpen + 1
         hanaDone.myOpen == hanaOpen.myOpen
-        hanaDone.myDoneRecent == hanaBefore.myDoneRecent + 2
+        hanaDone.myDoneRecent == hanaBefore.myDoneRecent + 3
         team.myDoneRecent == after.myDoneRecent
     },
 })

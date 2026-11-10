@@ -2762,8 +2762,9 @@ along with this software (see the LICENSE.md file). If not, see
             services), over the projects the user sees (get#VisibleProjectInfo; template projects left out):
             - myOpen: the open work items the user is an Assignee of; dueWeek: those due from today through seven days;
               overdue: those due before today (as WorkItems' smart lists mine, week and overdue);
-            - myDoneRecent: the Complete or Closed work items completed in the last seven days through now, with the same
-              current assignments, visible projects and template exclusions as myOpen;
+            - myDoneRecent: the Complete or Closed work items completed in the last seven calendar days (from the start of
+              the day six days ago) through now, with the same current assignments, visible projects and template
+              exclusions as myOpen;
             - reviewsWaiting: the open merge requests of the repositories the user may view where the user is a requested
               reviewer who has not reviewed yet (org.moqui.impl.GitReviewServices.find#MergeRequests waitingForUserId); null
               when the build has no git hosting;
@@ -2809,6 +2810,9 @@ along with this software (see the LICENSE.md file). If not, see
             const nowMillis = Number(String(ec.user.nowTimestamp))
             const today = ec.user.getPeriodRange('day', '0')
             const todayStart = today ? Number(String(today[0])) : nowMillis
+            // the last seven calendar days in the user's zone: from the start of the day six days ago, through now
+            const recentDay = ec.user.getPeriodRange('day', '-6')
+            const recentStart = recentDay ? Number(String(recentDay[0])) : todayStart - 6 * 86400000
             const open = ['WeComplete', 'WeClosed', 'WeCancelled']
 
             part('myWork', () => {
@@ -2825,7 +2829,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const count = (more) => countBase([cf.makeCondition('statusId', 'not-in', open)].concat(more))
                 counts.myOpen = count([])
                 counts.myDoneRecent = countBase([cf.makeCondition('statusId', 'in', ['WeComplete', 'WeClosed']),
-                    cf.makeCondition('actualCompletionDate', 'greater-equals', new Date(nowMillis - 7 * 86400000)),
+                    cf.makeCondition('actualCompletionDate', 'greater-equals', new Date(recentStart)),
                     cf.makeCondition('actualCompletionDate', 'less-equals', new Date(nowMillis))])
                 counts.dueWeek = count([cf.makeCondition('estimatedCompletionDate', 'greater-equals', new Date(todayStart)),
                     cf.makeCondition('estimatedCompletionDate', 'less-than', new Date(todayStart + 7 * 86400000))])
