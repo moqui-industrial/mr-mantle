@@ -1592,7 +1592,7 @@ function mailRegret(rfq, quote, recipient, fromAddress, fromName, body, subject,
         const out =
             ec.service
                 .sync()
-                .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                 .parameters({
                     emailTemplateId: emailTemplateId || "MANTLE_RFQ_REGRET_EMAIL",
                     toAddresses: recipient,

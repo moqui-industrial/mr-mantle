@@ -367,7 +367,7 @@ function sendOf(po, p) {
             const out =
                 ec.service
                     .sync()
-                    .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                    .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                     .parameters({
                         emailTemplateId: p.emailTemplateId || "MANTLE_PURCHASE_ORDER_EMAIL",
                         toAddresses: recipient,

@@ -158,7 +158,7 @@ function threadOf(theCase) {
     const ids = events.map(row => row.emailMessageId)
     if (theCase.profile.emailMessageId) ids.push(theCase.profile.emailMessageId)
     if (!ids.length) return null
-    const accessMap = lib.call("org.moqui.impl.EmailClientServices.get#EmailAccountAccess").accessMap || {}
+    const accessMap = lib.call("org.moqui.mail.EmailClientServices.get#EmailAccountAccess").accessMap || {}
     for (const emailMessageId of ids) {
         const message = one(MESSAGE, {emailMessageId})
         if (message && accessMap[message.emailAccountId]) return message
@@ -168,7 +168,7 @@ function threadOf(theCase) {
 // The account the reply is sent from: the one named (that the user may send from), else the user's of the case's
 // organization, else their first; none is refused when sending.
 function senderAccount(emailAccountId, organizationPartyId) {
-    const sendable = Array.from(lib.call("org.moqui.impl.EmailClientServices.get#EmailAccountAccess").accountList || []).filter(
+    const sendable = Array.from(lib.call("org.moqui.mail.EmailClientServices.get#EmailAccountAccess").accountList || []).filter(
         account => account.canSend
     )
     const account = !blank(emailAccountId)
@@ -371,7 +371,7 @@ function apply(p) {
         if (earlier.emailMessageId) {
             const message = one(MESSAGE, {emailMessageId: earlier.emailMessageId})
             if (message?.statusId === "ES_READY" && message.sendError)
-                call("org.moqui.impl.EmailClientServices.send#Draft", {emailMessageId: earlier.emailMessageId})
+                call("org.moqui.mail.EmailClientServices.send#Draft", {emailMessageId: earlier.emailMessageId})
             Object.assign(earlier, deliveryOf(earlier.emailMessageId), {
                 retried: message?.statusId === "ES_READY" && !!message.sendError
             })
@@ -393,7 +393,7 @@ function apply(p) {
     let emailMessageId = null
     let delivery = {deliveryStatus: null, statusId: null, sendError: null}
     if (send) {
-        const draft = call("org.moqui.impl.EmailClientServices.save#Draft", {
+        const draft = call("org.moqui.mail.EmailClientServices.save#Draft", {
             emailAccountId: shown.emailAccountId,
             toAddresses: shown.recipients.map(row => row.address).join(", "),
             subject: shown.subject,

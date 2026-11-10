@@ -1476,7 +1476,7 @@ along with this software (see the LICENSE.md file). If not, see
                         <if condition="optInLink?.confirmUrl"><set field="bodyParameters" from="Object.assign({}, bodyParameters, {optInConfirmUrl: optInLink.confirmUrl})"/></if>
                     </if>
 
-                    <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
+                    <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                             in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId, toAddresses:toAddresses,
                                 bccAddresses:bccAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.order.OrderEmailMessage").parameter("orderId", orderId)

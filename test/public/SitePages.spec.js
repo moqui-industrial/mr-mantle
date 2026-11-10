@@ -171,7 +171,7 @@ spec({
 
 feature("the Forum's guidelines page binds and reads by its role as before, and Commerce does not reach it", {
     when() {
-        const wiki = (verb, input) => call("org.moqui.impl.WikiServices." + verb, input)
+        const wiki = (verb, input) => call("org.moqui.resource.WikiServices." + verb, input)
         let wikiPageId, versionName
         system(() => {
             wiki("create#WikiSpace", {wikiSpaceId: "STPGFRM", description: "Forum page fixture"})

@@ -2452,7 +2452,7 @@ along with this software (see the LICENSE.md file). If not, see
                         headerImagePath:storeEmail.headerImagePath, detailLinkPath:storeEmail.detailLinkPath}"/>
 
                     <if condition="!storeEmail.emailTemplateId"><continue/></if>
-                    <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
+                    <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                             in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                 toAddresses:toAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.shipment.ShipmentEmailMessage")
@@ -2472,7 +2472,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.shipment.ShipmentContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="shipmentId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="shipmentContentId"/></out-parameters>
         <actions>
@@ -2486,7 +2486,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="shipmentContentId" required="true"/>
             <auto-parameters entity-name="mantle.shipment.ShipmentContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <actions>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
@@ -2501,7 +2501,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="shipmentContentId" required="true"/>
             <parameter name="shipmentId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>

@@ -1,11 +1,11 @@
 // CalDAV and CardDAV over Mantle (mantle.work.CalendarDavServices, mantle.party.ContactDavServices): the framework's DAV
-// server (org.moqui.impl.DavServices.serve#DavRequest, as a phone sends each request, with an app password) finds the
+// server (org.moqui.resource.DavServices.serve#DavRequest, as a phone sends each request, with an app password) finds the
 // user's calendars, tasks and contact books, reads events and tasks as CalDAV objects and contacts as vCards, writes
 // what a phone writes (new, changed, deleted, with entity tags), and refuses what the user may not change. New spec.
 const hour = 3600000
 const day = 24 * hour
 const dayStart = Date.UTC(2027, 5, 7, 5, 0, 0)
-const DAV = "org.moqui.impl.DavServices.serve#DavRequest"
+const DAV = "org.moqui.resource.DavServices.serve#DavRequest"
 const s = {}
 
 spec({

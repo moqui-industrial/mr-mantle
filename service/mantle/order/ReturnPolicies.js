@@ -1711,7 +1711,7 @@ function send(p) {
         "<p>" +
         escapeHtml(ec.l10n.localize("The authorization with what to send and where is attached.")) +
         "</p>"
-    const draft = lib.call("org.moqui.impl.EmailClientServices.save#Draft", {
+    const draft = lib.call("org.moqui.mail.EmailClientServices.save#Draft", {
         emailAccountId: account.emailAccountId,
         toAddresses: recipient,
         subject: p.subject || ec.l10n.localize("Return authorization") + " " + (header.displayId || header.returnId),

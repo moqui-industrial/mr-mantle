@@ -14,6 +14,52 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <service verb="check" noun="WorkEffortOpen" allow-remote="false">
+        <description>Manual work and planning changes require an open project. Check the existing record's project and
+            any requested destination project or parent before writing, including a move out of a closed project.
+            Complete remains editable; only Closed is read only. Derived actuals and late time or billing do not call
+            this planning guard. Reading a closed project as a clone source is allowed.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="parentWorkEffortId"/>
+            <parameter name="targetWorkEffortId"/>
+            <parameter name="workEffortContentId"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="workEffortIdList" type="List"><description>More records to check, in one call (the
+                work efforts a label is applied to)</description></parameter>
+        </in-parameters>
+        <actions><script><![CDATA[
+            const one = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).disableAuthz().one() : null
+            const projects = new Set()
+            const add = (id) => {
+                const row = one(id)
+                if (row?.workEffortTypeEnumId === 'WetProject') projects.add(row.workEffortId)
+                else if (row?.rootWorkEffortId) projects.add(row.rootWorkEffortId)
+            }
+            add(workEffortId)
+            add(rootWorkEffortId)
+            add(parentWorkEffortId)
+            add(targetWorkEffortId)
+            // a list (the items a label is on): their projects in two reads, not one read per item
+            const listed = Array.from(new Set(Array.from(workEffortIdList || []).filter((id) => id)))
+            if (listed.length) for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', listed)
+                    .selectField('workEffortId,workEffortTypeEnumId,rootWorkEffortId').disableAuthz().list()) {
+                if (row.workEffortTypeEnumId === 'WetProject') projects.add(row.workEffortId)
+                else if (row.rootWorkEffortId) projects.add(row.rootWorkEffortId)
+            }
+            if (workEffortContentId) add(ec.entity.find('mantle.work.effort.WorkEffortContent')
+                .condition('workEffortContentId', workEffortContentId).disableAuthz().one()?.workEffortId)
+            if (communicationEventId) for (const link of ec.entity.find('mantle.work.effort.WorkEffortCommEvent')
+                .condition('communicationEventId', communicationEventId).disableAuthz().list()) add(link.workEffortId)
+            if (projects.size && ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', Array.from(projects))
+                    .condition('workEffortTypeEnumId', 'WetProject').condition('statusId', 'WeClosed').disableAuthz().count() > 0) {
+                // the code stays outside localize so callers can match it in every language
+                ec.message.addError('PROJECT_CLOSED: ' + ec.l10n.localize('The project is closed; reopen it before changing its work or plan'))
+            }
+        ]]></script></actions>
+    </service>
+
     <service verb="clone" noun="WorkEffort">
         <in-parameters>
             <parameter name="workEffortId"><description>The new workEffortId unless no baseWorkEffortId is specified then this is
@@ -68,6 +114,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-sequenced-id-primary value-field="workEffort"/>
                 </else></if>
             </else></if>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
+                    in-map="{rootWorkEffortId:workEffort.rootWorkEffortId, parentWorkEffortId:workEffort.parentWorkEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <!-- <log level="warn" message="Cloning ${baseWorkEffortId} to ${workEffort.workEffortId}"/> -->
             <entity-create value-field="workEffort"/>
             <set field="workEffortId" from="workEffort.workEffortId"/>
@@ -171,6 +220,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="deleteWorkEffortParties" type="Boolean" default-value="false"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId"/></entity-find-one>
             <if condition="!workEffort"><return/></if>
@@ -228,6 +279,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fromDate" type="Timestamp"/>
         </out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList" limit="1">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -250,6 +303,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="roleTypeId"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -270,6 +325,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="roleTypeId"/>
             </entity-find>
@@ -308,7 +365,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="linkEntityName"><description>The entity holding the link</description></parameter>
             <parameter name="created" type="Boolean"><description>True when this call wrote the link</description></parameter>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             created = false
             const workEffort = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (workEffort == null) { ec.message.addError(`Work effort ${workEffortId} not found`); return }
@@ -344,7 +404,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recordId" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="unlinked" type="Boolean"><description>True when a link row was removed</description></parameter></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             unlinked = false
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
                     .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
@@ -793,6 +856,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="fromDate" type="Timestamp"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortProduct" list="existingWepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="productId"/>
                 <econdition field-name="typeEnumId"/></entity-find>
@@ -887,10 +952,12 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.work.effort.WorkEffortContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="workEffortId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortContentId"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="create#mantle.work.effort.WorkEffortContent" in-map="context" out-map="context"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <service-call name="mantle.work.WorkEffortServices.save#WorkEffortContentFile" in-map="context"/></if>
@@ -901,9 +968,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortContentId" required="true"/>
             <auto-parameters entity-name="mantle.work.effort.WorkEffortContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffortContent" value-field="workEffortContent"/>
                 <service-call name="mantle.work.WorkEffortServices.save#WorkEffortContentFile" out-map="context"
@@ -916,11 +985,13 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="workEffortContentId" required="true"/>
             <parameter name="workEffortId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>

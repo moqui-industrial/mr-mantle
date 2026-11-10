@@ -502,7 +502,7 @@ along with this software (see the LICENSE.md file). If not, see
             for the user. needsReply keeps the threads whose last message is to the user (a to or cc row, not a mailbox
             delivery), not from the user, a day old or more, and not archived (Comms Home's Needs reply).
 
-            The search line: searchText, read by org.moqui.impl.EmailClientServices.parse#SearchText, or searchTermMap,
+            The search line: searchText, read by org.moqui.mail.EmailClientServices.parse#SearchText, or searchTermMap,
             what that service answered (find#InboxThreads parses once for both stores). A message puts its thread in the
             view when it matches every term; the operators mean what they mean for mail (find#Messages), over the internal
             fields: from: the party it is from, to: its to or cc recipients (and toPartyId), cc: its cc recipients, each a
@@ -587,7 +587,7 @@ along with this software (see the LICENSE.md file). If not, see
             // thread in the view and as filters of the thread
             let terms = searchTermMap || null
             if (terms == null && searchText && String(searchText).trim()) {
-                terms = ec.service.sync().name('org.moqui.impl.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
+                terms = ec.service.sync().name('org.moqui.mail.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
                 if (ec.message.hasError()) return
             }
             const messageConditions = []
@@ -726,7 +726,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (!['received', 'sent', 'flagged', 'snoozed', 'archived', 'comments', 'all'].includes(view)) {
                 ec.message.addError(`Unknown view ${view}: received, sent, flagged, snoozed, archived, comments or all`); return }
             if (emailLabelId) {
-                const accountId = ec.service.sync().name('org.moqui.impl.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
+                const accountId = ec.service.sync().name('org.moqui.mail.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
                 const label = ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', emailLabelId).one()
                 if (ec.message.hasError()) return
                 if (label == null || label.emailAccountId !== accountId) { ec.message.addError(`Email label ${emailLabelId} not found`); return }
@@ -1087,7 +1087,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Puts labels on, or takes them off, a message the current user may see (communicationEventId) or every visible
             message of a thread (rootCommEventId). Each label is an EmailLabel of the user's Internal account
-            (org.moqui.impl.EmailClientServices.ensure#InternalAccount); any other is "Email label X not found". The join
+            (org.moqui.mail.EmailClientServices.ensure#InternalAccount); any other is "Email label X not found". The join
             is CommunicationEventPartyLabel, so two people on the same message label it apart, and a reply does not
             inherit a label. Linking a label that is already on the message, or removing one that is not, changes
             nothing. A message or thread the user may not see is "not found". At least one label to add or remove.
@@ -1127,7 +1127,7 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.message.addError(`Communication event ${wanted} not found`); return }
             const scopeIds = communicationEventId && !rootCommEventId ? [communicationEventId]
                     : thread.messageList.map((message) => message.communicationEventId)
-            const accountId = ec.service.sync().name('org.moqui.impl.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
+            const accountId = ec.service.sync().name('org.moqui.mail.EmailClientServices.ensure#InternalAccount').call()?.emailAccountId
             if (ec.message.hasError()) return
             for (const emailLabelId of addIds.concat(removeIds)) {
                 const label = ec.entity.find('moqui.basic.email.EmailLabel').condition('emailLabelId', emailLabelId).one()
@@ -1263,7 +1263,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="InboxThreads">
         <description>
             The Inbox's one list over both stores, newest first by sortDate: the framework's mail
-            (org.moqui.impl.EmailClientServices.find#Messages, rows with store email) and the internal threads
+            (org.moqui.mail.EmailClientServices.find#Messages, rows with store email) and the internal threads
             (find#InternalThreads, store internal). A store is called only when the view includes it.
 
             The view:
@@ -1282,7 +1282,7 @@ along with this software (see the LICENSE.md file). If not, see
             - contactListId: the threads of that mailbox only (view all by default, else an internal view).
             - store email keeps the mail of a view that reads both stores; view comments (the internal notes to the user)
               reads only the internal threads.
-            Filters: searchText, the search line, is read once by org.moqui.impl.EmailClientServices.parse#SearchText: the
+            Filters: searchText, the search line, is read once by org.moqui.mail.EmailClientServices.parse#SearchText: the
             mail gets the text (find#Messages applies its operators) and the internal threads its terms (find#InternalThreads
             says what each operator means there), so both stores answer the same search; termList is the operators, for
             the query chips. A term that is not understood (before:someday, larger:huge) is an error before any store is
@@ -1371,7 +1371,7 @@ along with this software (see the LICENSE.md file). If not, see
             let searchTerms = null
             let internalSearchOff = false
             if (searchText && String(searchText).trim()) {
-                searchTerms = ec.service.sync().name('org.moqui.impl.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
+                searchTerms = ec.service.sync().name('org.moqui.mail.EmailClientServices.parse#SearchText').parameter('searchText', searchText).call()
                 if (ec.message.hasError()) return
                 termList = Array.from(searchTerms.termList || [])
                 // a value an operator does not understand is the user's error, not a store that fails
@@ -1427,7 +1427,7 @@ along with this software (see the LICENSE.md file). If not, see
                 let account = null
                 let access = null
                 if (emailAccountId || emailFolderId || emailLabelId) {
-                    access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess')
+                    access = ec.service.sync().name('org.moqui.mail.EmailClientServices.get#EmailAccountAccess')
                             .parameters(emailAccountId ? {emailAccountId: emailAccountId} : {}).call()
                     if (ec.message.hasError()) return
                 }
@@ -1480,7 +1480,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
             const stores = []
-            if (emailParameters) stores.push({name: 'email', service: 'org.moqui.impl.EmailClientServices.find#Messages', parameters: emailParameters})
+            if (emailParameters) stores.push({name: 'email', service: 'org.moqui.mail.EmailClientServices.find#Messages', parameters: emailParameters})
             if (internalParameters) stores.push({name: 'internal', service: 'mantle.party.CommunicationServices.find#InternalThreads',
                 parameters: internalParameters})
             storeList = stores.map((entry) => entry.name)
@@ -1599,7 +1599,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="InboxUnreadCounts">
         <description>
             The unread counts of the Inbox rail and Comms Home for the current user, each part on its own: accountList, the
-            user's accounts as org.moqui.impl.EmailClientServices.get#UserEmailAccounts gives them (the Internal account
+            user's accounts as org.moqui.mail.EmailClientServices.get#UserEmailAccounts gives them (the Internal account
             first; each mail account with its Inbox unreadCount and its folders' counts), with the Internal account's
             unreadCount filled from count#UnreadInternalMessages (internal messages and the mailbox posts delivered to the
             Inbox); mailboxList, the mailboxes the user is a member of or asked to join with their unreadCount and the user's
@@ -1649,7 +1649,7 @@ along with this software (see the LICENSE.md file). If not, see
                 return out
             }
             const emailOk = part('email', () => {
-                const out = callService('org.moqui.impl.EmailClientServices.get#UserEmailAccounts')
+                const out = callService('org.moqui.mail.EmailClientServices.get#UserEmailAccounts')
                 accountList = Array.from(out.accountList || []).map((account) => Object.assign({}, account))
                 internalEmailAccountId = out.internalEmailAccountId ?? null
                 emailUnreadCount = accountList.filter((account) => !account.isInternal).reduce((sum, account) => sum + (account.unreadCount || 0), 0)
@@ -1839,7 +1839,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="delete" noun="WikiPageJoins" allow-remote="false">
-        <description>Mantle's rows that name a wiki page, removed before org.moqui.impl.WikiServices.delete#WikiPage deletes
+        <description>Mantle's rows that name a wiki page, removed before org.moqui.resource.WikiServices.delete#WikiPage deletes
             the page (the SECA WikiPageDeleteJoins), which would otherwise fail on their foreign keys: its comments'
             WikiPageCommunicationEvent joins (the comments themselves stay), its WikiPageWorkEffort and WikiPageRequest
             joins, and its followers (RecordFollower). The page is wikiPageId, or wikiSpaceId and pagePath as the delete
@@ -1852,10 +1852,10 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions><script><![CDATA[
             let pageId = wikiPageId || null
-            if (!pageId && wikiSpaceId && pagePath) pageId = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageId')
+            if (!pageId && wikiSpaceId && pagePath) pageId = ec.service.sync().name('org.moqui.resource.WikiServices.get#WikiPageId')
                     .parameters({wikiSpaceId: wikiSpaceId, pagePath: pagePath}).call()?.wikiPageId || null
             if (!pageId) return
-            const access = ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()
+            const access = ec.service.sync().name('org.moqui.resource.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()
             if (!access?.canUpdate) return
             for (const entityName of ['mantle.party.communication.WikiPageCommunicationEvent', 'mantle.work.effort.WikiPageWorkEffort',
                     'mantle.request.WikiPageRequest'])
@@ -2069,13 +2069,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             A wiki page (moqui.resource.wiki.WikiPage, a framework entity, which no entity filter covers) follows the wiki's
             own view rule whenever authorization is on, for every user, staff included as in the wiki screens, with or
-            without an organization filter: org.moqui.impl.WikiServices.get#WikiPageAccess, its canView. A space with
+            without an organization filter: org.moqui.resource.WikiServices.get#WikiPageAccess, its canView. A space with
             restrictView Y needs a WikiSpaceUser row of the user with allowView or allowAdmin Y, and a page with
             restrictView Y a WikiPageUser row of the user with allowView Y; the ADMIN group sees every page; a page whose
             space is not found is not seen.
 
             A merge request or a git repository (moqui.resource.GitMergeRequest, GitRepository, framework entities no entity
-            filter covers) is seen by whoever may view the repository (org.moqui.impl.GitServices.get#GitRepositoryAccess,
+            filter covers) is seen by whoever may view the repository (org.moqui.git.GitServices.get#GitRepositoryAccess,
             canView), whenever authorization is on, as a wiki page is; so are the review comments filed on a merge request.
 
             A timesheet (mantle.work.time.Timesheet, which no entity filter covers) is seen by its person, its approvers and ADMIN
@@ -2352,12 +2352,12 @@ along with this software (see the LICENSE.md file). If not, see
                 return ec.entity.find('mantle.order.OrderPartParty').condition('orderId', order.orderId)
                         .condition('partyId', 'in', s.partyIds).disableAuthz().count() > 0
             }
-            // the wiki's own view rule, org.moqui.impl.WikiServices.get#WikiPageAccess (see the description), once a page
+            // the wiki's own view rule, org.moqui.resource.WikiServices.get#WikiPageAccess (see the description), once a page
             const wikiViews = {}
             const wikiPageVisible = (page) => {
                 const pageId = page.wikiPageId
                 if (!Object.prototype.hasOwnProperty.call(wikiViews, pageId)) wikiViews[pageId] = !!ec.service.sync()
-                        .name('org.moqui.impl.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()?.canView
+                        .name('org.moqui.resource.WikiServices.get#WikiPageAccess').parameter('wikiPageId', pageId).call()?.canView
                 return wikiViews[pageId]
             }
             let visible
@@ -2659,9 +2659,9 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!authzOn) return true
                 if (entityName === COMM_EVENT) return commEventVisible(value, depth)
                 if (entityName === WIKI_PAGE) return wikiPageVisible(value)
-                // a merge request or a repository: whoever may view the repository (org.moqui.impl.GitServices)
+                // a merge request or a repository: whoever may view the repository (org.moqui.git.GitServices)
                 if (entityName === GIT_MERGE_REQUEST || entityName === GIT_REPOSITORY) return ec.factory.hasFeature('git') && !!ec.service.sync()
-                        .name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameter('repositoryId', value.repositoryId).call()?.canView
+                        .name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameter('repositoryId', value.repositoryId).call()?.canView
                 // a timesheet: its person, its approvers and ADMIN (mantle.work.TimesheetServices.get#TimesheetAccess)
                 if (entityName === TIMESHEET) return !!ec.service.sync()
                         .name('mantle.work.TimesheetServices.get#TimesheetAccess').parameter('timesheetId', value.timesheetId).call()?.canView
@@ -2697,7 +2697,7 @@ along with this software (see the LICENSE.md file). If not, see
             (create#EmailCommunicationEvent: type Email, its parties matched by user account and by the email addresses on
             parties, the status from the message's, and the parent event of the message's parent email when it has one). A
             message of a mail client account (emailAccountId) is found only by a user who reaches the account
-            (org.moqui.impl.EmailClientServices.get#EmailAccountAccess); the personal contacts that match are the account
+            (org.moqui.mail.EmailClientServices.get#EmailAccountAccess); the personal contacts that match are the account
             owner's and the current user's. Mail with no account (template mail, the old poller) is found by anyone, as
             before.
         </description>
@@ -2712,7 +2712,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (email == null) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
             const owners = []
             if (email.emailAccountId) {
-                const access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess')
+                const access = ec.service.sync().name('org.moqui.mail.EmailClientServices.get#EmailAccountAccess')
                         .parameter('emailAccountId', email.emailAccountId).call()
                 if (ec.message.hasError()) return
                 if (!(access.level >= 1)) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
@@ -2985,7 +2985,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="send" noun="EmailDraft">
         <description>
-            Sends a mail client draft through org.moqui.impl.EmailClientServices.send#Draft, with the same parameters (now,
+            Sends a mail client draft through org.moqui.mail.EmailClientServices.send#Draft, with the same parameters (now,
             at scheduledSendDate, or after the undo-send hold of holdSeconds) and the same results, and files it on records
             once it is sent (IronStone R6): recordEntityName and recordId, or recordList ({recordEntityName, recordId}) for
             several. Each record must be one the user sees (get#RecordLinkInfo) and the draft one the user may send from,
@@ -3052,7 +3052,7 @@ along with this software (see the LICENSE.md file). If not, see
                     checked.push({recordEntityName: info.recordEntityName, recordId: record.recordId})
             }
             // a draft the user may send from (send#Draft checks the rest)
-            const access = ec.service.sync().name('org.moqui.impl.EmailClientServices.get#EmailAccountAccess').call()
+            const access = ec.service.sync().name('org.moqui.mail.EmailClientServices.get#EmailAccountAccess').call()
             if (ec.message.hasError()) return
             const draft = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).one()
             if (draft == null || !access.accessMap[draft.emailAccountId]) { ec.message.addError(`Email message ${emailMessageId} not found`); return }
@@ -3084,7 +3084,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (record.recordEntityName === 'mantle.request.Request')
                     ec.resource.script('component://mr-mantle/service/mantle/request/SupportNotices.js').addCaseLink(emailMessageId, record.recordId)
             }
-            const out = ec.service.sync().name('org.moqui.impl.EmailClientServices.send#Draft').parameters({emailMessageId: emailMessageId,
+            const out = ec.service.sync().name('org.moqui.mail.EmailClientServices.send#Draft').parameters({emailMessageId: emailMessageId,
                 scheduledSendDate: scheduleAt, holdSeconds: holdSeconds}).call()
             if (ec.message.hasError()) return
             statusId = out.statusId ?? null
@@ -3314,7 +3314,7 @@ along with this software (see the LICENSE.md file). If not, see
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
             or WorkEffortRecord); its changes from the entity audit log; its files (the *Content rows); and the messages of
-            the chat room bound to it (org.moqui.impl.ChatServices.get#Timeline by the record: none when there is no room,
+            the chat room bound to it (org.moqui.chat.ChatServices.get#Timeline by the record: none when there is no room,
             the user may not read it or the room is end-to-end encrypted, as the server has no text for it). The open activities come apart in plannedActivities, soonest due first, with the
             assignee.
 
@@ -3608,7 +3608,7 @@ along with this software (see the LICENSE.md file). If not, see
                 for (let pages = 0; pages < 20; pages++) {
                     const parameters = {recordEntityName: recordEntityName, recordId: recordId, limit: Math.min(200, Math.max(fetch, 20))}
                     if (beforeSeq != null) parameters.beforeSeq = beforeSeq
-                    const out = callSource('org.moqui.impl.ChatServices.get#Timeline', parameters)
+                    const out = callSource('org.moqui.chat.ChatServices.get#Timeline', parameters)
                     if (ec.message.hasError() || !out?.room) return
                     const room = out.room
                     // an end-to-end encrypted room (C7) has no text on the server: its messages stay out of the record's history
@@ -4236,7 +4236,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Chat messages on records ========== -->
     <!-- ================================================ -->
 
-    <!-- A chat message (the framework's moqui.chat store, org.moqui.impl.ChatServices) is not a communication event: it
+    <!-- A chat message (the framework's moqui.chat store, org.moqui.chat.ChatServices) is not a communication event: it
         becomes one only when a user files it on a record or turns it into a task, request or event (IronStone design §13).
         A record room's messages show in the record's timeline as they are (get#RecordTimeline, kind chat). -->
 
@@ -4244,7 +4244,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             A chat message as a communication event, made once per message: type Chat, from the sender's party, its date
             the message's, the room's name as its subject and the message's HTML (its last edit) as its body. The user must
-            be able to read the room (org.moqui.impl.ChatServices.get#RoomAccess), and the message is one of the room's
+            be able to read the room (org.moqui.chat.ChatServices.get#RoomAccess), and the message is one of the room's
             messages that is not removed. A message of an end-to-end encrypted room is refused: the server has only its
             ciphertext, and its text does not leave the browser. The event names its message by a CommunicationEventRecord of moqui.chat.ChatEvent
             whose recordId is chatRoomId::eventSeq (the key of the MoquiChatEvent document): it finds the event again, and is
@@ -4268,7 +4268,7 @@ along with this software (see the LICENSE.md file). If not, see
             created = false
             chatMessage = null
             const parse = (text) => { if (!text) return {}; try { const value = JSON.parse(text); return value && typeof value === 'object' ? value : {} } catch (err) { return {} } }
-            const access = ec.service.sync().name('org.moqui.impl.ChatServices.get#RoomAccess').parameter('chatRoomId', chatRoomId).call()
+            const access = ec.service.sync().name('org.moqui.chat.ChatServices.get#RoomAccess').parameter('chatRoomId', chatRoomId).call()
             if (ec.message.hasError()) return
             if (!access?.canRead) { ec.message.addError(`Chat room ${chatRoomId} not found`); return }
             if (ec.entity.find('moqui.chat.ChatRoom').condition('chatRoomId', chatRoomId).disableAuthz().one()?.encrypted === 'Y') {
@@ -4289,7 +4289,7 @@ along with this software (see the LICENSE.md file). If not, see
             const sender = row.senderUserId ? ec.entity.find('moqui.security.UserAccount').condition('userId', row.senderUserId)
                     .disableAuthz().one() : null
             // an external actor of a chat bridge (no user, no party): its name on its network
-            const actor = !row.senderUserId && row.senderActorId ? (ec.service.sync().name('org.moqui.impl.ChatServices.get#ActorNames')
+            const actor = !row.senderUserId && row.senderActorId ? (ec.service.sync().name('org.moqui.chat.ChatServices.get#ActorNames')
                     .parameter('chatActorIdList', [row.senderActorId]).call()?.actorMap || {})[row.senderActorId] : null
             chatMessage = {chatRoomId: chatRoomId, eventSeq: Number(eventSeq), senderUserId: row.senderUserId ?? null,
                 senderActorId: row.senderActorId ?? null,
@@ -4497,7 +4497,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.party.communication.CommunicationEventContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="communicationEventId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="communicationEventContentId"/></out-parameters>
         <actions>
@@ -4512,7 +4512,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="communicationEventContentId" required="true"/>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEventContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <actions>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
@@ -4528,7 +4528,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="communicationEventContentId" required="true"/>
             <parameter name="communicationEventId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>

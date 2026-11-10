@@ -264,7 +264,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="ShellCounts">
         <description>
             The header badge counts of a user, for the theme value STRT_SHELL_COUNTS_SERVICE (the framework's
-            org.moqui.impl.ShellServices.get#ShellCounts and publish#ShellCounts call it with userId and send counts as it
+            org.moqui.ui.ShellServices.get#ShellCounts and publish#ShellCounts call it with userId and send counts as it
             is). Written over each user's own state, not on get#UserNoticeCounts, which counts declined events and
             completed tasks and reads messages by toPartyId only. counts:
             - today: the overdue and due today items of the user's Today (mantle.work.WorkEffortServices.get#UserTodayItems:
@@ -278,12 +278,12 @@ along with this software (see the LICENSE.md file). If not, see
             - messages: the unread internal messages and Inbox-delivered mailbox posts
               (mantle.party.CommunicationServices.count#UnreadInternalMessages), the Messages badge
             - email: the unread mail in the Inbox folders of the user's mail accounts, not snoozed or archived
-              (org.moqui.impl.EmailClientServices.count#UnreadEmail), the Mail badge
+              (org.moqui.mail.EmailClientServices.count#UnreadEmail), the Mail badge
             - chat: the unread chat messages and mentions that count for the user
-              (org.moqui.impl.ChatServices.get#UnreadCounts total: the unread of rooms at notification level all, the
+              (org.moqui.chat.ChatServices.get#UnreadCounts total: the unread of rooms at notification level all, the
               mentions of rooms at mentions or muted, nothing at none), the Chat badge. The framework's ChatServices publish
               the counts of the users whose chat counts change (publish#ChatCounts), so no entity ECA is needed for it.
-            - calls: the missed calls not seen yet (org.moqui.impl.CallServices.count#MissedCalls); the call services
+            - calls: the missed calls not seen yet (org.moqui.call.CallServices.count#MissedCalls); the call services
               publish the counts when they change (publish#MissedCounts).
             Each part stands alone: one that fails is logged by name, null in counts and named in failedParts. The counts
             read only the user's own rows, with authorization disabled; another user's counts only for internal work, with
@@ -344,9 +344,9 @@ along with this software (see the LICENSE.md file). If not, see
                     return {notifications: out.notificationCount, approvals: out.approvalCount, updates: out.updateCount}
                 })
                 part('messages', ['messages'], () => ({messages: callService('mantle.party.CommunicationServices.count#UnreadInternalMessages', {userId: userId}).unreadCount}))
-                part('email', ['email'], () => ({email: callService('org.moqui.impl.EmailClientServices.count#UnreadEmail', {userId: userId}).unreadCount}))
-                part('chat', ['chat'], () => ({chat: callService('org.moqui.impl.ChatServices.get#UnreadCounts', {userId: userId}).total}))
-                part('calls', ['calls'], () => ({calls: callService('org.moqui.impl.CallServices.count#MissedCalls', {userId: userId}).missedCount}))
+                part('email', ['email'], () => ({email: callService('org.moqui.mail.EmailClientServices.count#UnreadEmail', {userId: userId}).unreadCount}))
+                part('chat', ['chat'], () => ({chat: callService('org.moqui.chat.ChatServices.get#UnreadCounts', {userId: userId}).total}))
+                part('calls', ['calls'], () => ({calls: callService('org.moqui.call.CallServices.count#MissedCalls', {userId: userId}).missedCount}))
             } finally {
                 if (!wasDisabled) ec.artifactExecution.enableAuthz()
             }
@@ -400,7 +400,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="publish" noun="PartyShellCounts" authenticate="false">
         <description>
             Sends the shell counts of userIdList and of the users of partyIdList (UserAccount.partyId) through
-            org.moqui.impl.ShellServices.publish#ShellCounts, which waits for the commit and coalesces per user. Never
+            org.moqui.ui.ShellServices.publish#ShellCounts, which waits for the commit and coalesces per user. Never
             fails the caller: a failure is logged.
         </description>
         <in-parameters>
@@ -419,7 +419,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .selectField('userId').disableAuthz().list()) userIds.add(account.userId)
                 if (userIds.size === 0) return
                 const users = Array.from(userIds)
-                ec.service.sync().name('org.moqui.impl.ShellServices.publish#ShellCounts').parameters({userIdList: users}).call()
+                ec.service.sync().name('org.moqui.ui.ShellServices.publish#ShellCounts').parameters({userIdList: users}).call()
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                 publishedUserIds = users
             } catch (err) {
@@ -763,7 +763,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="update" noun="Account">
-        <description>Update Person, UserAccount, and EmailPrimary.</description>
+        <description>Update Person, UserAccount, and EmailPrimary. A change to the person's name refreshes the user's full
+            name from PartyFullNameTemplate; other account changes preserve the user's existing display name.</description>
         <in-parameters>
             <parameter name="userId"/>
             <parameter name="partyId"/>
@@ -788,10 +789,18 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount"/>
                 <set field="partyId" from="userAccount.partyId"/>
             </else-if></if>
+            <set field="accountNameFields" from="['salutation', 'firstName', 'middleName', 'lastName', 'personalTitle', 'suffix', 'nickname']"/>
+            <set field="accountPersonBefore" from="partyId ? ec.entity.find('mantle.party.Person').condition('partyId', partyId).one() : null"/>
+            <set field="accountNameBefore" from="accountNameFields.map(name =&gt; accountPersonBefore?.[name] ?? '')"/>
             <if condition="userId"><service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="context"/></if>
             <set field="prePartyId" from="partyId"/>
             <service-call name="store#mantle.party.Party" in-map="context" out-map="context"/>
             <service-call name="store#mantle.party.Person" in-map="context"/>
+            <entity-find-one entity-name="mantle.party.Person" value-field="accountPersonAfter"/>
+            <if condition="userId &amp;&amp; accountNameFields.some((name, index) =&gt; (accountPersonAfter?.[name] ?? '') !== accountNameBefore[index])">
+                <set field="userFullName" value="${ec.resource.expand('PartyFullNameTemplate','',accountPersonAfter||{})}"/>
+                <service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="{userId:userId, userFullName:userFullName}"/>
+            </if>
             <if condition="!prePartyId"><service-call name="store#moqui.security.UserAccount"
                     in-map="{userId:userId, partyId:partyId}"/></if>
             <if condition="emailAddress"><service-call name="mantle.party.ContactServices.store#PartyContactInfo"
@@ -1413,7 +1422,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.party.PartyContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="partyId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="partyContentId"/></out-parameters>
         <actions>
@@ -1427,7 +1436,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyContentId" required="true"/>
             <auto-parameters entity-name="mantle.party.PartyContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <actions>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
@@ -1442,7 +1451,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="partyContentId" required="true"/>
             <parameter name="partyId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>

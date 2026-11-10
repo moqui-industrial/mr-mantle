@@ -1082,7 +1082,7 @@ function confirm(p) {
         "<p>" +
         escapeHtml(ec.l10n.localize("Attached is the change made to your order") + " " + ch.so.orderId + ".") +
         "</p>"
-    const draft = lib.call("org.moqui.impl.EmailClientServices.save#Draft", {
+    const draft = lib.call("org.moqui.mail.EmailClientServices.save#Draft", {
         emailAccountId: account.emailAccountId,
         toAddresses: recipient,
         subject: ec.l10n.localize("Change to your order") + " " + ch.so.orderId + " · " + partyName(ch.so.organizationPartyId),

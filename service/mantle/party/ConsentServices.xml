@@ -847,7 +847,7 @@ along with this software (see the LICENSE.md file). If not, see
                 subject: list.verifyEmailSubject || `Confirm your unsubscribe from ${listName}`}
             // a template without a body screen: a short body with the link
             const own = !template.bodyScreenLocation
-            const out = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: template.emailTemplateId,
+            const out = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: template.emailTemplateId,
                 toAddresses: address.infoString, createEmailMessage: true, bodyParameters: params,
                 body: own ? `<p>Please confirm that you want to stop getting ${encode(listName)}${organizationName ? ' from ' + encode(organizationName) : ''}.</p>`
                     + `<p><a href="${encode(verifyUrl)}">Confirm unsubscribe</a></p><p>If you did not ask for this, ignore this email and you stay subscribed.</p>` : null,

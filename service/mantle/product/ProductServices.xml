@@ -933,7 +933,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <auto-parameters entity-name="mantle.product.ProductContent" include="nonpk"/>
             <parameter name="productId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="contentLocation"/>
             <parameter name="contentText" allow-html="any"/>
             <parameter name="textExtension" default-value="html"/>
@@ -963,7 +963,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="productContentId" required="true"/>
             <auto-parameters entity-name="mantle.product.ProductContent" include="nonpk"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="contentText" allow-html="any"/>
             <parameter name="expectedRevision"/>
             <parameter name="requireRevision" type="Boolean" default="false"/>
@@ -983,7 +983,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="productContentId" required="true"/>
             <parameter name="productId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
@@ -1011,7 +1011,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <auto-parameters entity-name="mantle.product.category.ProductCategoryContent" include="nonpk"/>
             <parameter name="productCategoryId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="contentText" allow-html="any"/>
             <parameter name="textExtension" default-value="html"/>
             <parameter name="filename"/>
@@ -1040,7 +1040,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="productCategoryContentId" required="true"/>
             <auto-parameters entity-name="mantle.product.category.ProductCategoryContent" include="nonpk"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="contentText" allow-html="any"/>
             <parameter name="expectedRevision"/>
             <parameter name="requireRevision" type="Boolean" default="false"/>
@@ -1060,7 +1060,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="productCategoryContentId" required="true"/>
             <parameter name="productCategoryId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>

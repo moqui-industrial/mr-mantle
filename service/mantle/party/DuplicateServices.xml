@@ -681,49 +681,56 @@ along with this software (see the LICENSE.md file). If not, see
                 duplicatesFound = 0
                 partiesChecked = 0
                 const cf = ec.entity.conditionFactory
-                // NOTE: no limit on this query, for really big databases this may blow up!
+                // read through the find's iterator, a batch of parties at a time, so a big database is not held whole;
                 // personal contacts (privateOwnerUserId) are left out of the duplicate scan
-                const partyList = ec.entity.find("mantle.party.Party")
+                const parties = ec.entity.find("mantle.party.Party")
                         .condition(cf.makeCondition("privateOwnerUserId", "equals", null))
                         .condition(cf.makeActionConditionDirect("disabled", "equals", null, "N", null, false, false, true, "false"))
                         .condition(cf.makeActionConditionDirect("hasDuplicates", "equals", null, "N", null, false, false, true, "false"))
                         .condition(cf.makeActionConditionDirect("lastDupCheckDate", "less", String(oneDayAgo), null, null, false, false, true, "false"))
-                        .selectField("partyId").list()
-                ec.logger.info(`Found ${partyList.length} parties to check for duplicates`)
+                        .selectField("partyId").iterator()
                 // check in batches of parallel async calls; a party whose check fails is logged and the rest are checked
-                let partyIdList = []
                 let failed = 0
-                for (let partyIdx = 0; partyIdx < partyList.length; partyIdx++) {
-                    partyIdList.push(partyList[partyIdx].partyId)
-                    if (partyIdList.length === threads || partyIdx === partyList.length - 1) {
-                        const futureList = []
-                        for (const checkPartyId of partyIdList) {
-                            // party may have already been checked since the original query
-                            const curParty = ec.entity.find("mantle.party.Party").condition("partyId", checkPartyId).one()
-                            if (curParty == null || curParty.hasDuplicates === "Y") continue
-                            futureList.push({partyId: checkPartyId, future: ec.service.async().name("mantle.party.DuplicateServices.find#PartyDuplicates")
-                                    .parameters({partyId:checkPartyId}).callFuture()})
-                        }
-                        for (const {partyId: checkedPartyId, future} of futureList) {
-                            try {
-                                const dupOut = future.get()
-                                if (ec.message.hasError()) {
-                                    ec.logger.error(`Duplicate check of party ${checkedPartyId} failed: ${ec.message.getErrorsString()}`)
-                                    ec.message.clearErrors()
-                                    failed++
-                                    continue
-                                }
-                                if (dupOut?.matchingInfoByPartyId && Object.keys(dupOut.matchingInfoByPartyId).length > 0) duplicatesFound = (duplicatesFound + 1)
-                                partiesChecked = (partiesChecked + 1)
-                            } catch (t) {
-                                ec.logger.log("error", `Duplicate check of party ${checkedPartyId} failed`, t)
-                                failed++
-                            }
-                        }
-                        if (partiesChecked % 100 === 0) ec.logger.log("info", `Progress: checked ${partiesChecked} parties at ${Date.now() - startTime}ms, found ${duplicatesFound} duplicates`, null)
-                        // clear out list for next set
-                        partyIdList = []
+                const checkBatch = (partyIdList) => {
+                    const futureList = []
+                    for (const checkPartyId of partyIdList) {
+                        // party may have already been checked since the original query
+                        const curParty = ec.entity.find("mantle.party.Party").condition("partyId", checkPartyId).one()
+                        if (curParty == null || curParty.hasDuplicates === "Y") continue
+                        futureList.push({partyId: checkPartyId, future: ec.service.async().name("mantle.party.DuplicateServices.find#PartyDuplicates")
+                                .parameters({partyId:checkPartyId}).callFuture()})
                     }
+                    for (const {partyId: checkedPartyId, future} of futureList) {
+                        try {
+                            const dupOut = future.get()
+                            if (ec.message.hasError()) {
+                                ec.logger.error(`Duplicate check of party ${checkedPartyId} failed: ${ec.message.getErrorsString()}`)
+                                ec.message.clearErrors()
+                                failed++
+                                continue
+                            }
+                            if (dupOut?.matchingInfoByPartyId && Object.keys(dupOut.matchingInfoByPartyId).length > 0) duplicatesFound = (duplicatesFound + 1)
+                            partiesChecked = (partiesChecked + 1)
+                        } catch (t) {
+                            ec.logger.log("error", `Duplicate check of party ${checkedPartyId} failed`, t)
+                            failed++
+                        }
+                    }
+                    if (partiesChecked % 100 === 0) ec.logger.log("info", `Progress: checked ${partiesChecked} parties at ${Date.now() - startTime}ms, found ${duplicatesFound} duplicates`, null)
+                }
+                try {
+                    let partyIdList = []
+                    let party
+                    while ((party = parties.next()) != null) {
+                        partyIdList.push(party.partyId)
+                        if (partyIdList.length === threads) {
+                            checkBatch(partyIdList)
+                            partyIdList = []
+                        }
+                    }
+                    if (partyIdList.length > 0) checkBatch(partyIdList)
+                } finally {
+                    parties.close()
                 }
                 ec.logger.log("info", `Completed. Checked ${partiesChecked} parties in ${Date.now() - startTime}ms, found ${duplicatesFound} duplicates${failed ? `, ${failed} failed` : ''}`, null)
             ]]></script>

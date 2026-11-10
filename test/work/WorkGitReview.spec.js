@@ -4,7 +4,7 @@
 // rules of service/WorkGit.secas.xml after the framework's review services, the review threads (create#ReviewComment,
 // store#ReviewAnchor, get#ReviewThreads, resolve#ReviewThread, refresh#ReviewAnchors), get#RecordLinkInfo on a merge request,
 // release tags by version (link#RefByName), the topics MergeRequestReview, MergeRequestUpdate and CommitStatusFailed, and
-// search#Code. On a database repository whose commits are made through org.moqui.impl.GitServices.commit#GitFiles; a branch's
+// search#Code. On a database repository whose commits are made through org.moqui.git.GitServices.commit#GitFiles; a branch's
 // commits are made with the branch as the default for the moment. New spec, no Groovy original.
 // Run: ./moq test mr-mantle --spec WorkGitReview
 const PROJECT = "GITR"
@@ -50,19 +50,19 @@ function settle() {
         const busy = ["recording", "pending", "running"].reduce((sum, status) =>
             sum + countOf("moqui.resource.GitUpdate", { repositoryId, ecaStatus: status }), 0)
         if (busy == 0) return
-        call("org.moqui.impl.GitServices.process#PendingGitUpdates", {})
+        call("org.moqui.git.GitServices.process#PendingGitUpdates", {})
     }
     throw new Error("the git updates did not settle")
 }
 function commitFiles(message, fileMap) {
-    const out = call("org.moqui.impl.GitServices.commit#GitFiles", { repositoryId, message, fileMap })
+    const out = call("org.moqui.git.GitServices.commit#GitFiles", { repositoryId, message, fileMap })
     settle()
     return out.commitId
 }
 // a commit on a branch: the branch is the default for the moment
 function commitOn(branch, message, fileMap) {
-    call("org.moqui.impl.GitServices.update#GitRepository", { repositoryId, branch })
-    try { return commitFiles(message, fileMap) } finally { call("org.moqui.impl.GitServices.update#GitRepository", { repositoryId, branch: "main" }) }
+    call("org.moqui.git.GitServices.update#GitRepository", { repositoryId, branch })
+    try { return commitFiles(message, fileMap) } finally { call("org.moqui.git.GitServices.update#GitRepository", { repositoryId, branch: "main" }) }
 }
 const authz = (userId, action) => call("mantle.work.GitServices.check#GitRepositoryAuthz", { userId, authzActionEnumId: action,
     artifactName: repositoryId }).authzTypeEnumId
@@ -151,7 +151,7 @@ feature("a merge request links the branch's task and the keys of its text, moves
         const waitingBefore = call("mantle.work.ProjectServices.get#ProjectHomeCounts", {}).counts.reviewsWaiting
         login("joe.developer")
         try {
-            const made = call("org.moqui.impl.GitReviewServices.create#MergeRequest", { repositoryId, sourceRef: branchName,
+            const made = call("org.moqui.git.GitReviewServices.create#MergeRequest", { repositoryId, sourceRef: branchName,
                 title: `Sign in with a passkey (${taskBranch})`, description: `Closes ${taskClose}\n\nNot ${PROJECT}-NOPE.`,
                 reviewerUserIdList: [userIdOf(JOHN)] })
             mergeRequestId = made.mergeRequestId
@@ -179,10 +179,10 @@ feature("a merge request links the branch's task and the keys of its text, moves
 
 feature("an edit of the description drops a key taken out and keeps the branch's task", {
     when() {
-        call("org.moqui.impl.GitReviewServices.update#MergeRequest", { mergeRequestId, description: `Fixes ${taskOther}` })
+        call("org.moqui.git.GitReviewServices.update#MergeRequest", { mergeRequestId, description: `Fixes ${taskOther}` })
         const ids = Array.from(ec.entity.find("mantle.work.effort.WorkEffortGitMergeRequest").condition("mergeRequestId", mergeRequestId)
             .orderBy("workEffortId").list()).map((link) => link.workEffortId)
-        call("org.moqui.impl.GitReviewServices.update#MergeRequest", { mergeRequestId, description: `Closes ${taskClose}` })
+        call("org.moqui.git.GitReviewServices.update#MergeRequest", { mergeRequestId, description: `Closes ${taskClose}` })
         return { ids, after: Array.from(ec.entity.find("mantle.work.effort.WorkEffortGitMergeRequest").condition("mergeRequestId", mergeRequestId)
             .orderBy("workEffortId").list()).map((link) => link.workEffortId) }
     },
@@ -265,12 +265,12 @@ feature("a new commit on the source marks the thread on a changed line outdated 
 feature("a failed check tells the commit's author; an approval and the merge complete the linked items", {
     when() {
         const mr = ec.entity.find("moqui.resource.GitMergeRequest").condition("mergeRequestId", mergeRequestId).one()
-        call("org.moqui.impl.GitServices.create#GitCommitStatus", { repositoryId, commitId: mr.headCommitId, state: "failure", context: "ci/build",
+        call("org.moqui.git.GitServices.create#GitCommitStatus", { repositoryId, commitId: mr.headCommitId, state: "failure", context: "ci/build",
             description: "Build failed" })
         const failed = notices(userIdOf(JOE), "CommitStatusFailed")
-        call("org.moqui.impl.GitReviewServices.submit#MergeRequestReview", { mergeRequestId, decision: "approve", note: "Looks good" })
+        call("org.moqui.git.GitReviewServices.submit#MergeRequestReview", { mergeRequestId, decision: "approve", note: "Looks good" })
         const approvedNotice = notices(userIdOf(JOE), "MergeRequestUpdate").map((notice) => notice.change)
-        const merged = call("org.moqui.impl.GitReviewServices.merge#MergeRequest", { mergeRequestId })
+        const merged = call("org.moqui.git.GitReviewServices.merge#MergeRequest", { mergeRequestId })
         settle()
         return { failed, approvedNotice, merged, after: ec.entity.find("moqui.resource.GitMergeRequest").condition("mergeRequestId", mergeRequestId).one(),
             branchTask: workEffort(taskBranch), closeTask: workEffort(taskClose), other: workEffort(taskOther),
@@ -295,7 +295,7 @@ feature("a tag named as a release's version links the release", {
     when() {
         const release = call("create#mantle.work.effort.WorkEffort", { workEffortId: `${PROJECT}-REL-1`, workEffortTypeEnumId: "WetRelease",
             rootWorkEffortId: PROJECT, workEffortName: "2.0", statusId: "WeInPlanning" }).workEffortId
-        const made = call("org.moqui.impl.GitServices.create#GitRef", { repositoryId, refName: "v2.0", refType: "tag", message: "Release 2.0" })
+        const made = call("org.moqui.git.GitServices.create#GitRef", { repositoryId, refName: "v2.0", refType: "tag", message: "Release 2.0" })
         settle()
         call("mantle.work.GitServices.link#RefByName", { repositoryId, refName: "refs/tags/2.0.1", newId: made.commitId, tag: { commitId: made.commitId, annotated: false } })
         return { release, refs: Array.from(ec.entity.find("mantle.work.effort.WorkEffortGitRef").condition({ workEffortId: release }).orderBy("refName").list()) }

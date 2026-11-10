@@ -98,7 +98,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="existing != null"><return error="true" message="Git repository ${repositoryId} already exists"/></if>
             <service-call name="create#moqui.resource.GitRepository" in-map="{repositoryId:repositoryId,
                     repositoryKind:repositoryKind, branch:branch, description:description || project.workEffortName}"/>
-            <service-call name="org.moqui.impl.GitServices.init#GitRepository"
+            <service-call name="org.moqui.git.GitServices.init#GitRepository"
                     in-map="{repositoryId:repositoryId, contentRepository:contentRepository}"/>
             <service-call name="mantle.work.GitServices.add#ProjectRepository"
                     in-map="{workEffortId:workEffortId, repositoryId:repositoryId}"/>
@@ -176,7 +176,7 @@ along with this software (see the LICENSE.md file). If not, see
                     const pattern = repo.branch || 'main'
                     const existing = ec.entity.find('moqui.resource.GitBranchRule').condition({repositoryId, refPattern: pattern}).disableAuthz().count()
                     if (existing > 0) return
-                    ec.service.sync().name('org.moqui.impl.GitServices.store#GitBranchRule').parameters({repositoryId, refPattern: pattern,
+                    ec.service.sync().name('org.moqui.git.GitServices.store#GitBranchRule').parameters({repositoryId, refPattern: pattern,
                         allowForcePush: 'N', allowDelete: 'N', requireMergeRequest: yes(values.requireMergeRequest) ? 'Y' : 'N',
                         requiredApprovals: Math.max(0, Number(values.approvals || 0) || 0), dismissStaleApprovals: yes(values.dismissStale) ? 'Y' : 'N'}).call()
                 })
@@ -282,7 +282,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Commits on tasks ========== -->
 
     <service verb="store" noun="TaskCommit">
-        <description>Link a commit (a map as org.moqui.impl.GitServices.get#GitCommit gives it) to a work effort,
+        <description>Link a commit (a map as org.moqui.git.GitServices.get#GitCommit gives it) to a work effort,
             unless it is linked already.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -313,7 +313,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="commitId" required="true"/>
         </in-parameters>
         <actions>
-            <service-call name="org.moqui.impl.GitServices.get#GitCommit" out-map="found"
+            <service-call name="org.moqui.git.GitServices.get#GitCommit" out-map="found"
                     in-map="{repositoryId:repositoryId, commitId:commitId.trim(), stats:false}"/>
             <if condition="!found.commit"><return error="true" message="No commit ${commitId} in repository ${repositoryId}"/></if>
             <service-call name="mantle.work.GitServices.store#TaskCommit" in-map="{workEffortId:workEffortId,
@@ -381,7 +381,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="refName" required="true"/>
         </in-parameters>
         <actions>
-            <service-call name="org.moqui.impl.GitServices.get#GitRefs" in-map="{repositoryId:repositoryId}" out-map="refsOut"/>
+            <service-call name="org.moqui.git.GitServices.get#GitRefs" in-map="{repositoryId:repositoryId}" out-map="refsOut"/>
             <set field="found" from="(refsOut.refList ?? []).find(ref => ref.refName == refName.trim() || ref.shortName == refName.trim())"/>
             <if condition="!found"><return error="true" message="No branch or tag ${refName} in repository ${repositoryId}"/></if>
             <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:workEffortId,
@@ -501,7 +501,7 @@ along with this software (see the LICENSE.md file). If not, see
                     out-map="projectOut"/>
             <if condition="!projectOut.projectIdList.length"><return/></if>
             <iterate list="newCommitIds" entry="commitId">
-                <service-call name="org.moqui.impl.GitServices.get#GitCommit" out-map="found"
+                <service-call name="org.moqui.git.GitServices.get#GitCommit" out-map="found"
                         in-map="{repositoryId:repositoryId, commitId:commitId, stats:false}"/>
                 <if condition="!found.commit"><continue/></if>
                 <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
@@ -626,7 +626,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions><script><![CDATA[
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!mr || !access?.canView) { ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null || task.workEffortTypeEnumId !== 'WetTask') { ec.message.addError(ec.resource.expand('Work item ${workEffortId} not found', '', {workEffortId})); return }
@@ -645,7 +645,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions><script><![CDATA[
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!mr || !access?.canView) { ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             ec.entity.find('mantle.work.effort.WorkEffortGitMergeRequest').condition({workEffortId, mergeRequestId}).disableAuthz().deleteAll()
         ]]></script></actions>
@@ -658,7 +658,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             itemList = []
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!mr || !access?.canView) { ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             const nameOf = (table, field, id) => id ? ec.entity.find(table).condition(field, id).useCache(true).disableAuthz().one()?.description || id : null
             for (const link of Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitMergeRequest').condition('mergeRequestId', mergeRequestId)
@@ -725,7 +725,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="handle" noun="MergeRequestEvent">
         <description>The gitECA-style rules of a merge request's events (service/Work.secas.xml, after the framework's
-            org.moqui.impl.GitReviewServices services): opened, updated, ready and reopened link its work items
+            org.moqui.git.GitReviewServices services): opened, updated, ready and reopened link its work items
             (link#MergeRequestItems), and opened or ready move them to In Review (move#MergeRequestItemsToReview); merged
             completes them (complete#MergeRequestItems); and the reviewers and the author are told (topics MergeRequestReview
             and MergeRequestUpdate, notify#MergeRequest). synchronize (a new head of the source) marks the review threads it
@@ -827,7 +827,7 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="notify" noun="CommitStatusFailed">
-        <description>A failure or error status posted on a commit (the SECA on org.moqui.impl.GitServices.create#GitCommitStatus):
+        <description>A failure or error status posted on a commit (the SECA on org.moqui.git.GitServices.create#GitCommitStatus):
             topic CommitStatusFailed to the commit's author (its Moqui-User-Id, else the user accounts with its email) and to
             the authors of the open merge requests whose head it is, not the one who posted it. Message: repositoryId,
             commitId, shortId, summary, checkContext (a template's context names the context itself), state, stateLabel, description, targetUrl. A notice that fails is logged.</description>
@@ -840,7 +840,7 @@ along with this software (see the LICENSE.md file). If not, see
             const repositoryId = status.repositoryId
             ec.message.pushErrors()
             try {
-                const found = ec.service.sync().name('org.moqui.impl.GitServices.get#GitCommit').parameters({repositoryId, commitId: status.commitId, stats: false}).disableAuthz().call()
+                const found = ec.service.sync().name('org.moqui.git.GitServices.get#GitCommit').parameters({repositoryId, commitId: status.commitId, stats: false}).disableAuthz().call()
                 const commit = found?.commit || {}
                 const userIds = []
                 if (commit.moquiUserId) userIds.push(commit.moquiUserId)
@@ -883,7 +883,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="communicationEventId"/></out-parameters>
         <actions><script><![CDATA[
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             // a client contact (PROJECT_CLIENT) only views a shared repository: review comments are the team's notes (impl-projects.md P10b)
             if (!mr || !access?.canView || !ec.user.userId || ec.user.hasPermission('PROJECT_CLIENT')) {
                 ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
@@ -936,7 +936,7 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions><script><![CDATA[
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!mr || !access?.canView || ec.user.hasPermission('PROJECT_CLIENT')) {
                 ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             if (oldLine == null && newLine == null) { ec.message.addError(ec.l10n.localize('A review comment is on an old or a new line')); return }
@@ -967,7 +967,7 @@ along with this software (see the LICENSE.md file). If not, see
             rootCommEventId = event ? (event.rootCommEventId || event.communicationEventId) : null
             const anchor = rootCommEventId ? ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor').condition('communicationEventId', rootCommEventId).disableAuthz().one() : null
             const mr = anchor ? ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', anchor.mergeRequestId).disableAuthz().one() : null
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!access?.canView || !ec.user.userId || ec.user.hasPermission('PROJECT_CLIENT')) {
                 ec.message.addError(ec.resource.expand('Review thread ${communicationEventId} not found', '', {communicationEventId})); return }
             const root = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', rootCommEventId).disableAuthz().one()
@@ -989,7 +989,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             threadList = []
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            const access = mr ? ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
+            const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!mr || !access?.canView) { ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             // a client contact (PROJECT_CLIENT) who views a shared repository reads its diffs, never the team's review threads
             // (Comments, as a note; impl-projects.md P10b)
@@ -1034,7 +1034,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const anchor of anchors) {
                 ec.message.pushErrors()
                 try {
-                    if (!(anchor.commitId in compares)) compares[anchor.commitId] = ec.service.sync().name('org.moqui.impl.GitServices.get#GitCompare')
+                    if (!(anchor.commitId in compares)) compares[anchor.commitId] = ec.service.sync().name('org.moqui.git.GitServices.get#GitCompare')
                             .parameters({repositoryId: mr.repositoryId, base: anchor.commitId, head: mr.headCommitId, withDiffs: true}).disableAuthz().call()
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                     const file = Array.from(compares[anchor.commitId]?.fileList || []).find((one) => one.path === anchor.path)
@@ -1078,7 +1078,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="TaskBranch">
         <description>A branch for a work item (WorkItemDetail's Create branch): named by get#TaskBranchName unless branchName is
             given, in repositoryId or the one repository of its project, from a ref (the default branch's head when empty),
-            made by org.moqui.impl.GitServices.create#GitRef (the user's create right and the branch rules apply) and linked to
+            made by org.moqui.git.GitServices.create#GitRef (the user's create right and the branch rules apply) and linked to
             the item (store#WorkEffortRef).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -1104,7 +1104,7 @@ along with this software (see the LICENSE.md file). If not, see
             }
             if (!branchName) branchName = ec.service.sync().name('mantle.work.GitServices.get#TaskBranchName').parameters({workEffortId}).call()?.branchName
             if (ec.message.hasError() || !branchName) return
-            const out = ec.service.sync().name('org.moqui.impl.GitServices.create#GitRef').parameters({repositoryId, refName: String(branchName).trim(),
+            const out = ec.service.sync().name('org.moqui.git.GitServices.create#GitRef').parameters({repositoryId, refName: String(branchName).trim(),
                 refType: 'branch', revision: fromRef || null}).call()
             if (ec.message.hasError()) return
             refName = out?.refName || 'refs/heads/' + branchName
@@ -1132,12 +1132,12 @@ along with this software (see the LICENSE.md file). If not, see
             const bang = term.startsWith('!')
             const words = bang ? term.substring(1).trim() : term
             if (!bang) {
-                const repos = ec.service.sync().name('org.moqui.impl.GitServices.find#GitRepositories').parameters({text: words, pageSize: max}).call()
+                const repos = ec.service.sync().name('org.moqui.git.GitServices.find#GitRepositories').parameters({text: words, pageSize: max}).call()
                 for (const repo of Array.from(repos?.repositoryList || [])) resultList.push({kind: 'repository', repositoryId: repo.repositoryId,
                     description: repo.description || '', repositoryKind: repo.repositoryKind})
             }
             if (resultList.length >= max || (!number && !words)) return
-            const visible = Array.from(ec.service.sync().name('org.moqui.impl.GitServices.find#GitRepositories').parameters({pageNoLimit: true}).call()?.repositoryList || [])
+            const visible = Array.from(ec.service.sync().name('org.moqui.git.GitServices.find#GitRepositories').parameters({pageNoLimit: true}).call()?.repositoryList || [])
                     .map((repo) => repo.repositoryId)
             if (!visible.length) return
             let rows

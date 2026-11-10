@@ -235,7 +235,7 @@ feature("joe fixes Monday and submits again; john.doe approves from the notice; 
         made.fix = entry({ workEffortId: made.task1, fromDate: "2026-11-16 15:00:00", hours: "4.5", comments: "Finished the cells" })
         as("joe.developer", () => call(`${TS}.submit#Timesheet`, { timesheetId: made.timesheetId }))
         const notice = messagesOf("TimesheetApproval", made.timesheetId).find((message) => usersOf(message).some((row) => row.viewedDate == null))
-        const approved = as("john.doe", () => call("org.moqui.impl.NotificationServices.approve#NotificationMessage", { notificationMessageId: notice.notificationMessageId }))
+        const approved = as("john.doe", () => call("org.moqui.ui.NotificationServices.approve#NotificationMessage", { notificationMessageId: notice.notificationMessageId }))
         const status1 = sheet().statusId
         const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2026-11-18" }).week)
         const reopened = as("john.doe", () => call(`${TS}.reopen#Timesheet`, { timesheetId: made.timesheetId, reason: "One more fix" }))

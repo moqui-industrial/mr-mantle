@@ -324,7 +324,7 @@
             <parameter name="description" type="String"/>
             <parameter name="contentText" type="String"/>
             <parameter name="filename" type="String"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters>
             <parameter name="productBomContentId"/>
@@ -400,7 +400,7 @@
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="csvText"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="delimiter"/>
             <parameter name="preview" type="Boolean" default="true"/>
             <parameter name="changeReason" required="true"/>

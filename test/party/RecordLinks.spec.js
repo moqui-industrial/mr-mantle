@@ -535,7 +535,7 @@ feature("deleting a wiki page takes its comment, activity and follower joins fir
             activities: count("mantle.work.effort.WikiPageWorkEffort", { wikiPageId }),
             followers: count("mantle.party.communication.RecordFollower", { recordEntityName: WIKI, recordId: wikiPageId }) })
         const before = joins()
-        call("org.moqui.impl.WikiServices.delete#WikiPage", { wikiPageId })
+        call("org.moqui.resource.WikiServices.delete#WikiPage", { wikiPageId })
         return { before, after: joins(), page: count(WIKI, { wikiPageId }), eventIds,
             events: ec.entity.find("mantle.party.communication.CommunicationEvent").condition("communicationEventId", "in", eventIds).count() }
     },

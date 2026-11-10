@@ -159,6 +159,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
         </out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <if condition="!workEffortId &amp;&amp; rootWorkEffortId">
                 <!-- a bank of 1: the numbers have no gaps (create#Project starts them at 1) -->
                 <set field="seqName" value="Project_${rootWorkEffortId}"/>
@@ -197,6 +199,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="Object.assign({}, context, {workEffortTypeEnumId:'WetTask'})"/>
             <if condition="assignToPartyId">
                 <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:assignToPartyId,
@@ -219,6 +223,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeUomId" default-value="TF_hr"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <set field="movedProject" from="false"/>
             <if condition="rootWorkEffortId">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="before"/>
@@ -253,7 +259,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="rootWorkEffortId" required="true"/>
             <parameter name="clearParent" type="Boolean" default="false"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             if (clearParent) ec.service.sync().name('update#mantle.work.effort.WorkEffort').parameters({workEffortId: workEffortId, parentWorkEffortId: null}).call()
             const subtree = [workEffortId]
             for (let i = 0; i < subtree.length && i < 100000; i++) {
@@ -279,6 +288,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="milestoneWorkEffortId" required="true"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
+                    in-map="{workEffortId:workEffortId, targetWorkEffortId:milestoneWorkEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <!-- if milestoneWorkEffortId is different from currently associated milestone, expire all milestones and assoc with new one -->
             <entity-find entity-name="mantle.work.effort.WorkEffortAssoc" list="weaList">
                 <date-filter/>
@@ -309,7 +321,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="assocTypeEnumId" required="true"/>
             <parameter name="planWorkEffortId"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const kinds = {WeatMilestone: 'WetMilestone', WeatRelease: 'WetRelease', WeatSprint: 'WetSprint', WeatComponent: 'WetComponent'}
             if (!kinds[assocTypeEnumId]) { ec.message.addError(ec.resource.expand('${assocTypeEnumId} is not a kind of plan item', '', {assocTypeEnumId})); return }
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
@@ -357,7 +372,10 @@ along with this software (see the LICENSE.md file). If not, see
             made it, which ProjectReportServices.get#SprintScopeChanges reads.</description>
         <in-parameters><parameter name="workEffortId" required="true"/><parameter name="sprintWorkEffortId"/></in-parameters>
         <out-parameters><parameter name="oldSprintWorkEffortId"/><parameter name="changed" type="Boolean"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             changed = false
             const find = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one() : null
             const sprint = find(sprintWorkEffortId)
@@ -396,7 +414,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="nextWorkEffortId"/>
         </in-parameters>
         <out-parameters><parameter name="sequenceNum" type="Long"/><parameter name="renumbered" type="Boolean"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             renumbered = false
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null || task.workEffortTypeEnumId !== 'WetTask' || !task.rootWorkEffortId) {
@@ -457,7 +478,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lagDays" type="BigDecimal"/>
         </in-parameters>
         <out-parameters><parameter name="created" type="Boolean"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
+                    in-map="{workEffortId:workEffortId, targetWorkEffortId:toWorkEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             created = false
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
             const one = (id) => ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one()
@@ -511,7 +536,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toWorkEffortId" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             removed = false
             for (const row of ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', workEffortId).condition('toWorkEffortId', toWorkEffortId)
                     .condition('workEffortAssocTypeEnumId', 'WeatDependsOn').conditionDate('fromDate', 'thruDate', null).list()) {
@@ -550,7 +578,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="movedList" type="List"/>
             <parameter name="failedList" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             movedList = []
             failedList = []
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
@@ -734,6 +765,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="oldStatusId"/><parameter name="statusChanged" type="Boolean"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.TaskServices.get#TaskStatusFlow" in-map="{workEffortId:workEffortId}" out-map="flow"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="oldStatusId" from="flow.statusId"/>
@@ -779,7 +812,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="previousSiblingId"/>
         </in-parameters>
         <out-parameters><parameter name="oldParentWorkEffortId"/><parameter name="sequenceNum" type="Long"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const find = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one() : null
             const task = find(workEffortId)
             if (task == null || task.workEffortTypeEnumId !== 'WetTask') { ec.message.addError(ec.resource.expand('Task ${workEffortId} not found', '', {workEffortId})); return }
@@ -832,7 +868,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="previousSiblingId"/>
         </in-parameters>
         <out-parameters><parameter name="sequenceNum" type="Long"/><parameter name="renumbered" type="Boolean"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             renumbered = false
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null) { ec.message.addError(ec.resource.expand('Task ${workEffortId} not found', '', {workEffortId})); return }
@@ -883,6 +922,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortCategoryId" required="true"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffortCategory" value-field="label"/>
             <if condition="label == null || label.categoryTypeEnumId != 'WcatLabel'">
                 <return error="true" message="${workEffortCategoryId} is not a label"/></if>
@@ -900,6 +941,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortCategoryId" required="true"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffortCategoryAppl" value-field="appl"/>
             <if condition="appl != null"><entity-delete value-field="appl"/></if>
         </actions>
@@ -956,6 +999,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const label = ec.entity.find('mantle.work.effort.WorkEffortCategory').condition('workEffortCategoryId', workEffortCategoryId).one()
             if (label == null || label.categoryTypeEnumId !== 'WcatLabel') { ec.message.addError(ec.resource.expand('${workEffortCategoryId} is not a label', '', {workEffortCategoryId})); return }
+            const labelled = Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', workEffortCategoryId)
+                    .selectField('workEffortId').list()).map((row) => row.workEffortId)
+            ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortIdList: labelled}).call()
+            if (ec.message.hasError()) return
             itemCount = ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', workEffortCategoryId).deleteAll()
             label.delete()
         ]]></script></actions>
@@ -975,9 +1022,12 @@ along with this software (see the LICENSE.md file). If not, see
                 const label = ec.entity.find('mantle.work.effort.WorkEffortCategory').condition('workEffortCategoryId', id).one()
                 if (label == null || label.categoryTypeEnumId !== 'WcatLabel') { ec.message.addError(ec.resource.expand('${id} is not a label', '', {id})); return }
             }
+            const fromRows = Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', fromCategoryId).list())
+            ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortIdList: fromRows.map((row) => row.workEffortId)}).call()
+            if (ec.message.hasError()) return
             const has = new Set(Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', intoCategoryId)
                     .selectField('workEffortId').list()).map((row) => row.workEffortId))
-            for (const row of ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', fromCategoryId).list()) {
+            for (const row of fromRows) {
                 if (!has.has(row.workEffortId)) {
                     ec.service.sync().name('create#mantle.work.effort.WorkEffortCategoryAppl').parameters({workEffortId: row.workEffortId, workEffortCategoryId: intoCategoryId}).call()
                     itemCount++
@@ -1001,7 +1051,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeZone"/>
         </in-parameters>
         <out-parameters><parameter name="seriesWorkEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null || task.workEffortTypeEnumId !== 'WetTask') { ec.message.addError(ec.resource.expand('Task ${workEffortId} not found', '', {workEffortId})); return }
             // the series: the task, or the series it was made from
@@ -1010,6 +1063,10 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').list())[0]
             if (link && ec.entity.find('mantle.work.effort.WorkEffortRecurrence').condition('workEffortId', link.workEffortId).one() != null)
                 seriesWorkEffortId = link.workEffortId
+            if (seriesWorkEffortId !== workEffortId) {
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: seriesWorkEffortId}).call()
+                if (ec.message.hasError()) return
+            }
             const existing = ec.entity.find('mantle.work.effort.WorkEffortRecurrence').condition('workEffortId', seriesWorkEffortId).one()
             const rule = rrule == null ? '' : String(rrule).trim().replace(/^RRULE:/i, '')
             if (!rule) {
@@ -1041,7 +1098,10 @@ along with this software (see the LICENSE.md file). If not, see
             (Work.secas.xml) on Complete and Cancelled.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="newWorkEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             newWorkEffortId = null
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null || task.workEffortTypeEnumId !== 'WetTask' || !['WeComplete', 'WeCancelled'].includes(task.statusId)) return
@@ -1057,6 +1117,10 @@ along with this software (see the LICENSE.md file). If not, see
             if (recurrence == null || !recurrence.rrule) return
             const series = seriesId === workEffortId ? task : ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', seriesId).one()
             if (series == null) return
+            if (seriesId !== workEffortId) {
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: seriesId}).call()
+                if (ec.message.hasError()) return
+            }
             const toMillis = (value) => {
                 if (value == null || value === '') return null
                 const text = String(value)
@@ -1193,6 +1257,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="communicationEventId"><description>The new comment (Chatter shows it at once)</description></parameter></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
                     in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
                         fromPartyId:ec.user.userAccount.partyId, entryDate:ec.user.nowTimestamp,
@@ -1210,6 +1276,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="contentType" default-value="text/plain"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="update#mantle.party.communication.CommunicationEvent" out-map="context"
                   in-map="{communicationEventId:communicationEventId, fromPartyId:ec.user.userAccount.partyId,
                         contentType:contentType, subject:subject, body:body}"/>
@@ -1221,6 +1289,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="communicationEventId" required="true"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="delete#mantle.work.effort.WorkEffortCommEvent"
                     in-map="{workEffortId:workEffortId, communicationEventId:communicationEventId}"/>
             <service-call name="delete#mantle.party.communication.CommunicationEvent"
@@ -1248,10 +1318,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="actualCost" from="toDecimal(0)"/>
             <iterate list="tearList" entry="tear">
                 <set field="actualWorkTime" from="actualWorkTime.add(tear.hours ?? 0)"/>
-                <if condition="tear.clientRateAmount != null">
-                    <set field="actualClientCost" from="actualClientCost.add(toDecimal(tear.hours ?? 0).multiply(tear.clientRateAmount))"/></if>
-                <if condition="tear.vendorRateAmount != null">
-                    <set field="actualCost" from="actualCost.add(toDecimal(tear.hours ?? 0).multiply(tear.vendorRateAmount))"/></if>
+                <set field="clientRate" from="tear.clientHourRate ?? tear.clientRateAmount"/>
+                <set field="vendorRate" from="tear.vendorHourRate ?? tear.vendorRateAmount"/>
+                <if condition="clientRate != null">
+                    <set field="actualClientCost" from="actualClientCost.add(toDecimal(tear.hours ?? 0).multiply(clientRate))"/></if>
+                <if condition="vendorRate != null">
+                    <set field="actualCost" from="actualCost.add(toDecimal(tear.hours ?? 0).multiply(vendorRate))"/></if>
             </iterate>
             <!-- <log level="warn" message="======== time for ${workEffortId}: ${actualWorkTime}, ${actualCost}, ${actualClientCost}\n${tearList}"/> -->
             <service-call name="update#mantle.work.effort.WorkEffort"

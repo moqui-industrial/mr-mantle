@@ -146,8 +146,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="inventoryCategoryId"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="excludeOnPicklistCond" type="org.moqui.entity.EntityCondition"/>
-            <parameter name="inventoryCategoryCond" type="org.moqui.entity.EntityCondition"/>
+            <parameter name="excludeOnPicklistCond" type="EntityCondition"/>
+            <parameter name="inventoryCategoryCond" type="EntityCondition"/>
         </out-parameters>
         <actions>
             <if condition="excludeOnPicklist"><then>

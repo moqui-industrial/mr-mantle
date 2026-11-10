@@ -336,7 +336,7 @@ along with this software (see the LICENSE.md file). If not, see
             const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
             if (to == null || !to.partyId || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
                 ec.message.addError(`User ${toUserId} cannot own a calendar: the account is not enabled or has no party`); return }
-            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+            if (ec.service.sync().name('org.moqui.chat.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
                     .disableAuthz().call()?.anyExternal !== false) {
                 ec.message.addError(`User ${toUserId} cannot own a calendar: an external user`); return }
             const label = row.calendarName || calendarId
@@ -1077,7 +1077,7 @@ along with this software (see the LICENSE.md file). If not, see
             turned off.</description>
         <in-parameters>
             <parameter name="calendarId" required="true"/>
-            <parameter name="calendarFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="calendarFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
         </in-parameters>
         <out-parameters>

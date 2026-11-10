@@ -15,7 +15,7 @@
       <parameter name="clientVerified" type="Boolean"/>
       <parameter name="visitorAddress"/>
       <parameter name="operationId"/>
-      <parameter name="file" type="org.apache.commons.fileupload2.core.FileItem"/>
+      <parameter name="file" type="FileItem"/>
     </in-parameters>
     <out-parameters>
       <parameter name="result" type="Map"/>

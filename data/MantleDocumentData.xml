@@ -241,7 +241,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== Wiki Page ========== -->
     <dataDocuments dataDocumentId="MantleWikiPage" indexName="mantle" documentName="Wiki Page"
             primaryEntityName="moqui.resource.wiki.WikiPage" documentTitle="${wikiSpaceId}/${pagePath||''}"
-            manualDataServiceName="org.moqui.impl.WikiServices.get#WikiPageManualDocumentData">
+            manualDataServiceName="org.moqui.resource.WikiServices.get#WikiPageManualDocumentData">
         <!-- NOTE: service purpose is to get wiki page contents from the file (resource), and with them what the Knowledge
             screens list a hit with: the title (the first heading, else the page name), the last change (updatedDate in
             milliseconds, updatedByUserId) and restrictView (Y or N), declared below as expression fields over what it

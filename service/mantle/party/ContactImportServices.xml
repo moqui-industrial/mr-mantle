@@ -33,7 +33,7 @@ along with this software (see the LICENSE.md file). If not, see
             (IronStone BOSS's import draft) reads it with this service.
         </description>
         <in-parameters>
-            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contactFile" type="FileItem"/>
             <parameter name="fileLocation"/>
             <parameter name="characterSet" default-value="UTF-8"/>
         </in-parameters>
@@ -78,7 +78,7 @@ along with this software (see the LICENSE.md file). If not, see
             An upload or a location is read in characterSet by read#ContactFileText.
         </description>
         <in-parameters>
-            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contactFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
@@ -106,7 +106,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The import's first step: the file's kind, the preset found (or given), its columns each with the target
             field it maps to and sample values, the first rows, and the row count.</description>
         <in-parameters>
-            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contactFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
@@ -214,7 +214,7 @@ along with this software (see the LICENSE.md file). If not, see
             and the row's problems. A row with nothing to import is skipped.
         </description>
         <in-parameters>
-            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contactFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>
@@ -295,7 +295,7 @@ along with this software (see the LICENSE.md file). If not, see
             cannot be sent is logged and the import goes on.
         </description>
         <in-parameters>
-            <parameter name="contactFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contactFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
             <parameter name="fileLocation"/>
             <parameter name="fileName"/>

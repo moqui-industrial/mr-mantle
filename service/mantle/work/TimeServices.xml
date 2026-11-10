@@ -772,6 +772,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pieceAmount" type="BigDecimal"/>
             <parameter name="hours" type="BigDecimal"/>
             <parameter name="pieceCount" type="BigDecimal"/>
+            <parameter name="rated" type="Boolean"><description>True when its hours have an hourly rate or its pieces a
+                piece rate, an explicit zero rate included: the entries an invoice item links.</description></parameter>
         </out-parameters>
         <actions>
             <if condition="timeEntry == null"><entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry"/></if>
@@ -868,6 +870,7 @@ along with this software (see the LICENSE.md file). If not, see
                     amount = hourlyAmount
                     quantity = hours
                 }
+                rated = (!hours.isZero() && hourlyAmount != null) || (!pieceCount.isZero() && pieceAmount != null)
             ]]></script>
         </actions>
     </service>
@@ -1328,7 +1331,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="clientPartyId" required="true"/>
             <parameter name="effectiveDate" type="Timestamp" default="ec.user.nowTimestamp"/>
-            <parameter name="timeFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="timeFile" type="FileItem" required="true"/>
         </in-parameters>
         <actions>
             <set field="fileText" from="timeFile.getString('UTF-8')"/>
@@ -1391,7 +1394,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="clientPartyId" required="true"/>
             <parameter name="defaultDate" type="Timestamp" default="ec.user.nowTimestamp"/>
-            <parameter name="timeFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="timeFile" type="FileItem" required="true"/>
         </in-parameters>
         <actions>
             <set field="fileText" from="timeFile.getString('UTF-8')"/>
@@ -1735,7 +1738,7 @@ along with this software (see the LICENSE.md file). If not, see
             upload (timeEntryFile), text (fileText) or a resource location (fileLocation).
         </description>
         <in-parameters>
-            <parameter name="timeEntryFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="timeEntryFile" type="FileItem"/>
             <parameter name="fileText" allow-html="any"/>
             <parameter name="fileLocation"/>
             <parameter name="characterSet" default-value="UTF-8"/>

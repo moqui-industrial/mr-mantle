@@ -1211,7 +1211,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
-            <parameter name="basisDate" type="java.sql.Date" default="ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')"/>
+            <parameter name="basisDate" type="Date" default="ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')"/>
         </in-parameters>
         <actions>
             <script>configuredFiscalHandled = ec.resource.script('component://mr-mantle/service/mantle/ledger/FiscalPeriods.js').ensure({organizationPartyId,basisDate})</script>

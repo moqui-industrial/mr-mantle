@@ -104,6 +104,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <if condition="estimatedStartDate != null &amp;&amp; estimatedCompletionDate != null &amp;&amp;
                            Number(estimatedCompletionDate) &lt; Number(estimatedStartDate)">
                 <return error="true" message="Project date range is not valid."/>
@@ -162,6 +164,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="managerPartyId"/>
         </in-parameters>
         <actions>
+            <!-- a closed project is read only except for the status change that reopens it -->
+            <set field="reopening" from="statusId &amp;&amp; statusId != 'WeClosed' &amp;&amp; ec.entity.find('mantle.work.effort.WorkEffort')
+                    .condition('workEffortId', workEffortId).disableAuthz().one()?.statusId == 'WeClosed'"/>
+            <if condition="!reopening">
+                <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <entity-find entity-name="mantle.work.effort.WorkEffort" list="tasksList">
                 <econdition field-name="rootWorkEffortId" from="workEffortId"/>
             </entity-find>
@@ -494,6 +503,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="settingValue" allow-html="any"/>
         </in-parameters>
         <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="settingType" cache="true">
                 <field-map field-name="enumId" from="settingTypeEnumId"/></entity-find-one>
             <if condition="settingType == null || settingType.enumTypeId != 'WorkEffortSettingType'">
@@ -1426,7 +1437,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId" default-value="WeInPlanning"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const kinds = {WetMilestone: 'milestone', WetRelease: 'release', WetComponent: 'component'}
             if (!kinds[workEffortTypeEnumId]) { ec.message.addError(ec.resource.expand('${workEffortTypeEnumId} is not a kind of plan item', '', {workEffortTypeEnumId})); return }
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
@@ -1525,7 +1539,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statusId"/>
             <parameter name="clearFields" type="Object"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const plan = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (plan == null || !['WetMilestone', 'WetRelease', 'WetComponent'].includes(plan.workEffortTypeEnumId)) {
                 ec.message.addError(ec.resource.expand('Plan item ${workEffortId} not found', '', {workEffortId})); return
@@ -1684,7 +1701,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const canView = (repositoryId) => {
                     if (!(repositoryId in viewable)) {
                         ec.message.pushErrors()
-                        try { viewable[repositoryId] = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canView && !ec.message.hasError() }
+                        try { viewable[repositoryId] = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canView && !ec.message.hasError() }
                         catch (err) { viewable[repositoryId] = false }
                         finally { ec.message.clearErrors(); ec.message.popErrors() }
                     }
@@ -1747,7 +1764,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="notesText" allow-html="any"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortContentId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
             const content = Array.from(ec.entity.find('mantle.work.effort.WorkEffortContent').condition('workEffortId', workEffortId)
@@ -1773,7 +1793,7 @@ along with this software (see the LICENSE.md file). If not, see
             title the project and version and the date, a new version of it when it is there already, linked to the release by
             WikiPageWorkEffort; toChangelog, the section of the version at the top of CHANGELOG.md (made when missing; a section
             of the version already there is replaced) in repositoryId, a repository of the project (by default the first the user
-            may update), committed by the user (org.moqui.impl.GitServices.commit#GitFiles, which checks the right to update);
+            may update), committed by the user (org.moqui.git.GitServices.commit#GitFiles, which checks the right to update);
             notify, the topic ReleasePublished to the followers of the release and of the project (but the user).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -1793,7 +1813,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="publishedList" type="List"/>
             <parameter name="failedList" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             publishedList = []; failedList = []; notifiedCount = 0
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
@@ -1838,7 +1861,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (space == null || !space.rootPageLocation) throw new Error(ec.resource.expand('documentation space ${spaceId} not found', '', {spaceId}))
                 const rootDir = String(space.rootPageLocation).replace(/\.[^/.]*$/, '')
                 if (!ec.resource.getLocationReference(rootDir + '/Releases.md').exists) {
-                    ec.service.sync().name('org.moqui.impl.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, pageName: 'Releases',
+                    ec.service.sync().name('org.moqui.resource.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, pageName: 'Releases',
                         pageText: '# ' + L('Releases') + '\n\n' + L('The notes of each release of the project.') + '\n', versionNote: L('Releases')}).call()
                     if (ec.message.hasError()) return
                 }
@@ -1847,12 +1870,12 @@ along with this software (see the LICENSE.md file). If not, see
                 const pageText = '# ' + (project?.workEffortName || release.rootWorkEffortId) + ' ' + version + '\n\n'
                     + (dateText ? '_' + (released ? L('Released') : L('Planned for')) + ' ' + dateText + '_\n\n' : '')
                     + body.replace(/^###(?=\s)/gm, '##') + '\n'
-                const saved = ec.service.sync().name('org.moqui.impl.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, parentPath: 'Releases',
+                const saved = ec.service.sync().name('org.moqui.resource.WikiServices.update#WikiPage').parameters({wikiSpaceId: spaceId, parentPath: 'Releases',
                     pageName: pageName, pageText: pageText, versionNote: ec.resource.expand('Release notes for ${version}', '', {version})}).call() || {}
                 if (ec.message.hasError()) return
                 wikiSpaceId = spaceId
                 pagePath = saved.pagePath || ('Releases/' + pageName)
-                wikiPageId = saved.wikiPageId || ec.service.sync().name('org.moqui.impl.WikiServices.get#WikiPageId').parameters({wikiSpaceId: spaceId,
+                wikiPageId = saved.wikiPageId || ec.service.sync().name('org.moqui.resource.WikiServices.get#WikiPageId').parameters({wikiSpaceId: spaceId,
                     pagePath: pagePath, createIfMissing: true}).call()?.wikiPageId
                 if (wikiPageId && ec.entity.find('mantle.work.effort.WikiPageWorkEffort').condition({wikiPageId: wikiPageId, workEffortId: workEffortId}).count() === 0)
                     ec.service.sync().name('create#mantle.work.effort.WikiPageWorkEffort').parameters({wikiPageId: wikiPageId, workEffortId: workEffortId}).call()
@@ -1863,7 +1886,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const access = (id) => {
                     if (!ec.factory.hasFeature('git')) return {}
                     ec.message.pushErrors()
-                    try { const out = ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId: id}).call() || {}; return ec.message.hasError() ? {} : out }
+                    try { const out = ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: id}).call() || {}; return ec.message.hasError() ? {} : out }
                     finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
                 if (repositoryId && !linked.includes(repositoryId)) throw new Error(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId}))
@@ -1871,7 +1894,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!target) throw new Error(L('the project has no repository you may update'))
                 const repoAccess = access(target)
                 if (!repoAccess.canUpdate) throw new Error(ec.resource.expand('you may not update ${target}', '', {target}))
-                const current = ec.service.sync().name('org.moqui.impl.GitServices.get#GitBlob').parameters({repositoryId: target, path: 'CHANGELOG.md'}).call()?.text
+                const current = ec.service.sync().name('org.moqui.git.GitServices.get#GitBlob').parameters({repositoryId: target, path: 'CHANGELOG.md'}).call()?.text
                 if (ec.message.hasError()) return
                 const section = '## ' + version + (dateText ? ' - ' + dateText : '') + '\n\n' + body + '\n'
                 let text = current == null || !String(current).trim() ? '# ' + L('Changelog') + '\n\n' + section : String(current).replace(/\r\n/g, '\n')
@@ -1893,7 +1916,7 @@ along with this software (see the LICENSE.md file). If not, see
                     text = lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n')
                 }
                 repositoryId = target
-                commitId = ec.service.sync().name('org.moqui.impl.GitServices.commit#GitFiles').parameters({repositoryId: target,
+                commitId = ec.service.sync().name('org.moqui.git.GitServices.commit#GitFiles').parameters({repositoryId: target,
                     message: ec.resource.expand('Release notes for ${version}', '', {version}), fileMap: {'CHANGELOG.md': text}}).call()?.commitId || null
             })
             if (notify) step('followers', () => {
@@ -1942,7 +1965,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="commitId"/>
             <parameter name="publishedList" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             movedCount = 0; movedToWorkEffortId = null; publishedList = []
             const release = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (release == null || release.workEffortTypeEnumId !== 'WetRelease') { ec.message.addError(ec.resource.expand('Release ${workEffortId} not found', '', {workEffortId})); return }
@@ -1996,7 +2022,7 @@ along with this software (see the LICENSE.md file). If not, see
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.repositoryId)
                     if (!repositoryId || !linked.includes(repositoryId)) throw new Error(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId: repositoryId || '-'}))
                     const name = String(tagName || '').trim() || (/^\d/.test(version) ? 'v' + version : version)
-                    const out = ec.service.sync().name('org.moqui.impl.GitServices.create#GitRef').parameters({repositoryId: repositoryId, refName: name, refType: 'tag',
+                    const out = ec.service.sync().name('org.moqui.git.GitServices.create#GitRef').parameters({repositoryId: repositoryId, refName: name, refType: 'tag',
                         revision: revision || null, message: ec.resource.expand('Release ${version}', '', {version})}).call() || {}
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                     tagRefName = out.refName || ('refs/tags/' + name)
@@ -2041,7 +2067,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="wikiSpaceId"/>
         </in-parameters>
         <out-parameters><parameter name="wikiSpaceId"/><parameter name="rootPageLocation"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const L = (text) => ec.l10n.localize(text)
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
@@ -2055,7 +2084,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!repositoryId || !linked.includes(repositoryId)) { ec.message.addError(ec.resource.expand('${repositoryId} is not a repository of the project', '', {repositoryId: repositoryId || '-'})); return }
                 ec.message.pushErrors()
                 let canUpdate = false
-                try { canUpdate = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.impl.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canUpdate && !ec.message.hasError() }
+                try { canUpdate = ec.factory.hasFeature('git') && !!ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId}).call()?.canUpdate && !ec.message.hasError() }
                 catch (err) { canUpdate = false }
                 finally { ec.message.clearErrors(); ec.message.popErrors() }
                 if (!canUpdate) { ec.message.addError(ec.resource.expand('You may not update the repository ${repositoryId}', '', {repositoryId})); return }
@@ -2079,7 +2108,7 @@ along with this software (see the LICENSE.md file). If not, see
                     ? L('These pages are markdown files in the docs folder of the repository, beside the code: each save is a commit.')
                     : L('The pages of the project: guides, decisions and release notes.')) + '\n')
             const restricted = !['WevAllUsers', 'WevGeneral'].includes(project.visibilityEnumId)
-            ec.service.sync().name('org.moqui.impl.WikiServices.create#WikiSpace').parameters({wikiSpaceId: wikiSpaceId, description: name + ' ' + L('documentation'),
+            ec.service.sync().name('org.moqui.resource.WikiServices.create#WikiSpace').parameters({wikiSpaceId: wikiSpaceId, description: name + ' ' + L('documentation'),
                 rootPageDirectory: rootPageDirectory, rootPageLocation: rootPageLocation, restrictView: restricted ? 'Y' : 'N', restrictUpdate: 'Y'}).call()
             if (ec.message.hasError()) return
             ec.service.sync().name('mantle.work.ProjectServices.store#ProjectSetting').parameters({workEffortId: workEffortId, settingTypeEnumId: 'WstDocsWikiSpace',
@@ -2217,7 +2246,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="capacity" type="BigDecimal"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', rootWorkEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${rootWorkEffortId} not found', '', {rootWorkEffortId})); return }
             const defaults = ec.service.sync().name('mantle.work.ProjectServices.get#SprintDefaults').parameters({rootWorkEffortId: rootWorkEffortId}).call() || {}
@@ -2244,7 +2276,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedCompletionDate" type="Timestamp" format="yyyy-MM-dd"/>
             <parameter name="capacity"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
             const fields = {workEffortId: workEffortId}
@@ -2280,7 +2315,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedCompletionDate" type="Timestamp" format="yyyy-MM-dd"/>
         </in-parameters>
         <out-parameters><parameter name="itemCount" type="Integer"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
             if (!['WeInPlanning', 'WeApproved'].includes(sprint.statusId)) {
@@ -2323,7 +2361,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="carriedToSprintId"/>
             <parameter name="carriedIds" type="List"/>
         </out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             doneCount = 0; notDoneCount = 0; carriedToSprintId = null; carriedIds = []
             const sprint = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (sprint == null || sprint.workEffortTypeEnumId !== 'WetSprint') { ec.message.addError(ec.resource.expand('Sprint ${workEffortId} not found', '', {workEffortId})); return }
@@ -2399,7 +2440,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="clientVisible" default-value="N"/>
         </in-parameters>
         <out-parameters><parameter name="communicationEventId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
             const health = ec.entity.find('moqui.basic.Enumeration').condition('enumId', healthEnumId).useCache(true).one()
@@ -2566,7 +2610,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const contact of contactList) {
                 ec.message.pushErrors()
                 try {
-                    const sent = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_UPDATE',
+                    const sent = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_UPDATE',
                         toAddresses: contact.emailAddress, bodyParameters: {subject: subject, fromAddress: contacts.fromAddress, fromName: contacts.fromName},
                         body: body, bodyText: bodyText}).requireNewTransaction(true).call() || {}
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
@@ -2718,8 +2762,11 @@ along with this software (see the LICENSE.md file). If not, see
             services), over the projects the user sees (get#VisibleProjectInfo; template projects left out):
             - myOpen: the open work items the user is an Assignee of; dueWeek: those due from today through seven days;
               overdue: those due before today (as WorkItems' smart lists mine, week and overdue);
+            - myDoneRecent: the Complete or Closed work items completed in the last seven calendar days (from the start of
+              the day six days ago) through now, with the same current assignments, visible projects and template
+              exclusions as myOpen;
             - reviewsWaiting: the open merge requests of the repositories the user may view where the user is a requested
-              reviewer who has not reviewed yet (org.moqui.impl.GitReviewServices.find#MergeRequests waitingForUserId); null
+              reviewer who has not reviewed yet (org.moqui.git.GitReviewServices.find#MergeRequests waitingForUserId); null
               when the build has no git hosting;
             - hoursWeek: the hours of the user's time entries this week (the week of the user's timesheet policy,
               TimesheetServices.get#WeekRange), with expectedWeek (the week's working hours) and timesheetStatusId (TmshInProcess
@@ -2743,7 +2790,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="failedParts" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
-            counts = {myOpen: null, dueWeek: null, overdue: null, reviewsWaiting: null, hoursWeek: null, expectedWeek: null, timesheetStatusId: null,
+            counts = {myOpen: null, myDoneRecent: null, dueWeek: null, overdue: null, reviewsWaiting: null, hoursWeek: null, expectedWeek: null, timesheetStatusId: null,
                 projectsAtRisk: null, milestonesSoon: null, timesheetsToApprove: null, allocationRequests: null, unbilledAmount: null, unbilledCurrencyUomId: null}
             atRiskProjectIds = []
             failedParts = []
@@ -2763,20 +2810,27 @@ along with this software (see the LICENSE.md file). If not, see
             const nowMillis = Number(String(ec.user.nowTimestamp))
             const today = ec.user.getPeriodRange('day', '0')
             const todayStart = today ? Number(String(today[0])) : nowMillis
+            // the last seven calendar days in the user's zone: from the start of the day six days ago, through now
+            const recentDay = ec.user.getPeriodRange('day', '-6')
+            const recentStart = recentDay ? Number(String(recentDay[0])) : todayStart - 6 * 86400000
             const open = ['WeComplete', 'WeClosed', 'WeCancelled']
 
             part('myWork', () => {
-                if (!me || (!all && !visibleIds.length)) { counts.myOpen = 0; counts.dueWeek = 0; counts.overdue = 0; return }
+                if (!me || (!all && !visibleIds.length)) { counts.myOpen = 0; counts.myDoneRecent = 0; counts.dueWeek = 0; counts.overdue = 0; return }
                 const assigned = Array.from(new Set(Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('partyId', me).condition('roleTypeId', 'Assignee')
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).condition(cf.makeCondition('statusId', 'not-in', ['WeptDeclined', 'WeptUnassigned'], true))
                         .selectField('workEffortId').list()).map((row) => row.workEffortId)))
-                if (!assigned.length) { counts.myOpen = 0; counts.dueWeek = 0; counts.overdue = 0; return }
+                if (!assigned.length) { counts.myOpen = 0; counts.myDoneRecent = 0; counts.dueWeek = 0; counts.overdue = 0; return }
                 const base = [cf.makeCondition('workEffortId', 'in', assigned), cf.makeCondition('workEffortTypeEnumId', 'equals', 'WetTask'),
-                    cf.makeCondition('rootWorkEffortId', 'is-not-null', null), cf.makeCondition('statusId', 'not-in', open)]
+                    cf.makeCondition('rootWorkEffortId', 'is-not-null', null)]
                 if (!all) base.push(cf.makeCondition('rootWorkEffortId', 'in', visibleIds))
                 if (templateIds.length) base.push(cf.makeCondition('rootWorkEffortId', 'not-in', templateIds))
-                const count = (more) => ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition(base.concat(more), 'and')).count()
+                const countBase = (more) => ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition(base.concat(more), 'and')).count()
+                const count = (more) => countBase([cf.makeCondition('statusId', 'not-in', open)].concat(more))
                 counts.myOpen = count([])
+                counts.myDoneRecent = countBase([cf.makeCondition('statusId', 'in', ['WeComplete', 'WeClosed']),
+                    cf.makeCondition('actualCompletionDate', 'greater-equals', new Date(recentStart)),
+                    cf.makeCondition('actualCompletionDate', 'less-equals', new Date(nowMillis))])
                 counts.dueWeek = count([cf.makeCondition('estimatedCompletionDate', 'greater-equals', new Date(todayStart)),
                     cf.makeCondition('estimatedCompletionDate', 'less-than', new Date(todayStart + 7 * 86400000))])
                 counts.overdue = count([cf.makeCondition('estimatedCompletionDate', 'less-than', new Date(todayStart))])
@@ -2788,7 +2842,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!ec.factory.hasFeature('git')) return
                 ec.message.pushErrors()
                 try {
-                    const out = ec.service.sync().name('org.moqui.impl.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId,
+                    const out = ec.service.sync().name('org.moqui.git.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId,
                         pageSize: 1}).requireNewTransaction(true).call() || {}
                     if (ec.message.hasError()) {
                         const errors = ec.message.getErrorsString()
@@ -3130,7 +3184,7 @@ along with this software (see the LICENSE.md file). If not, see
             })
             part('reviews', () => {
                 // in a transaction of its own: without git hosting the call fails, which would leave this one rollback-only
-                const out = ec.service.sync().name('org.moqui.impl.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId, pageSize: 10})
+                const out = ec.service.sync().name('org.moqui.git.GitReviewServices.find#MergeRequests').parameters({waitingForUserId: ec.user.userId, pageSize: 10})
                         .requireNewTransaction(true).call() || {}
                 if (ec.message.hasError()) {
                     // git hosting is a build feature: without it there are no reviews, not a failure
@@ -3344,7 +3398,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="approvalRequired"/>
             <parameter name="approverPartyId"/>
         </in-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'gate'}).call() || {}
             if (ec.message.hasError()) return
             const required = approvalRequired === 'Y' || approvalRequired === true || approvalRequired === 'true'
@@ -3376,7 +3433,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortContentId"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortApprovalId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const L = (text) => ec.l10n.localize(text)
             const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'request'}).call() || {}
             if (ec.message.hasError()) return
@@ -3417,6 +3477,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .orderBy('-requestedDate').forUpdate(true).list())[0] || null
                 if (request == null) { ec.message.addError(L('No approval waits on this milestone')); return }
                 workEffortApprovalId = request.workEffortApprovalId
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: request.workEffortId}).call()
+                if (ec.message.hasError()) return
                 const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: request.workEffortId, need: 'decide'}).call() || {}
                 if (ec.message.hasError()) return
                 if (request.statusId !== 'WeaRequested') { ec.message.addError(L('This approval was decided already')); return }
@@ -3479,6 +3541,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .orderBy('-requestedDate').forUpdate(true).list())[0] || null
                 if (request == null) { ec.message.addError(L('No approval waits on this milestone')); return }
                 workEffortApprovalId = request.workEffortApprovalId
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: request.workEffortId}).call()
+                if (ec.message.hasError()) return
                 ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: request.workEffortId, need: 'decide'}).call()
                 if (ec.message.hasError()) return
                 if (request.statusId !== 'WeaRequested') { ec.message.addError(L('This approval was decided already')); return }
@@ -3496,7 +3560,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Withdraws a milestone's waiting request (as a new estimate replaces the one sent), by the project's team.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="cancelledCount" type="Integer"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             cancelledCount = 0
             ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'request'}).call()
             if (ec.message.hasError()) return
@@ -3512,7 +3579,7 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
-    <!-- the decision services of the MilestoneApproval topic (org.moqui.impl.NotificationServices approve# and refuse#NotificationMessage) -->
+    <!-- the decision services of the MilestoneApproval topic (org.moqui.ui.NotificationServices approve# and refuse#NotificationMessage) -->
     <service verb="approve" noun="MilestoneApprovalNotice">
         <in-parameters>
             <parameter name="recordEntityName"/><parameter name="recordId" required="true"/>
@@ -3859,7 +3926,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const contact of contactList) {
                 ec.message.pushErrors()
                 try {
-                    const sent = ec.service.sync().name('org.moqui.impl.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_ESTIMATE',
+                    const sent = ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_PROJECT_ESTIMATE',
                         toAddresses: contact.emailAddress, bodyParameters: {subject: subject, fromAddress: contacts.fromAddress, fromName: contacts.fromName},
                         body: body, bodyText: bodyText, attachments: [{fileName: fileName, contentType: 'text/html; charset=UTF-8', contentText: page}]})
                         .requireNewTransaction(true).call() || {}

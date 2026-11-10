@@ -13,7 +13,7 @@ const effectiveTime = Date.now()
 const minute = 60000
 const at = (minutes) => ec.user.setEffectiveTime(effectiveTime + minutes * minute)
 const COMM = "mantle.party.CommunicationServices"
-const MAIL = "org.moqui.impl.EmailClientServices"
+const MAIL = "org.moqui.mail.EmailClientServices"
 const CE = "mantle.party.communication.CommunicationEvent"
 const CEP = "mantle.party.communication.CommunicationEventParty"
 const EMR = "mantle.party.communication.EmailMessageRecord"

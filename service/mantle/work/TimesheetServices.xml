@@ -641,7 +641,7 @@ const days = Array.from(dayList || []).map(String)
         ]]></script></actions>
     </service>
 
-    <!-- the decision services of the TimesheetApproval topic (org.moqui.impl.NotificationServices approve# and refuse#NotificationMessage) -->
+    <!-- the decision services of the TimesheetApproval topic (org.moqui.ui.NotificationServices approve# and refuse#NotificationMessage) -->
     <service verb="approve" noun="TimesheetNotice">
         <in-parameters>
             <parameter name="recordEntityName"/><parameter name="recordId" required="true"/>

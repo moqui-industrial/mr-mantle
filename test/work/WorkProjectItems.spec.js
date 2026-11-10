@@ -40,6 +40,90 @@ const ranks = (parentId) => Array.from(ec.entity.find("mantle.work.effort.WorkEf
 const assocs = (toId, type) => Array.from(ec.entity.find("mantle.work.effort.WorkEffortAssoc").condition("toWorkEffortId", toId)
         .condition("workEffortAssocTypeEnumId", type).conditionDate("fromDate", "thruDate", null).list()).map((row) => row.workEffortId)
 
+feature("a closed project refuses manual task and planning changes while complete projects and late actuals remain usable", {
+    when() {
+        const closedId = "PWCLOSED"
+        const openId = "PWOPEN"
+        call(`${PROJECT}.create#Project`, {workEffortId: closedId, workEffortName: "Closed work control"})
+        call(`${PROJECT}.create#Project`, {workEffortId: openId, workEffortName: "Open work control"})
+        const closedTask = task(closedId, "Historical task", {priority: 5, estimatedWorkTime: 2})
+        const openTask = task(openId, "Current task", {priority: 5})
+        const closedMilestone = call(`${PROJECT}.create#Milestone`, {rootWorkEffortId: closedId, workEffortName: "Historical milestone"}).workEffortId
+        const openMilestone = call(`${PROJECT}.create#Milestone`, {rootWorkEffortId: openId, workEffortName: "Current milestone"}).workEffortId
+        call(`${TASK}.set#TaskMilestone`, {workEffortId: openTask, milestoneWorkEffortId: openMilestone})
+        call("create#mantle.work.effort.WorkEffortCategory", {workEffortCategoryId: "PWCLOSED_LBL", categoryTypeEnumId: "WcatLabel", description: "Historical control"})
+        call("create#mantle.work.effort.WorkEffortCategory", {workEffortCategoryId: "PWCLOSED_NEW", categoryTypeEnumId: "WcatLabel", description: "New control"})
+        call(`${TASK}.add#TaskLabel`, {workEffortId: closedTask, workEffortCategoryId: "PWCLOSED_LBL"})
+        const commentId = call(`${TASK}.add#TaskComment`, {workEffortId: closedTask, body: "Historical note"}).communicationEventId
+        // a request waiting on the milestone when the project closes: deciding it is a plan change too
+        call("create#mantle.work.effort.WorkEffortApproval", {workEffortApprovalId: "PWCLOSED_APR", workEffortId: closedMilestone,
+            approverPartyId: "EX_JOHN_DOE", statusId: "WeaRequested", requestedDate: effectiveTime})
+        call(`${PROJECT}.update#Project`, {workEffortId: closedId, statusId: "WeComplete"})
+        const completeError = errorOf(`${TASK}.update#Task`, {workEffortId: closedTask, priority: 6})
+        call(`${PROJECT}.update#Project`, {workEffortId: closedId, statusId: "WeClosed"})
+        const errors = {
+            update: errorOf(`${TASK}.update#Task`, {workEffortId: closedTask, priority: 8}),
+            status: errorOf(`${TASK}.set#TaskStatus`, {workEffortId: closedTask, statusId: "WeApproved"}),
+            label: errorOf(`${TASK}.add#TaskLabel`, {workEffortId: closedTask, workEffortCategoryId: "PWCLOSED_NEW"}),
+            labelDelete: errorOf(`${TASK}.delete#Label`, {workEffortCategoryId: "PWCLOSED_LBL"}),
+            labelMerge: errorOf(`${TASK}.merge#Labels`, {fromCategoryId: "PWCLOSED_LBL", intoCategoryId: "PWCLOSED_NEW"}),
+            assignment: errorOf("mantle.work.WorkEffortServices.add#WorkEffortParty", {workEffortId: closedTask, partyId: "ORG_ZIZI_JD", roleTypeId: "Assignee"}),
+            comment: errorOf(`${TASK}.update#TaskComment`, {workEffortId: openTask, communicationEventId: commentId, body: "Refused note edit"}),
+            legacyMilestone: errorOf(`${TASK}.set#TaskMilestone`, {workEffortId: openTask, milestoneWorkEffortId: closedMilestone}),
+            create: errorOf(`${TASK}.create#Task`, {workEffortId: "PWCLOSED-NEW", rootWorkEffortId: closedId, workEffortName: "Refused new task"}),
+            targetMove: errorOf(`${TASK}.update#Task`, {workEffortId: openTask, rootWorkEffortId: closedId}),
+            sourceMove: errorOf(`${TASK}.update#Task`, {workEffortId: closedTask, rootWorkEffortId: openId}),
+            project: errorOf(`${PROJECT}.update#Project`, {workEffortId: closedId, workEffortName: "Refused project rename"}),
+            plan: errorOf(`${PROJECT}.create#Milestone`, {rootWorkEffortId: closedId, workEffortName: "Refused milestone"}),
+            setting: errorOf(`${PROJECT}.store#ProjectSetting`, {workEffortId: closedId, settingTypeEnumId: "WstModules", settingValue: "requests"}),
+            statusUpdate: errorOf(`${PROJECT}.post#ProjectUpdate`, {workEffortId: closedId, healthEnumId: "WehOnTrack", body: "Refused update"}),
+            approvalRequest: errorOf(`${PROJECT}.request#MilestoneApproval`, {workEffortId: closedMilestone}),
+            approvalApprove: errorOf(`${PROJECT}.approve#MilestoneApproval`, {workEffortApprovalId: "PWCLOSED_APR"}),
+            approvalRefuse: errorOf(`${PROJECT}.refuse#MilestoneApproval`, {workEffortId: closedMilestone, reason: "Refused refusal"}),
+            approvalCancel: errorOf(`${PROJECT}.cancel#MilestoneApproval`, {workEffortId: closedMilestone}),
+            docsSpace: errorOf(`${PROJECT}.create#ProjectDocsSpace`, {workEffortId: closedId}),
+            dependencyTarget: errorOf(`${TASK}.add#TaskDependency`, {workEffortId: openTask, toWorkEffortId: closedTask}),
+        }
+        const beforeActuals = we(closedTask).getMap()
+        // The time entry's existing EECA updates actuals; closing does not prevent a late billable entry or its roll-up.
+        call("create#mantle.work.time.TimeEntry", {workEffortId: closedTask, partyId: "EX_JOHN_DOE", fromDate: effectiveTime,
+            hours: 1, clientHourRate: 100, vendorHourRate: 0, isBillable: "Y"})
+        const copied = call(`${PROJECT}.clone#Project`, {baseWorkEffortId: closedId, workEffortId: "PWCOPY", workEffortName: "Copy of closed work"})
+        const approvalStatus = ec.entity.find("mantle.work.effort.WorkEffortApproval").condition("workEffortApprovalId", "PWCLOSED_APR").one().statusId
+        // reopening is the one change a closed project takes, and then its work is editable again
+        const reopenError = errorOf(`${PROJECT}.update#Project`, {workEffortId: closedId, statusId: "WeInPlanning"})
+        const reopenedStatus = we(closedId).statusId
+        const afterReopenError = errorOf(`${TASK}.update#Task`, {workEffortId: closedTask, priority: 7})
+        return {errors, completeError, beforeActuals, openRoot: we(openTask).rootWorkEffortId, openMilestone,
+            approvalStatus, reopenError, reopenedStatus, afterReopenError, reopenedPriority: we(closedTask).priority,
+            openMemberships: assocs(openTask, "WeatMilestone"),
+            unexpectedTask: we("PWCLOSED-NEW"), projectName: we(closedId).workEffortName,
+            actualHours: String(we(closedTask).actualWorkTime), projectHours: String(we(closedId).actualWorkTime),
+            copiedId: copied.workEffortId, copiedStatus: we("PWCOPY")?.statusId}
+    },
+    then({errors, completeError, beforeActuals, openRoot, openMilestone, openMemberships, unexpectedTask, projectName, actualHours, projectHours, copiedId, copiedStatus,
+            approvalStatus, reopenError, reopenedStatus, afterReopenError, reopenedPriority}) {
+        completeError == null
+        Object.keys(errors).filter((key) => !String(errors[key]).includes("PROJECT_CLOSED")) == []
+        approvalStatus == "WeaRequested"
+        reopenError == null
+        reopenedStatus == "WeInPlanning"
+        afterReopenError == null
+        reopenedPriority == 7
+        beforeActuals.priority == 6
+        beforeActuals.statusId == "WeInPlanning"
+        beforeActuals.rootWorkEffortId == "PWCLOSED"
+        openRoot == "PWOPEN"
+        openMemberships == [openMilestone]
+        unexpectedTask == null
+        projectName == "Closed work control"
+        actualHours == "1"
+        projectHours == "1"
+        copiedId == "PWCOPY"
+        copiedStatus == "WeInPlanning"
+    },
+})
+
 feature("a project's work item tree: one level in rank order with each row's roll-up", {
     when() {
         call(`${PROJECT}.create#Project`, { workEffortId: "PWI", workEffortName: "Work items project", visibilityEnumId: "WevWorkGroup",

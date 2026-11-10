@@ -820,7 +820,7 @@
                     'A page with that title already exists; choose another title',
                 )
             const page = serviceCall(
-                'org.moqui.impl.WikiServices.update#WikiPage',
+                'org.moqui.resource.WikiServices.update#WikiPage',
                 {
                     wikiSpaceId: s.publishingWikiSpaceId,
                     pageName: title,
@@ -833,7 +833,7 @@
                 'Unauthorized',
             )
             serviceCall(
-                'org.moqui.impl.WikiServices.request#WikiPageReview',
+                'org.moqui.resource.WikiServices.request#WikiPageReview',
                 {
                     wikiPageId: page.wikiPageId,
                     reviewerUserId: reviewer.userId,

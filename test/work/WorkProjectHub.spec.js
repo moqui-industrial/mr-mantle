@@ -27,6 +27,12 @@ spec({
         // john.doe's assignments on the spec's tasks end: left open, the late one is on his Today in the specs after this one
         ec.artifactExecution.disableAuthz()
         try {
+            if (parties.homeControlTaskIds?.length) ec.entity.find("mantle.work.effort.WorkEffortParty")
+                    .condition("workEffortId", "in", parties.homeControlTaskIds).condition("thruDate", null)
+                    .updateAll({ thruDate: ec.user.nowTimestamp })
+            // the counter projects are cancelled, so no later spec counts them among a user's projects
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", "in", ["PHCNT", "PHCNTH", "PHCNTT"])
+                    .updateAll({ statusId: "WeCancelled" })
             const taskIds = Array.from(ec.entity.find("mantle.work.effort.WorkEffort").condition("rootWorkEffortId", "PHA")
                     .condition("workEffortTypeEnumId", "WetTask").list()).map((row) => row.workEffortId)
             if (taskIds.length) ec.entity.find("mantle.work.effort.WorkEffortParty").condition("workEffortId", "in", taskIds)
@@ -143,11 +149,54 @@ feature("get#ProjectHomeCounts: my open, due this week and overdue items, my hou
         call("create#mantle.work.time.TimeEntry", { partyId: "EX_JOHN_DOE", workEffortId: "PHA-1", fromDate: effectiveTime, hours: 2.5 })
         call(`${PROJECT}.create#Milestone`, { rootWorkEffortId: "PHA", workEffortId: "PHA-MS-1", workEffortName: "Beta",
                 estimatedCompletionDate: effectiveTime + 5 * dayMillis })
+        // Hana's current project assignments, rather than every Assignee row in every app, define both counters.
+        call(`${PROJECT}.create#Project`, {workEffortId: "PHCNT", workEffortName: "Home counter scope", visibilityEnumId: "WevWorkGroup",
+            assignToPartyId: parties.Hana, assignRoleTypeId: "Programmer"})
+        call(`${PROJECT}.create#Project`, {workEffortId: "PHCNTH", workEffortName: "Hidden counter project", visibilityEnumId: "WevRestricted"})
+        call(`${PROJECT}.create#Project`, {workEffortId: "PHCNTT", workEffortName: "Counter template", isTemplate: "Y",
+            assignToPartyId: parties.Hana, assignRoleTypeId: "Programmer"})
+        const hanaCounts = () => {
+            login("ph.hana", "moqui1!!")
+            ec.user.setEffectiveTime(effectiveTime)
+            try { return homeCounts(false).counts }
+            finally { login("john.doe"); ec.user.setEffectiveTime(effectiveTime) }
+        }
+        const hanaBefore = hanaCounts()
+        parties.homeControlTaskIds = []
+        const assigned = (root, name, more) => {
+            const id = task(root, name, Object.assign({assignToPartyId: parties.Hana}, more || {}))
+            parties.homeControlTaskIds.push(id)
+            return id
+        }
+        assigned("PHCNT", "Current open counter control")
+        const ended = task("PHCNT", "Ended assignment counter control")
+        parties.homeControlTaskIds.push(ended)
+        call("create#mantle.work.effort.WorkEffortParty", {workEffortId: ended, partyId: parties.Hana, roleTypeId: "Assignee",
+            fromDate: effectiveTime - 2 * dayMillis, thruDate: effectiveTime - dayMillis, statusId: "WeptAssigned"})
+        const excluded = [ended, assigned(null, "Nonproject counter control"), assigned("PHCNTH", "Hidden counter control"),
+            assigned("PHCNTT", "Template counter control")]
+        const hanaOpen = hanaCounts()
+        for (const workEffortId of excluded) call("update#mantle.work.effort.WorkEffort", {workEffortId,
+            statusId: "WeComplete", actualCompletionDate: effectiveTime - dayMillis})
+        assigned("PHCNT", "Recently complete counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime - dayMillis})
+        assigned("PHCNT", "Recently closed counter control", {statusId: "WeClosed", actualCompletionDate: effectiveTime - dayMillis})
+        assigned("PHCNT", "Old completion counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime - 8 * dayMillis})
+        // the window is calendar days in the user's zone: the first minute of the day six days ago counts, the minute before does not
+        login("ph.hana", "moqui1!!")
+        ec.user.setEffectiveTime(effectiveTime)
+        const recentStart = Number(String(ec.user.getPeriodRange("day", "-6")[0]))
+        login("john.doe")
+        ec.user.setEffectiveTime(effectiveTime)
+        assigned("PHCNT", "Six days ago counter control", {statusId: "WeComplete", actualCompletionDate: recentStart + 60000})
+        assigned("PHCNT", "Seven days ago counter control", {statusId: "WeComplete", actualCompletionDate: recentStart - 60000})
+        assigned("PHCNT", "Future completion counter control", {statusId: "WeComplete", actualCompletionDate: effectiveTime + dayMillis})
+        const hanaDone = hanaCounts()
         const after = homeCounts(true)
         const team = homeCounts(false)
-        return { before: before.counts, after: after.counts, atRisk: Array.from(after.atRiskProjectIds), failed: Array.from(after.failedParts), team: team.counts }
+        return { before: before.counts, after: after.counts, atRisk: Array.from(after.atRiskProjectIds), failed: Array.from(after.failedParts),
+            team: team.counts, hanaBefore, hanaOpen, hanaDone }
     },
-    then({ before, after, atRisk, failed, team }) {
+    then({ before, after, atRisk, failed, team, hanaBefore, hanaOpen, hanaDone }) {
         after.myOpen == before.myOpen + 3
         after.dueWeek == before.dueWeek + 1
         after.overdue == before.overdue + 1
@@ -161,6 +210,10 @@ feature("get#ProjectHomeCounts: my open, due this week and overdue items, my hou
         failed.length == 0
         team.projectsAtRisk == null
         team.myOpen == after.myOpen
+        hanaOpen.myOpen == hanaBefore.myOpen + 1
+        hanaDone.myOpen == hanaOpen.myOpen
+        hanaDone.myDoneRecent == hanaBefore.myDoneRecent + 3
+        team.myDoneRecent == after.myDoneRecent
     },
 })
 
