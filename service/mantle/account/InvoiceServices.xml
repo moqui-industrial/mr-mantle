@@ -3970,8 +3970,9 @@ along with this software (see the LICENSE.md file). If not, see
                 (.xml), rendered as html-print with invoiceId and organizationPartyId, or an html.fancy template, rendered
                 over get#InvoicePrintInfo as get#InvoiceOutput renders its own. A location, never HTML.</description></parameter>
             <parameter name="projectBilling" type="Boolean" default="false"><description>Use project-scoped output
-                authority: the invoice's side editor must see a linked project. A custom print screen must match
-                OrgTemplateProjectInvoicePrint. Rechecked before replay or sending.</description></parameter>
+                authority: the invoice's side editor must see a linked project. The print screen is the organization's
+                OrgTemplateProjectInvoicePrint setting: used when printLocation is empty, and a printLocation given must
+                match it. Rechecked before replay or sending.</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="invoiceId"/>
@@ -3988,14 +3989,15 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="workflow" value="component://mr-mantle/service/mantle/account/InvoiceWorkflow.js"/>
             <set field="scope" from="ec.resource.script(workflow).execute('scope', {invoiceId:invoiceId,
-                organizationPartyId:organizationPartyId, need:'write', version:true})"/>
-            <if condition="projectBilling"><script>ec.resource.script(workflow).execute('scope', {invoiceId:invoiceId,
-                organizationPartyId:scope.organizationPartyId, need:'projectRead'})</script></if>
-            <if condition="projectBilling &amp;&amp; printLocation">
+                organizationPartyId:organizationPartyId, need:'write', projectBilling:projectBilling, version:true})"/>
+            <!-- a project's invoice prints with the organization's project print screen: the one used when none is given,
+                and the only one accepted -->
+            <if condition="projectBilling">
                 <service-call name="mantle.party.PartyServices.get#PartySettingValue" out-map="projectPrint"
                         in-map="{partyId:scope.organizationPartyId, partySettingTypeId:'OrgTemplateProjectInvoicePrint'}"
                         disable-authz="true"/>
-                <if condition="!String(printLocation).endsWith('.xml') || printLocation != projectPrint.settingValue">
+                <if condition="!printLocation"><set field="printLocation" from="projectPrint.settingValue || null"/></if>
+                <if condition="printLocation &amp;&amp; (!String(printLocation).endsWith('.xml') || printLocation != projectPrint.settingValue)">
                     <return error="true" message="PROJECT_INVOICE_PRINT_INVALID: Choose the configured project invoice print screen"/>
                 </if>
             </if>

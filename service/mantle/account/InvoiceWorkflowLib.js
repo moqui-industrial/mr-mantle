@@ -106,32 +106,54 @@ function readInvoice(p) {
         denied("PERMISSION_DENIED", "Invoice view authority is required")
     return out
 }
+// The projects an invoice bills (WorkEffortInvoice, or time billed on it: TimeEntry.invoiceId or vendorInvoiceId), each
+// work effort read once in batches rather than one read per row.
+function invoiceProjectIds(invoiceId) {
+    const workEffortIds = new Set(rows("mantle.work.effort.WorkEffortInvoice", {invoiceId}).map(row => row.workEffortId))
+    for (const field of ["invoiceId", "vendorInvoiceId"])
+        for (const row of Array.from(
+            find("mantle.work.time.TimeEntry", {[field]: invoiceId})
+                .selectField("workEffortId")
+                .distinct(true)
+                .list()
+        ))
+            workEffortIds.add(row.workEffortId)
+    workEffortIds.delete(null)
+    const ids = Array.from(workEffortIds)
+    const projectIds = new Set()
+    for (let offset = 0; offset < ids.length; offset += 1000)
+        for (const row of Array.from(
+            find("mantle.work.effort.WorkEffort")
+                .condition("workEffortId", "in", ids.slice(offset, offset + 1000))
+                .selectField("workEffortId,workEffortTypeEnumId,rootWorkEffortId")
+                .list()
+        )) {
+            const projectId = row.workEffortTypeEnumId === "WetProject" ? row.workEffortId : row.rootWorkEffortId
+            if (projectId) projectIds.add(projectId)
+        }
+    return projectIds
+}
 // Projects' billing: the editor of an invoice's side (RECEIVABLE_EDIT or PAYABLE_EDIT, never a client) who sees one of the
-// projects it bills (WorkEffortInvoice, or time billed on it: TimeEntry.invoiceId or vendorInvoiceId), as Projects'
-// get#InvoiceProjects scopes them (IronStone Accounting P21, F438).
+// projects it bills, as Projects' get#InvoiceProjects scopes them (IronStone Accounting P21, F438). found: an invoice()
+// result the caller already has, so the invoice is not read again.
 // memo: an object kept over several calls (a search's hits), which holds the user's visible projects once found.
-function projectEditor(p, memo = {}) {
-    const found = invoice(p)
+function projectEditorOf(found, memo = {}) {
     if (!has(found.permission)) return false
-    const rootOf = workEffortId => {
-        const row = workEffortId && one("mantle.work.effort.WorkEffort", {workEffortId})
-        return row ? (row.workEffortTypeEnumId === "WetProject" ? row.workEffortId : row.rootWorkEffortId || null) : null
-    }
-    const linked = rows("mantle.work.effort.WorkEffortInvoice", {invoiceId: p.invoiceId})
-    const projectIds = new Set(linked.map(row => rootOf(row.workEffortId)))
-    for (const field of ["invoiceId", "vendorInvoiceId"]) {
-        const timeRows = find("mantle.work.time.TimeEntry", {[field]: p.invoiceId})
-            .selectField("workEffortId")
-            .list()
-        for (const row of Array.from(timeRows)) projectIds.add(rootOf(row.workEffortId))
-    }
-    projectIds.delete(null)
+    const projectIds = invoiceProjectIds(found.record.invoiceId)
     if (!projectIds.size) return false
     if (!memo.projects) {
         const visible = call("mantle.work.ProjectServices.get#VisibleProjectInfo")
         memo.projects = {all: !!visible.allProjects, ids: Array.from(visible.visibleProjectIds || [])}
     }
     return memo.projects.all || [...projectIds].some(id => memo.projects.ids.includes(id))
+}
+function projectEditor(p, memo = {}) {
+    return projectEditorOf(invoice(p), memo)
+}
+// Refuses unless the user is the invoice's project billing editor; found as for projectEditorOf.
+function requireProjectEditor(found, memo = {}) {
+    if (!projectEditorOf(found, memo)) denied("PERMISSION_DENIED", "Project invoice view authority is required")
+    return found
 }
 // Whether the user reads an invoice outside the finance screens (record mounts, search): its reader (readInvoice) or a
 // project's billing editor (projectEditor). Answers false, never an error: a lookup that fails leaves no message behind.
@@ -325,6 +347,9 @@ function escapeHtml(value) {
     invoice,
     readInvoice,
     projectEditor,
+    projectEditorOf,
+    requireProjectEditor,
+    invoiceProjectIds,
     readable,
     writeInvoice,
     revision,

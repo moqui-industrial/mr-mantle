@@ -52,9 +52,10 @@ function creditCap(record) {
 // works in, and no counterparty another user keeps private. need "draft" also checks a draft that is not posted, its
 // revision when checkRevision is set, and the period of the invoice date (or of periodDate, a new date). The invoice comes
 // with its party and status names and stored totals; version adds its sourceVersion, capabilities what the user may do.
+// need "projectRead" reads it as its project billing editor (lib.projectEditorOf); projectBilling adds that check to
+// another need (a project's send), on the same read of the invoice.
 function scope(p) {
     const need = p.need || "read"
-    if (need === "projectRead" && !lib.projectEditor(p)) denied("PERMISSION_DENIED", "Project invoice view authority is required")
     const found =
         need === "read"
             ? lib.readInvoice(p)
@@ -63,6 +64,7 @@ function scope(p) {
               : need === "approve"
                 ? lib.invoice(p, "INVOICE_APPROVE", true)
                 : lib.writeInvoice(p)
+    if (need === "projectRead" || p.projectBilling) lib.requireProjectEditor(found)
     const record = found.record
     if (need === "draft") {
         requireDraft(found)
