@@ -1223,6 +1223,134 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="restore" noun="EventOccurrence">
+        <description>
+            Restores what cancel#EventOccurrence cancelled, with edit access (check#EventAccess): for an instance of a
+            recurring event (instanceStart on the series, or the workEffortId of an instance changed on its own) its EXDATE
+            is taken off the series' rule and the changed instance, if it is one and cancelled, is restored; a cancelled
+            single event, or a cancelled series (from any of its instances), is restored with the changed instances that were
+            cancelled with it (cancelled without an EXDATE of their own). A restored work effort takes back the status it had
+            before it was cancelled (the statusId audit log), else WeInPlanning. An instance or event that is not cancelled
+            is refused. A series ended by a cancel of this and following (its UNTIL) is not restored here: change its
+            repeat. With notify Y the attendees are told as cancel#EventOccurrence tells them (send#EventInvitations, one that
+            fails is logged). restoredWorkEffortIds are the work efforts restored; exdate is the EXDATE taken off.
+        </description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="instanceStart"/>
+            <parameter name="notify"><description>Y to tell the attendees</description></parameter>
+            <parameter name="eventUrl"><description>The event's screen, for the notifications' link</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="restoredWorkEffortIds" type="List"/>
+            <parameter name="seriesWorkEffortId"/>
+            <parameter name="exdate"/>
+            <parameter name="message"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const L = (text) => ec.l10n.localize(text)
+            restoredWorkEffortIds = []
+            notifiedCount = 0
+            seriesWorkEffortId = null
+            exdate = null
+            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'edit'}).call()
+            if (ec.message.hasError()) return
+            const pattern = 'yyyy-MM-dd HH:mm:ss.SSS'
+            const toMillis = (value) => {
+                if (value == null || value === '') return null
+                if (typeof value === 'number') return value
+                if (value instanceof Date) return value.getTime()
+                const text = String(value)
+                if (/^-?\d+$/.test(text)) return Number(text)
+                const parsed = Date.parse(text)
+                return Number.isNaN(parsed) ? null : parsed
+            }
+            const workEffortOf = (id) => ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one()
+            const row = workEffortOf(workEffortId)
+            const link = ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', workEffortId)
+                    .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').list()[0] ?? null
+            const seriesId = link ? link.workEffortId : workEffortId
+            const series = link ? workEffortOf(seriesId) : row
+            const recurrence = ec.entity.find('mantle.work.effort.WorkEffortRecurrence').condition('workEffortId', seriesId).one()
+            const overrides = () => Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', seriesId)
+                    .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').list())
+            const seriesAllDay = toMillis(series.actualStartDate || series.estimatedStartDate) == null && series.allDayStart != null
+            // the EXDATE value of an instance, as cancel#EventOccurrence writes it
+            const exdateOf = (keyMs, day) => seriesAllDay ? day.replace(/-/g, '') : new Date(keyMs).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+            const exdateValues = String(recurrence?.exdates || '').split(/[,\s]+/).filter((value) => value)
+            const keyOf = (assoc) => ({keyMs: toMillis(assoc.fromDate), day: ec.l10n.format(String(toMillis(assoc.fromDate)), 'yyyy-MM-dd')})
+            // the status before the cancel, from the audit log
+            const restore = (target) => {
+                if (target.statusId !== 'WeCancelled') return
+                const audit = ec.entity.find('moqui.entity.EntityAuditLog').condition('changedEntityName', 'mantle.work.effort.WorkEffort')
+                        .condition('changedFieldName', 'statusId').condition('pkPrimaryValue', target.workEffortId).condition('newValueText', 'WeCancelled')
+                        .orderBy('-changedDate').limit(1).disableAuthz().list()[0] ?? null
+                const before = audit?.oldValueText && audit.oldValueText !== 'WeCancelled' ? audit.oldValueText : 'WeInPlanning'
+                target.set('statusId', before)
+                target.update()
+                restoredWorkEffortIds.push(target.workEffortId)
+            }
+            let notifyIds = [workEffortId]
+            let resendAll = true
+            const isRecurring = !!(recurrence?.rrule || link)
+            if (isRecurring && (link || instanceStart) && series.statusId !== 'WeCancelled') {
+                // one instance: its EXDATE off the rule, the changed instance restored
+                let key = null
+                if (link) key = keyOf(link)
+                else {
+                    const match = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(instanceStart))
+                    if (match) key = {keyMs: toMillis(ec.l10n.parseTimestamp(match[1] + ' ' + (match[2] ? match[2] + ':' + match[3] : '00:00') + ':00.000', pattern)), day: match[1]}
+                }
+                if (!key || key.keyMs == null) { ec.message.addError(L('Which instance of the recurring event: instanceStart is missing')); return }
+                seriesWorkEffortId = seriesId
+                const changed = link ? link : overrides().find((assoc) => toMillis(assoc.fromDate) === key.keyMs)
+                const target = changed ? workEffortOf(changed.toWorkEffortId) : null
+                const value = exdateOf(key.keyMs, key.day)
+                const excluded = !!recurrence && exdateValues.includes(value)
+                if (!excluded && target?.statusId !== 'WeCancelled') { ec.message.addError(L('This event is not cancelled')); return }
+                if (excluded) {
+                    exdate = value
+                    recurrence.set('exdates', exdateValues.filter((item) => item !== value).join(',') || null)
+                    recurrence.update()
+                }
+                if (target) restore(target)
+                notifyIds = [seriesId]
+                resendAll = false
+            } else {
+                // a single event, or the whole series with the changed instances cancelled with it
+                if (series.statusId !== 'WeCancelled') { ec.message.addError(L('This event is not cancelled')); return }
+                if (isRecurring) seriesWorkEffortId = seriesId
+                restore(series)
+                if (isRecurring) for (const assoc of overrides()) {
+                    const key = keyOf(assoc)
+                    if (exdateValues.includes(exdateOf(key.keyMs, key.day))) continue
+                    const target = workEffortOf(assoc.toWorkEffortId)
+                    if (target) restore(target)
+                }
+                notifyIds = [seriesId]
+            }
+            if (ec.message.hasError()) return
+            message = ec.resource.expand('Event restored: ${name}', '', {name: row.workEffortName || workEffortId})
+            if (notify === 'Y' || notify === 'true' || notify === true) {
+                const told = new Set()
+                for (const id of notifyIds.concat(restoredWorkEffortIds.filter((id) => !notifyIds.includes(id)))) {
+                    ec.message.pushErrors()
+                    try {
+                        const sent = ec.service.sync().name('mantle.work.EventServices.send#EventInvitations').parameters({workEffortId: id,
+                            resendAll: resendAll || restoredWorkEffortIds.includes(id), eventUrl: eventUrl || null}).call()
+                        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                        for (const partyId of Array.from(sent?.sentPartyIdList ?? [])) told.add(partyId)
+                    } catch (err) {
+                        ec.logger.warn(`Event ${id}: the restore was not sent: ${err && err.message ? err.message : err}`)
+                    } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                }
+                notifiedCount = told.size
+                if (notifiedCount) message += ' · ' + ec.resource.expand('${count} attendees told', '', {count: notifiedCount})
+            }
+        ]]></script></actions>
+    </service>
+
     <!-- ========== Invitations and answers (RSVP) ========== -->
 
     <service verb="respond" noun="EventInvitation">
