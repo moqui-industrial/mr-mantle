@@ -26,6 +26,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="targetWorkEffortId"/>
             <parameter name="workEffortContentId"/>
             <parameter name="communicationEventId"/>
+            <parameter name="workEffortIdList" type="List"><description>More records to check, in one call (the
+                work efforts a label is applied to)</description></parameter>
         </in-parameters>
         <actions><script><![CDATA[
             const one = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).disableAuthz().one() : null
@@ -39,16 +41,21 @@ along with this software (see the LICENSE.md file). If not, see
             add(rootWorkEffortId)
             add(parentWorkEffortId)
             add(targetWorkEffortId)
+            // a list (the items a label is on): their projects in two reads, not one read per item
+            const listed = Array.from(new Set(Array.from(workEffortIdList || []).filter((id) => id)))
+            if (listed.length) for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', listed)
+                    .selectField('workEffortId,workEffortTypeEnumId,rootWorkEffortId').disableAuthz().list()) {
+                if (row.workEffortTypeEnumId === 'WetProject') projects.add(row.workEffortId)
+                else if (row.rootWorkEffortId) projects.add(row.rootWorkEffortId)
+            }
             if (workEffortContentId) add(ec.entity.find('mantle.work.effort.WorkEffortContent')
                 .condition('workEffortContentId', workEffortContentId).disableAuthz().one()?.workEffortId)
             if (communicationEventId) for (const link of ec.entity.find('mantle.work.effort.WorkEffortCommEvent')
                 .condition('communicationEventId', communicationEventId).disableAuthz().list()) add(link.workEffortId)
-            for (const id of projects) {
-                const project = one(id)
-                if (project?.workEffortTypeEnumId === 'WetProject' && project.statusId === 'WeClosed') {
-                    ec.message.addError(ec.l10n.localize('PROJECT_CLOSED: The project is closed; reopen it before changing its work or plan'))
-                    return
-                }
+            if (projects.size && ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', Array.from(projects))
+                    .condition('workEffortTypeEnumId', 'WetProject').condition('statusId', 'WeClosed').disableAuthz().count() > 0) {
+                // the code stays outside localize so callers can match it in every language
+                ec.message.addError('PROJECT_CLOSED: ' + ec.l10n.localize('The project is closed; reopen it before changing its work or plan'))
             }
         ]]></script></actions>
     </service>

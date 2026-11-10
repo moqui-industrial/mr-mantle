@@ -164,8 +164,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="managerPartyId"/>
         </in-parameters>
         <actions>
-            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
-            <if condition="ec.message.hasError()"><return/></if>
+            <!-- a closed project is read only except for the status change that reopens it -->
+            <set field="reopening" from="statusId &amp;&amp; statusId != 'WeClosed' &amp;&amp; ec.entity.find('mantle.work.effort.WorkEffort')
+                    .condition('workEffortId', workEffortId).disableAuthz().one()?.statusId == 'WeClosed'"/>
+            <if condition="!reopening">
+                <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <entity-find entity-name="mantle.work.effort.WorkEffort" list="tasksList">
                 <econdition field-name="rootWorkEffortId" from="workEffortId"/>
             </entity-find>
@@ -2062,7 +2067,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="wikiSpaceId"/>
         </in-parameters>
         <out-parameters><parameter name="wikiSpaceId"/><parameter name="rootPageLocation"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const L = (text) => ec.l10n.localize(text)
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
@@ -2432,7 +2440,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="clientVisible" default-value="N"/>
         </in-parameters>
         <out-parameters><parameter name="communicationEventId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const project = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (project == null || project.workEffortTypeEnumId !== 'WetProject') { ec.message.addError(ec.resource.expand('Project ${workEffortId} not found', '', {workEffortId})); return }
             const health = ec.entity.find('moqui.basic.Enumeration').condition('enumId', healthEnumId).useCache(true).one()
@@ -3418,7 +3429,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortContentId"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortApprovalId"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             const L = (text) => ec.l10n.localize(text)
             const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'request'}).call() || {}
             if (ec.message.hasError()) return
@@ -3459,6 +3473,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .orderBy('-requestedDate').forUpdate(true).list())[0] || null
                 if (request == null) { ec.message.addError(L('No approval waits on this milestone')); return }
                 workEffortApprovalId = request.workEffortApprovalId
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: request.workEffortId}).call()
+                if (ec.message.hasError()) return
                 const access = ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: request.workEffortId, need: 'decide'}).call() || {}
                 if (ec.message.hasError()) return
                 if (request.statusId !== 'WeaRequested') { ec.message.addError(L('This approval was decided already')); return }
@@ -3521,6 +3537,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .orderBy('-requestedDate').forUpdate(true).list())[0] || null
                 if (request == null) { ec.message.addError(L('No approval waits on this milestone')); return }
                 workEffortApprovalId = request.workEffortApprovalId
+                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: request.workEffortId}).call()
+                if (ec.message.hasError()) return
                 ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: request.workEffortId, need: 'decide'}).call()
                 if (ec.message.hasError()) return
                 if (request.statusId !== 'WeaRequested') { ec.message.addError(L('This approval was decided already')); return }
@@ -3538,7 +3556,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Withdraws a milestone's waiting request (as a new estimate replaces the one sent), by the project's team.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="cancelledCount" type="Integer"/></out-parameters>
-        <actions><script><![CDATA[
+        <actions>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <script><![CDATA[
             cancelledCount = 0
             ec.service.sync().name('mantle.work.ProjectServices.get#MilestoneApprovalAccess').parameters({workEffortId: workEffortId, need: 'request'}).call()
             if (ec.message.hasError()) return

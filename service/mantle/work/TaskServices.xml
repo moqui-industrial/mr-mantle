@@ -479,7 +479,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="created" type="Boolean"/></out-parameters>
         <actions>
-            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
+                    in-map="{workEffortId:workEffortId, targetWorkEffortId:toWorkEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             created = false
@@ -998,10 +999,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const label = ec.entity.find('mantle.work.effort.WorkEffortCategory').condition('workEffortCategoryId', workEffortCategoryId).one()
             if (label == null || label.categoryTypeEnumId !== 'WcatLabel') { ec.message.addError(ec.resource.expand('${workEffortCategoryId} is not a label', '', {workEffortCategoryId})); return }
-            for (const row of ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', workEffortCategoryId).list()) {
-                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: row.workEffortId}).call()
-                if (ec.message.hasError()) return
-            }
+            const labelled = Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', workEffortCategoryId)
+                    .selectField('workEffortId').list()).map((row) => row.workEffortId)
+            ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortIdList: labelled}).call()
+            if (ec.message.hasError()) return
             itemCount = ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', workEffortCategoryId).deleteAll()
             label.delete()
         ]]></script></actions>
@@ -1022,10 +1023,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (label == null || label.categoryTypeEnumId !== 'WcatLabel') { ec.message.addError(ec.resource.expand('${id} is not a label', '', {id})); return }
             }
             const fromRows = Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', fromCategoryId).list())
-            for (const row of fromRows) {
-                ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortId: row.workEffortId}).call()
-                if (ec.message.hasError()) return
-            }
+            ec.service.sync().name('mantle.work.WorkEffortServices.check#WorkEffortOpen').parameters({workEffortIdList: fromRows.map((row) => row.workEffortId)}).call()
+            if (ec.message.hasError()) return
             const has = new Set(Array.from(ec.entity.find('mantle.work.effort.WorkEffortCategoryAppl').condition('workEffortCategoryId', intoCategoryId)
                     .selectField('workEffortId').list()).map((row) => row.workEffortId))
             for (const row of fromRows) {
