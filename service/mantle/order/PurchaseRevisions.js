@@ -928,7 +928,7 @@ function remindOne(orderId, p, occurrence, emailTemplateId) {
             const out =
                 ec.service
                     .sync()
-                    .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                    .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                     .parameters({
                         emailTemplateId,
                         toAddresses: recipient,

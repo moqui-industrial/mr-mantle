@@ -313,7 +313,7 @@
             <parameter name="description"/>
             <parameter name="contentText"/>
             <parameter name="filename"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortContentId"/>
@@ -385,7 +385,7 @@
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="csvText"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="delimiter"/>
             <parameter name="preview" type="Boolean" default="true"/>
             <parameter name="changeReason" required="true"/>

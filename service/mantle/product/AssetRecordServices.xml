@@ -154,7 +154,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.product.asset.AssetContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="assetId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="assetContentId"/></out-parameters>
         <actions>
@@ -167,7 +167,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="assetContentId" required="true"/>
             <parameter name="assetId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>

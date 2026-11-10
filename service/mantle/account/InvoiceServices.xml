@@ -3017,7 +3017,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!storeEmail.emailTemplateId"><continue/></if>
 
                     <iterate list="toAddressesList" entry="toAddressesCur">
-                        <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
+                        <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                                 in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                     toAddresses:toAddressesCur, bodyParameters:bodyParameters, toUserId:toUserId}"/>
                         <if condition="sendOut.emailMessageId"><script><![CDATA[
@@ -3214,7 +3214,7 @@ along with this software (see the LICENSE.md file). If not, see
                             headerImagePath:storeEmail.headerImagePath, detailLinkPath:storeEmail.detailLinkPath}"/>
 
                     <iterate list="toAddressesList" entry="toAddressesCur">
-                        <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
+                        <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                                 in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                 toAddresses:toAddressesCur, bodyParameters:bodyParameters, toUserId:toUserId}"/>
 
@@ -3266,7 +3266,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.account.invoice.InvoiceContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="invoiceId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="invoiceContentId"/></out-parameters>
         <actions>
@@ -3280,7 +3280,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="invoiceContentId" required="true"/>
             <auto-parameters entity-name="mantle.account.invoice.InvoiceContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <actions>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
@@ -3297,7 +3297,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="invoiceContentId" required="true"/>
             <parameter name="invoiceId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
             <parameter name="saveContentLocation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
@@ -4122,7 +4122,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <continue/>
                 </if>
                 <!-- each address its own message, in its own transaction: one that fails is named and the others go out -->
-                <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut"
+                <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut"
                         out-map-add-to-existing="false" transaction="force-new" ignore-error="true"
                         in-map="{emailTemplateId:emailTemplateId, toAddresses:recipient, bodyParameters:emailParameters,
                             body:body, bodyText:bodyText, attachments:attachmentList}"/>
@@ -4361,7 +4361,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="orderId"/>
             <parameter name="orderPartSeqId"/>
             <parameter name="shipmentId"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
             <parameter name="fileDescription"/>
             <parameter name="operationKey"/>
         </in-parameters>

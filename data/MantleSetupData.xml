@@ -376,7 +376,7 @@ along with this software (see the LICENSE.md file). If not, see
         record. A topic that waits on a decision (an approval) is an app's, with the framework's approveServiceName and
         refuseServiceName on its NotificationTopic; those services get recordEntityName, recordId, the message's
         messageJson map and, for a refuse, reason. -->
-    <!-- a mention in a chat room, as org.moqui.impl.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
+    <!-- a mention in a chat room, as org.moqui.chat.ChatServices send#Message and edit#Message send it: roomName, chatRoomId,
         eventSeq, authorUserId, authorName and summary in the message, reason NrMention, the room (moqui.chat.ChatRoom) as
         its record, the actor the author, and the caller's roomUrl as its link; in the Notifications inbox (it asks for the
         user, so it is in the badge). No summary (a user who turned previews off, an end-to-end encrypted room, which has
@@ -459,7 +459,7 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.user.NotificationTopic topic="MilestoneDecision" inboxEnumId="NinUpdates" description="Milestone Approval Decided" typeString="info"
             showAlert="N" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${milestoneName} of ${projectName} ${decision} by ${actorName}${reasonSuffix}"/>
-    <!-- the actions of the mail client's rules that make requests and work items (org.moqui.impl.EmailClientServices
+    <!-- the actions of the mail client's rules that make requests and work items (org.moqui.mail.EmailClientServices
         run#EmailRules runs the service in optionValue for the action in enumCode; impl-projects.md F6) -->
     <moqui.basic.Enumeration enumId="ErActCreateRequest" enumTypeId="EmailRuleAction" enumCode="createRequest" sequenceNum="1"
             description="Make a request" optionValue="mantle.request.RequestServices.create#RequestFromEmail"/>

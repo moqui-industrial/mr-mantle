@@ -193,7 +193,7 @@ function attemptStep(p) {
         out =
             ec.service
                 .sync()
-                .name("org.moqui.impl.EmailServices.send#EmailTemplate")
+                .name("org.moqui.mail.EmailServices.send#EmailTemplate")
                 .parameters({
                     emailTemplateId: delivery.templateKey,
                     toAddresses: toAddress,

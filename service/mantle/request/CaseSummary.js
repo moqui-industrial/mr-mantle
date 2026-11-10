@@ -203,7 +203,7 @@ function send(p) {
         "<p>" +
         escapeHtml(L("The summary of your case") + " " + theCase.requestId + " " + L("is attached.")) +
         "</p>"
-    const draft = lib.call("org.moqui.impl.EmailClientServices.save#Draft", {
+    const draft = lib.call("org.moqui.mail.EmailClientServices.save#Draft", {
         emailAccountId: account.emailAccountId,
         toAddresses: recipient,
         subject: p.subject || L("Case summary") + " " + theCase.requestId,

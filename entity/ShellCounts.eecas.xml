@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- The header badge counts (mantle.party.PartyServices.get#ShellCounts): a write to a row they count publishes the counts
     of the users it touches. The condition skips an update that leaves the counted fields as they were; the service
-    compares them again, finds the users and calls org.moqui.impl.ShellServices.publish#ShellCounts, which sends after the
+    compares them again, finds the users and calls org.moqui.ui.ShellServices.publish#ShellCounts, which sends after the
     commit, coalesced per user. A failure there is logged and never fails the write. -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
     <!-- Today: the party's rows (assignment, decline, removal, snooze) and the work effort's status and dates -->

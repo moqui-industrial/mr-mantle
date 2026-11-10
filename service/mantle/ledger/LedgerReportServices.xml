@@ -722,7 +722,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="glAccountCodeMask" from="partyAcctgPreference?.glAccountCodeMask || ec.user.getPreference('GlAccountCodeMask')"/>
                 <script>
                     // format the account code with the mask: '#' takes the next character of the code, a code that runs out is padded
-                    // with '0', and any other mask character is a literal, like javax.swing.text.MaskFormatter
+                    // with '0', and any other mask character is a literal, like Java's MaskFormatter
                     accountCode = glAccount.accountCode
                     if (glAccountCodeMask) {
                         const codeText = accountCode == null ? '' : String(accountCode)

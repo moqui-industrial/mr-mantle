@@ -78,7 +78,7 @@ const price = (productId, amount, fields = {}) =>
     )
 const published = (productStoreId, productId, kind) =>
     make(S + "ProductStoreProduct", {productStoreId, productId, fromDate: 0, publicationKindEnumId: kind || "PspkPublished"})
-const wiki = (verb, parameters) => call("org.moqui.impl.WikiServices." + verb, parameters)
+const wiki = (verb, parameters) => call("org.moqui.resource.WikiServices." + verb, parameters)
 // a Shop read as the public reads it (no one signed in), or as a signed-in user: {result} or {error}
 function read(service, input, username) {
     if (username) login(username)

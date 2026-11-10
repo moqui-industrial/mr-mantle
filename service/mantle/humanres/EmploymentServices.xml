@@ -125,8 +125,8 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.party.PartyRelationship" include="nonpk"/>
             <auto-parameters entity-name="mantle.humanres.employment.Employment" include="nonpk"/>
             <!-- use PartyContent instead
-            <parameter name="identityDocumentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
-            <parameter name="emplAuthzDocumentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="identityDocumentFile" type="FileItem"/>
+            <parameter name="emplAuthzDocumentFile" type="FileItem"/>
             -->
         </in-parameters>
         <actions>
@@ -270,7 +270,7 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
-            <parameter name="basisDate" type="java.sql.Date" default="new Date(Number(ec.user.nowTimestamp)).toISOString().slice(0, 10)"/>
+            <parameter name="basisDate" type="Date" default="new Date(Number(ec.user.nowTimestamp)).toISOString().slice(0, 10)"/>
         </in-parameters>
         <actions>
             <!-- A date reaches a script as epoch millis text (UTC midnight for a Date field); calendar steps are done in UTC on

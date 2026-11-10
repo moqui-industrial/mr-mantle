@@ -1782,7 +1782,7 @@ along with this software (see the LICENSE.md file). If not, see
             <auto-parameters entity-name="mantle.order.return.ReturnContent" include="nonpk">
                 <exclude field-name="contentLocation"/></auto-parameters>
             <parameter name="returnId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem"/>
+            <parameter name="contentFile" type="FileItem"/>
         </in-parameters>
         <out-parameters><parameter name="returnContentId"/></out-parameters>
         <actions>
@@ -1810,7 +1810,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="returnContentId" required="true"/>
             <parameter name="returnId" required="true"/>
-            <parameter name="contentFile" type="org.apache.commons.fileupload2.core.FileItem" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>

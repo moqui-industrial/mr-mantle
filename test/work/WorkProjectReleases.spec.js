@@ -45,7 +45,7 @@ function settle() {
         const busy = ["recording", "pending", "running"].reduce((sum, status) =>
             sum + countOf("moqui.resource.GitUpdate", { repositoryId, ecaStatus: status }), 0)
         if (busy == 0) return
-        call("org.moqui.impl.GitServices.process#PendingGitUpdates", {})
+        call("org.moqui.git.GitServices.process#PendingGitUpdates", {})
     }
     throw new Error("the git updates did not settle")
 }
@@ -129,7 +129,7 @@ feature("a plan item's progress counts its items by state, with their hours and 
 feature("a project's documentation space in its repository is a docs folder beside the code, its users the project's members", {
     when() {
         call("mantle.work.GitServices.create#ProjectRepository", { workEffortId: PROJECT, repositoryId, repositoryKind: "db", applyDefaults: false })
-        call("org.moqui.impl.GitServices.commit#GitFiles", { repositoryId, message: "PRL code", fileMap: { "README.md": "# PRL\n", "src/app.js": "export {}\n" } })
+        call("org.moqui.git.GitServices.commit#GitFiles", { repositoryId, message: "PRL code", fileMap: { "README.md": "# PRL\n", "src/app.js": "export {}\n" } })
         settle()
         const made = call(`${PS}.create#ProjectDocsSpace`, { workEffortId: PROJECT, storage: "repository", repositoryId })
         wikiSpaceId = made.wikiSpaceId
@@ -145,7 +145,7 @@ feature("a project's documentation space in its repository is a docs folder besi
             thruDate: ec.user.nowTimestamp })
         const joeLeft = spaceUser(userIdOf(JOE))
         // a page saved in the space is a file under docs/ of the repository, the code as it was
-        call("org.moqui.impl.WikiServices.update#WikiPage", { wikiSpaceId, pageName: "GettingStarted", pageText: "# Getting started\n", versionNote: "Getting started" })
+        call("org.moqui.resource.WikiServices.update#WikiPage", { wikiSpaceId, pageName: "GettingStarted", pageText: "# Getting started\n", versionNote: "Getting started" })
         settle()
         return { made, setting, space, before, bobJoined, joeLeft,
             home: text(`git://${repositoryId}/docs/${wikiSpaceId}.md`), page: text(`git://${repositoryId}/docs/${wikiSpaceId}/GettingStarted.md`),

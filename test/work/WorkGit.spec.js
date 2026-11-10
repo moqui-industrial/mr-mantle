@@ -1,6 +1,6 @@
 // Git repositories of projects, and their commits, branches and tags on tasks: mantle.work.GitServices and the gitECA
 // rules of service/Work.gitecas.xml, on a database repository whose commits are made through
-// org.moqui.impl.GitServices.commit#GitFiles (a write, which the rules listen for as for a push). The push itself, the
+// org.moqui.git.GitServices.commit#GitFiles (a write, which the rules listen for as for a push). The push itself, the
 // rules engine and the HTTP and SSH endpoints are tested in mr-moqui. New spec, no Groovy original.
 const PROJECT = "GITP"
 let repositoryId, taskOne, taskTwo, taskThree
@@ -24,13 +24,13 @@ function settle() {
         const busy = ["recording", "pending", "running"].reduce((sum, status) =>
             sum + countOf("moqui.resource.GitUpdate", { repositoryId, ecaStatus: status }), 0)
         if (busy == 0) return
-        call("org.moqui.impl.GitServices.process#PendingGitUpdates", {})
+        call("org.moqui.git.GitServices.process#PendingGitUpdates", {})
     }
     throw new Error("the git updates did not settle")
 }
 
 function commitFiles(message, fileMap) {
-    const out = call("org.moqui.impl.GitServices.commit#GitFiles", { repositoryId, message, fileMap })
+    const out = call("org.moqui.git.GitServices.commit#GitFiles", { repositoryId, message, fileMap })
     settle()
     return out.commitId
 }
@@ -100,7 +100,7 @@ feature("Fixes and Closes complete their tasks on the default branch", {
 
 feature("a commit linked by hand by an ID prefix, and one that is not there", {
     when() {
-        const head = call("org.moqui.impl.GitServices.get#GitLog", { repositoryId, limit: 1 }).commitList[0].commitId
+        const head = call("org.moqui.git.GitServices.get#GitLog", { repositoryId, limit: 1 }).commitList[0].commitId
         call("mantle.work.GitServices.add#TaskCommit", { workEffortId: taskThree, repositoryId, commitId: head.substring(0, 8) })
         let error = ""
         try {
@@ -118,7 +118,7 @@ feature("a commit linked by hand by an ID prefix, and one that is not there", {
 
 feature("branch and tag names link to their task or project", {
     when() {
-        const head = call("org.moqui.impl.GitServices.get#GitLog", { repositoryId, limit: 1 }).commitList[0].commitId
+        const head = call("org.moqui.git.GitServices.get#GitLog", { repositoryId, limit: 1 }).commitList[0].commitId
         // what the ref-update and tag rules call for a branch or tag a push creates
         for (const refName of [`refs/heads/${taskThree}-help-text`, `refs/tags/${PROJECT}/v1.0`, `refs/tags/${taskTwo}/done`]) {
             call("mantle.work.GitServices.link#RefByName", { repositoryId, refName, newId: head,

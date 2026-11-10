@@ -189,7 +189,7 @@ along with this software (see the LICENSE.md file). If not, see
                             errorMessage:'Invalid recipient address'}, statementKey))</script>
                         <continue/>
                     </if>
-                    <service-call name="org.moqui.impl.EmailServices.send#EmailTemplate" out-map="sendOut"
+                    <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut"
                             out-map-add-to-existing="false" transaction="force-new" ignore-error="true"
                             in-map="{emailTemplateId:emailTemplateId, toAddresses:recipient, bodyParameters:emailParameters,
                                 body:statement.printHtml, bodyText:bodyText,

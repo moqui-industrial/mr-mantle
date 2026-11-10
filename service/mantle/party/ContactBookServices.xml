@@ -296,7 +296,7 @@ along with this software (see the LICENSE.md file). If not, see
             const ended = (value) => value != null && (value instanceof Date ? value.getTime() : Number(value) || Date.parse(String(value))) <= now
             if (to == null || (to.disabled === 'Y' && to.disabledDateTime == null) || ended(to.terminateDate)) {
                 ec.message.addError(`User ${toUserId} cannot manage a contact book: the account is not enabled`); return }
-            if (ec.service.sync().name('org.moqui.impl.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
+            if (ec.service.sync().name('org.moqui.chat.ChatServices.get#ExternalUsers').parameter('userIdList', [toUserId])
                     .disableAuthz().call()?.anyExternal !== false) {
                 ec.message.addError(`User ${toUserId} cannot manage a contact book: an external user`); return }
             if (book.ownerPartyId && (!to.partyId || ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', to.partyId)
@@ -1313,7 +1313,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="filter" noun="ContactAddresses" allow-remote="false">
         <description>
             Which of these email addresses are a user's contacts: the hook of the framework's
-            org.moqui.impl.EmailClientServices.filter#ContactAddresses (the email_contact_service property or the theme value
+            org.moqui.mail.EmailClientServices.filter#ContactAddresses (the email_contact_service property or the theme value
             STRT_EMAIL_CONTACT_SERVICE), which an automatic reply to contacts only asks. A contact is a party, not disabled,
             with the address (any case) on a current email contact mechanism, that is the user's personal contact
             (privateOwnerUserId the user), a current member of one of the user's personal books or of a shared book shared now

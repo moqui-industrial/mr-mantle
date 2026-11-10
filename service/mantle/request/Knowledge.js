@@ -113,13 +113,13 @@ function caseOf(requestId) {
 }
 // What the user may view by the wiki's rules (the spaces and the restricted pages hidden from them).
 function viewScope() {
-    const out = ec.service.sync().name("org.moqui.impl.WikiServices.get#WikiViewScope").call() || {}
+    const out = ec.service.sync().name("org.moqui.resource.WikiServices.get#WikiViewScope").call() || {}
     return {spaceIds: new Set(Array.from(out.viewSpaceIdList || [])), hidden: new Set(Array.from(out.hiddenPageIdList || []))}
 }
 const pageAccess = wikiPageId =>
-    ec.service.sync().name("org.moqui.impl.WikiServices.get#WikiPageAccess").parameters({wikiPageId}).call() || {}
+    ec.service.sync().name("org.moqui.resource.WikiServices.get#WikiPageAccess").parameters({wikiPageId}).call() || {}
 const spaceAccess = wikiSpaceId =>
-    ec.service.sync().name("org.moqui.impl.WikiServices.get#WikiPageAccess").parameters({wikiSpaceId}).call() || {}
+    ec.service.sync().name("org.moqui.resource.WikiServices.get#WikiPageAccess").parameters({wikiSpaceId}).call() || {}
 
 // ===== sources =====
 // The current sources (a draft has no from date) of some organizations (null: every one), by priority.
@@ -387,7 +387,7 @@ function publishedArticle(p) {
     try {
         out = ec.service
             .sync()
-            .name("org.moqui.impl.WikiServices.get#PublishedWikiPageText")
+            .name("org.moqui.resource.WikiServices.get#PublishedWikiPageText")
             .parameters({wikiSpaceId: page.wikiSpaceId, pagePath: page.pagePath, versionName: null})
             .call()
     } finally {
@@ -823,7 +823,7 @@ function articleFromCase(p) {
               .map(part => "<p>" + escape(part).replace(/\n/g, "<br>") + "</p>")
               .join("\n")
         : "# " + pageName + "\n\n" + bodyOut.text + "\n"
-    const written = call("org.moqui.impl.WikiServices.update#WikiPage", {
+    const written = call("org.moqui.resource.WikiServices.update#WikiPage", {
         wikiSpaceId,
         parentPath,
         pageName,

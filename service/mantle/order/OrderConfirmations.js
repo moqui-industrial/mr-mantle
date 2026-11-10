@@ -233,7 +233,7 @@ function allowedRecipients(customerPartyIds) {
 // The account the user sends from: the one named (which they may send from), else their first account of the selling
 // organization they may send from, else their first one; none is refused.
 function senderAccount(emailAccountId, organizationPartyId) {
-    const access = lib.call("org.moqui.impl.EmailClientServices.get#EmailAccountAccess")
+    const access = lib.call("org.moqui.mail.EmailClientServices.get#EmailAccountAccess")
     const sendable = Array.from(access.accountList || []).filter(account => account.canSend)
     const account = !blank(emailAccountId)
         ? sendable.find(row => row.emailAccountId === emailAccountId)
@@ -301,7 +301,7 @@ function resend(p) {
         "</p>"
     // the draft in the user's account with the stored PDF (a file of the order, not of the account: authorization off), then
     // the mail client's send, filed on the order once it is sent
-    const draft = lib.call("org.moqui.impl.EmailClientServices.save#Draft", {
+    const draft = lib.call("org.moqui.mail.EmailClientServices.save#Draft", {
         emailAccountId: account.emailAccountId,
         toAddresses: recipient,
         subject: p.subject || ec.l10n.localize("Your order") + " " + so.orderId + " · " + organizationName,
