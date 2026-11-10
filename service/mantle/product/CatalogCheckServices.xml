@@ -9,6 +9,8 @@
             <parameter name="includeDescendants" type="Boolean" />
             <parameter name="asOfDate" type="Timestamp" />
             <parameter name="checkIds" type="List" />
+            <parameter name="severity" type="String"><description>Only the issues of this severity, and the counts of
+                those; valid still reflects every issue.</description></parameter>
             <parameter name="includeInactive" type="Boolean" />
         </in-parameters>
         <out-parameters>
