@@ -413,6 +413,10 @@ function publish(p) {
         validateRule(r, r.priceRuleId)
     audit(["state", "changeReason"], p.changeReason)
     call("update#" + L, {priceListId: p.priceListId, state: "published", changeReason: p.changeReason})
+    // the publication as a marker on the organization's time series, after the commit (BusinessEvents.js)
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/BusinessEvents.js")
+        .register("PriceListPublished", p.priceListId)
     return {priceListId: p.priceListId}
 }
 function retire(p) {

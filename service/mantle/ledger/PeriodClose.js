@@ -769,6 +769,8 @@ function close(p) {
     })
     const answer = {closeRunId: run.closeRunId, closingAcctgTransIdList: closingIds, summaryAccountCount: own.accountCount}
     if (op) lib.lib.complete(op, "mantle.ledger.transaction.AccountingCloseRun", run.closeRunId, answer)
+    // the close as a marker on the organization's time series, after the commit (BusinessEvents.js)
+    ec.resource.script("component://mr-mantle/service/mantle/party/BusinessEvents.js").register("PeriodClosed", run.closeRunId)
     return answer
 }
 
