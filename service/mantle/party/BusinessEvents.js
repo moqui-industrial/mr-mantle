@@ -60,7 +60,7 @@ const events = {
 // record#BusinessEvent: the marker of one event, written with authorization off (the owner's service checked its own
 // permission; the engine's business source is the owner's to write). A failure is logged and answered, not thrown.
 function record(p) {
-    const read = events[p.event]
+    const read = Object.prototype.hasOwnProperty.call(events, p.event) ? events[p.event] : null
     if (!read) throw new Error("Unknown business event " + p.event)
     const wasDisabled = ec.artifactExecution.disableAuthz()
     try {
