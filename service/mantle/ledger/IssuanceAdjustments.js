@@ -30,7 +30,7 @@ function repost(p) {
         })
         return true
     }
-    lib.find("mantle.party.Party", {partyId: asset.ownerPartyId}).forUpdate(true).one()
+    lib.find("mantle.party.Party", {partyId: asset.ownerPartyId}).forNoKeyUpdate(true).one()
     const mapped =
         lib.call("mantle.ledger.AssetAutoPostServices.get#AssetTypeGlAccount", {
             organizationPartyId: asset.ownerPartyId,

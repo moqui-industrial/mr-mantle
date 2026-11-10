@@ -393,7 +393,7 @@ function store(p) {
     const changeReason = String(p.changeReason || "").trim()
     if (!changeReason) denied("CHANGE_REASON_REQUIRED", "Give the reason for the change")
     const lockKey = {organizationPartyId}
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     let query = find(POLICY, lockKey).condition(cf().makeConditionDate("fromDate", "thruDate", ec.user.nowTimestamp))
     query = customerPartyId
         ? query.condition("customerPartyId", customerPartyId)

@@ -429,7 +429,7 @@ function assertMutable(p) {
     if (p.operation === "unpost" || initial.isPosted !== "Y") return
     if (!initial.invoiceId && !initial.paymentId && !initial.paymentApplicationId) return
     // The organization first, as the application writers lock it, then the transaction.
-    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
     const tx = find(T, {acctgTransId: initial.acctgTransId}).forUpdate(true).one()
     const ownApplication = applicationTypes.includes(tx.acctgTransTypeEnumId) && !tx.reverseOfAcctgTransId
     const linked = ownApplication && tx.paymentApplicationId ? one(A, {paymentApplicationId: tx.paymentApplicationId}) : null
@@ -464,7 +464,7 @@ function check(p) {
         captureSourceDay(initial)
         return {handled: false, valid: true, findings: []}
     }
-    if (!p.verifyOnly) find("mantle.party.Party", {partyId: initial.organizationPartyId}).forUpdate(true).one()
+    if (!p.verifyOnly) find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
     const out = validate(p, !p.verifyOnly)
     if (out.findings.some(r => r.code === "ORGANIZATION")) throw new Error("Posting organization is not available")
     if (!p.verifyOnly && out.enabled && out.valid) {

@@ -233,7 +233,7 @@ function store(p) {
     const why = String(p.changeReason || "").trim()
     if (!why) denied("POLICY_INVALID", "Give a reason for the policy change")
     const key = {organizationPartyId: scope.organizationPartyId}
-    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forNoKeyUpdate(true).one()
     // now is read after the lock, so a change that waited on another starts after it and sees it (POLICY_CHANGED)
     const now = ms(ec.user.nowTimestamp)
     const all = rows(POLICY, key).sort((a, b) => ms(a.fromDate) - ms(b.fromDate))

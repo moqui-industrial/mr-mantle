@@ -100,7 +100,7 @@ function stage(p) {
                 fileHash,
                 salt: p.forceNew ? ec.user.randomString(20) : ""
             }).slice(0, 32)
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     if (one(J, {operationKey})) return get({operationKey})
     const request = {
         kindId: cfg.kindId,

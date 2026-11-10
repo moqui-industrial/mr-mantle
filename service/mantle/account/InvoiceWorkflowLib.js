@@ -78,7 +78,7 @@ function organization(organizationPartyId, permission, lock = false) {
         if ((!financeAdmin && !permitted.includes(organizationPartyId)) || (activeOrgId && activeOrgId !== organizationPartyId))
             denied("ORGANIZATION_DENIED", "The organization is not available")
     }
-    if (lock) find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    if (lock) find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     return organizationPartyId
 }
 function invoice(p, permission = null, lock = false) {

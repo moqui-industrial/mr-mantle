@@ -756,7 +756,7 @@ function lockApplication(p) {
               .sort()
         : []
     if (orgs.length)
-        Array.from(find("mantle.party.Party").condition("partyId", "in", orgs).orderBy("partyId").forUpdate(true).list())
+        Array.from(find("mantle.party.Party").condition("partyId", "in", orgs).orderBy("partyId").forNoKeyUpdate(true).list())
     if (invoiceIds.length)
         Array.from(find(I).condition("invoiceId", "in", invoiceIds).orderBy("invoiceId").forUpdate(true).list())
     if (paymentIds.length)

@@ -106,7 +106,7 @@ function store(p) {
     })
     if (!guarded.canManage) denied("POLICY_MANAGE_REQUIRED", "Warehouse manager authority is required")
     const organizationPartyId = guarded.organizationPartyId
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     const now = ms(ec.user.nowTimestamp)
     const auditFields = [...fields, "fromDate", "thruDate", "changeReason"]
     ec.context.putAll(Object.fromEntries(auditFields.map(field => [field + "_changeReason", why])))

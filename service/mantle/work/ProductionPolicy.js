@@ -304,7 +304,7 @@ function store(p) {
     const why = String(p.changeReason || "").trim()
     if (!why) denied("POLICY_INVALID", "Give a reason for the policy change")
     const key = {organizationPartyId: scope.organizationPartyId, facilityId: scope.facility?.facilityId || ALL}
-    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forNoKeyUpdate(true).one()
     // now is read after the lock, so a change that waited on another starts after it and sees it (POLICY_CHANGED), and no
     // row starts before a release that committed while it waited
     const now = ms(ec.user.nowTimestamp)
@@ -448,7 +448,7 @@ function storeReasons(p) {
     if (!why) denied("REASON_INVALID", "Give a reason for the change")
     const given = Array.from(p.reasons || []).map(row => (row?.getMap ? row.getMap() : Object.assign({}, row)))
     if (!given.length) denied("REASON_INVALID", "Give at least one reason")
-    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forNoKeyUpdate(true).one()
     const now = ms(ec.user.nowTimestamp)
     const plans = given.map(row => {
         try {

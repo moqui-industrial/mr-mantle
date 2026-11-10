@@ -515,7 +515,7 @@ function post(p) {
     const before = lib.lib.previous(op)
     if (before) return before
     // the organization, then the bill, then the receipts' assets: the order every landed cost locks in
-    find("mantle.party.Party", {partyId: org}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: org}).forNoKeyUpdate(true).one()
     find("mantle.account.invoice.Invoice", {invoiceId: p.invoiceId}).forUpdate(true).one()
     if (rows(ALLOCATION, {invoiceId: p.invoiceId, invoiceItemSeqId: p.invoiceItemSeqId, statusId: "LcaPosted"}).length)
         denied("ALREADY_ALLOCATED", "This charge line is already allocated")
@@ -642,7 +642,7 @@ function repair(p) {
     const op = lib.lib.operation(p, "cost-data-repair", org, request)
     const before = lib.lib.previous(op)
     if (before) return before
-    find("mantle.party.Party", {partyId: org}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: org}).forNoKeyUpdate(true).one()
     let query = find(ASSET, {ownerPartyId: org, productId: p.productId, assetTypeEnumId: "AstTpInventory"})
     if (p.facilityId) query = query.condition("facilityId", p.facilityId)
     const assets = Array.from(query.orderBy("assetId").forUpdate(true).list())

@@ -650,7 +650,7 @@ function runPlan(p) {
     const scope = scopeOf(p)
     const organizationPartyId = scope.organizationPartyId
     // one run at a time per organization (the current run per facility set is decided under it)
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     const now = ec.user.nowTimestamp
     const planDate = p.planDate || now
     const schedule = one(SCHEDULE, {organizationPartyId})
@@ -1380,7 +1380,7 @@ function storeSchedule(p) {
     requireAny(["SUPPLY_PLAN_RUN"])
     const scope = scopeOf(p)
     const organizationPartyId = scope.organizationPartyId
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     const intervalHours = Number(p.intervalHours ?? 24)
     if (!Number.isInteger(intervalHours) || intervalHours < 1 || intervalHours > 24 * 31)
         denied("SCHEDULE_INVALID", "Run the plan every 1 to 744 hours")

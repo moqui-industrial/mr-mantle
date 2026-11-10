@@ -784,7 +784,7 @@ function decideSupplier(p) {
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse")
     const reason = text(p.reason)
     if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing")
-    find(PARTY, {partyId: supplierPartyId}).forUpdate(true).one()
+    find(PARTY, {partyId: supplierPartyId}).forNoKeyUpdate(true).one()
     const source = supplierSource(organizationPartyId, supplierPartyId)
     if (source.statusId !== "SupaPending")
         denied("NOT_PENDING", partyName(supplierPartyId) + " is not waiting for approval; submit it first")

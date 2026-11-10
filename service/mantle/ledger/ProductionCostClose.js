@@ -182,7 +182,7 @@ function storePolicy(p) {
     const org = organizationOf(p)
     const why = String(p.changeReason || "").trim()
     if (!why || why.length > 255) denied("CHANGE_REASON_REQUIRED", "Give a change reason of 1–255 characters")
-    find("mantle.party.Party", {partyId: org}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: org}).forNoKeyUpdate(true).one()
     const now = ms(ec.user.nowTimestamp)
     const all = rows(POLICY, {organizationPartyId: org}).sort((a, b) => ms(a.fromDate) - ms(b.fromDate))
     const inEffect = all.filter(row => current(row, now)).at(-1)
@@ -804,7 +804,7 @@ function post(p) {
     const first = entityLib.previous(op)
     if (first) return first
     // the organization, then the run: the order every close locks in
-    find("mantle.party.Party", {partyId: run0.ownerPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: run0.ownerPartyId}).forNoKeyUpdate(true).one()
     const out = calculate(p, true)
     if (out.inputFingerprint !== p.inputFingerprint)
         denied("STALE_PREVIEW", "The run's costs changed since the preview; preview again")

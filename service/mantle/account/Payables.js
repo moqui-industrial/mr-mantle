@@ -206,7 +206,7 @@ function importBill(p) {
 // A supplier's own bill from a public page (submit#SupplierBill): the caller checked the supplier's capability over the
 // order (check#AccessCapability) in place of PAYABLE_IMPORT, and the organization and supplier come from it.
 function portalBill(p) {
-    find("mantle.party.Party", {partyId: p.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: p.organizationPartyId}).forNoKeyUpdate(true).one()
     return billCore(p, p.organizationPartyId)
 }
 // The intake both share: the key, the receipt's self-billed draft, the order check and the incoming draft bill.

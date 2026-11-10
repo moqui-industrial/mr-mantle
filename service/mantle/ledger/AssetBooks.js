@@ -247,7 +247,7 @@ function post(p) {
     scope(c)
     if (c.userId !== ec.user.userId) throw new Error("Review your own revaluation")
     // Organization serializes operation-key lookup with the sources, result facts and ledger commit.
-    find("mantle.party.Party", {partyId: c.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: c.organizationPartyId}).forNoKeyUpdate(true).one()
     c = find(P, {previewId: p.previewId}).forUpdate(true).one()
     const reviewedRequest = JSON.parse(c.requestJson)
     for (const field of ["productStandardCostId", "organizationPartyId", "productId", "facilityId"])

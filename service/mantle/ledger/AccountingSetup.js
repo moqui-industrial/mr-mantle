@@ -336,7 +336,7 @@ function storeMapping(p) {
         if (!category || !["_NA_", ...lib.organizationChain(s.organizationPartyId)].includes(category.ownerPartyId))
             throw new Error("Category is outside the mapping organization")
     }
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     const key = pick(values, ["organizationPartyId", ...descriptor[1]])
     const old = descriptor[1].every(f => values[f]) ? find(entity, key).forUpdate(true).one() : null
     if (old) lib.revision(old, p.lastUpdatedStamp)
@@ -350,7 +350,7 @@ function clone(p) {
     if (!source || !sourceAccess.organizationPartyIds.includes(source)) throw new Error("Source organization is not available")
     const target = lib.organization(p, "admin").organizationPartyId
     if (source === target) throw new Error("Choose different source and destination organizations")
-    for (const id of [source, target].sort()) find("mantle.party.Party", {partyId: id}).forUpdate(true).one()
+    for (const id of [source, target].sort()) find("mantle.party.Party", {partyId: id}).forNoKeyUpdate(true).one()
     const kinds = p.mappingKinds || Object.keys(mappings),
         copies = [],
         conflicts = []

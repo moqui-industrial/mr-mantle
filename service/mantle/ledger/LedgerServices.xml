@@ -1257,7 +1257,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="timePeriodTypeId" operator="in" from="['FiscalYear', 'FiscalQuarter', 'FiscalMonth']"/>
             </entity-find-count>
             <if condition="currentCount &lt; 3">
-                <entity-find-one entity-name="mantle.party.Party" value-field="lockedParty" for-update="true">
+                <entity-find-one entity-name="mantle.party.Party" value-field="lockedParty" for-no-key-update="true">
                     <field-map field-name="partyId" from="organizationPartyId"/>
                 </entity-find-one>
             </if>
