@@ -20,6 +20,16 @@ function invoiceDisplay(record) {
 // immutable due day independent of the viewer's zone. Legacy stamps and multiple portions retain their existing
 // presentation; their calendar meaning cannot be reconstructed from one timestamp. Read schedules in batches.
 function invoiceCalendarDays(invoiceIds) {
+    // one stored day that does not convert leaves that day empty and is logged; the other rows still get theirs
+    const dayText = (value, invoiceId, field) => {
+        if (!value) return null
+        try {
+            return policy.calendarDateText(value)
+        } catch (error) {
+            ec.logger.error(`Invoice ${invoiceId} ${field} ${value} is not a calendar day: ${error?.message || error}`)
+            return null
+        }
+    }
     const ids = Array.from(new Set(Array.from(invoiceIds || []).filter(Boolean)))
     const out = {}
     for (let offset = 0; offset < ids.length; offset += 1000) {
@@ -30,7 +40,7 @@ function invoiceCalendarDays(invoiceIds) {
             .selectField("accountingDate")
             .list())
             out[invoice.invoiceId] = {
-                invoiceDay: invoice.accountingDate ? policy.calendarDateText(invoice.accountingDate) : null,
+                invoiceDay: dayText(invoice.accountingDate, invoice.invoiceId, "accountingDate"),
                 dueDay: null
             }
         const portions = {}
@@ -41,7 +51,7 @@ function invoiceCalendarDays(invoiceIds) {
             .list()) {
             const entry = portions[row.invoiceId] || (portions[row.invoiceId] = {count: 0, day: null})
             entry.count++
-            entry.day = row.dueDate ? policy.calendarDateText(row.dueDate) : null
+            entry.day = dayText(row.dueDate, row.invoiceId, "dueDate")
         }
         for (const [id, entry] of Object.entries(portions)) if (out[id] && entry.count === 1) out[id].dueDay = entry.day
     }
