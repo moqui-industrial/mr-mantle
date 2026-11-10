@@ -1,0 +1,20 @@
+{
+  "id": "mantle-business-events",
+  "type": "dataset",
+  "title": "Business events",
+  "body": {
+    "indexName": "monitor_annotations",
+    "timeField": "time",
+    "rowFilter": {
+      "field": {
+        "name": "source",
+        "op": "eq",
+        "value": "business"
+      }
+    },
+    "rowFilterService": "mantle.party.PartyServices.get#OrganizationRowFilter",
+    "rowFilterParameters": {
+      "organizationField": "organizationPartyId"
+    }
+  }
+}

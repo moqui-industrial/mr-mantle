@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="record" noun="BusinessEvent" allow-remote="false">
+        <description>Write a domain event as a business annotation of the report engine (org.moqui.report.ReportServices
+            create#Annotation, source business), so dashboards over business data show it as a marker on their time series.
+            The owner of the event registers this call to run after its commit (BusinessEvents.js register): a price list
+            published (PriceListPublished, mantle.product.PriceServices.publish#ProductPriceList), a store promotion with a
+            start date (PromotionStart, StorePromotionServices.store#Promotion) and a fiscal period closed (PeriodClosed,
+            mantle.ledger.CloseServices.close#Period). The marker is made from the record as it is stored, never from the
+            caller: its name, its time, its organization and the record's key, and no amount; an event whose record is not in
+            that state (a list not published, a run not closed) or has no organization writes nothing. One event keeps one
+            marker (its key). A failure is logged and answered as not recorded: the owner's change stays.</description>
+        <in-parameters>
+            <parameter name="event" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recorded" type="Boolean"/>
+            <parameter name="annotationId"/>
+        </out-parameters>
+        <actions>
+            <set field="written" from="ec.resource.script('component://mr-mantle/service/mantle/party/BusinessEvents.js').execute('record', context)"/>
+            <set field="recorded" from="written.recorded"/>
+            <set field="annotationId" from="written.annotationId"/>
+        </actions>
+    </service>
+</services>
