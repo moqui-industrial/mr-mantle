@@ -123,13 +123,14 @@ function contractOf(s, contractId, forUpdate = false) {
 // A product the user may bind to paid access: in the current or coming assortment of one of their stores, and of no store
 // outside their scope, since its paid access is the product's own and every store selling it grants what it says (P12
 // review R2: a store-limited member, or another organization sharing the product, never changes a store they do not work).
+function productStoreIds(productId) {
+    return rows("mantle.product.store.ProductStoreProduct", {productId})
+        .filter(row => row.publicationKindEnumId !== "PspkExcluded" && (row.thruDate == null || ms(row.thruDate) > nowMs()))
+        .map(row => row.productStoreId)
+}
 function productOf(s, productId) {
     const product = text(productId) ? one("mantle.product.Product", {productId: text(productId)}) : null
-    const storeIds = product
-        ? rows("mantle.product.store.ProductStoreProduct", {productId: product.productId})
-              .filter(row => row.publicationKindEnumId !== "PspkExcluded" && (row.thruDate == null || ms(row.thruDate) > nowMs()))
-              .map(row => row.productStoreId)
-        : []
+    const storeIds = product ? productStoreIds(product.productId) : []
     if (!storeIds.some(storeId => s.storeIds.includes(storeId)))
         denied("RECORD_UNAVAILABLE", "Product " + text(productId) + " is not available")
     if (storeIds.some(storeId => !s.storeIds.includes(storeId)))
@@ -386,6 +387,18 @@ function getProductPaidAccess(p) {
         denied("PERMISSION_DENIED", "PRODUCT_CATALOG_VIEW or COMMERCE_VIEW is required")
     const product = text(p.productId) ? one("mantle.product.Product", {productId: text(p.productId)}) : null
     if (!product) denied("RECORD_UNAVAILABLE", "Product " + text(p.productId) + " is not available")
+    const catalogScope = access.has("PRODUCT_CATALOG_VIEW")
+            ? call("mantle.product.ProductServices.get#CatalogOwnerScope")
+            : null,
+        catalogRead =
+            catalogScope &&
+            (catalogScope.systemAdmin || catalogScope.ownerPartyIds.includes(product.ownerPartyId || "_NA_")),
+        commerceScope = !catalogRead && access.has("COMMERCE_VIEW") ? scope("view") : null
+    if (
+        !catalogRead &&
+        (!commerceScope || !productStoreIds(product.productId).some(id => commerceScope.storeIds.includes(id)))
+    )
+        denied("RECORD_UNAVAILABLE", "Product " + text(p.productId) + " is not available")
     let canEdit = false
     if (access.has("COMMERCE_VIEW") && access.has("COMMERCE_SUBSCRIPTION_MANAGE"))
         try {
