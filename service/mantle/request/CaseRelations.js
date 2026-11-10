@@ -23,6 +23,7 @@
 // Refusals carry reason codes (EntityLib.denied). Nothing here acts on a request that is not a case.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
+const requestContent = ec.resource.script("component://mr-mantle/service/mantle/request/RequestContent.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -137,7 +138,7 @@ function messageAudience(event) {
     })
     return internal ? "CfaInternal" : "CfaCustomer"
 }
-const fileAudience = row => (!row.contentTypeEnumId || row.contentTypeEnumId === "RqCntInternal" ? "CfaInternal" : "CfaCustomer")
+const fileAudience = row => (requestContent.customerVisibleContentType(row.contentTypeEnumId) ? "CfaCustomer" : "CfaInternal")
 // The receipt of a message: its mail's received date, else when it happened, else when it was entered.
 function receiptOf(event) {
     const mail = event?.emailMessageId ? one(MAIL, {emailMessageId: event.emailMessageId}) : null
