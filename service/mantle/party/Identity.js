@@ -692,6 +692,14 @@ function storeAccount(p) {
 // any identity in scope; factor ends one factor (invalidate#UserAuthcFactorEntry) and lock releases a tarpit lock (the
 // account's failed-login lock and its artifact velocity locks, not a permanent disable), each account-wide, so a shared
 // identity needs ADMIN_IDENTITY_GLOBAL, and a factor's end is checked against the administration path.
+// A reset changes no audit-logged field of the account (a mailed reset password, an ended factor, a released lock that was
+// not a disable), so each is a row of the audit log on the account: who, the session, the reason; never a password or a factor's
+// secret (mr-boss impl-admin P17).
+function resetEvidence(account, fieldName, summary, reason) {
+    ec.resource
+        .script("component://framework/service/org/moqui/admin/ConfigurationLib.js")
+        .auditRow(ACCOUNT, fieldName, account.userId, null, null, summary, reason || null)
+}
 function resetAuthentication(p) {
     requirePermission(MANAGE)
     const found = identity(p.userId)
@@ -702,6 +710,7 @@ function resetAuthentication(p) {
         if (!account.emailAddress) return refused("NO_EMAIL", "The account has no email address to send a reset to")
         callAuthorized("org.moqui.impl.UserServices.reset#Password", {userId: account.userId})
         ec.logger.info("Password reset sent for " + account.username + " by " + ec.user.username + (reason ? ": " + reason : ""))
+        resetEvidence(account, "passwordReset", "Reset password mailed to the account's address", reason)
         return {
             applied: true,
             reasonCode: null,
@@ -724,6 +733,7 @@ function resetAuthentication(p) {
         ec.logger.info(
             "Factor " + factorId + " of " + account.username + " reset by " + ec.user.username + (reason ? ": " + reason : "")
         )
+        resetEvidence(account, "factorReset", "Factor " + factorId + " ended", reason)
         return {
             applied: true,
             reasonCode: null,
@@ -767,6 +777,7 @@ function resetAuthentication(p) {
         ec.logger.info(
             "Sign-in locks of " + account.username + " released by " + ec.user.username + (reason ? ": " + reason : "")
         )
+        if (released) resetEvidence(account, "signInLock", "Released: " + released, reason)
         return {
             applied: true,
             reasonCode: null,
@@ -803,6 +814,9 @@ const operations = {
     // a find on UserAccountOrganization under the caller's organization filters (an account's row for each of its
     // organizations in scope), or null when nothing is in scope
     scopedAccounts: () => scopedFind(ACCOUNT_ORGANIZATION),
+    // a find on any view that joins a record back to its internal organization, under the same filters; null when nothing
+    // is in scope (the audit-log views, IdentityAudit.js)
+    scopedFind,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown identity operation " + op)
         return operations[op](parameters)
