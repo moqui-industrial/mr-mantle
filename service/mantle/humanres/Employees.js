@@ -100,8 +100,10 @@ function contactsOf(partyIds, purposes, withValues = false) {
 // The managers of the people's employments are their reporting lines at each employer (People.js managersByEmployment, P3):
 // {"organizationPartyId/partyId": [managerPartyId]}, so a manager at another employer of a person employed by two is that
 // employment's, which a reader of this one does not see.
-// The job title of each employment: its position's class title, else the position's description (positions are P4's).
-function titlesOf(employmentIds) {
+// The job title of each employment: the class title of the position the person holds at its employer on the date (now when
+// none; an occupancy row, EmplPositionParty, of a position of that employer: P4), else of the position the employment names
+// (Employment.emplPositionId), else that position's description.
+function titlesOf(employmentIds, asOf = null) {
     const found = {}
     if (!employmentIds.length) return found
     const employments = Array.from(
@@ -110,7 +112,34 @@ function titlesOf(employmentIds) {
             .selectField(["partyRelationshipId", "emplPositionId", "terminationReasonEnumId"])
             .list()
     )
-    const positionIds = people.unique(employments.map(row => row.emplPositionId).filter(Boolean))
+    const relationships = new Map(
+        Array.from(
+            find("mantle.party.PartyRelationship")
+                .condition("partyRelationshipId", "in", employmentIds)
+                .selectField(["partyRelationshipId", "fromPartyId", "toPartyId"])
+                .list()
+        ).map(row => [row.partyRelationshipId, row])
+    )
+    const partyIds = people.unique(Array.from(relationships.values()).map(row => row.fromPartyId))
+    const held = partyIds.length
+        ? Array.from(
+              people
+                  .current(
+                      find("mantle.humanres.position.EmplPositionParty")
+                          .condition("partyId", "in", partyIds)
+                          .condition("roleTypeId", "Employee"),
+                      asOf
+                  )
+                  .orderBy("-fromDate")
+                  .list()
+          )
+        : []
+    const positionIds = people.unique(
+        employments
+            .map(row => row.emplPositionId)
+            .concat(held.map(row => row.emplPositionId))
+            .filter(Boolean)
+    )
     const positions = positionIds.length
         ? new Map(
               Array.from(find("mantle.humanres.position.EmplPosition").condition("emplPositionId", "in", positionIds).list()).map(
@@ -131,7 +160,16 @@ function titlesOf(employmentIds) {
           )
         : new Map()
     for (const row of employments) {
-        const position = row.emplPositionId ? positions.get(row.emplPositionId) : null
+        const relationship = relationships.get(row.partyRelationshipId)
+        const occupied = relationship
+            ? held.find(
+                  holder =>
+                      holder.partyId === relationship.fromPartyId &&
+                      positions.get(holder.emplPositionId)?.organizationPartyId === relationship.toPartyId
+              )
+            : null
+        const positionId = occupied?.emplPositionId || row.emplPositionId
+        const position = positionId ? positions.get(positionId) : null
         const positionClass = position?.emplPositionClassId ? classes.get(position.emplPositionClassId) : null
         found[row.partyRelationshipId] = {
             jobTitle: positionClass?.title || position?.description || "",
@@ -162,7 +200,10 @@ function stateOf(row, asOf) {
 // names (true, false, or a test of the row: an HR reader's own employers' employments).
 function employmentRows(rows, asOf, withDates) {
     const datesOf = typeof withDates === "function" ? withDates : () => !!withDates
-    const titles = titlesOf(rows.map(row => row.partyRelationshipId))
+    const titles = titlesOf(
+        rows.map(row => row.partyRelationshipId),
+        asOf
+    )
     const organizations = people.organizationNames(people.unique(rows.map(row => row.organizationPartyId)))
     const reasons = rows.some(datesOf) ? enumNames(Object.values(titles).map(row => row.terminationReasonEnumId)) : {}
     return rows.map(row => {

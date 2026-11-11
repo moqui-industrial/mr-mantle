@@ -12,6 +12,13 @@ You should have received a copy of the CC0 Public Domain Dedication
 along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
+<!-- Positions: the employer and position class choices of a party (get#PartyEmployersAndPositionClasses), and People's job classes and
+    positions (IronStone People design §5 JobClasses, JobClassDetail, Positions and PositionDetail, PE-03; impl-people P4, F10, F35;
+    Positions.js): job classes (EmplPositionClass with its work types and required skills, shared by every employer, ended and never
+    deleted), positions (an EmplPosition of its legal employer, in a department that rolls up to it, planned when new) and their
+    holders (dated EmplPositionParty rows, one holder at a time; vacancy computed from them at a date). Each People service checks the
+    caller's People scope (PeopleServices get#Scope's rules, People.js) and the People permissions itself, then reads and writes with
+    authorization off, and names no application group. Pay amounts are never part of an answer here: a grade is its name. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="PartyEmployersAndPositionClasses">
@@ -81,6 +88,243 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="enumId" operator="in" from="workTypeEnumIdSet" ignore-if-empty="true"/>
                 <order-by field-name="description"/>
             </entity-find>
+        </actions>
+    </service>
+    <!-- ===== People: job classes (P4) ===== -->
+    <service verb="find" noun="JobClasses" allow-remote="false">
+        <description>The job classes by title, searched by title or id ignoring case, current ones unless includeEnded; paged
+            (an export up to 2000). Each row: title, description and a short summary, the count of required skills, the positions
+            of the class in effect the caller reads (null for a reader of no position), state (current or ended), whether the
+            caller may change it and its revision. Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="jobClasses" type="List"><description>emplPositionClassId, title, description, summary, skillCount,
+                positionCount, state, stateText, thruDateText, canEdit, revision</description></parameter>
+            <parameter name="jobClassesCount" type="Integer"/>
+            <parameter name="jobClassesPageIndex" type="Integer"/>
+            <parameter name="jobClassesPageSize" type="Integer"/>
+            <parameter name="jobClassesPageMaxIndex" type="Integer"/>
+            <parameter name="jobClassesPageRangeLow" type="Integer"/>
+            <parameter name="jobClassesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('findJobClasses', context)"/>
+            <set field="jobClasses" from="found.jobClasses"/>
+            <set field="jobClassesCount" from="found.jobClassesCount"/>
+            <set field="jobClassesPageIndex" from="found.jobClassesPageIndex"/>
+            <set field="jobClassesPageSize" from="found.jobClassesPageSize"/>
+            <set field="jobClassesPageMaxIndex" from="found.jobClassesPageMaxIndex"/>
+            <set field="jobClassesPageRangeLow" from="found.jobClassesPageRangeLow"/>
+            <set field="jobClassesPageRangeHigh" from="found.jobClassesPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="JobClass" allow-remote="false">
+        <description>One job class: its row as find#JobClasses gives it, its required skills and its work types. Refuses a missing
+            class (RECORD_UNAVAILABLE) and a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters><parameter name="emplPositionClassId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="jobClass" type="Map"/>
+            <parameter name="skills" type="List"><description>skillTypeEnumId, skillName</description></parameter>
+            <parameter name="workTypes" type="List"><description>workTypeEnumId, workTypeName</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('getJobClass', context)"/>
+            <set field="jobClass" from="found.jobClass"/>
+            <set field="skills" from="found.skills"/>
+            <set field="workTypes" from="found.workTypes"/>
+        </actions>
+    </service>
+    <service verb="store" noun="JobClass" allow-remote="false">
+        <description>A new job class (a title, a description, work types), or a class's new title, description or work types (the
+            set given replaces the class's), or its end (thruDate): an ended class keeps its positions and history and is offered
+            for no new position. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), no title
+            (TITLE_REQUIRED), a work type that is not one (WORK_TYPE_INVALID), a missing class (RECORD_UNAVAILABLE), the end of an
+            ended class (CLASS_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="title"/>
+            <parameter name="description"/>
+            <parameter name="workTypeEnumIds"><description>A list or a comma list of WorkType enumerations</description></parameter>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('storeJobClass', context)"/>
+            <set field="emplPositionClassId" from="stored.emplPositionClassId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="JobRequirement" allow-remote="false">
+        <description>A skill a job class requires (EmplPositionClassSkill), added, or removed with remove; class and skill only
+            until P18 adds levels and dates. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a
+            missing class (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a
+            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED) and, to remove, one not required
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="emplPositionClassId" required="true"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="skillTypeEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('storeJobRequirement', context)"/>
+            <set field="emplPositionClassId" from="stored.emplPositionClassId"/>
+            <set field="skillTypeEnumId" from="stored.skillTypeEnumId"/>
+        </actions>
+    </service>
+
+    <!-- ===== People: positions and their holders (P4) ===== -->
+    <service verb="find" noun="Positions" allow-remote="false">
+        <description>The positions the caller reads as of asOfDate (now when empty; a date alone is the end of that day): every
+            position of the employers in scope for an HR, recruiting, payroll or People configuration reader, and for a manager
+            (PEOPLE_TEAM_VIEW) those of the units they lead and the units under them. Filtered by employer (ORGANIZATION_DENIED
+            outside the scope), department, class, grade, status, vacancy (vacant or filled) and term (the seat's name or id, or
+            its class title, ignoring case); ended positions only with includeEnded. Each row: name, employer, department, class,
+            grade name (never an amount), status, dates, state on the date (planned, active, inactive, future or ended), vacancy
+            while in effect (from the holders at the date), the holder, whether the caller may change it and its revision. Paged
+            (an export up to 2000), with the count of vacant seats. Refuses a caller who reads no position (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="payGradeId"/>
+            <parameter name="statusId"/>
+            <parameter name="vacancy"><description>vacant or filled</description></parameter>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="positions" type="List"><description>emplPositionId, pseudoId, positionName, description,
+                organizationPartyId, organizationName, departmentPartyId, departmentName, emplPositionClassId, classTitle,
+                payGradeId, payGradeName, statusId, statusText, fromDate, thruDate, fromDateText, thruDateText,
+                standardHoursPerWeek, fullTimeFlag, temporaryFlag, salaryFlag, overtimeFlag, state, stateText, vacancy, vacancyText,
+                holderPartyId, holderName, canEdit, revision</description></parameter>
+            <parameter name="positionsCount" type="Integer"/>
+            <parameter name="positionsPageIndex" type="Integer"/>
+            <parameter name="positionsPageSize" type="Integer"/>
+            <parameter name="positionsPageMaxIndex" type="Integer"/>
+            <parameter name="positionsPageRangeLow" type="Integer"/>
+            <parameter name="positionsPageRangeHigh" type="Integer"/>
+            <parameter name="vacantCount" type="Integer"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('findPositions', context)"/>
+            <set field="positions" from="found.positions"/>
+            <set field="positionsCount" from="found.positionsCount"/>
+            <set field="positionsPageIndex" from="found.positionsPageIndex"/>
+            <set field="positionsPageSize" from="found.positionsPageSize"/>
+            <set field="positionsPageMaxIndex" from="found.positionsPageMaxIndex"/>
+            <set field="positionsPageRangeLow" from="found.positionsPageRangeLow"/>
+            <set field="positionsPageRangeHigh" from="found.positionsPageRangeHigh"/>
+            <set field="vacantCount" from="found.vacantCount"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Position" allow-remote="false">
+        <description>One position the caller reads (as find#Positions admits it), as of asOfDate: its row and its holders, every
+            dated holding (current, future, ended) with the person, period, source (a holding, or the employment that names the
+            position) and the person's employment by the employer then. Refuses one outside the reach as a missing one
+            (RECORD_UNAVAILABLE) and a caller who reads no position (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="emplPositionId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="position" type="Map"/>
+            <parameter name="holders" type="List"><description>partyId, personName, fromMs, fromDateText, thruDateText, periodText,
+                source, sourceText, partyRelationshipId, comments, state, stateText</description></parameter>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('getPosition', context)"/>
+            <set field="position" from="found.position"/>
+            <set field="holders" from="found.holders"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Position" allow-remote="false">
+        <description>A new position, planned (EmpsPlanned; its activation is an approval decision), of an employer in the caller's
+            scope, of a current job class, in a department of the employer (an OrgDepartment whose rollups reach it, F10), with a
+            grade by name, from fromDate (now when empty) and an optional end; or a position's new terms: name, department, class,
+            grade, dates, hours a week and the employment flags. The department, class and grade are audited, with changeReason.
+            Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED),
+            one outside the scope (ORGANIZATION_DENIED) or another one for an existing position (EMPLOYER_CHANGE), no class
+            (CLASS_REQUIRED) or an ended one (CLASS_ENDED), a department that is not one (NOT_A_DEPARTMENT) or not the employer's
+            (DEPARTMENT_OUTSIDE), a missing class, grade or position (RECORD_UNAVAILABLE), an end on or before the start
+            (DATES_INVALID), hours outside 0 to 168 (HOURS_INVALID), an end before a holder's last day (OCCUPIED_AFTER_END), a start
+            after a holder's first (OCCUPIED_BEFORE_START) and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="emplPositionId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="payGradeId"/>
+            <parameter name="description"><description>The seat's name; the class title when empty</description></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="standardHoursPerWeek"/>
+            <parameter name="fullTimeFlag"/>
+            <parameter name="temporaryFlag"/>
+            <parameter name="salaryFlag"/>
+            <parameter name="overtimeFlag"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emplPositionId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('storePosition', context)"/>
+            <set field="emplPositionId" from="stored.emplPositionId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="PositionHolder" allow-remote="false">
+        <description>A person holds a position from fromDate (now when empty) to an optional end, as a dated EmplPositionParty row
+            in role Employee (the occupancy a hire and an employment change write), or, with holderFromDate (the holding's start as
+            get#Position gives it, fromMs), that holding ends on thruDate. A holding ends with the position at the latest. Refuses
+            a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a position outside the scope
+            (RECORD_UNAVAILABLE), not in effect on the date (POSITION_NOT_IN_EFFECT) or inactive (POSITION_INACTIVE), no person
+            (PERSON_REQUIRED), one the employer does not employ on the date (NOT_EMPLOYED), another holder in the same period
+            (POSITION_OCCUPIED: a seat has one holder at a time), and an end of a holding that is not the position's
+            (RECORD_UNAVAILABLE), has ended (HOLDER_ENDED) or is on or before its start (DATE_STALE).</description>
+        <in-parameters>
+            <parameter name="emplPositionId" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="holderFromDate"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="emplPositionId"/>
+            <parameter name="partyId"/>
+            <parameter name="fromMs"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('storePositionHolder', context)"/>
+            <set field="emplPositionId" from="stored.emplPositionId"/>
+            <set field="partyId" from="stored.partyId"/>
+            <set field="fromMs" from="stored.fromMs"/>
         </actions>
     </service>
 </services>

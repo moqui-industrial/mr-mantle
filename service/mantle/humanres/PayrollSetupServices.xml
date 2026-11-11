@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payroll setup (IronStone People design §5 PayGrades, §8, PE-08; impl-people P4, F4; PayrollSetup.js): pay grades and
+    their dated bands (PayGradeSalary: minimum, reference amount and maximum, with a currency and a pay frequency). Later phases add
+    components, structures, assignments and groups. A band's amounts are answered only to a holder of PAYROLL_VIEW; any other staff
+    reader gets a grade's name alone. Each service checks the People and payroll permissions itself, then reads and writes with
+    authorization off, and names no application group. Bands are ended, never deleted, and change no employment salary. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="PayGrades" allow-remote="false">
+        <description>The pay grades by name, searched by name or id ignoring case (or the one payGradeId names), paged (an export
+            up to 2000): each its name and comments, for any staff reader. For a holder of PAYROLL_VIEW also the band in effect on
+            asOfDate (else the next one: dates, currency, frequency, minimum, reference and maximum), the count of bands, whether
+            the caller may change it, its revision and, for the grade payGradeId names, every band, newest first (bands);
+            amountsShown says which. Without PAYROLL_VIEW no band, amount, currency or frequency is in the answer. Refuses a caller
+            who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="payGradeId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payGrades" type="List"><description>payGradeId, gradeName, comments, amountsShown, canEdit; with
+                PAYROLL_VIEW bandCount, band (fromDate, fromDateText, thruDateText, currencyUomId, timePeriodTypeId,
+                frequencyText, minAmount, amount, maxAmount, state, stateText) and revision</description></parameter>
+            <parameter name="bands" type="List"><description>Every band of the grade payGradeId names, for PAYROLL_VIEW</description></parameter>
+            <parameter name="amountsShown" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="payGradesCount" type="Integer"/>
+            <parameter name="payGradesPageIndex" type="Integer"/>
+            <parameter name="payGradesPageSize" type="Integer"/>
+            <parameter name="payGradesPageMaxIndex" type="Integer"/>
+            <parameter name="payGradesPageRangeLow" type="Integer"/>
+            <parameter name="payGradesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollSetup.js').execute('findPayGrades', context)"/>
+            <set field="payGrades" from="found.payGrades"/>
+            <set field="bands" from="found.bands"/>
+            <set field="amountsShown" from="found.amountsShown"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="payGradesCount" from="found.payGradesCount"/>
+            <set field="payGradesPageIndex" from="found.payGradesPageIndex"/>
+            <set field="payGradesPageSize" from="found.payGradesPageSize"/>
+            <set field="payGradesPageMaxIndex" from="found.payGradesPageMaxIndex"/>
+            <set field="payGradesPageRangeLow" from="found.payGradesPageRangeLow"/>
+            <set field="payGradesPageRangeHigh" from="found.payGradesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PayGrade" allow-remote="false">
+        <description>A new pay grade (gradeName, comments), or a grade's new name or comments at the revision read, and with the
+            band fields a new band from fromDate (now when empty) to an optional end: the band in effect then ends on that date
+            and the new one starts, both kept; no employment salary is changed. A band needs a currency, a pay frequency (a
+            Payroll time period type) and a minimum, reference (amount, F4) and maximum, the minimum at most the reference and the
+            reference at most the maximum. Refuses a caller without PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED), no name
+            (NAME_REQUIRED), a missing grade (RECORD_UNAVAILABLE), a revision other than the one read (REVISION_CHANGED), no or an
+            unknown currency (CURRENCY_REQUIRED, CURRENCY_INVALID), no or another frequency (FREQUENCY_REQUIRED,
+            FREQUENCY_INVALID), a missing, negative or too fine amount (AMOUNT_REQUIRED, AMOUNT_INVALID, CURRENCY_PRECISION),
+            amounts out of order (BAND_ORDER), an end on or before the start (DATES_INVALID) and a band from that date or later
+            already set (BAND_SCHEDULED).</description>
+        <in-parameters>
+            <parameter name="payGradeId"/>
+            <parameter name="gradeName"/>
+            <parameter name="comments"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="timePeriodTypeId"/>
+            <parameter name="minAmount"/>
+            <parameter name="amount"/>
+            <parameter name="maxAmount"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payGradeId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollSetup.js').execute('storePayGrade', context)"/>
+            <set field="payGradeId" from="stored.payGradeId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+</services>

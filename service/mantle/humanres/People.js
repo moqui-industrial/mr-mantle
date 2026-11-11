@@ -488,7 +488,7 @@ function run(op, p) {
 }
 ;({
     execute: run,
-    // for the other People modules (Employees.js, Organization.js): the scope and its pieces, read once per call there
+    // for the other People modules (Employees.js, Organization.js, Positions.js, PayrollSetup.js): the scope and its pieces, read once per call there
     scopeOf,
     partyAccess,
     checkedAccess,
@@ -503,5 +503,6 @@ function run(op, p) {
     employmentFind,
     employersOfParties,
     linesOf,
-    managersByEmployment
+    managersByEmployment,
+    unitsUnder
 })
