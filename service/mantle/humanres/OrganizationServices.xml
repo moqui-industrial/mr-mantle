@@ -192,7 +192,9 @@ along with this software (see the LICENSE.md file). If not, see
             (RECORD_UNAVAILABLE) or not employed there on the date (NOT_EMPLOYED); ORGANIZATION_REQUIRED, PERSON_REQUIRED;
             SELF_REPORTING; a manager the employer does not employ on the date (MANAGER_NOT_EMPLOYED); a manager below the person
             at that employer (REPORTING_CYCLE); the manager they have (MANAGER_UNCHANGED); a line starting later
-            (MANAGER_SCHEDULED); an expectedRevision other than the line in effect (REVISION_CHANGED; empty for no line).</description>
+            (MANAGER_SCHEDULED); a line ended or started that would also be a line at an employer the caller does not read, the
+            manager and the person both employed there (LINE_SHARED); an expectedRevision other than the line in effect
+            (REVISION_CHANGED; empty for no line).</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="organizationPartyId"/>

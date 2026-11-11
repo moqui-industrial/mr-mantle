@@ -2,8 +2,9 @@
 // OrgChart, PE-03; impl-people P3): a department and a team under an employer, a cycle, a department under a team, a move to
 // another employer, a stale date and a stale revision refused, a move dated with the old parent ended and both parents read by
 // as-of date; a team membership and its lead changing no employment, the lead before staying a member, a person not employed
-// refused; a manager change dated and refused when self, cyclic or to a manager the employer does not employ, with the people with
-// no manager at the top of the tree; and a reporting line per employment: a manager at one employer of a person employed by two is
+// refused, a lead changed since the unit was read refused (its revision); a manager change dated and refused when self, cyclic,
+// to a manager the employer does not employ or on a line another employer the caller does not read keeps too, with the people
+// with no manager at the top of the tree; and a reporting line per employment: a manager at one employer of a person employed by two is
 // that employment's alone, for the team reader, the tree, the directory and Home's due work. A directory reader reads and changes
 // nothing; another employer's unit is refused as a missing one. Standalone: spec-local organizations, people, employments, groups
 // and users, with artifact authorization disabled (the rules are the services' own permission and scope checks).
@@ -102,14 +103,16 @@ spec({
         organization(orgA, "People Org Spec A")
         organization(orgB, "People Org Spec B")
         // A: a lead (HEAD) over a manager (MGR) over a report (REPORT), and two more employees; DUAL employed by A and B and
-        // managed by MGR, who is employed by A only; B: its own employee (BETA)
-        for (const kind of ["HEAD", "MGR", "REPORT", "PEER", "OTHER", "DUAL", "BETA"]) state[kind] = person(kind)
-        for (const kind of ["HEAD", "MGR", "REPORT", "PEER", "OTHER", "DUAL"]) employ(state[kind], orgA)
-        employ(state.DUAL, orgB)
-        employ(state.BETA, orgB)
+        // managed by MGR, who is employed by A only; B: its own employee (BETA); BOTH and SHARED employed by A and B, BOTH managing
+        // SHARED, so their line is at both employers
+        for (const kind of ["HEAD", "MGR", "REPORT", "PEER", "OTHER", "DUAL", "BETA", "BOTH", "SHARED"])
+            state[kind] = person(kind)
+        for (const kind of ["HEAD", "MGR", "REPORT", "PEER", "OTHER", "DUAL", "BOTH", "SHARED"]) employ(state[kind], orgA)
+        for (const kind of ["DUAL", "BETA", "BOTH", "SHARED"]) employ(state[kind], orgB)
         manage(state.HEAD, state.MGR)
         manage(state.MGR, state.REPORT)
         manage(state.MGR, state.DUAL)
+        manage(state.BOTH, state.SHARED)
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA])
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgB])
         state.hrBoth = user("HRBOTH", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA, orgB])
@@ -255,7 +258,12 @@ feature(
             const lead = join(state.PEER, "lead")
             const again = code(join(state.REPORT, "member"))
             const notEmployed = code(join(state.BETA, "member"))
+            // the unit as an editor read it with PEER the lead; a new lead since makes that form's save (its lead) stale
+            const readRevision = run(state.hr, O + "get#Unit", {partyId: state.team}).unit.revision
             const newLead = join(state.OTHER, "lead", {changeReason: "Rotation"})
+            const staleLead = code(
+                run(state.hr, O + "store#Unit", {partyId: state.team, headPartyId: state.PEER, expectedRevision: readRevision})
+            )
             const unit = run(state.reader, O + "get#Unit", {partyId: state.team})
             const current = unit.members.filter(row => row.state == "current")
             const reportRow = current.find(row => row.partyId == state.REPORT)
@@ -284,6 +292,7 @@ feature(
                 errors: [member.error, lead.error, newLead.error, ended.error],
                 again,
                 notEmployed,
+                staleLead,
                 stale,
                 current: current.map(row => row.personName + " " + row.roleText).sort(),
                 roles: roles.sort(),
@@ -293,10 +302,23 @@ feature(
                 readerMembers: unit.error
             }
         },
-        then({errors, again, notEmployed, stale, current, roles, employmentsUnchanged, teamPeople, headName, readerMembers}) {
+        then({
+            errors,
+            again,
+            notEmployed,
+            staleLead,
+            stale,
+            current,
+            roles,
+            employmentsUnchanged,
+            teamPeople,
+            headName,
+            readerMembers
+        }) {
             errors == ["", "", "", ""]
             again == "ALREADY_MEMBER"
             notEmployed == "NOT_EMPLOYED"
+            staleLead == "REVISION_CHANGED"
             stale == "REVISION_CHANGED"
             current == ["Org OTHER Lead", "Org PEER Member", "Org REPORT Member"]
             roles ==
@@ -320,6 +342,8 @@ feature(
             const change = parameters =>
                 run(state.hr, O + "change#Manager", Object.assign({organizationPartyId: orgA}, parameters))
             const report = nodeOf({partyId: state.REPORT}, state.REPORT)
+            const dual = nodeOf({partyId: state.DUAL}, state.DUAL)
+            const shared = nodeOf({partyId: state.SHARED}, state.SHARED)
             const refusals = {
                 self: code(change({partyId: state.PEER, managerPartyId: state.PEER, expectedRevision: peer.lineRevision})),
                 cycle: code(change({partyId: state.HEAD, managerPartyId: state.REPORT, expectedRevision: ""})),
@@ -335,7 +359,12 @@ feature(
                         managerPartyId: state.MGR
                     })
                 ),
-                otherEmployer: code(run(state.hr, O + "change#Manager", {partyId: state.BETA, managerPartyId: state.DUAL}))
+                otherEmployer: code(run(state.hr, O + "change#Manager", {partyId: state.BETA, managerPartyId: state.DUAL})),
+                // A's HR may not start a line that would be B's too (BOTH and DUAL both employed by B), nor end one that is
+                sharedNew: code(change({partyId: state.DUAL, managerPartyId: state.BOTH, expectedRevision: dual.lineRevision})),
+                sharedEnded: code(
+                    change({partyId: state.SHARED, managerPartyId: state.MGR, expectedRevision: shared.lineRevision})
+                )
             }
             // REPORT moves from MGR to PEER from next month
             const next = state.now + 30 * day
@@ -373,12 +402,14 @@ feature(
                     stale: "REVISION_CHANGED",
                     unchanged: "MANAGER_UNCHANGED",
                     reader: "PERMISSION_DENIED",
-                    otherEmployer: "RECORD_UNAVAILABLE"
+                    otherEmployer: "RECORD_UNAVAILABLE",
+                    sharedNew: "LINE_SHARED",
+                    sharedEnded: "LINE_SHARED"
                 }
             changed == ""
             lines == [state.MGR + " true", state.PEER + " open"]
-            // HEAD leads; PEER and OTHER have no manager, listed at the top rather than lost
-            top == [state.HEAD, state.OTHER, state.PEER].sort()
+            // HEAD and BOTH lead; PEER and OTHER have no manager, listed at the top rather than lost
+            top == [state.HEAD, state.OTHER, state.PEER, state.BOTH].sort()
             mgrNow == [state.DUAL, state.REPORT].sort()
             peerLater == [state.REPORT]
             readerTop.every(row => row.lineRevision == null && row.workEmail != null)
@@ -412,7 +443,8 @@ feature(
         then({employments, listed, dueB, treeB, directoryB, filteredB}) {
             employments == [orgA]
             listed == [orgA]
-            dueB == [state.BETA, state.DUAL].sort()
+            // SHARED is managed at B (BOTH's line is at both employers), DUAL is not
+            dueB == [state.BETA, state.BOTH, state.DUAL].sort()
             treeB == [orgB + " true"]
             directoryB == [""]
             filteredB == 0

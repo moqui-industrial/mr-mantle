@@ -163,11 +163,12 @@ function visibleUnit(userScope, partyId, at) {
 }
 
 // ===== unit rows =====
-// The revision of a unit: the later change of its Organization row and its rollups, what store#Unit names.
+// The revision of a unit: the later change of its Organization row, its rollups and its lead rows, what store#Unit names (its
+// form sends the lead it read, so a lead changed since is a stale write, not one to put back).
 function unitRevision(partyId) {
-    const stamps = [ms(one("mantle.party.Organization", {partyId})?.lastUpdatedStamp) ?? 0].concat(
-        relationships(ROLLUP, {fromPartyId: partyId}).map(row => ms(row.lastUpdatedStamp) ?? 0)
-    )
+    const stamps = [ms(one("mantle.party.Organization", {partyId})?.lastUpdatedStamp) ?? 0]
+        .concat(relationships(ROLLUP, {fromPartyId: partyId}).map(row => ms(row.lastUpdatedStamp) ?? 0))
+        .concat(relationships(MEMBER, {toPartyId: partyId, fromRoleTypeId: "Manager"}).map(row => ms(row.lastUpdatedStamp) ?? 0))
     return String(Math.max(...stamps))
 }
 // The rows of the organizations and units on the date, as the tree shows them: name, kind, parent and since when, employer,
@@ -659,8 +660,8 @@ function reportingTree(p) {
 // not employ (RECORD_UNAVAILABLE), or not on the date (NOT_EMPLOYED); a person employed by two of them with no employer named
 // (ORGANIZATION_REQUIRED); the person as their own manager (SELF_REPORTING); a manager the employer does not employ on the date
 // (MANAGER_NOT_EMPLOYED); a manager who reports to the person, directly or not, at that employer (REPORTING_CYCLE); the manager
-// they have (MANAGER_UNCHANGED); a line starting later (MANAGER_SCHEDULED); a revision other than the line read
-// (REVISION_CHANGED; "" for none).
+// they have (MANAGER_UNCHANGED); a line starting later (MANAGER_SCHEDULED); a line ended or started that is also a line at an
+// employer the caller does not read (LINE_SHARED); a revision other than the line read (REVISION_CHANGED; "" for none).
 function employedOn(partyId, organizationPartyId, at) {
     return (
         people.current(people.employmentFind().condition({fromPartyId: partyId, toPartyId: organizationPartyId}), at).count() > 0
@@ -707,7 +708,10 @@ function changeManager(p) {
     const lines = relationships(MANAGER, {toPartyId: partyId}).filter(row => (ms(row.thruDate) ?? Infinity) > fromMs)
     if (lines.some(row => (ms(row.fromDate) ?? 0) > fromMs && atEmployer(row, ms(row.fromDate))))
         denied("MANAGER_SCHEDULED", (names[partyId] || partyId) + " already has a later manager change; change that one")
-    const open = lines.filter(row => (ms(row.fromDate) ?? -Infinity) <= fromMs && atEmployer(row, fromMs))
+    // newest first, as linesOf orders them, so the revision is of the line the tree shows
+    const open = lines
+        .filter(row => (ms(row.fromDate) ?? -Infinity) <= fromMs && atEmployer(row, fromMs))
+        .sort((a, b) => (ms(b.fromDate) ?? -Infinity) - (ms(a.fromDate) ?? -Infinity))
     const revision = revisionOf(open[0] || null)
     if (text(p.expectedRevision) !== revision)
         denied(
@@ -734,6 +738,25 @@ function changeManager(p) {
                     .find(line => line.organizationPartyIds.includes(organizationPartyId))?.managerPartyId || null
         }
     }
+    // a line is at every employer of the report that employs the manager too (People.js linesOf): the line ended and the one
+    // started must be at employers the caller reads, so a change at one employer never changes another employer's line
+    const endedIds = new Set(open.map(row => row.partyRelationshipId))
+    const affected = people
+        .linesOf({reportPartyIds: [partyId]}, fromMs)
+        .filter(line => endedIds.has(line.partyRelationshipId))
+        .flatMap(line => line.organizationPartyIds)
+    if (managerPartyId) {
+        const employers = people.employersOfParties([managerPartyId, partyId], fromMs)
+        for (const organization of employers[partyId] || [])
+            if ((employers[managerPartyId] || []).includes(organization)) affected.push(organization)
+    }
+    if (affected.some(organization => !userScope.organizationPartyIds.includes(organization)))
+        denied(
+            "LINE_SHARED",
+            "This reporting line is also kept at another employer of " +
+                (names[partyId] || partyId) +
+                "; it is changed by someone who reads both employers"
+        )
     for (const row of open) endRow(row, fromMs, reason)
     let partyRelationshipId = null
     if (managerPartyId) {
