@@ -681,4 +681,21 @@ along with this software (see the LICENSE.md file). If not, see
             an import of invitations may be for and whose imports the caller may read. None without the permission.</description>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('findInvitationImportScopes', context))</script></actions>
     </service>
+
+    <!-- ========== Change evidence (IdentityAudit.js; mr-boss impl-admin P17) ========== -->
+
+    <service verb="find" noun="IdentityChanges" allow-remote="false">
+        <implements service="org.moqui.admin.AuditServices.find#OwnedChanges"/>
+        <description>The audit source of the records that belong to an internal organization, for the framework's
+            org.moqui.admin.AuditServices.find#Changes (a registered projection's sourceService): the audit rows of the
+            given projections whose record is of an organization the caller administers, newest first, as ids only
+            (auditIdList) with how many match (changeCount). A user account's, a group membership's and a topic
+            subscription's rows by the organizations the account's party works for now; an organization membership's, an
+            invitation's and a lifecycle operation's by their organization; an organization's own by itself. Which
+            organizations is the organization entity filters of the authorization the call runs under, on the audit-log
+            views (entity/IdentityEntities.xml), as every find of this package: with none named nothing is in scope, but
+            for an instance administrator. A projection of an entity this source does not know is answered nothing. It
+            answers no value of any row. Needs ADMIN_AUDIT_VIEW.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/IdentityAudit.js').execute('findIdentityChanges', context))</script></actions>
+    </service>
 </services>
