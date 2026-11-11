@@ -1517,7 +1517,85 @@ function commitChannelImport(p) {
     return Object.assign(answer, {message: "Batch " + id + " committed: " + answer.countsText})
 }
 
+// ===== recovery registration =====
+// Store channel messages as a registered recovery of the framework's operational recovery (moqui.server.RecoveryDescriptor
+// rows in data/StoreChannelSetupData.xml; org.moqui.admin.OperationServices preview#Recovery and execute#Recovery; mr-boss
+// impl-admin P13, design-commerce §9): an administrator's queue offers the same retry as IntegrationDetail, through
+// retry#StoreMessages, with nothing added. The registration gives no right: both services answer by this caller's own
+// COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and store scope.
+//
+// find#MessageRecoveryTargets: which of these system messages are a store binding's, and what retry#StoreMessages would take
+// now for this caller. A message of a store outside the caller's scope is answered as held, with no state, detail or reason
+// of its own; a message of no store binding is not answered (it is not Commerce's). Never a retry of a conflict, a
+// duplicate, an applied message or a batch; nothing is reconciled or cancelled here, and no payload is shown.
+function findMessageRecoveryTargets(p) {
+    if (text(p.targetKind) !== "SystemMessage") return {targetList: []}
+    let s = null
+    try {
+        s = scope()
+    } catch (_) {
+        // a caller with no channel permission is answered what it may not do
+        s = null
+    }
+    const ids = unique(Array.from(p.targetIdList?.toArray ? p.targetIdList.toArray() : p.targetIdList || []).map(text))
+    const targetList = []
+    for (const m of rowsIn(MESSAGE, "systemMessageId", ids.slice(0, limits.retry))) {
+        const b = m.systemMessageRemoteId ? bindingOf(one(REMOTE, {systemMessageRemoteId: m.systemMessageRemoteId})) : null
+        if (!b?.remote || !b.connectorId || !b.productStoreId) continue
+        const inScope = !!s && s.storeIds.includes(b.productStoreId)
+        const state = stateOf(m)
+        const eligible = inScope && retryable(m)
+        targetList.push({
+            targetId: m.systemMessageId,
+            ownerRef: inScope ? b.remote.systemMessageRemoteId : "",
+            ownerStateText: inScope ? state.text : "",
+            retryEligible: eligible,
+            reconcileEligible: false,
+            cancelEligible: false,
+            uncertain: false,
+            detailVisible: inScope,
+            payloadVisible: false,
+            reason: eligible
+                ? ""
+                : !inScope
+                  ? "It is a store integration's message outside the stores you work"
+                  : m.statusId === "SmsgRejected" && m.duplicateOfMessageId
+                    ? "It conflicts with message " + m.duplicateOfMessageId + ": it is kept as evidence, not retried"
+                    : "It is not retried: " + state.text.toLowerCase()
+        })
+    }
+    return {targetList}
+}
+// recover#StoreMessage: the registered action on one message: retry#StoreMessages for it, with the reason and the operation
+// key, whose repeat answers the first result. Anything else is not offered.
+function recoverStoreMessage(p) {
+    if (text(p.targetKind) !== "SystemMessage" || text(p.action) !== "retry")
+        return {
+            applied: false,
+            reasonCode: "NOT_OFFERED",
+            reason: "A failed store channel message is retried; nothing else is offered"
+        }
+    const m = p.targetId ? one(MESSAGE, {systemMessageId: p.targetId}) : null
+    if (!m || !m.systemMessageRemoteId) unavailable("Message", p.targetId)
+    const out = call(SERVICES + "retry#StoreMessages", {
+        systemMessageRemoteId: m.systemMessageRemoteId,
+        systemMessageIds: [m.systemMessageId],
+        reason: p.reason,
+        operationKey: p.operationKey
+    })
+    const item = Array.from(out.results || [])[0] || {}
+    if (item.ok) return {applied: true, ownerStateText: (item.stateText || "") + (item.orderId ? ", order " + item.orderId : "")}
+    return {
+        applied: false,
+        reasonCode: item.reasonCode || "RETRY_FAILED",
+        reason: safeError(item.message) || item.stateText || "Not retried",
+        ownerStateText: item.stateText || ""
+    }
+}
+
 const operations = {
+    findMessageRecoveryTargets,
+    recoverStoreMessage,
     findStoreIntegrations,
     getStoreIntegration,
     storeStoreIntegration,

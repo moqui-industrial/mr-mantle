@@ -162,6 +162,12 @@ spec({
             users.operator = user("operator", orgA, channel)
             users.staff = user("staff", orgA, channel)
             users.other = user("other", orgB, channel)
+            // the framework's operational recovery (mr-boss impl-admin P13): operators of each organization who also hold
+            // the administration's operation permissions, and one who holds those alone
+            const operation = ["ADMIN_OPERATION_VIEW", "ADMIN_OPERATION_MANAGE"]
+            users.recoverer = user("recoverer", orgA, channel.concat(operation))
+            users.otherRecoverer = user("otherrecoverer", orgB, channel.concat(operation))
+            users.adminOnly = user("adminonly", orgA, operation)
             make("mantle.product.store.ProductStoreParty", {
                 productStoreId: ids.storeA,
                 partyId: users.staff,
@@ -347,6 +353,75 @@ feature(
                 problems.push("no mapping finding")
             if (code(run(users.other, I + "get#StoreMessage", {systemMessageId: e2.systemMessageId})) !== "RECORD_UNAVAILABLE")
                 problems.push("organization B read A's message")
+            // the same retry as a registered operational recovery (org.moqui.admin.OperationServices, mr-boss impl-admin
+            // P13): offered to the store's own operator and no one else, a conflict never, and nothing settled or cancelled
+            const R = "org.moqui.admin.OperationServices."
+            deliver(state.remoteA, [order("E8", ids.product2)])
+            const e8 = messageOf(state.remoteA, "E8")[0] || {}
+            const previewOf = username =>
+                run(username, R + "preview#Recovery", {
+                    targetKind: "SystemMessage",
+                    targetIdList: [e8.systemMessageId, conflict?.systemMessageId]
+                })
+            const offered = (preview, index, name) =>
+                Array.from(Array.from(preview.previewList || [])[index]?.actionList || []).find(row => row.action === name) || {}
+            const queueRow = username =>
+                Array.from(
+                    run(username, R + "find#Messages", {reference: e8.systemMessageId, state: "all"}).messageList || []
+                )[0] || {}
+            const recover = (username, operationKey) =>
+                run(username, R + "execute#Recovery", {
+                    targetKind: "SystemMessage",
+                    action: "retry",
+                    targetId: e8.systemMessageId,
+                    expectedRevision: queueRow(username).revision,
+                    reason: "Product published",
+                    operationKey
+                })
+            const mine = previewOf(users.recoverer)
+            if (
+                !offered(mine, 0, "retry").eligible ||
+                offered(mine, 0, "retry").mode !== "owner" ||
+                offered(mine, 0, "reconcile").reasonCode !== "NOT_OFFERED" ||
+                offered(mine, 0, "cancel").reasonCode !== "NOT_OFFERED" ||
+                offered(mine, 1, "retry").reasonCode !== "NOT_FAILED"
+            )
+                problems.push("the recovery offered to the store's operator: " + JSON.stringify(mine).slice(0, 400))
+            if (
+                !/^ITEM_UNAVAILABLE/.test(queueRow(users.recoverer).errorText || "") ||
+                queueRow(users.recoverer).ownerRef !== state.remoteA
+            )
+                problems.push("the queue row of the store's operator: " + JSON.stringify(queueRow(users.recoverer)).slice(0, 300))
+            const theirs = previewOf(users.otherRecoverer)
+            const theirRow = queueRow(users.otherRecoverer)
+            if (
+                offered(theirs, 0, "retry").reasonCode !== "OWNER_REFUSES" ||
+                theirRow.retryEligible ||
+                theirRow.errorText ||
+                theirRow.ownerRef ||
+                theirRow.messageId ||
+                theirRow.ownerStateText ||
+                JSON.stringify([theirs, theirRow]).includes("ITEM_UNAVAILABLE")
+            )
+                problems.push("organization B's operator on A's message: " + JSON.stringify([theirs, theirRow]).slice(0, 400))
+            if (offered(previewOf(users.adminOnly), 0, "retry").reasonCode !== "OWNER_PERMISSION")
+                problems.push("an administrator without the channel permission was offered the retry")
+            const refusedB = recover(users.otherRecoverer, prefix + "-recover-b")
+            const refusedAdmin = recover(users.adminOnly, prefix + "-recover-admin")
+            // while the product is not sold the retry fails again, named, and the message stays as it was
+            const failedAgain = recover(users.recoverer, prefix + "-recover-0")
+            const e8Failed = list(SM, {systemMessageId: e8.systemMessageId})[0] || {}
+            if (
+                refusedB.reasonCode !== "OWNER_REFUSES" ||
+                refusedAdmin.reasonCode !== "OWNER_PERMISSION" ||
+                failedAgain.applied ||
+                e8Failed.orderId ||
+                Number(e8Failed.failCount) !== 2
+            )
+                problems.push(
+                    "recovery refused or failing: " +
+                        JSON.stringify([refusedB, refusedAdmin, failedAgain, e8Failed.failCount]).slice(0, 400)
+                )
             // the product published, the failed order retried: the same message makes its order; a second submit answers it
             system(() =>
                 make("mantle.product.store.ProductStoreProduct", {
@@ -375,6 +450,25 @@ feature(
                 list("mantle.order.OrderHeader", {productStoreId: ids.storeA, externalId: "E2"}).length !== 1
             )
                 problems.push("a second submit did not answer the first")
+            // and through the registered recovery: the same message makes its order once, and its key's repeat answers it
+            const recovered = recover(users.recoverer, prefix + "-recover-1")
+            const e8After = list(SM, {systemMessageId: e8.systemMessageId})[0] || {}
+            const recoveredAgain = run(users.recoverer, R + "execute#Recovery", {
+                targetKind: "SystemMessage",
+                action: "retry",
+                targetId: e8.systemMessageId,
+                expectedRevision: "0",
+                reason: "Product published",
+                operationKey: prefix + "-recover-1"
+            })
+            if (
+                !recovered.applied ||
+                !e8After.orderId ||
+                e8After.messageId !== "E8" ||
+                !recoveredAgain.repeated ||
+                list("mantle.order.OrderHeader", {productStoreId: ids.storeA, externalId: "E8"}).length !== 1
+            )
+                problems.push("recovery: " + JSON.stringify([recovered, recoveredAgain, e8After.statusId]).slice(0, 400))
             // an order unreadable as it came (its external ID too long) is kept failed and never made by a retry (review R2)
             const bad = {
                 externalId: "X".repeat(61),
