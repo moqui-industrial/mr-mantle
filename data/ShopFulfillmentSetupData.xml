@@ -16,4 +16,12 @@
     <moqui.service.job.ServiceJob jobName="run_MessageDeliveries" description="Send queued and retrying deliveries"
             serviceName="mantle.party.MessageServices.run#Deliveries" cronExpression="0 0/2 * * * ?"
             paused="N" errorHistoryOnly="Y" transactionTimeout="1800"/>
+
+    <!-- The ledger as an owner of mail send outcomes (the framework's moqui.server.MailOutcomeOwner; mr-boss impl-admin P12):
+        the mail queue asks it which stored messages are its attempts and leaves those to it; an uncertain one is reconciled
+        through it, by a holder of MESSAGE_DELIVERY_REVIEW. -->
+    <moqui.server.MailOutcomeOwner ownerKey="mantleDeliveryLedger" title="Delivery ledger" sequenceNum="10"
+            description="Notices the apps queue on the outbound delivery ledger, which keeps their attempts"
+            ownerService="mantle.party.MessageServices.find#MailOutcomeOwners"
+            recoverService="mantle.party.MessageServices.recover#OwnedMailOutcome"/>
 </entity-facade-xml>

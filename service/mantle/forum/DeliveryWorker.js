@@ -878,6 +878,37 @@ function dispatch() {
     }
     return { processed, failedItemIds: failures }
 }
+/* The framework's mail queue (org.moqui.admin.OperationServices, moqui.server.MailOutcomeOwner; mr-boss impl-admin P12 R1):
+   this worker tries a failed notice again itself (retry, with backoff) and keeps no stored message's id, so every stored
+   message of a site's notice template is answered as the forum's: none is sent again or settled beside the worker. */
+function mailOutcomeOwners(p) {
+    const ids = Array.from(p.emailMessageIdList || [])
+        .map((id) => String(id ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 500)
+    const templates = new Set(
+        Array.from(find(F + 'ForumMailSettings').list())
+            .map((row) => row.templateId)
+            .filter(Boolean),
+    )
+    if (!ids.length || !templates.size) return { ownerList: [] }
+    return {
+        ownerList: Array.from(
+            find('moqui.basic.email.EmailMessage')
+                .condition('emailMessageId', 'in', ids)
+                .condition('emailTemplateId', 'in', Array.from(templates))
+                .selectField('emailMessageId')
+                .list(),
+        ).map((row) => ({
+            emailMessageId: row.emailMessageId,
+            ownerRef: '',
+            ownerStateText: 'A forum notice',
+            retryEligible: false,
+            reconcileEligible: false,
+            selfRetrying: true,
+        })),
+    }
+}
 function execute(op, p) {
     const was = ec.artifactExecution.disableAuthz()
     try {
@@ -889,6 +920,7 @@ function execute(op, p) {
             dispatch,
             prepareDigest,
             digests,
+            mailOutcomeOwners,
         }[op](p || {})
     } finally {
         if (!was) ec.artifactExecution.enableAuthz()

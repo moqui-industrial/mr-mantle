@@ -225,15 +225,22 @@ function recordOutcome(delivery, attempts, out, record) {
         })
     if (out.deliveryOutcome === "retryable") {
         if (attempts >= limits.tries)
-            return record("MdsFailed", "retryable", {lastError: error || "Not accepted after several tries"})
+            return record("MdsFailed", "retryable", {
+                emailMessageId: out.emailMessageId || null,
+                lastError: error || "Not accepted after several tries"
+            })
         const minutes = Math.min(limits.maxBackoffMinutes, Math.pow(2, attempts))
         return record("MdsRetry", "retryable", {
+            emailMessageId: out.emailMessageId || null,
             nextAttemptDate: new Date(nowMs() + minutes * 60000),
             lastError: error || "The mail server could not be reached; tried again later"
         })
     }
     if (out.deliveryOutcome === "permanent")
-        return record("MdsFailed", "permanent", {lastError: error || "The provider refused it"})
+        return record("MdsFailed", "permanent", {
+            emailMessageId: out.emailMessageId || null,
+            lastError: error || "The provider refused it"
+        })
     return record("MdsUncertain", "uncertain", {
         emailMessageId: out.emailMessageId || null,
         lastError: error || "The provider's acceptance is unknown"
@@ -297,7 +304,72 @@ function resolveDelivery(p) {
 // The deliveries of an event (a source's own view of what went out), newest first.
 const ofEvent = eventKey => rows(D, {eventKey}).sort((a, b) => (ms(b.createdDate) ?? 0) - (ms(a.createdDate) ?? 0))
 
-const operations = {queue, attempt: attemptStep, receipt, runDeliveries, resolveDelivery}
+// ===== the mail queue's owner contract (the framework's org.moqui.admin.OperationServices; impl-admin P12) =====
+// The ledger owns the attempts of what it sends: a stored message one of its attempts made is never retried or settled beside
+// it. It tries a waiting delivery again on its own, so it offers no retry; an uncertain delivery is reconciled by
+// resolve#Delivery, with its own permission.
+const stateTexts = {
+    MdsQueued: "Queued",
+    MdsRetry: "Waiting to be tried again",
+    MdsSent: "Sent",
+    MdsFailed: "Failed",
+    MdsUncertain: "Uncertain: waits for review",
+    MdsSuppressed: "Suppressed"
+}
+const lastAttemptSeqId = delivery => String(Number(delivery.attempts || 0)).padStart(3, "0")
+// find#MailOutcomeOwners: which of these stored messages are an attempt of a delivery, with the delivery's state.
+function mailOutcomeOwners(p) {
+    const ids = Array.from(p.emailMessageIdList || [])
+        .map(text)
+        .filter(Boolean)
+        .slice(0, 500)
+    if (!ids.length) return {ownerList: []}
+    const attempts = Array.from(find(ATTEMPT).condition("emailMessageId", "in", ids).list())
+    if (!attempts.length) return {ownerList: []}
+    const deliveries = new Map(
+        Array.from(
+            find(D)
+                .condition("deliveryId", "in", Array.from(new Set(attempts.map(attempt => attempt.deliveryId))))
+                .list()
+        ).map(delivery => [delivery.deliveryId, delivery])
+    )
+    const ownerList = []
+    for (const attempt of attempts) {
+        const delivery = deliveries.get(attempt.deliveryId)
+        if (!delivery) continue
+        const last = attempt.attemptSeqId === lastAttemptSeqId(delivery)
+        ownerList.push({
+            emailMessageId: attempt.emailMessageId,
+            ownerRef: delivery.deliveryId,
+            ownerStateText: (stateTexts[delivery.stateEnumId] || "Kept") + (last ? "" : " (an earlier attempt)"),
+            retryEligible: false,
+            reconcileEligible: last && delivery.stateEnumId === "MdsUncertain",
+            selfRetrying: ["MdsQueued", "MdsRetry"].includes(delivery.stateEnumId)
+        })
+    }
+    return {ownerList}
+}
+// recover#OwnedMailOutcome: the reconciliation of an uncertain delivery by its last attempt's message: sent, or notSent (the
+// ledger then tries it again itself). A retry is never taken: the ledger's own run does that.
+function recoverMailOutcome(p) {
+    const refuse = (reasonCode, reason) => ({applied: false, reasonCode, reason})
+    if (p.action === "retry") return refuse("OWNER_RETRIES", "The delivery ledger tries a delivery again on its own")
+    if (!["sent", "notSent"].includes(p.action)) throw new Error("Choose sent or notSent")
+    if (!ec.user.hasPermission("MESSAGE_DELIVERY_REVIEW"))
+        return refuse("PERMISSION_DENIED", "Reviewing deliveries needs MESSAGE_DELIVERY_REVIEW")
+    const attempt = one(ATTEMPT, {deliveryId: text(p.ownerRef), emailMessageId: text(p.emailMessageId)})
+    const delivery = attempt ? one(D, {deliveryId: attempt.deliveryId}) : null
+    if (!delivery || delivery.stateEnumId !== "MdsUncertain" || attempt.attemptSeqId !== lastAttemptSeqId(delivery))
+        return refuse("NOT_UNCERTAIN", "Only the last attempt of an uncertain delivery is reconciled")
+    const resolved = resolveDelivery({
+        deliveryId: delivery.deliveryId,
+        outcome: p.action === "sent" ? "sent" : "retry",
+        note: p.reason
+    })
+    return {applied: true, ownerStateText: stateTexts[resolved.stateEnumId] || ""}
+}
+
+const operations = {queue, attempt: attemptStep, receipt, runDeliveries, resolveDelivery, mailOutcomeOwners, recoverMailOutcome}
 ;({
     limits,
     ofEvent,

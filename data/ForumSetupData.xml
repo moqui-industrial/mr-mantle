@@ -12,4 +12,9 @@
   <moqui.service.job.ServiceJob jobName="pass_classify_posts" description="Send queued posts to the configured classifier for review" serviceName="mantle.forum.ModerationWorkerServices.classify#Posts" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
   <moqui.service.job.ServiceJob jobName="pass_dispatch_operations" description="Advance forum operation runs: rebuilds, retries, retention, exports and erasure" serviceName="mantle.forum.OperationServices.dispatch#Jobs" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
   <moqui.service.job.ServiceJob jobName="pass_send_digests" description="Prepare due forum digests from currently accessible topics" serviceName="mantle.forum.DeliveryWorkerServices.send#Digests" cronExpression="0 0 * * * ?" paused="N" errorHistoryOnly="Y"/>
+  <!-- The forum's delivery worker as an owner of mail send outcomes (the framework's moqui.server.MailOutcomeOwner; mr-boss
+    impl-admin P12 R1): it tries a failed notice again itself, so the mail queue sends none of a site's notice template again -->
+  <moqui.server.MailOutcomeOwner ownerKey="forumDeliveries" title="Forum notices" sequenceNum="20"
+      description="Forum notifications and digests, which the forum's delivery worker tries again on its own"
+      ownerService="mantle.forum.DeliveryWorkerServices.find#MailOutcomeOwners"/>
 </entity-facade-xml>

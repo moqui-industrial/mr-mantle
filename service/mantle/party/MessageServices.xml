@@ -92,4 +92,33 @@
             <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('resolveDelivery', context).stateEnumId"/>
         </actions>
     </service>
+    <!-- The framework's mail queue (org.moqui.admin.OperationServices, moqui.server.MailOutcomeOwner; mr-boss impl-admin P12):
+        the ledger answers for the stored messages its attempts made, so none is retried or settled beside it. Neither
+        service is in a group's grant: the mail queue's services call them, and the second checks the ledger's own
+        permission. -->
+    <service verb="find" noun="MailOutcomeOwners" allow-remote="false">
+        <description>Which of the given EmailMessages are an attempt of a delivery of this ledger: each with its delivery
+            (ownerRef), the delivery's state in words, whether its uncertain send may be reconciled now (the last attempt
+            of an uncertain delivery) and whether the ledger tries it again on its own (queued or waiting). The ledger
+            offers no retry. No address or parameter of a delivery is returned.</description>
+        <implements service="org.moqui.admin.OperationServices.find#MailOutcomeOwners"/>
+        <actions>
+            <set field="ownerList" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('mailOutcomeOwners', context).ownerList"/>
+        </actions>
+    </service>
+    <service verb="recover" noun="OwnedMailOutcome" allow-remote="false">
+        <description>The reconciliation of an uncertain delivery by its last attempt's message, as resolve#Delivery: sent
+            (the provider shows it went out), or notSent (the ledger tries it again itself). A retry is refused
+            (OWNER_RETRIES: the ledger's own run tries a waiting delivery again). Answers a refusal, never an error, for a
+            caller without MESSAGE_DELIVERY_REVIEW (PERMISSION_DENIED) and for a delivery that is not uncertain or an
+            earlier attempt's message (NOT_UNCERTAIN).</description>
+        <implements service="org.moqui.admin.OperationServices.recover#OwnedMailOutcome"/>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('recoverMailOutcome', context)"/>
+            <set field="applied" from="done.applied"/>
+            <set field="reasonCode" from="done.reasonCode"/>
+            <set field="reason" from="done.reason"/>
+            <set field="ownerStateText" from="done.ownerStateText"/>
+        </actions>
+    </service>
 </services>

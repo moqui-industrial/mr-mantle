@@ -162,3 +162,83 @@ feature("a retryable outcome waits for the job; an uncertain one is kept for rev
         attempts.length == 2
     }
 })
+
+// The framework's mail queue (org.moqui.admin.OperationServices; mr-boss impl-admin P12): the ledger answers for the stored
+// messages its attempts made, so the queue offers no retry beside the ledger's own and reconciles an uncertain one through it.
+feature("the mail queue leaves the ledger's messages to the ledger, and reconciles an uncertain one through it", {
+    when() {
+        const O = "org.moqui.admin.OperationServices."
+        const outcome = emailMessageId => call(O + "find#MailOutcomes", {emailMessageId, state: "all"}).outcomeList[0]
+        capture.disable()
+        const waiting = queue({
+            eventKey: "spec:order-9",
+            recipientPartyId: ids.buyer,
+            toAddress: "buyer@ledger.example.test",
+            templateKey: ids.down,
+            sendNow: true
+        })
+        capture.enable()
+        capture.clear()
+        const attempt = one("mantle.party.MessageDeliveryAttempt", {deliveryId: waiting.deliveryId, attemptSeqId: "001"})
+        const listed = outcome(attempt.emailMessageId)
+        const retried = call(O + "retry#MailOutcome", {emailMessageId: attempt.emailMessageId, expectedRevision: listed.revision})
+        // the same hand-off lost part way: the delivery and its message are uncertain
+        call("update#mantle.party.MessageDelivery", {deliveryId: waiting.deliveryId, stateEnumId: "MdsUncertain"})
+        call("update#moqui.basic.email.EmailMessage", {emailMessageId: attempt.emailMessageId, sendOutcome: "uncertain"})
+        const uncertain = outcome(attempt.emailMessageId)
+        const again = call(O + "retry#MailOutcome", {
+            emailMessageId: attempt.emailMessageId,
+            expectedRevision: uncertain.revision
+        })
+        const settled = call(O + "reconcile#MailOutcome", {
+            emailMessageId: attempt.emailMessageId,
+            resolution: "sent",
+            reason: "The provider's log shows it",
+            expectedRevision: uncertain.revision
+        })
+        // a forum notice (a stored message of a site's notice template) is the forum worker's, which tries it again itself
+        call("create#mantle.public.PublicSite", {siteId: "MDL_FORUM_SITE"})
+        call("create#mantle.forum.ForumMailSettings", {siteId: "MDL_FORUM_SITE", templateId: ids.sent})
+        call("create#moqui.basic.email.EmailMessage", {
+            emailMessageId: "MDL_FORUM_NOTICE",
+            statusId: "ES_READY",
+            emailTemplateId: ids.sent,
+            sendOutcome: "retryable",
+            sendError: "451 try again later"
+        })
+        const forum = outcome("MDL_FORUM_NOTICE")
+        const forumRetried = call(O + "retry#MailOutcome", {emailMessageId: "MDL_FORUM_NOTICE", expectedRevision: forum.revision})
+        call("delete#mantle.forum.ForumMailSettings", {siteId: "MDL_FORUM_SITE"})
+        return {
+            listed,
+            retried,
+            uncertain,
+            again,
+            settled,
+            forum,
+            forumRetried,
+            sends: capture.count(),
+            delivery: one("mantle.party.MessageDelivery", {deliveryId: waiting.deliveryId}),
+            message: one("moqui.basic.email.EmailMessage", {emailMessageId: attempt.emailMessageId})
+        }
+    },
+    then(r) {
+        r.listed.ownerKind === "registered"
+        r.listed.ownerKey === "mantleDeliveryLedger"
+        r.listed.ownerRef === r.delivery.deliveryId
+        r.listed.state === "retryable"
+        r.listed.retryEligible === false
+        r.listed.abandonEligible === false
+        r.retried.applied === false
+        r.retried.reasonCode === "OWNER_RETRIES"
+        r.uncertain.reconcileEligible === true
+        r.again.reasonCode === "RECONCILE_REQUIRED"
+        r.settled.applied === true
+        r.delivery.stateEnumId === "MdsSent"
+        r.message.statusId === "ES_SENT"
+        r.forum.ownerKey === "forumDeliveries"
+        r.forum.retryEligible === false
+        r.forumRetried.reasonCode === "OWNER_RETRIES"
+        r.sends === 0
+    }
+})
