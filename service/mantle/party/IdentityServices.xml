@@ -698,4 +698,138 @@ along with this software (see the LICENSE.md file). If not, see
             answers no value of any row. Needs ADMIN_AUDIT_VIEW.</description>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/IdentityAudit.js').execute('findIdentityChanges', context))</script></actions>
     </service>
+
+    <!-- ========== Shared devices (SharedDevices.js; mr-boss impl-admin P18, design-admin §6 Devices, crosscut CX-DEVICE) ========== -->
+
+    <service verb="create" noun="DisplayAccount" allow-remote="false">
+        <description>A display account for shared devices (the framework's device credential runs a registered browser as
+            it, with no person signed in): a Person party with a member relationship to an internal organization the
+            caller administers (store#OrganizationMembership), so the organization filters show it that organization's
+            rows and no other's; a UserAccount marked displayAccount with no email, no password and nothing that signs it
+            in; and the memberships of the grant proposal (registered bundles, checked and applied by the framework's
+            AccessServices), never a privileged group or a group granting a sealed permission. All or nothing; a refusal
+            is a reason. It shows another organization only through another membership (store#OrganizationMembership).
+            Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="displayName" required="true"/>
+            <parameter name="username"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="userId"/>
+            <parameter name="partyId"/>
+            <parameter name="username"/>
+            <parameter name="addedGroupIds" type="List"/>
+            <parameter name="bundleList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('createDisplayAccount', context))</script></actions>
+    </service>
+    <service verb="find" noun="DisplayAccounts" allow-remote="false">
+        <description>The display accounts in the caller's identity scope (the organization entity filters of the call): name,
+            username, the organizations in scope it shows, its groups, and whether a device may run as it now (usable,
+            unusableReason). Those out of scope are counted (otherCount), never named. Needs ADMIN_ACCESS_VIEW or
+            ADMIN_IDENTITY_VIEW.</description>
+        <out-parameters>
+            <parameter name="displayAccountList" type="List"/>
+            <parameter name="otherCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('findDisplayAccounts', context))</script></actions>
+    </service>
+    <service verb="find" noun="SharedDevices" allow-remote="false">
+        <description>The framework's org.moqui.admin.DeviceServices.find#Devices for the devices whose display account is in
+            the caller's identity scope, each with the organizations in scope it shows and its site's name; the others are
+            counted (otherCount), never named. Needs ADMIN_ACCESS_VIEW.</description>
+        <in-parameters>
+            <parameter name="deviceId"/>
+            <parameter name="routeGroupId"/>
+            <parameter name="facilityId"/>
+            <parameter name="displayUserId"/>
+            <parameter name="parameterValue"/>
+            <parameter name="state"/>
+            <parameter name="text"/>
+            <parameter name="seenSinceDays" type="Integer"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deviceList" type="List"/>
+            <parameter name="deviceCount" type="Integer"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="activeCount" type="Integer"/>
+            <parameter name="otherCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('findSharedDevices', context))</script></actions>
+    </service>
+    <service verb="register" noun="SharedDevice" allow-remote="false">
+        <description>The framework's register#Device for a display account in the caller's identity scope: another
+            organization's display account is refused as not available, one that also shows an organization the caller
+            does not administer needs ADMIN_IDENTITY_GLOBAL, and the site is a facility the caller reads. The registration
+            code is returned once. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceName" required="true"/>
+            <parameter name="routeGroupId" required="true"/>
+            <parameter name="displayUserId" required="true"/>
+            <parameter name="parameterValue"/>
+            <parameter name="facilityId"/>
+            <parameter name="ipAllowed"/>
+            <parameter name="idleTimeoutMinutes" type="Integer"/>
+            <parameter name="lifetimeDays" type="Integer"/>
+            <parameter name="codeMinutes" type="Integer"/>
+            <parameter name="issueCode" type="Boolean" default="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+            <parameter name="registrationCode"/>
+            <parameter name="codeExpireDate" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('registerSharedDevice', context))</script></actions>
+    </service>
+    <service verb="reveal" noun="SharedDeviceCode" allow-remote="false">
+        <description>The framework's issue#DeviceCode for a device whose display account is in the caller's identity scope:
+            the registration code of a device registered without one (issueCode false), made as it is shown, once, to its
+            registrar, within fifteen minutes. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceId" required="true"/>
+            <parameter name="codeMinutes" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+            <parameter name="deviceName"/>
+            <parameter name="registrationCode"/>
+            <parameter name="codeExpireDate" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('revealSharedDeviceCode', context))</script></actions>
+    </service>
+    <service verb="revoke" noun="SharedDevice" allow-remote="false">
+        <description>The framework's revoke#Device for a device whose display account is in the caller's identity scope;
+            another organization's device is refused as not available. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('revokeSharedDevice', context))</script></actions>
+    </service>
 </services>
