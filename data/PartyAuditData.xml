@@ -177,4 +177,33 @@ along with this software (see the LICENSE.md file). If not, see
         person who made them works for, so one organization's audit reader does not read what another's people exported -->
     <moqui.server.AuditProjection auditProjectionId="TransferExport" sourceService="mantle.party.IdentityServices.find#IdentityChanges"/>
     <moqui.server.AuditProjection auditProjectionId="TransferImport" sourceService="mantle.party.IdentityServices.find#IdentityChanges"/>
+
+    <!-- shared devices (mr-boss impl-admin P18; the framework's org.moqui.admin.DeviceServices and its device credential,
+        mr-moqui docs/security/Shared-Devices.md): what happens to a device is evidence on its display account, the device
+        the secondary key, so it is read by the audit reader of an organization the display account shows. Never a
+        registration code or a secret: the services write none. -->
+    <moqui.server.AuditProjection auditProjectionId="AccountDisplay" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="displayAccount" category="identity" description="Display account (shared devices)" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="650"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRegistered" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRegistered" category="identity" description="Shared device registered" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="651"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRedeemed" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRedeemed" category="identity" description="Shared device's code redeemed" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="652"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRevoked" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRevoked" category="identity" description="Shared device revoked" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="653"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRefused" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRefused" category="identity" description="Shared device refused" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="654"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceStopped" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceStopped" category="identity" description="Shared device stopped" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="655"/>
 </entity-facade-xml>

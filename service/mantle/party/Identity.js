@@ -286,8 +286,8 @@ function findUsers(p) {
         organizationPartyIds: row.organizations,
         otherOrganizationCount: row.owners.length - row.organizations.length,
         sharedBeyondScope: row.organizations.length < row.owners.length,
-        relationshipKind: row.site ? "site" : "staff",
-        relationshipText: row.site ? "Site relationship" : "Staff",
+        relationshipKind: row.account.displayAccount === "Y" ? "display" : row.site ? "site" : "staff",
+        relationshipText: row.account.displayAccount === "Y" ? "Display account" : row.site ? "Site relationship" : "Staff",
         state: row.state,
         stateText: stateNames[row.state],
         lastLoginDate: lastLogin(row.account.userId)
