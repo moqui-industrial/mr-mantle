@@ -5,9 +5,12 @@
 // person's public work identity, nothing of another employer's (F59).
 //
 // The projections, by field category:
-// - the public work identity (any reader the scope admits): name and preferred name, employer, job title, manager, the work
-//   email, phone and address (the contact purposes of workPurposes) and the employment's state;
-// - HR columns (an HR reader of the employer): the employment's id and dates, ended employments, the termination reason;
+// - the public work identity (any reader the scope admits): name and preferred name, employer, job title, manager (one employed
+//   by that employer, so a reader of one employer learns nothing of another's reporting line), the work email, phone and
+//   address (the contact purposes of workPurposes: EmailWork, never EmailPrimary, which may be a personal address) and the
+//   employment's state;
+// - HR columns (an HR reader, of an employment by an employer in their scope only): the employment's id and dates, ended
+//   employments, the termination reason;
 // - private person data (the person themselves, or an HR reader of an employer of theirs): the private contacts of
 //   privatePurposes, birth date and gender, and for HR the identifications other than tax ones, their values masked. Tax and
 //   bank fields are reviewed payroll setup (P23) and are neither read nor written here.
@@ -19,7 +22,8 @@ const {find, one, denied, call, dateText, hash} = lib
 
 const EMPLOYMENT = "mantle.humanres.employment.Employment"
 // the contact purposes of the public work identity, and of the private contacts
-const workPurposes = {workEmail: "EmailPrimary", workPhone: "PhoneWork", workAddress: "PostalWork"}
+// (the work email is EmailWork, the user's call of Nov 11, 2026: EmailPrimary may be a personal address)
+const workPurposes = {workEmail: "EmailWork", workPhone: "PhoneWork", workAddress: "PostalWork"}
 const privatePurposes = {homePhone: "PhoneHome", mobilePhone: "PhoneMobile", homeAddress: "PostalHome"}
 // identifications that are tax fields: payroll's reviewed setup, never shown or written here
 const taxIdTypes = ["PtidSsn", "PtidFein", "PtidFuid"]
@@ -105,6 +109,27 @@ function managersOf(partyIds) {
         (found[row.toPartyId] = found[row.toPartyId] || []).push(row.fromPartyId)
     return found
 }
+// The current employers of the managers: {managerPartyId: [organizationPartyId]}, an unemployed manager absent.
+function employersOf(managerPartyIds) {
+    const found = {}
+    if (!managerPartyIds.length) return found
+    const query = find("mantle.party.PartyRelationship")
+        .condition("relationshipTypeEnumId", "PrtEmployee")
+        .condition("fromPartyId", "in", managerPartyIds)
+        .selectField(["fromPartyId", "toPartyId"])
+    for (const row of Array.from(people.current(query, null).list()))
+        (found[row.fromPartyId] = found[row.fromPartyId] || []).push(row.toPartyId)
+    return found
+}
+// The managers shown on employments by the organizations: a live PrtManager employed by one of them, or employed by none (a
+// reporting line names no employer; until P3's lines per employment, a manager at another employer of a person employed by two
+// is that employment's, which a reader of this one does not see).
+function managersAt(managerIds, employers, organizationPartyIds) {
+    return managerIds.filter(managerId => {
+        const theirs = employers[managerId]
+        return !theirs || theirs.some(organizationPartyId => organizationPartyIds.includes(organizationPartyId))
+    })
+}
 // The job title of each employment: its position's class title, else the position's description (positions are P4's).
 function titlesOf(employmentIds) {
     const found = {}
@@ -163,11 +188,13 @@ function stateOf(row, asOf) {
     if (from != null && from > asOf) return {state: "future", stateText: "Starts " + dateText(row.fromDate)}
     return {state: "current", stateText: "Current"}
 }
-// Employments as the answer shows them: the employer's name, the job title, the state, and for an HR reader the dates.
+// Employments as the answer shows them: the employer's name, the job title, the state, and the dates for the rows withDates
+// names (true, false, or a test of the row: an HR reader's own employers' employments).
 function employmentRows(rows, asOf, withDates) {
+    const datesOf = typeof withDates === "function" ? withDates : () => !!withDates
     const titles = titlesOf(rows.map(row => row.partyRelationshipId))
     const organizations = people.organizationNames(people.unique(rows.map(row => row.organizationPartyId)))
-    const reasons = withDates ? enumNames(Object.values(titles).map(row => row.terminationReasonEnumId)) : {}
+    const reasons = rows.some(datesOf) ? enumNames(Object.values(titles).map(row => row.terminationReasonEnumId)) : {}
     return rows.map(row => {
         const title = titles[row.partyRelationshipId] || {}
         const out = Object.assign(
@@ -179,7 +206,7 @@ function employmentRows(rows, asOf, withDates) {
             },
             stateOf(row, asOf)
         )
-        if (withDates)
+        if (datesOf(row))
             Object.assign(out, {
                 fromDate: row.fromDate,
                 thruDate: row.thruDate || null,
@@ -203,6 +230,8 @@ function findEmployees(p) {
     people.requireOrganization(userScope, p.organizationPartyId)
     const asOf = people.asOfMillis(p.asOfDate)
     const hr = !!caps.hrView
+    // the HR columns are of an employment by an employer in the HR reader's scope, not of a report's or their own elsewhere
+    const hrRow = row => hr && Array.from(userScope.organizationPartyIds || []).includes(row.organizationPartyId)
     const includeEnded = hr && truthy(p.includeEnded)
     const factory = ec.entity.conditionFactory
     const all = list => factory.makeCondition(list.filter(Boolean), "and")
@@ -231,6 +260,9 @@ function findEmployees(p) {
                 .list()
         ).map(row => row.toPartyId)
         query = query.condition("fromPartyId", "in", reports.length ? reports : ["_NA_"])
+        // the employments the manager is shown on: by an employer of theirs, when they have one (managersAt)
+        const managerEmployers = employersOf([p.managerPartyId])[p.managerPartyId]
+        if (managerEmployers) query = query.condition("toPartyId", "in", managerEmployers)
     }
     const term = String(p.term || "").trim()
     if (term)
@@ -267,11 +299,13 @@ function findEmployees(p) {
     const partyIds = people.unique(found.map(row => row.partyId))
     const contacts = contactsOf(partyIds, workPurposes)
     const managers = managersOf(partyIds)
-    const managerNames = people.personNames(people.unique([].concat(...Object.values(managers))))
-    const shown = employmentRows(found, asOf, hr)
+    const allManagerIds = people.unique([].concat(...Object.values(managers)))
+    const managerEmployers = employersOf(allManagerIds)
+    const managerNames = people.personNames(allManagerIds)
+    const shown = employmentRows(found, asOf, hrRow)
     const employees = found.map((row, index) => {
         const contact = contacts[row.partyId] || {}
-        const managerIds = managers[row.partyId] || []
+        const managerIds = managersAt(managers[row.partyId] || [], managerEmployers, [row.organizationPartyId])
         const out = Object.assign({}, shown[index], {
             partyId: row.partyId,
             personName: row.personName,
@@ -283,7 +317,7 @@ function findEmployees(p) {
             workLocation: contact.workAddressCity || ""
         })
         // the employment's id is an HR host's: a directory reader gets the person only
-        if (!hr) delete out.partyRelationshipId
+        if (!hrRow(row)) delete out.partyRelationshipId
         return out
     })
     const out = {employees, hrColumns: hr, asOfDate: asOf}
@@ -298,9 +332,9 @@ function sortEmployments(rows, asOf) {
     return rows.slice().sort((a, b) => rank(a) - rank(b) || (lib.ms(b.fromDate) || 0) - (lib.ms(a.fromDate) || 0))
 }
 // What the caller may do with the person: their access kinds, and whether they read or change the HR and private regions.
-function personAccess(partyId, asOf) {
+function personAccess(partyId, asOf, checkOnly = false) {
     const userScope = people.scopeOf()
-    const admitted = people.partyAccess(userScope, partyId, asOf)
+    const admitted = people.checkedAccess(userScope, partyId, asOf, checkOnly)
     const caps = userScope.capabilities
     const self = admitted.kinds.includes("self")
     const hr = admitted.kinds.includes("staff") && !!caps.hrView
@@ -359,25 +393,38 @@ function personalOf(partyId, hr) {
 // current one, then the newest).
 function employee360(p) {
     const asOf = people.asOfMillis(p.asOfDate)
-    const access = personAccess(p.partyId, asOf)
+    const checkOnly = truthy(p.checkOnly)
+    // with checkOnly, a person or employment the caller may not read answers no region, as a missing one, instead of a refusal
+    const unavailable = {partyId: p.partyId, access: [], regions: [], overview: null, partyRelationshipId: null, capabilities: {}}
+    const access = personAccess(p.partyId, asOf, checkOnly)
+    if (!access.kinds.length) return unavailable
     const employments = sortEmployments(access.employments, asOf)
-    if (p.partyRelationshipId && !employments.some(row => row.partyRelationshipId === p.partyRelationshipId))
+    if (p.partyRelationshipId && !employments.some(row => row.partyRelationshipId === p.partyRelationshipId)) {
+        if (checkOnly) return unavailable
         denied("RECORD_UNAVAILABLE", "Employment " + p.partyRelationshipId + " is not available")
+    }
     const selectedId = p.partyRelationshipId || employments[0]?.partyRelationshipId || null
     const person = one("mantle.party.Person", {partyId: p.partyId}) || {}
     const contacts = contactsOf([p.partyId], workPurposes)[p.partyId] || {}
-    const managerIds = managersOf([p.partyId])[p.partyId] || []
+    // the managers of the employments shown (managersAt): none of another employer's reporting line
+    const allManagerIds = managersOf([p.partyId])[p.partyId] || []
+    const managerIds = managersAt(
+        allManagerIds,
+        employersOf(allManagerIds),
+        people.unique(employments.map(row => row.organizationPartyId))
+    )
     const managerNames = people.personNames(managerIds)
-    const rows = employmentRows(employments, asOf, access.hr)
-    // a directory or team reader sees the employment's work identity, not its id; the person and HR see the id the record
-    // opens on
-    const showIds = access.hr || access.self
+    // HR's dates and ids are of the employments by an employer in their scope; the person sees their own ids; a directory or
+    // team reader sees the employment's work identity, not its id
+    const hrRow = row => access.hrEmployments.some(held => held.partyRelationshipId === row.partyRelationshipId)
+    const idShown = row => access.self || hrRow(row)
+    const rows = employmentRows(employments, asOf, hrRow)
     const overview = {
         personName: nameOf(person) || p.partyId,
         preferredName: person.nickname || "",
-        employments: rows.map(row => {
+        employments: rows.map((row, index) => {
             const out = Object.assign({}, row)
-            if (!showIds) delete out.partyRelationshipId
+            if (!idShown(employments[index])) delete out.partyRelationshipId
             return out
         }),
         managers: managerIds.map(partyId => ({partyId, personName: managerNames[partyId] || partyId})),
@@ -395,12 +442,13 @@ function employee360(p) {
     const hostId = access.hrEmployments.some(row => row.partyRelationshipId === selectedId) ? selectedId : null
     if (hostId) regions.push("filesAndActivity")
     out.regions = regions
-    out.partyRelationshipId = showIds ? selectedId : null
+    const selected = employments.find(row => row.partyRelationshipId === selectedId)
+    out.partyRelationshipId = selected && idShown(selected) ? selectedId : null
     out.hostEmploymentId = hostId
     out.capabilities = {
         editPersonal: access.self || access.hrEdit,
         editHr: access.hrEdit,
-        selfFields: access.self && !access.hrEdit ? selfFields : selfFields.concat(hrFields),
+        selfFields: access.hrEdit ? selfFields.concat(hrFields) : access.self ? selfFields : [],
         files: !!hostId
     }
     return out

@@ -35,6 +35,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId"/>
             <parameter name="asOfDate" type="Timestamp"><description>The date a directory reader's employments are in effect
                 on; now when empty</description></parameter>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller asking whether the person is
+                admitted (a link shown only then): a person missing or outside the scope answers partyAccess empty instead of
+                RECORD_UNAVAILABLE, alike either way</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="capabilities" type="Map"/>
@@ -125,8 +128,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The employee directory (design §4 Employees, §15): one row per employment the caller's scope reaches as of
             asOfDate (now when empty; a date alone is the end of that day): an employment by an employer a staff reader sees, a
             live report's and, with PEOPLE_SELF_SERVICE, the caller's own. Each row is the public work identity (name, preferred
-            name, employer, job title, manager, work email, phone and location, the state); an HR reader (PEOPLE_HR_VIEW) gets the
-            employment's id and dates too, and with includeEnded the ended employments. Never a private contact, identification
+            name, employer, job title, manager employed by that employer, work email (EmailWork, never EmailPrimary), phone and
+            location, the state); an HR reader (PEOPLE_HR_VIEW) gets the id and dates of an employment by an employer in their
+            scope too, and with includeEnded the ended employments. Never a private contact, identification
             or pay. Searched by term (name, preferred name or id) in the query ignoring case; filtered by employer (refused outside
             the scope, ORGANIZATION_DENIED) and manager; paged, or with pageNoLimit (an export) every row up to 2000. Refuses a
             caller the scope reaches no one for (PERMISSION_DENIED).</description>
@@ -177,11 +181,15 @@ along with this software (see the LICENSE.md file). If not, see
             FilesAndActivity (an HR reader of the employer of the employment opened): hostEmploymentId, the employment content
             host. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
             one, then the newest. A person outside the scope is refused as a missing one (RECORD_UNAVAILABLE). Never pay, review,
-            case or leave data.</description>
+            case or leave data. A manager shown is one of a shown employment's employer (or employed by none); HR's dates and
+            employment ids are of the employments by an employer in their scope.</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="partyRelationshipId"/>
             <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller that shows the record only when
+                it is readable (a card, a link): a person or employment missing or outside the scope answers access and regions
+                empty instead of RECORD_UNAVAILABLE, alike either way</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="partyId"/>

@@ -211,6 +211,19 @@ function partyAccess(userScope, partyId, asOf) {
     return {kinds, employments: Array.from(byId.values())}
 }
 
+// partyAccess for a caller that asks whether a person is admitted (checkOnly: a link or a card shown only when they are): a
+// person missing or outside the scope answers no access kind instead of a refusal, so an expected "no" is not a failed service
+// call, logged as an error (impl-people P2 review).
+function checkedAccess(userScope, partyId, asOf, checkOnly) {
+    if (!(checkOnly === true || checkOnly === "true")) return partyAccess(userScope, partyId, asOf)
+    try {
+        return partyAccess(userScope, partyId, asOf)
+    } catch (error) {
+        if (lib.reasonCode(error) !== "RECORD_UNAVAILABLE") throw error
+        return {kinds: [], employments: []}
+    }
+}
+
 // get#Scope: the scope, narrowed to an organization asked for (its employers, its units and a staff admission by its
 // employments) and with the access of a party asked for.
 function scope(p) {
@@ -222,7 +235,7 @@ function scope(p) {
         out.unitPartyIds = unitsUnder(out.organizationPartyIds)
     }
     if (p.partyId) {
-        const admitted = partyAccess(out, p.partyId, asOfMillis(p.asOfDate))
+        const admitted = checkedAccess(out, p.partyId, asOfMillis(p.asOfDate), p.checkOnly)
         out.partyAccess = admitted.kinds
         out.partyEmployments = admitted.employments.filter(
             row => !p.organizationPartyId || row.organizationPartyId === p.organizationPartyId
@@ -427,6 +440,7 @@ function run(op, p) {
     // for the other People modules (Employees.js): the scope and its pieces, read once per call there
     scopeOf,
     partyAccess,
+    checkedAccess,
     requireOrganization,
     capabilities,
     asOfMillis,

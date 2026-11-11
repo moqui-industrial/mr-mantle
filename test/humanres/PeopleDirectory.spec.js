@@ -1,8 +1,10 @@
 // The employee record (mantle.humanres.PeopleServices find#Employees, get#Employee360, get#EmploymentHistory, store#PersonalInfo,
 // check#EmploymentAccess, create#EmploymentContent; IronStone People design §4 Employees and Employee360, §1.1, §13; impl-people
-// P2): a directory reader's answer holds the public work identity and no private contact, identification or pay field, in the
-// list and in Employee360, whose other regions are absent for them; a second employer's HR sees its own employment of a person
-// employed by both and nothing of the first's; the person corrects only the permitted fields and HR the rest, a stale revision
+// P2): a directory reader's answer holds the public work identity (the work email EmailWork, never the EmailPrimary one) and no
+// private contact, identification or pay field, in the list and in Employee360, whose other regions are absent for them; a second
+// employer's HR sees its own employment of a person employed by both and nothing of the first's, its manager neither; an HR
+// reader's dates and ids are of their own employers' employments only, not of a report's elsewhere; a caller asking checkOnly is
+// answered no access for a person outside the scope; the person corrects only the permitted fields and HR the rest, a stale revision
 // refused; the history is HR's and the person's; and the employment content host opens to an HR reader of its employer only,
 // through get#RecordLinkInfo too. Standalone: spec-local organizations, people, employments, groups and users, with artifact
 // authorization disabled (the rules are the services' own permission and scope checks).
@@ -108,16 +110,20 @@ spec({
         organization(orgA, "People Directory Spec A")
         organization(orgB, "People Directory Spec B")
         // A: a manager and their report (with a preferred name, private contacts and identifications), one ended ten days ago;
-        // the report is employed by B too; B: its own employee
+        // the report is employed by B too; B: its own employee; DUAL, employed by A and B, reports to an HR officer of A who is a
+        // manager too
         state.MANAGER = person("MANAGER")
         state.REPORT = person("REPORT", "Rory")
         state.ENDED = person("ENDED")
         state.BETA = person("BETA")
+        state.DUAL = person("DUAL")
         employ(state.MANAGER, orgA)
         state.reportA = employ(state.REPORT, orgA)
         state.reportB = employ(state.REPORT, orgB, now - 30 * day)
         state.endedEmployment = employ(state.ENDED, orgA, since, now - 10 * day)
         employ(state.BETA, orgB)
+        state.dualA = employ(state.DUAL, orgA)
+        state.dualB = employ(state.DUAL, orgB)
         call("create#mantle.party.PartyRelationship", {
             relationshipTypeEnumId: "PrtManager",
             fromPartyId: state.MANAGER,
@@ -126,7 +132,8 @@ spec({
             toRoleTypeId: "Employee",
             fromDate: since
         })
-        contact(state.REPORT, {emailContactMechPurposeId: "EmailPrimary"}, {emailAddress: "rory.work@directory.example"})
+        contact(state.REPORT, {emailContactMechPurposeId: "EmailWork"}, {emailAddress: "rory.work@directory.example"})
+        contact(state.REPORT, {emailContactMechPurposeId: "EmailPrimary"}, {emailAddress: "rory@personal.example"})
         contact(state.REPORT, {telecomContactMechPurposeId: "PhoneWork"}, {contactNumber: "555-0100"})
         contact(state.REPORT, {telecomContactMechPurposeId: "PhoneHome"}, {contactNumber: "555-0199"})
         contact(
@@ -149,6 +156,15 @@ spec({
         state.hrView = user("HRVIEW", ["PEOPLE_HR_VIEW"], [orgA])
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgB])
         state.self = user("SELF", ["PEOPLE_SELF_SERVICE"], [], state.REPORT)
+        state.hrManager = user("HRMGR", ["PEOPLE_HR_VIEW", "PEOPLE_TEAM_VIEW"], [orgA])
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtManager",
+            fromPartyId: prefix + "_USER_HRMGR",
+            fromRoleTypeId: "Manager",
+            toPartyId: state.DUAL,
+            toRoleTypeId: "Employee",
+            fromDate: since
+        })
     },
     cleanupSpec() {
         ec.message.clearErrors()
@@ -167,15 +183,21 @@ feature(
             const other = run(state.reader, S + "find#Employees", {organizationPartyId: orgB})
             const report = (reader.employees || []).find(row => row.partyId == state.REPORT) || {}
             const hrReport = (hr.employees || []).find(row => row.partyId == state.REPORT) || {}
-            return {reader, search, managed, hr, other, report, hrReport}
+            // B's HR: the report's employment at B, with no manager of A's; an HR officer of A who manages DUAL: the dates of
+            // DUAL's employment at A, not of the one at B their team view reaches
+            const hrBReport = (run(state.hrB, S + "find#Employees", {term: "REPORT"}).employees || [])[0] || {}
+            const dualRows = run(state.hrManager, S + "find#Employees", {term: "DUAL"}).employees || []
+            const dualAt = organizationPartyId => dualRows.find(row => row.organizationPartyId == organizationPartyId) || {}
+            return {reader, search, managed, hr, other, report, hrReport, hrBReport, dualA: dualAt(orgA), dualB: dualAt(orgB)}
         },
-        then({reader, search, managed, hr, other, report, hrReport}) {
+        then({reader, search, managed, hr, other, report, hrReport, hrBReport, dualA, dualB}) {
             reader.error == ""
             reader.hrColumns == false
-            reader.employees.map(row => row.partyId).sort() == [state.MANAGER, state.REPORT].sort()
+            reader.employees.map(row => row.partyId).sort() == [state.MANAGER, state.REPORT, state.DUAL].sort()
             Object.keys(report).sort() == publicFields
             report.preferredName == "Rory"
             report.workEmail == "rory.work@directory.example"
+            !JSON.stringify(reader).includes("personal.example")
             report.workPhone == "555-0100"
             report.managerName == "Directory MANAGER"
             report.organizationPartyId == orgA
@@ -189,6 +211,13 @@ feature(
             !JSON.stringify(hr).includes("555-0199")
             !JSON.stringify(hr).includes("Private Lane")
             code(other) == "ORGANIZATION_DENIED"
+            hrBReport.organizationPartyId == orgB
+            hrBReport.managerName == ""
+            dualA.partyRelationshipId == state.dualA
+            dualA.fromDateText != ""
+            dualB.partyRelationshipId == null
+            dualB.fromDateText == null
+            dualB.organizationPartyId == orgB
         }
     }
 )
@@ -203,11 +232,30 @@ feature(
             const self = run(state.self, S + "get#Employee360", {partyId: state.REPORT})
             const forged = run(state.hr, S + "get#Employee360", {partyId: state.REPORT, partyRelationshipId: state.reportB})
             const outside = run(state.reader, S + "get#Employee360", {partyId: state.BETA})
-            return {reader, hr, hrB, self, forged, outside}
+            const outsideChecked = run(state.reader, S + "get#Employee360", {partyId: state.BETA, checkOnly: true})
+            const missingChecked = run(state.reader, S + "get#Scope", {partyId: prefix + "_NOBODY", checkOnly: true})
+            // an HR officer of A who manages DUAL: the id and dates of DUAL's employment at A, not of the one at B
+            const dual = run(state.hrManager, S + "get#Employee360", {partyId: state.DUAL}).overview?.employments || []
+            const dualAt = organizationPartyId => dual.find(row => row.organizationPartyId == organizationPartyId) || {}
+            return {
+                reader,
+                hr,
+                hrB,
+                self,
+                forged,
+                outside,
+                outsideChecked,
+                missingChecked,
+                dualA: dualAt(orgA),
+                dualB: dualAt(orgB)
+            }
         },
-        then({reader, hr, hrB, self, forged, outside}) {
+        then({reader, hr, hrB, self, forged, outside, outsideChecked, missingChecked, dualA, dualB}) {
             reader.error == ""
             reader.regions == ["overview"]
+            reader.overview.managers.map(row => row.partyId) == [state.MANAGER]
+            reader.capabilities.selfFields == []
+            !JSON.stringify(reader).includes("personal.example")
             reader.personalInfo == null
             reader.partyRelationshipId == null
             reader.overview.employments.map(row => row.organizationPartyId) == [orgA]
@@ -221,12 +269,23 @@ feature(
             hr.personalInfo.identifications[0].valueText == "•••• 5678"
             !JSON.stringify(hr).includes("6789")
             hrB.overview.employments.map(row => row.organizationPartyId) == [orgB]
+            hrB.overview.managers == []
             hrB.hostEmploymentId == state.reportB
             self.regions == ["overview", "employmentHistory", "personalInfo"]
             self.personalInfo.identifications == null
             self.capabilities.selfFields == ["preferredName", "homePhone", "mobilePhone"]
             code(forged) == "RECORD_UNAVAILABLE"
             code(outside) == "RECORD_UNAVAILABLE"
+            outsideChecked.error == ""
+            outsideChecked.regions == []
+            outsideChecked.overview == null
+            missingChecked.error == ""
+            missingChecked.partyAccess == []
+            dualA.partyRelationshipId == state.dualA
+            dualA.fromDateText != null
+            dualB.organizationPartyId == orgB
+            dualB.partyRelationshipId == null
+            dualB.fromDateText == null
         }
     }
 )
