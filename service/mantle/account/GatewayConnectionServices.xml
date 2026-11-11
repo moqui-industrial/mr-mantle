@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Mantle's connection adapters and the organizations a payment gateway is permitted for (mr-boss plan/design-admin.md §8.1,
+    Connections, ConnectionDetail, §14 "Connection adapter"; impl-admin P11, F10). The framework's
+    org.moqui.admin.ConfigurationServices (find#Connections, get#Connection, store#Connection, test#Connection,
+    find#ConnectionConsumers) reaches the payment, shipping and tax gateway configurations through run#GatewayConnectionAdapter,
+    registered in data/PaymentGatewayConnectionData.xml, which no group is authorized to call directly: it checks
+    ADMIN_CONNECTION_VIEW or ADMIN_CONNECTION_MANAGE itself. store#PaymentGatewayOrganization is the one writer of
+    PaymentGatewayOrganization; ALL_USERS may call it, and it refuses without ADMIN_CONNECTION_MANAGE and for an organization
+    the caller does not administer (the organization filters of the authorization the call runs under, as
+    mantle.party.IdentityServices). Stands without BOSS. The bodies are GatewayConnections.js. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="run" noun="GatewayConnectionAdapter" allow-remote="false">
+        <description>One operation (list, get, store, test, consumers) of a gateway kind: paymentGateway (PaymentGatewayConfig
+            with its type's options and its SystemMessageRemote), shippingGateway (ShippingGatewayConfig with its remote) or
+            taxGateway (TaxGatewayConfig). The connection's address, user and secrets are the remote's, under the framework's
+            rules (write-only secrets, the endpoint-change rule, a test with no credentials, no internal address for a
+            connection that may not use the private network). Mantle's own validation: a gateway is started only as a
+            registered provider type (Authorize.Net, PayTrace, Shippo), whose service names are the type's and are never
+            entered (UNSUPPORTED_TYPE); on a production instance its address is one of its provider's (PROVIDER_ADDRESS);
+            its usage agrees with the address and, for a shipping gateway, with its test mode (USAGE_MISMATCH); the type's
+            options are typed. A payment gateway's detail adds the organizations it is permitted for, those the caller
+            administers (organizationList), a count of the others and the organizations it may still be permitted for.
+            Needs ADMIN_CONNECTION_VIEW to read and ADMIN_CONNECTION_MANAGE to change or test.</description>
+        <implements service="org.moqui.admin.ConfigurationServices.run#ConnectionAdapter"/>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('runGatewayConnectionAdapter', context))</script></actions>
+    </service>
+    <service verb="store" noun="PaymentGatewayOrganization" allow-remote="false">
+        <description>Which internal organization may use a payment gateway (PaymentGatewayOrganization, the one service that
+            writes it): permitted from fromDate (now for a new binding) until thruDate, enabled or not, at the revision read
+            (expectedRevision as get#Connection's organizationList gives it, empty for a new binding). remove ends the
+            binding now: it is never deleted, and one that payment methods or stores of the organization still name is ended
+            from now on at the earliest (endedProspectively), so what they started keeps its gateway for reconciliation
+            and the reason says who still names it. Enabling a binding that had ended starts a new period now. Refused, with
+            the reason: a stale revision (STALE_REVISION), an end before the start (DATES_INVALID), a later start for a
+            binding in use (IN_USE), removing what is not bound (NOT_BOUND). Accounting's payment methods and Commerce's
+            checkout offer only the enabled, current bindings and change neither this nor a credential. The audit log keeps
+            each change with its reason. Needs ADMIN_CONNECTION_MANAGE and an organization the caller
+            administers.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="paymentGatewayConfigId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="isEnabled"><description>true or false</description></parameter>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="paymentGatewayConfigId"/>
+            <parameter name="revision"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="isEnabled" type="Boolean"/>
+            <parameter name="active" type="Boolean"/>
+            <parameter name="endedProspectively" type="Boolean"/>
+            <parameter name="paymentMethodCount" type="Integer"/>
+            <parameter name="storeCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('storePaymentGatewayOrganization', context))</script></actions>
+    </service>
+    <service verb="find" noun="RemoteConsumers" allow-remote="false">
+        <description>Where Mantle's records use a remote system (a connection of the framework's remote kind): the payment and
+            shipping gateways whose connection it is, and the store integration it binds, for a store of an organization the
+            caller administers. Needs ADMIN_CONNECTION_VIEW.</description>
+        <implements service="org.moqui.admin.ConfigurationServices.find#AdapterConsumers"/>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('findRemoteConsumers', context))</script></actions>
+    </service>
+    <service verb="find" noun="PrinterConsumers" allow-remote="false">
+        <description>The facilities that print a kind of document on a network printer (FacilityPrinter), named for the
+            organizations the caller administers and counted for the others. Needs ADMIN_CONNECTION_VIEW.</description>
+        <implements service="org.moqui.admin.ConfigurationServices.find#AdapterConsumers"/>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('findPrinterConsumers', context))</script></actions>
+    </service>
+</services>
