@@ -51,6 +51,17 @@ const fieldsOf = (out, userId) =>
         .sort()
         .join()
 const usernames = {}
+// the rows of the records Mantle's source finds by organization (its views, IdentityAudit.js)
+const staffEntities = [
+    "moqui.security.UserAccount",
+    "moqui.security.UserGroupMember",
+    "moqui.security.user.NotificationTopicUser",
+    "mantle.party.PartyRelationship",
+    "mantle.party.UserInvitation",
+    "mantle.party.UserLifecycleOperation",
+    "mantle.party.UserLifecycleOperationStep"
+]
+const staffRows = out => Array.from(out.changeList || []).filter(row => staffEntities.includes(row.changedEntityName))
 
 spec({
     setupSpec() {
@@ -235,8 +246,11 @@ feature("an audit reader reads the changes of its own organization's staff and n
         // the membership, by its member
         out.member.recordText ===
             "Group: Spec audited staff · User: iau.two (Two Audited)".replace(/two/g, "one").replace("Two", "One")
-        // another organization's staff: nothing found, nothing counted, by its key or in the whole category
-        out.two.error === "" && out.two.changeListCount === 0 && out.two.changeList.length === 0
+        // another organization's staff: nothing found, by its key or in the whole category. A key is matched against every
+        // registered record, so the instance's own records (F262: every audit reader reads them) whose sequenced id is the
+        // same as the account's (a system message another spec made) may be found by it: only the staff records count here
+        out.two.error === "" && staffRows(out.two).length === 0
+        !JSON.stringify(out.two).includes("iau.two") && !JSON.stringify(out.two).includes("changed.two")
         out.identity.changeListCount > 0
         !JSON.stringify(out.identity).includes("iau.two") && !JSON.stringify(out.identity).includes("changed.two")
         // the source answers ids only, each of an account in scope, and nothing of an entity it does not know
@@ -257,7 +271,7 @@ feature("an audit reader reads the changes of its own organization's staff and n
         out.gatewayOther.changeListCount === 1 && out.gatewayOther.changeList[0].changedFieldName === "fromDate"
         out.gatewayOther.changeList[0].masked === true && out.gatewayOther.changeList[0].after === null
         // the instance administrator reads the other organization's too
-        out.admin.changeListCount >= 3
+        staffRows(out.admin).length >= 3
         JSON.stringify(out.adminTransfers).includes("IAU_EXPORT_Two")
         // and each organization's own record, but not a person's party as an organization's (the audit log read as it is
         // would answer every party's)
