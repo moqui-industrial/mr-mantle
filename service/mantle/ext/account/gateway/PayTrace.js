@@ -162,6 +162,10 @@ function gateway(paymentGatewayConfigId) {
     else if (!remote) problem = "Gateway " + paymentGatewayConfigId + " has no connection (SystemMessageRemote)"
     else if (!remote.sendUrl || !remote.username || !remote.password)
         problem = "The connection " + remote.systemMessageRemoteId + " needs its API base address, API user and password"
+    // a connection an administrator disabled, or whose address or sign-in changed and has not passed a test since (Admin
+    // Connections; the framework's ConfigurationServices.store#Connection), takes no request
+    else if (remote.disabled === "Y")
+        problem = "The connection " + remote.systemMessageRemoteId + " is disabled until a test of it passes"
     else if (!/^\d+$/.test(String(options.merchantId || "")) || !options.integratorId || !options.currencyUomId)
         problem = "Gateway " + paymentGatewayConfigId + " needs its PayTrace merchant id, integrator id and account currency"
     else if (String(options.integratorId).length > 12)
@@ -229,7 +233,7 @@ function accessToken(gw, fresh) {
         "grant_type=client_credentials&client_id=" + encode(gw.remote.username) + "&client_secret=" + encode(gw.remote.password)
     let response
     try {
-        response = ec.service
+        const client = ec.service
             .rest()
             .method("POST")
             .uri(gw.base + "/v3/token")
@@ -239,7 +243,9 @@ function accessToken(gw, fresh) {
             .addHeader("Cache-Control", "no-cache")
             .contentType("application/x-www-form-urlencoded")
             .text(form)
-            .call()
+        // a connection that may not use the private network (a delegated administrator's on a production instance)
+        if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
+        response = client.call()
     } catch (_) {
         return {problem: "No answer from PayTrace's token endpoint"}
     }
@@ -279,6 +285,7 @@ function api(gw, method, path, body) {
                 .addHeader("Accept", "application/json")
                 .addHeader("Cache-Control", "no-cache")
             if (body != null) client.jsonObject(JSON.stringify(body))
+            if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
             response = client.call()
         } catch (error) {
             return {unknown: "No answer from PayTrace: " + clip(error?.message ?? error, 200)}

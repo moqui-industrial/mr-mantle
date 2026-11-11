@@ -111,6 +111,10 @@ function gateway(shippingGatewayConfigId) {
     else if (!remote) problem = "Gateway " + shippingGatewayConfigId + " has no connection (SystemMessageRemote)"
     else if (blank(remote.sendUrl) || blank(remote.password))
         problem = "The connection " + remote.systemMessageRemoteId + " needs its API base (sendUrl) and API token (password)"
+    // a connection an administrator disabled, or whose address or sign-in changed and has not passed a test since (Admin
+    // Connections; the framework's ConfigurationServices.store#Connection), takes no request
+    else if (remote.disabled === "Y")
+        problem = "The connection " + remote.systemMessageRemoteId + " is disabled until a test of it passes"
     if (config && !blank(option(shippingGatewayConfigId, "SgoApiToken")))
         ec.logger.warn(
             "Shippo gateway " +
@@ -179,6 +183,7 @@ function send(gw, method, path, body) {
             .addHeader("Shippo-API-Version", API_VERSION)
             .addHeader("Accept", "application/json")
         if (body != null) client = client.jsonObject(JSON.stringify(body))
+        if (gw.remote.allowPrivateNetwork === "N") client = client.denyInternal()
         response = client.call()
     } catch (error) {
         return {lost: "No answer from Shippo: " + clip(errorText(error), 200)}

@@ -96,6 +96,10 @@ function gateway(paymentGatewayConfigId) {
     else if (!remote) problem = "Gateway " + paymentGatewayConfigId + " has no connection (SystemMessageRemote)"
     else if (!remote.sendUrl || !remote.username || !remote.password)
         problem = "The connection " + remote.systemMessageRemoteId + " needs its API endpoint, API login id and transaction key"
+    // a connection an administrator disabled, or whose address or sign-in changed and has not passed a test since (Admin
+    // Connections; the framework's ConfigurationServices.store#Connection), takes no request
+    else if (remote.disabled === "Y")
+        problem = "The connection " + remote.systemMessageRemoteId + " is disabled until a test of it passes"
     return {id: paymentGatewayConfigId, label: "Authorize.Net", config, options: options || {}, remote, problem}
 }
 
@@ -113,7 +117,10 @@ function send(gw, requestName, body) {
     }
     let response
     try {
-        response = ec.service.rest().method("POST").uri(gw.remote.sendUrl).timeout(40).jsonObject(JSON.stringify(request)).call()
+        const client = ec.service.rest().method("POST").uri(gw.remote.sendUrl).timeout(40).jsonObject(JSON.stringify(request))
+        // a connection that may not use the private network (a delegated administrator's on a production instance)
+        if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
+        response = client.call()
     } catch (error) {
         return {unknown: "No answer from Authorize.Net: " + clip(error?.message ?? error, 200)}
     }
