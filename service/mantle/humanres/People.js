@@ -63,7 +63,13 @@ function capabilities() {
 }
 
 // ===== scope =====
-const asOfMillis = value => ec.user.timestampMillis(value || ec.user.nowTimestamp)
+// An as-of time in milliseconds, now when empty. A date-only as-of (midnight in the user's zone, as a date field gives it) is
+// the end of that day, so an employment that begins or ends that day is current or ended on it (impl-people P2, F76).
+function asOfMillis(value) {
+    const millis = ec.user.timestampMillis(value || ec.user.nowTimestamp)
+    if (!value) return millis
+    return ec.l10n.format(new Date(millis), "HH:mm:ss.SSS") === "00:00:00.000" ? millis + day - 1 : millis
+}
 // a time for a find condition: a Date, which crosses as a timestamp (a number of milliseconds does not)
 const stamp = millis => (millis == null ? null : new Date(Number(millis)))
 const current = (query, asOf) => query.conditionDate("fromDate", "thruDate", stamp(asOf))
@@ -205,6 +211,19 @@ function partyAccess(userScope, partyId, asOf) {
     return {kinds, employments: Array.from(byId.values())}
 }
 
+// partyAccess for a caller that asks whether a person is admitted (checkOnly: a link or a card shown only when they are): a
+// person missing or outside the scope answers no access kind instead of a refusal, so an expected "no" is not a failed service
+// call, logged as an error (impl-people P2 review).
+function checkedAccess(userScope, partyId, asOf, checkOnly) {
+    if (!(checkOnly === true || checkOnly === "true")) return partyAccess(userScope, partyId, asOf)
+    try {
+        return partyAccess(userScope, partyId, asOf)
+    } catch (error) {
+        if (lib.reasonCode(error) !== "RECORD_UNAVAILABLE") throw error
+        return {kinds: [], employments: []}
+    }
+}
+
 // get#Scope: the scope, narrowed to an organization asked for (its employers, its units and a staff admission by its
 // employments) and with the access of a party asked for.
 function scope(p) {
@@ -216,7 +235,7 @@ function scope(p) {
         out.unitPartyIds = unitsUnder(out.organizationPartyIds)
     }
     if (p.partyId) {
-        const admitted = partyAccess(out, p.partyId, asOfMillis(p.asOfDate))
+        const admitted = checkedAccess(out, p.partyId, asOfMillis(p.asOfDate), p.checkOnly)
         out.partyAccess = admitted.kinds
         out.partyEmployments = admitted.employments.filter(
             row => !p.organizationPartyId || row.organizationPartyId === p.organizationPartyId
@@ -416,4 +435,18 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown People operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({
+    execute: run,
+    // for the other People modules (Employees.js): the scope and its pieces, read once per call there
+    scopeOf,
+    partyAccess,
+    checkedAccess,
+    requireOrganization,
+    capabilities,
+    asOfMillis,
+    stamp,
+    current,
+    unique,
+    personNames,
+    organizationNames
+})

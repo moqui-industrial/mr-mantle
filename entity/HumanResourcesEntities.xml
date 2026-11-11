@@ -352,6 +352,32 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Resident Citizen ID Card" enumId="EatResCitizenId" enumTypeId="EmplAuthzType"/>
         </seed-data>
     </entity>
+    <entity entity-name="EmploymentContent" package="mantle.humanres.employment" cache="never">
+        <description>A file of an employment: a contract, a letter, an identity or right-to-work document (IronStone People design
+            §13 RecordFiles, PE-01; impl-people P2). The employment is People's content host, keyed by its partyRelationshipId, so an
+            HR file is never on the person's broadly visible Party record; get#RecordLinkInfo and RecordFiles admit it only to a
+            People HR reader of the employer (mantle.humanres.PeopleServices.check#EmploymentAccess), and it has no Records-drive
+            folder, so nothing shares it. Written through mantle.humanres.PeopleServices.create#EmploymentContent.</description>
+        <field name="employmentContentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment"/>
+        <relationship type="one" title="EmploymentContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Content Type" enumTypeId="EmploymentContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="EmcntDocument" enumTypeId="EmploymentContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Contract" enumId="EmcntContract" enumTypeId="EmploymentContentType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Letter" enumId="EmcntLetter" enumTypeId="EmploymentContentType" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Identity or right to work" enumId="EmcntIdentity" enumTypeId="EmploymentContentType"
+                    sequenceNum="4"/>
+        </seed-data>
+    </entity>
     <entity entity-name="EmploymentApplication" package="mantle.humanres.employment" use="nontransactional">
         <field name="employmentApplicationId" type="id" is-pk="true"/>
         <field name="emplPositionId" type="id"/>

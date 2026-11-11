@@ -2080,6 +2080,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             A timesheet (mantle.work.time.Timesheet, which no entity filter covers) is seen by its person, its approvers and ADMIN
             (mantle.work.TimesheetServices.get#TimesheetAccess, canView) whenever authorization is on.
+
+            An employment (mantle.humanres.employment.Employment, IronStone People's employment content host) and its files
+            (EmploymentContent) are seen only by an HR reader of its employer in People's scope
+            (mantle.humanres.PeopleServices.check#EmploymentAccess), for every caller, authorization disabled or not; a call with
+            no user sees none.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2148,7 +2153,11 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.product.asset.Asset': content('mantle.product.asset.AssetContent', 'assetId', 'contentTypeEnumId'),
                 'mantle.product.quality.QualityInspection': content('mantle.product.quality.QualityInspectionContent',
                         'qualityInspectionId', 'contentTypeEnumId'),
-                'mantle.order.return.ReturnHeader': content('mantle.order.return.ReturnContent', 'returnId', 'contentTypeEnumId')}
+                'mantle.order.return.ReturnHeader': content('mantle.order.return.ReturnContent', 'returnId', 'contentTypeEnumId'),
+                // People's employment content host (IronStone People PE-01, impl-people P2), keyed by the employment's
+                // partyRelationshipId
+                'mantle.humanres.employment.Employment': content('mantle.humanres.employment.EmploymentContent',
+                        'partyRelationshipId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2563,6 +2572,12 @@ along with this software (see the LICENSE.md file). If not, see
                     if (!ours) return false
                     return !value.otherPartyId || visible(PARTY, 'partyId', value.otherPartyId, depth)
                 }
+                // People's HR hosts (IronStone People PE-01, impl-people P2, F66): an employment and its files, for an HR reader of
+                // its employer in People's scope (mantle.humanres.PeopleServices.check#EmploymentAccess), whatever the entity
+                // filters and authorization; a call with no user sees none. A person's Party record shows none of them.
+                if (entityName === 'mantle.humanres.employment.Employment' || entityName === 'mantle.humanres.employment.EmploymentContent')
+                    return !!ec.service.sync().name('mantle.humanres.PeopleServices.check#EmploymentAccess')
+                            .parameter('partyRelationshipId', value.partyRelationshipId).disableAuthz().call()?.recordVisible
                 if (financeEntity(entityName)) return false
                 // Catalog record mounts/drive links also enforce owner scope without an active-org filter. A catalog
                 // user's internal file/room callback retains this rule even when artifact authorization is disabled.
