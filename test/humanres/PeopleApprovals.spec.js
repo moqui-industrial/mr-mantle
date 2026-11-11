@@ -140,7 +140,8 @@ spec({
         ec.artifactExecution.disableAuthz()
         organization(orgA, "People Apr Spec A")
         organization(orgB, "People Apr Spec B")
-        for (const kind of ["HEAD", "MGR", "WORKER", "APPROVER", "ALT", "FALLBACK"]) state[kind] = employ(person(kind), orgA)
+        for (const kind of ["HEAD", "MGR", "WORKER", "APPROVER", "ALT", "FALLBACK", "HRO", "LEFT"])
+            state[kind] = employ(person(kind), orgA)
         state.BETA = employ(person("BETA"), orgB)
         // the worker's manager at A
         call("create#mantle.party.PartyRelationship", {
@@ -150,12 +151,16 @@ spec({
             fromDate: since
         })
         state.admin = user("ADMIN", ["PEOPLE_CONFIGURE", "PEOPLE_HR_VIEW"], [orgA])
-        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA])
+        // HR decides steps as everyone does, with PEOPLE_REQUEST_APPROVE (the user's call, impl-people §4): it asks here, and may
+        // not decide its own request
+        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_REQUEST_APPROVE"], [orgA])
         state.reader = user("READER", ["PEOPLE_DIRECTORY_VIEW"], [orgA])
         state.owner = user("OWNER", ["PEOPLE_APPROVAL_OWNER_CHANGE"], [orgA])
         const approve = ["PEOPLE_TEAM_VIEW", "PEOPLE_REQUEST_APPROVE"]
-        for (const kind of ["HEAD", "MGR", "APPROVER", "ALT"]) state["u" + kind] = user(kind, approve, [], state[kind])
-        state.uFALLBACK = user("FALLBACK", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [], state.FALLBACK)
+        for (const kind of ["HEAD", "MGR", "APPROVER", "ALT", "LEFT"]) state["u" + kind] = user(kind, approve, [], state[kind])
+        state.uFALLBACK = user("FALLBACK", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_REQUEST_APPROVE"], [], state.FALLBACK)
+        // an HR editor of A without PEOPLE_REQUEST_APPROVE: decides no step, an HR-routed one included
+        state.uHRO = user("HRO", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [], state.HRO)
         // A's departments: Stores (led by HEAD) with Backroom under it (no lead); Office (led by HEAD); Lab (no lead); Yard (led
         // by HEAD); a team under Stores
         const unit = (unitKind, organizationName, parentPartyId, headPartyId = null) =>
@@ -166,6 +171,8 @@ spec({
         state.lab = unit("department", "Lab", orgA)
         state.yard = unit("department", "Yard", orgA, state.HEAD)
         state.team = unit("team", "Floor", state.stores)
+        state.depot = unit("department", "Depot", orgA)
+        state.shed = unit("department", "Shed", orgA)
         state.classId = run(state.hr, S + "store#JobClass", {title: "Apr spec clerk"}).emplPositionClassId
     },
     cleanupSpec() {
@@ -245,11 +252,40 @@ feature(
                         expectedRevision: row.revision
                     })
                 )
-            out.ended = [end(typeRule), end(overrideRule), end(fallbackRule)]
+            // an end dated in the past is from now: the period the rule was in effect stays as it was
+            const before = ec.user.timestampMillis(ec.user.nowTimestamp) - 1000
+            const backdated = code(
+                policy({
+                    peopleApprovalPolicyId: overrideRule.peopleApprovalPolicyId,
+                    thruDate: "2001-01-01T00:00:00Z",
+                    expectedRevision: overrideRule.revision
+                })
+            )
+            const overrideEnd = ec.entity
+                .find("mantle.humanres.approval.PeopleApprovalPolicy")
+                .condition("peopleApprovalPolicyId", overrideRule.peopleApprovalPolicyId)
+                .disableAuthz()
+                .one().thruDate
+            out.ended = [end(typeRule), backdated, end(fallbackRule)]
+            out.overrideEndedNow = ec.user.timestampMillis(overrideEnd) >= before
             out.storesRule = withAlternate.peopleApprovalPolicyId
             return out
         },
-        then({none, type, department, employee, own, fallback, alternate, refusals, listed, canEdit, history, ended}) {
+        then({
+            none,
+            type,
+            department,
+            employee,
+            own,
+            fallback,
+            alternate,
+            refusals,
+            listed,
+            canEdit,
+            history,
+            ended,
+            overrideEndedNow
+        }) {
             none == ["default", state.MGR, "route"]
             type == ["type", state.APPROVER]
             department == ["department", state.HEAD, "Department head of Stores: Apr HEAD"]
@@ -283,6 +319,7 @@ feature(
             canEdit == false
             history == 5
             ended == ["", "", ""]
+            overrideEndedNow == true
         }
     }
 )
@@ -431,7 +468,7 @@ feature("new terms supersede a waiting request and its notice; a decision on a s
             after: [after.position.statusId, after.approval.statusId, after.approval.waiting]
         }
     },
-    then({superseded, unread, onOldNotice, again, changedSince, after}) {
+    then({superseded, onOldNotice, again, changedSince, after}) {
         superseded == ["PapSuperseded", true]
         onOldNotice == "NOT_PENDING"
         again == ["", true]
@@ -569,7 +606,14 @@ feature(
                     .values.filter(row => row.enumId === added.enumId)
                     .map(row => [row.description, row.ended, row.canEdit])
             const levels = run(state.admin, P + "find#Lookups", {enumTypeId: "SkillLevel"}).values.map(row => row.enumCode)
+            // an ended skill type is required by no new job class (the user's call: People's choices leave ended values out)
+            const skill = store({enumTypeId: "SkillType", description: "Apr spec forklift"})
+            store({enumTypeId: "SkillType", enumId: skill.enumId, end: true, expectedRevision: skill.revision})
+            const endedSkill = code(
+                run(state.hr, S + "store#JobRequirement", {emplPositionClassId: state.classId, skillTypeEnumId: skill.enumId})
+            )
             return {
+                endedSkill,
                 families,
                 refusals,
                 renamed: renamed.error,
@@ -588,7 +632,7 @@ feature(
                 levels
             }
         },
-        then({families, refusals, renamed, ended, afterEnd, current, withEnded, kept, levels}) {
+        then({families, refusals, renamed, ended, afterEnd, current, withEnded, kept, levels, endedSkill}) {
             families == ["TerminationReason", "TerminationType", "SkillType", "SkillLevel"]
             refusals ==
                 {
@@ -605,6 +649,7 @@ feature(
             withEnded == [["Apr spec moved away", true, false]]
             kept == 1
             levels == ["1", "2", "3", "4", "5"]
+            endedSkill == "VALUE_ENDED"
         }
     }
 )
@@ -633,7 +678,9 @@ feature("offboarding lists the rules and waiting requests that name a person and
         const refusals = {
             other: code(run(state.hr, A + "find#OwnedApprovals", {userId: state.uAPPROVER})),
             request: transfer(request.resourceId),
-            notOwner: transfer(rule.resourceId, state.hr)
+            notOwner: transfer(rule.resourceId, state.hr),
+            // the approver alone does not choose who decides in their place
+            self: transfer(rule.resourceId, state.uAPPROVER)
         }
         const moved = transfer(rule.resourceId)
         return {
@@ -654,10 +701,68 @@ feature("offboarding lists the rules and waiting requests that name a person and
                 ["approvalRule", true]
             ]
         requestName == "Position activation: position Lab assistant"
-        refusals == {other: "PERMISSION_DENIED", request: "NOT_TRANSFERABLE", notOwner: "PERMISSION_DENIED"}
+        refusals ==
+            {other: "PERMISSION_DENIED", request: "NOT_TRANSFERABLE", notOwner: "PERMISSION_DENIED", self: "PERMISSION_DENIED"}
         moved == ""
         after == 0
         alternate == 1
         sent == [state.uALT]
     }
 })
+
+feature(
+    "an HR-routed step is decided only with PEOPLE_REQUEST_APPROVE; one who no longer works for the employer decides nothing",
+    {
+        when() {
+            // Depot: decided by HR, its designated officer an HR editor without PEOPLE_REQUEST_APPROVE, so the request waits
+            policy({departmentPartyId: state.depot, approverRoleEnumId: "ParHr", approverPartyId: state.HRO})
+            const depotSeat = seat(state.depot, "Depot clerk")
+            const depot = run(state.hr, S + "request#PositionApproval", {
+                emplPositionId: depotSeat.emplPositionId,
+                expectedRevision: depotSeat.revision,
+                justification: "Stock"
+            })
+            const hrDecision = code(run(state.uHRO, S + "decide#PositionApproval", {emplPositionId: depotSeat.emplPositionId}))
+            // Shed: a named approver who then leaves A (the employment ends), so the step goes to its alternate
+            policy({
+                departmentPartyId: state.shed,
+                approverRoleEnumId: "ParPerson",
+                approverPartyId: state.LEFT,
+                alternatePartyId: state.ALT
+            })
+            const before = route({departmentPartyId: state.shed})
+            const employment = ec.entity
+                .find("mantle.party.PartyRelationship")
+                .condition({relationshipTypeEnumId: "PrtEmployee", fromPartyId: state.LEFT, toPartyId: orgA})
+                .disableAuthz()
+                .one()
+            call("update#mantle.party.PartyRelationship", {
+                partyRelationshipId: employment.partyRelationshipId,
+                thruDate: ec.user.nowTimestamp
+            })
+            const after = route({departmentPartyId: state.shed})
+            const shedSeat = seat(state.shed, "Shed hand")
+            run(state.hr, S + "request#PositionApproval", {
+                emplPositionId: shedSeat.emplPositionId,
+                expectedRevision: shedSeat.revision,
+                justification: "Loading"
+            })
+            return {
+                depot: [depot.statusId, depot.unresolved],
+                hrDecision,
+                before: [approverIds(before.steps[0]), before.steps[0].via],
+                after: [approverIds(after.steps[0]), after.steps[0].via],
+                leaverDecision: code(run(state.uLEFT, S + "decide#PositionApproval", {emplPositionId: shedSeat.emplPositionId})),
+                sent: Object.keys(notices(shedSeat.emplPositionId))
+            }
+        },
+        then({depot, hrDecision, before, after, leaverDecision, sent}) {
+            depot == ["PapPending", true]
+            hrDecision == "PERMISSION_DENIED"
+            before == [state.LEFT, "route"]
+            after == [state.ALT, "alternate"]
+            leaverDecision == "NOT_APPROVER"
+            sent == [state.uALT]
+        }
+    }
+)

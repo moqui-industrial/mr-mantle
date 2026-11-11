@@ -170,8 +170,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A skill a job class requires (EmplPositionClassSkill), added, or removed with remove; class and skill only
             until P18 adds levels and dates. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a
             missing class (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a
-            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED) and, to remove, one not required
-            (RECORD_UNAVAILABLE).</description>
+            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED,
+            People's lookups; P5) and, to remove, one not required (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="emplPositionClassId" required="true"/>
             <parameter name="skillTypeEnumId"/>

@@ -853,7 +853,8 @@ function storeJobClass(p) {
 // store#JobRequirement: a skill a job class requires, added or removed (class and skill only until P18 adds levels and dates).
 // Refused: a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED); a missing class (RECORD_UNAVAILABLE) or an
 // ended one (CLASS_ENDED); no skill (SKILL_REQUIRED) or one that is not a skill type (SKILL_INVALID); a skill required already
-// (ALREADY_REQUIRED) or, to remove, not required (RECORD_UNAVAILABLE).
+// (ALREADY_REQUIRED) or ended (VALUE_ENDED, P5's lookups; an ended one is still removed) or, to remove, not required
+// (RECORD_UNAVAILABLE).
 function storeJobRequirement(p) {
     editorScope("Changing a job class")
     const id = text(p.emplPositionClassId)
@@ -871,6 +872,8 @@ function storeJobRequirement(p) {
         return {emplPositionClassId: id, skillTypeEnumId}
     }
     if (existing) denied("ALREADY_REQUIRED", (skill.description || skillTypeEnumId) + " is required already")
+    // an ended skill type (People's lookups, Enumeration.thruDate) is kept where it is held and taken by no new requirement
+    if ((ms(skill.thruDate) ?? Infinity) <= nowMs()) denied("VALUE_ENDED", (skill.description || skillTypeEnumId) + " has ended")
     call("create#" + CLASS_SKILL, {emplPositionClassId: id, skillTypeEnumId})
     return {emplPositionClassId: id, skillTypeEnumId}
 }

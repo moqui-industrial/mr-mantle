@@ -62,8 +62,9 @@ along with this software (see the LICENSE.md file). If not, see
             empty) decided by a role (ParDepartmentHead, ParManager, ParPerson with approverPartyId, ParHr with an optional
             designated officer), for the whole employer, a department of it or one employee (an override), with an optional
             alternate; or the employer's HR fallback for the kind (ParHrFallback with the person). With peopleApprovalPolicyId,
-            a row's new terms (the row in effect ends on the change's date, fromDate or now, and the next starts; a row not yet
-            in effect changes in place) or its end (thruDate alone), each audited with changeReason. The waiting requests of
+            a row's new terms (the row in effect ends on the change's date, fromDate or now, never before now, and the next
+            starts; a row not yet in effect changes in place) or its end (thruDate alone, never before now), each audited with
+            changeReason. The waiting requests of
             the employer and kind are routed again (a request that waited for an approver is sent to the one it has now).
             Refuses a caller without PEOPLE_CONFIGURE (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED) or one outside the
             scope (ORGANIZATION_DENIED), a kind not built (KIND_INVALID), a role that is not one (ROLE_INVALID), a named role with
@@ -135,10 +136,11 @@ along with this software (see the LICENSE.md file). If not, see
             step waiting of the request (peopleApprovalId, else the latest of the kind's source) approved, or refused with a
             reason, as a PeopleApprovalDecision (actor, step, rule row, role, revision, time, reason). Rechecks the decider's
             authority (an approver of the step waiting by the employer's rules now, never the requester or the person it is
-            about, nor one who decided another step) and the source's revision. The last step's approval approves the request,
+            about, nor one who decided another step, nor one who no longer works for the employer) and the source's revision,
+            with the request locked and read again. The last step's approval approves the request,
             a refusal refuses it, and either reads the notices; an approval of an earlier step sends the next step's. A decision
             the caller already made of the request answers the first (repeated). Refuses a caller without
-            PEOPLE_REQUEST_APPROVE or PEOPLE_HR_EDIT (PERMISSION_DENIED), no request (RECORD_UNAVAILABLE), another decision than
+            PEOPLE_REQUEST_APPROVE, which every step needs, HR-routed ones too (PERMISSION_DENIED), no request (RECORD_UNAVAILABLE), another decision than
             the caller's first (ALREADY_DECIDED), a request no longer waiting (NOT_PENDING), a notice of an earlier revision
             (REVISION_CHANGED), a source changed since the request (SOURCE_CHANGED), a refusal without a reason
             (REASON_REQUIRED), the requester or the person it is about (SELF_APPROVAL) and anyone else not an approver of the
@@ -178,8 +180,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="OwnedApprovals" allow-remote="false">
         <description>What userId owns of People's approvals, for an offboarding preview: the requests waiting for their decision
             (resourceId approval:id, not transferable: a request follows its route and goes to the next approver once the rule
-            or reporting line naming them changes) and the approval rule rows in effect naming them as approver, alternate or
-            HR fallback (resourceId policy:id, transferable), each {resourceId, resourceName, resourceKind, transferable,
+            or reporting line naming them changes) and the approval rule rows not ended (in effect or starting later) naming
+            them as approver, alternate or HR fallback (resourceId policy:id, transferable), each {resourceId, resourceName, resourceKind, transferable,
             note}; names only. The caller's own, or another user's with PEOPLE_APPROVAL_OWNER_CHANGE.</description>
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
         <actions>
@@ -187,10 +189,11 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="transfer" noun="ApprovalOwner" allow-remote="false">
-        <description>An approval rule row naming fromUserId's person (as approver or alternate) handed to toUserId's: the row ends
-            now and its copy names the new person, with the reason in the audit log; the waiting requests of its employer and
-            kind are routed again. By fromUserId, or with PEOPLE_APPROVAL_OWNER_CHANGE. Refuses a resource that is not such a
-            row (RECORD_UNAVAILABLE), a waiting request (NOT_TRANSFERABLE), a new owner with no enabled account and person
+        <description>An approval rule row naming fromUserId's person (as approver or alternate) handed to toUserId's: the row in
+            effect ends now and its copy names the new person (a row not yet in effect changes in place), with the reason in
+            the audit log; the waiting requests of its employer and kind are routed again. With PEOPLE_APPROVAL_OWNER_CHANGE, or
+            by fromUserId holding PEOPLE_CONFIGURE in the rule's employer (PERMISSION_DENIED otherwise: an approver alone does
+            not choose who decides in their place). Refuses a resource that is not such a row (RECORD_UNAVAILABLE), a waiting request (NOT_TRANSFERABLE), a new owner with no enabled account and person
             (OWNER_INVALID), one who does not work for the employer (NOT_EMPLOYED) and the rule's own employee
             (SELF_APPROVAL).</description>
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>

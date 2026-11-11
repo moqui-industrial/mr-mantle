@@ -12,9 +12,10 @@
 // Routing (resolve): the rules in effect naming the request's employee (an override), else those of the nearest department at or
 // above the source's department, else the employer's type rule; with none, one step by the employee's manager (the head of the
 // department for a request about no one, a position). Each step's approvers are those of its role who may decide: an enabled
-// account holding PEOPLE_REQUEST_APPROVE (HR's roles also PEOPLE_HR_EDIT), never the requester or the person the request is
-// about, nor one who decided another step of it (every step is a different approver). When none may, the step's alternate
-// decides, else the HR fallback, else the step is unresolved and the request waits: nothing is approved by default.
+// account holding PEOPLE_REQUEST_APPROVE (HR-routed steps too: the user's call, impl-people §4), never the requester or the person the request is
+// about, nor one who decided another step of it (every step is a different approver), nor one who no longer works for the
+// employer (a leaver: P6's separation calls reroute). When none may, the step's alternate decides, else the HR fallback, else the
+// step is unresolved and the request waits: nothing is approved by default.
 //
 // Deciding (recordDecision): the caller must be one of the current step's approvers, at the revision the request was made for
 // (a source changed since is SOURCE_CHANGED, and its request superseded by the domain's change); a decision retried by the same
@@ -43,9 +44,9 @@ const statusTexts = {
     PapSuperseded: "Superseded by a change"
 }
 const decisionTexts = {PpdApproved: "Approved", PpdRefused: "Refused"}
-// the permissions that let a person decide a step: every role's, and HR's roles also an HR editor's
+// the permission that lets a person decide a step, of every role, HR-routed steps included (an HR editor without it decides
+// none: the user's call, impl-people §4, Nov 11, 2026)
 const approvePermissions = ["PEOPLE_REQUEST_APPROVE"]
-const hrApprovePermissions = ["PEOPLE_REQUEST_APPROVE", "PEOPLE_HR_EDIT"]
 // a parent chain longer than this is taken to be a cycle
 const maxDepth = 50
 // the most rows a policy list, a re-route and an owner lookup read
@@ -96,7 +97,6 @@ const unique = people.unique
 const nowMs = () => ms(ec.user.nowTimestamp)
 const effective = value => (value == null || value === "" ? nowMs() : ec.user.timestampMillis(value))
 const stampOf = row => ms(row?.lastUpdatedStamp) ?? 0
-const openAt = (row, at) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 function enumTexts(enumIds) {
     const ids = unique(enumIds.filter(Boolean))
     if (!ids.length) return {}
@@ -309,7 +309,6 @@ function roleCandidates(row, request, at) {
     }
     return {partyIds: []}
 }
-const hrRole = role => role === "ParHr" || role === "ParHrFallback"
 // The route of a request on the date: the basis of its rules and each step with who may decide it and how it was found (route,
 // alternate, fallback; none when unresolved). excludedByStep: the parties who decided each step (sequenceNum: [partyId]), so a
 // person decides one step of a request at most.
@@ -326,21 +325,24 @@ function resolve(request, at, excludedByStep = {}) {
             .filter(([step]) => Number(step) !== sequenceNum)
             .flatMap(([, partyIds]) => partyIds)
         const excluded = new Set(self.concat(others))
-        const permissions = hrRole(row.approverRoleEnumId) ? hrApprovePermissions : approvePermissions
         const candidates = roleCandidates(row, request, at)
-        const pick = (partyIds, perms) =>
-            deciders(
-                partyIds.filter(partyId => !excluded.has(partyId)),
-                perms
+        // who may decide: not excluded, working for the employer now (a leaver decides nothing), an account holding the permission
+        const pick = partyIds => {
+            const open = partyIds.filter(partyId => !excluded.has(partyId))
+            const staff = new Set(staffOf(unique(open), request.organizationPartyId, at))
+            return deciders(
+                open.filter(partyId => staff.has(partyId)),
+                approvePermissions
             )
-        let approvers = pick(candidates.partyIds, permissions)
+        }
+        let approvers = pick(candidates.partyIds)
         let via = approvers.length ? "route" : null
         if (!approvers.length && row.alternatePartyId) {
-            approvers = pick([row.alternatePartyId], approvePermissions)
+            approvers = pick([row.alternatePartyId])
             if (approvers.length) via = "alternate"
         }
         if (!approvers.length && fallbackPartyIds.length) {
-            approvers = pick(fallbackPartyIds, hrApprovePermissions)
+            approvers = pick(fallbackPartyIds)
             if (approvers.length) via = "fallback"
         }
         return {
@@ -506,13 +508,16 @@ function notify(approval, state = null) {
         return {notifiedCount: 0}
     }
 }
-// The waiting requests of an employer and kind routed again after a rule changed: a request that had no approver is sent to
-// the one it has now, and one whose approvers changed to the new ones. Each on its own: a failure is logged and the rest go on.
-function reroute(organizationPartyId, approvalKindEnumId) {
+// The waiting requests of an employer and kind (every kind when none is given) routed again after a rule, a reporting line or
+// an approver's employment changed: a request that had no approver is sent to the one it has now, and one whose approvers
+// changed to the new ones (the old notices read). P6's separation calls it for the leaver's employers, so a decision waiting
+// on them goes to the step's alternate, else the HR fallback, else waits. Each on its own: a failure is logged and the rest go
+// on.
+function reroute(organizationPartyId, approvalKindEnumId = null) {
     let notified = 0
-    const pending = Array.from(
-        find(APPROVAL).condition({organizationPartyId, approvalKindEnumId, statusId: "PapPending"}).limit(pendingCap).list()
-    )
+    const conditions = {organizationPartyId, statusId: "PapPending"}
+    if (approvalKindEnumId) conditions.approvalKindEnumId = approvalKindEnumId
+    const pending = Array.from(find(APPROVAL).condition(conditions).limit(pendingCap).list())
     for (const approval of pending) {
         try {
             if (statusOf(approval) === "PapPending") notified += notify(approval).notifiedCount
@@ -657,13 +662,13 @@ function summaryOf(approval) {
 // ===== record#Decision =====
 // A decision of the step waiting of a request (by peopleApprovalId, else the latest of the kind's source), at the revision the
 // caller read (sourceRevision, from the notice): approve, or refuse with a reason. A decision this user already made of the
-// request answers the first (repeated). Refused: a caller without PEOPLE_REQUEST_APPROVE or PEOPLE_HR_EDIT (PERMISSION_DENIED);
+// request answers the first (repeated). Refused: a caller without PEOPLE_REQUEST_APPROVE (PERMISSION_DENIED);
 // no request (RECORD_UNAVAILABLE); another decision than the caller's first (ALREADY_DECIDED); a request no longer waiting
 // (NOT_PENDING); a notice of an earlier request or revision (REVISION_CHANGED); a source changed since the request
 // (SOURCE_CHANGED); a refusal with no reason (REASON_REQUIRED); the requester or the person it is about (SELF_APPROVAL); anyone
 // not an approver of the step waiting (NOT_APPROVER).
 function recordDecision(p) {
-    requireAny(hrApprovePermissions, "Deciding an approval")
+    requireAny(approvePermissions, "Deciding an approval")
     const decision = text(p.decision) || "approve"
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse")
     const decisionEnumId = decision === "approve" ? "PpdApproved" : "PpdRefused"
@@ -680,8 +685,9 @@ function recordDecision(p) {
     }
     if (!approval || (p.approvalKindEnumId && approval.approvalKindEnumId !== p.approvalKindEnumId))
         denied("RECORD_UNAVAILABLE", "This approval is not available")
-    // the row is locked so two approvers of one step do not both record it
-    find(APPROVAL, {peopleApprovalId: approval.peopleApprovalId}).forUpdate(true).one()
+    // the row is locked and read again, so two approvers of one step do not both record it and a decision made meanwhile (a
+    // refusal, the last approval, a supersession) is seen
+    approval = find(APPROVAL, {peopleApprovalId: approval.peopleApprovalId}).forUpdate(true).one()
     const userId = ec.user.userId
     const partyId = ec.user.userAccount?.partyId || null
     const decisions = decisionsOf(approval)
@@ -974,7 +980,8 @@ function storePolicy(p) {
     // an end alone
     if (!changed.length) {
         if (!text(p.thruDate)) return {peopleApprovalPolicyId: row.peopleApprovalPolicyId, revision}
-        const thruMs = effective(p.thruDate)
+        // an end is never dated before now: the period a rule was in effect, and the decisions made under it, stay as they were
+        const thruMs = Math.max(effective(p.thruDate), nowMs())
         if (thruMs <= rowFromMs) denied("DATES_INVALID", "A rule ends after it starts")
         call("update#" + POLICY, {
             peopleApprovalPolicyId: row.peopleApprovalPolicyId,
@@ -989,7 +996,9 @@ function storePolicy(p) {
     const values = Object.fromEntries(policyFields.map(field => [field, row[field] == null ? null : String(row[field])]))
     for (const field of changed) values[field] = blankToNull(p[field])
     values.organizationPartyId = row.organizationPartyId
-    const fromMs = rowFromMs > nowMs() ? rowFromMs : effective(p.fromDate)
+    // a change takes effect from its date, never before now (the row's history stays as it was), or a row not yet in effect from
+    // its own start
+    const fromMs = rowFromMs > nowMs() ? rowFromMs : Math.max(effective(p.fromDate), nowMs())
     if (fromMs < rowFromMs) denied("DATES_INVALID", "A change starts on or after the rule's start")
     validatePolicy(values, Math.max(fromMs, nowMs()))
     if (sameStep(values, fromMs, rowThruMs, row.peopleApprovalPolicyId))
@@ -1085,19 +1094,24 @@ function findOwnedApprovals(p) {
     if (!partyId) return {resourceList}
     const now = nowMs()
     const factory = ec.entity.conditionFactory
+    // the rows not ended, those in effect and those starting later
     const named = Array.from(
-        people
-            .current(
-                find(POLICY).condition(
-                    factory.makeCondition(
-                        [
-                            factory.makeCondition("approverPartyId", "equals", partyId),
-                            factory.makeCondition("alternatePartyId", "equals", partyId)
-                        ],
-                        "or"
-                    )
-                ),
-                now
+        find(POLICY)
+            .condition(
+                factory.makeCondition(
+                    [
+                        factory.makeCondition("approverPartyId", "equals", partyId),
+                        factory.makeCondition("alternatePartyId", "equals", partyId)
+                    ],
+                    "or"
+                )
+            )
+            .condition(
+                factory.makeCondition(
+                    factory.makeCondition("thruDate", "is-null", null),
+                    "or",
+                    factory.makeCondition("thruDate", "greater", people.stamp(now))
+                )
             )
             .limit(policyCap)
             .list()
@@ -1140,9 +1154,11 @@ function findOwnedApprovals(p) {
     }
     return {resourceList}
 }
-// A rule row naming fromUserId's person to decide handed to toUserId's: the row ends now and its copy names the new person, with
-// the reason; the waiting requests of its employer and kind are routed again. By fromUserId, or with
-// PEOPLE_APPROVAL_OWNER_CHANGE. Refused: a resource that is not a rule row naming the person (RECORD_UNAVAILABLE), a waiting
+// A rule row naming fromUserId's person to decide handed to toUserId's: the row in effect ends now and its copy names the new
+// person, with the reason (a row not yet in effect is changed in place); the waiting requests of its employer and kind are
+// routed again. With PEOPLE_APPROVAL_OWNER_CHANGE (the offboarding operator), or by fromUserId when they also change the
+// employer's rules (PEOPLE_CONFIGURE in its scope): a rule is the employer's, so its approver alone does not choose who decides
+// in their place (PERMISSION_DENIED). Refused: a resource that is not a rule row naming the person (RECORD_UNAVAILABLE), a waiting
 // request (NOT_TRANSFERABLE: it follows its route), a new owner with no enabled account and person (OWNER_INVALID), one the
 // employer does not employ (NOT_EMPLOYED) or the rule's own employee (SELF_APPROVAL).
 function transferApprovalOwner(p) {
@@ -1155,8 +1171,21 @@ function transferApprovalOwner(p) {
         ? one(POLICY, {peopleApprovalPolicyId: resourceId.slice("policy:".length)})
         : null
     const fromPartyId = from?.partyId
-    if (!row || !fromPartyId || ![row.approverPartyId, row.alternatePartyId].includes(fromPartyId) || !openAt(row, nowMs()))
+    if (
+        !row ||
+        !fromPartyId ||
+        ![row.approverPartyId, row.alternatePartyId].includes(fromPartyId) ||
+        (ms(row.thruDate) ?? Infinity) <= nowMs()
+    )
         denied("RECORD_UNAVAILABLE", "This approval rule is not available")
+    if (!lib.access.has("PEOPLE_APPROVAL_OWNER_CHANGE")) {
+        const userScope = people.scopeOf()
+        if (!userScope.capabilities.configure || !userScope.organizationPartyIds.includes(row.organizationPartyId))
+            denied(
+                "PERMISSION_DENIED",
+                "Handing over an approval rule needs PEOPLE_APPROVAL_OWNER_CHANGE, or PEOPLE_CONFIGURE of its employer"
+            )
+    }
     if (!to || !to.partyId || to.disabled === "Y" || (ms(to.terminateDate) ?? Infinity) <= nowMs())
         denied("OWNER_INVALID", "The new approver needs an enabled account with a person")
     if (to.partyId === fromPartyId) denied("OWNER_INVALID", "The new approver is the current one")
@@ -1168,16 +1197,27 @@ function transferApprovalOwner(p) {
     if (values.employeePartyId && [values.approverPartyId, values.alternatePartyId].includes(values.employeePartyId))
         denied("SELF_APPROVAL", "An employee's rule may not name them to decide their own requests")
     const reason = text(p.reason) || "Handed over from " + (people.personNames([fromPartyId])[fromPartyId] || fromPartyId)
-    call("update#" + POLICY, {
-        peopleApprovalPolicyId: row.peopleApprovalPolicyId,
-        thruDate: new Date(now),
-        thruDate_changeReason: reason,
-        changedByUserId: ec.user.userId
-    })
-    call(
-        "create#" + POLICY,
-        Object.assign(values, {fromDate: new Date(now), thruDate: row.thruDate, changedByUserId: ec.user.userId})
-    )
+    if ((ms(row.fromDate) ?? -Infinity) > now) {
+        // a row not yet in effect names the new person in place, audited with the reason
+        const changes = {peopleApprovalPolicyId: row.peopleApprovalPolicyId, changedByUserId: ec.user.userId}
+        for (const field of ["approverPartyId", "alternatePartyId"])
+            if (values[field] !== (row[field] ?? null)) {
+                changes[field] = values[field]
+                changes[field + "_changeReason"] = reason
+            }
+        call("update#" + POLICY, changes)
+    } else {
+        call("update#" + POLICY, {
+            peopleApprovalPolicyId: row.peopleApprovalPolicyId,
+            thruDate: new Date(now),
+            thruDate_changeReason: reason,
+            changedByUserId: ec.user.userId
+        })
+        call(
+            "create#" + POLICY,
+            Object.assign(values, {fromDate: new Date(now), thruDate: row.thruDate, changedByUserId: ec.user.userId})
+        )
+    }
     reroute(row.organizationPartyId, row.approvalKindEnumId)
     return {transferred: true}
 }
@@ -1199,5 +1239,7 @@ function run(op, p) {
     // for the domain modules (Positions.js): a request of a source, its change, its summary and the kinds' sources
     request,
     sourceChanged,
-    sourceSummary
+    sourceSummary,
+    // for P6's separation and manager change (People's employment changes): an employer's waiting requests routed again
+    reroute
 })
