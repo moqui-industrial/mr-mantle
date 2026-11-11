@@ -654,4 +654,31 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('storeOrganizationDefault', context))</script></actions>
     </service>
+
+    <!-- The import of staff invitations (Invitations.js; mr-boss impl-admin P15, design-admin §4 Invitations' bulk invite,
+        §11.1): the row services of the framework's import target staffInvitations (data/PartyInvitationData.xml), called by
+        org.moqui.admin.DataTransferServices for each row of a staged file, as the importer. -->
+    <service verb="validate" noun="InvitationImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row (emailAddress, partyId, displayName, bundleGroupIds; organizationPartyId only as the
+            batch's own) would be invited into the batch's organization (scopeKey) by invite#User, by the same checks and
+            changing nothing: the organization in the caller's scope, no pending invitation of the address there, an
+            existing identity of another organization only with ADMIN_IDENTITY_GLOBAL, and the bundles as a grant proposal
+            (registered and delegable by the caller; never a privileged group or one granting a sealed permission). The
+            registration's alwaysBundleGroupIds (fixedValues) are added to every row. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('validateInvitationImportRow', context))</script></actions>
+    </service>
+    <service verb="apply" noun="InvitationImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One invite#User for a validated row, with the batch's options (expireDays, relationshipTypeEnumId,
+            message) and the row's operation key, so a repeat answers the invitation it made. resultRef is the invitation.
+            Needs ADMIN_IDENTITY_MANAGE.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('applyInvitationImportRow', context))</script></actions>
+    </service>
+    <service verb="find" noun="InvitationImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The internal organizations the caller administers (ADMIN_IDENTITY_VIEW or ADMIN_IDENTITY_MANAGE): those
+            an import of invitations may be for and whose imports the caller may read. None without the permission.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('findInvitationImportScopes', context))</script></actions>
+    </service>
 </services>

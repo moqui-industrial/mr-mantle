@@ -1207,7 +1207,65 @@ function clearable(p) {
     return {cleared: true}
 }
 
+// The statement imports the caller may read in Accounting (the framework's DataTransferServices.find#TargetRuns, for its
+// list of every import target's runs): those of the organizations the caller's accounting scope covers, with the authority
+// that reads a bank (bank reconciliation, accounting view or administration), newest first. Summaries only: no line, balance
+// or account number.
+function statementImportRuns(p) {
+    let ids
+    try {
+        const c = policy.capabilities()
+        if (!(c.bankReconcile || c.systemAdmin || c.reportRead || c.admin)) return {runList: []}
+        ids = policy.access(c.read ? "read" : "bankReconcile").allowedOrganizationPartyIds
+    } catch (error) {
+        return {runList: []}
+    }
+    if (p.scopeKey) ids = ids.filter(id => id === p.scopeKey)
+    if (!ids.length) return {runList: []}
+    let query = find("mantle.account.method.StatementImport").condition("organizationPartyId", "in", ids)
+    if (p.fromDate != null) query = query.condition("createdDate", "greater-equals", millisText(Number(p.fromDate)))
+    if (p.thruDate != null) query = query.condition("createdDate", "less", millisText(Number(p.thruDate)))
+    const states = {
+        SimReview: ["open", "In review"],
+        SimCommitting: ["running", "Committing"],
+        SimCommitted: ["complete", "Committed"]
+    }
+    const names = new Map()
+    const nameOf = (entityName, key, field) => {
+        const id = Object.values(key)[0]
+        if (id && !names.has(entityName + id)) names.set(entityName + id, one(entityName, key)?.[field] || id)
+        return id ? names.get(entityName + id) : null
+    }
+    return {
+        runList: Array.from(
+            query
+                .orderBy("-createdDate")
+                .limit(Math.min(Number(p.maxRows) || 100, 200))
+                .list()
+        ).map(row => ({
+            runId: row.statementImportId,
+            fileLabel: row.fileName || "Bank statement",
+            scopeKey: row.organizationPartyId,
+            scopeTitle: nameOf("mantle.party.Organization", {partyId: row.organizationPartyId}, "organizationName"),
+            state: (states[row.statusId] || ["open"])[0],
+            stateText: (states[row.statusId] || [null, null])[1],
+            startedDate: lib.ms(row.createdDate),
+            userName: nameOf("moqui.security.UserAccount", {userId: row.createdByUserId}, "userFullName"),
+            rowCount: row.totalCount,
+            appliedCount: row.committedCount,
+            errorCount: row.rejectedCount,
+            skippedCount: row.duplicateCount,
+            ownerParameters: {
+                organizationPartyId: row.organizationPartyId,
+                paymentMethodId: row.paymentMethodId,
+                statementImportId: row.statementImportId
+            }
+        }))
+    }
+}
+
 const operations = {
+    statementImportRuns,
     bank,
     statement,
     lineOf,

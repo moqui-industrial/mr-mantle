@@ -575,6 +575,21 @@ feature("a staged import previews each order, is guarded by its digest and commi
         if (list("mantle.order.OrderHeader", {productStoreId: ids.storeA, externalId: "E3"}).length !== 1)
             problems.push("the duplicate made an order")
         if (twice.batch?.reason !== "Marketplace export") problems.push("the reason is not recorded")
+        // the batch as Admin's Imports lists it (find#ChannelImportRuns, mr-boss impl-admin P15): for who operates the store,
+        // committed with its counts and the parameters that open it; another organization's operator and a reader see none
+        const runsOf = username =>
+            Array.from(run(username, I + "find#ChannelImportRuns", {targetId: "channelOrders"}).runList || [])
+        const listed = runsOf(users.operator).find(found => found.runId === batchId)
+        if (
+            listed?.state !== "complete" ||
+            listed.rowCount !== 4 ||
+            listed.scopeKey !== orgA ||
+            listed.ownerParameters?.systemMessageId !== batchId ||
+            JSON.stringify(listed).includes(ids.product)
+        )
+            problems.push("the import's run: " + JSON.stringify(listed))
+        if (runsOf(users.other).some(found => found.runId === batchId) || runsOf(users.reader).length)
+            problems.push("another organization's operator or a reader lists the import")
         // the EDI partner: its exceptions listed with their first line only, a conflict not retried
         const edi = run(users.operator, I + "get#StoreIntegration", {systemMessageRemoteId: ids.edi})
         const docs = Array.from(edi.ediDocuments || [])

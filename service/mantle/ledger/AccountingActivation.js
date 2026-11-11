@@ -727,7 +727,44 @@ function activationEntries(p) {
         denied("OPEN_ITEMS_UNTIED", "The open items do not tie to the control account balances")
     return {entries: tie.entries}
 }
-const operations = {preview, readiness, importItems, balanceLine, balanceRows, activationEntries}
+// The last import of opening open items of each organization the caller administers in Accounting (the framework's
+// DataTransferServices.find#TargetRuns): the setup run keeps one result, the latest, so each organization answers at most
+// one run. Finance administration only, as import#OpenItems.
+function openItemImportRuns(p) {
+    let ids
+    try {
+        const a = policy.access("read")
+        if (!a.capabilities.admin) return {runList: []}
+        ids = a.allowedOrganizationPartyIds
+    } catch (error) {
+        return {runList: []}
+    }
+    if (p.scopeKey) ids = ids.filter(id => id === p.scopeKey)
+    const runList = []
+    for (const organizationPartyId of ids)
+        for (const run of rows("mantle.ledger.config.AccountingSetupRun", {organizationPartyId})) {
+            const last = policy.lib.json(run.lastImportJson, null)
+            if (!last) continue
+            const started = Date.parse(String(last.importedDate || ""))
+            const failed = Number(last.failedCount) || 0
+            runList.push({
+                runId: run.setupRunId,
+                fileLabel: "Opening open items",
+                scopeKey: organizationPartyId,
+                scopeTitle: one("mantle.party.Organization", {partyId: organizationPartyId})?.organizationName || organizationPartyId,
+                state: failed ? "partial" : "complete",
+                stateText: failed ? "Imported with refused rows" : "Imported",
+                startedDate: Number.isFinite(started) ? started : policy.ms(run.lastUpdatedStamp),
+                rowCount: (Number(last.createdCount) || 0) + (Number(last.existingCount) || 0) + failed,
+                appliedCount: Number(last.createdCount) || 0,
+                errorCount: failed,
+                skippedCount: Number(last.existingCount) || 0,
+                ownerParameters: {organizationPartyId}
+            })
+        }
+    return {runList: runList.sort((a, b) => (b.startedDate || 0) - (a.startedDate || 0)).slice(0, Math.min(Number(p.maxRows) || 100, 200))}
+}
+const operations = {preview, readiness, importItems, balanceLine, balanceRows, activationEntries, openItemImportRuns}
 ;({
     templates,
     dayStamp,

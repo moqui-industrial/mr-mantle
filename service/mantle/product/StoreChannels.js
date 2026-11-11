@@ -1593,7 +1593,60 @@ function recoverStoreMessage(p) {
     }
 }
 
+// The channel import batches of the stores the caller operates (the framework's DataTransferServices.find#TargetRuns):
+// COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and the store scope, as get#ChannelImport; none otherwise. Summaries only: the
+// file's name, the store's organization, staged, committing or committed, the counts a commit kept, and the parameters that
+// open the batch in ChannelImport. No order, customer or payload.
+function findChannelImportRuns(p) {
+    let s
+    try {
+        s = scope()
+    } catch (error) {
+        return {runList: []}
+    }
+    if (!s.storeIds.length) return {runList: []}
+    let query = find(MESSAGE, {systemMessageTypeId: IMPORT_TYPE}).condition("productStoreId", "in", s.storeIds)
+    if (p.fromDate != null) query = query.condition("initDate", "greater-equals", String(Number(p.fromDate)))
+    if (p.thruDate != null) query = query.condition("initDate", "less", String(Number(p.thruDate)))
+    const states = {
+        SmsgStaged: ["open", "Staged"],
+        SmsgConsuming: ["running", "Committing"],
+        SmsgConsumed: ["complete", "Committed"]
+    }
+    const runList = []
+    for (const row of Array.from(
+        query
+            .orderBy("-initDate")
+            .limit(Math.min(Number(p.maxRows) || 100, 200))
+            .list()
+    )) {
+        const store = one("mantle.product.store.ProductStore", {productStoreId: row.productStoreId})
+        const organizationPartyId = store?.organizationPartyId || null
+        if (p.scopeKey && organizationPartyId !== p.scopeKey) continue
+        const operation = one(lib.operationEntity, {operationKey: "ChannelImport:" + row.systemMessageId})
+        const counts = lib.json(operation?.resultJson, {})?.counts || {}
+        const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0)
+        const account = operation?.userId ? one("moqui.security.UserAccount", {userId: operation.userId}) : null
+        runList.push({
+            runId: row.systemMessageId,
+            fileLabel: [row.messageId, store?.storeName].filter(Boolean).join(" · "),
+            scopeKey: organizationPartyId,
+            scopeTitle: organizationPartyId
+                ? one("mantle.party.Organization", {partyId: organizationPartyId})?.organizationName || organizationPartyId
+                : null,
+            state: (states[row.statusId] || ["open"])[0],
+            stateText: (states[row.statusId] || [null, null])[1],
+            startedDate: lib.ms(row.initDate),
+            userName: account?.userFullName || account?.username || null,
+            rowCount: operation ? total : null,
+            ownerParameters: {systemMessageId: row.systemMessageId, systemMessageRemoteId: row.systemMessageRemoteId}
+        })
+    }
+    return {runList}
+}
+
 const operations = {
+    findChannelImportRuns,
     findMessageRecoveryTargets,
     recoverStoreMessage,
     findStoreIntegrations,

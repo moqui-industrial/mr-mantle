@@ -562,4 +562,21 @@ along with this software (see the LICENSE.md file). If not, see
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/StoreFeeds.js").execute("getShopFeed", input)</script>
         </actions>
     </service>
+    <!-- mr-boss impl-admin P15 (design-admin §11.1; impl-commerce §7): ChannelImport's result contract for the framework's
+        org.moqui.admin.DataTransferServices (the target channelOrders, data/StoreChannelSetupData.xml) -->
+    <service verb="find" noun="ChannelImportRuns" allow-remote="false">
+        <description>The channel import batches of the stores the caller operates (COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE
+            and the store scope, as get#ChannelImport), newest first, as summaries: the file's name and store, the
+            store's organization, staged, committing or committed, how many orders a commit took, who committed it, and
+            the parameters that open the batch in ChannelImport. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findChannelImportRuns', context))</script></actions>
+    </service>
 </services>
