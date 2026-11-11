@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's organization and reporting lines (IronStone People design §4 OrgStructure and OrgChart, §16.2, PE-03; impl-people
+    P3; Organization.js): departments (OrgDepartment) and teams (OrgTeam) under their employer by dated PrtOrgRollup rows, a unit's
+    members and lead by dated PrtMember rows, and reporting lines by dated PrtManager rows from the manager to the report, each
+    line at the employers that employ both. Each service checks the caller's People scope (PeopleServices get#Scope's rules,
+    People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group.
+    Reads need a staff read of an employer; changes PEOPLE_HR_VIEW and PEOPLE_HR_EDIT. Rows are ended, never deleted. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Units" allow-remote="false">
+        <description>The organization as a tree, a level at a time, as of asOfDate (now when empty; a date alone is the end of
+            that day). Without parentPartyId, the top: the employers the caller reads whose parent they do not read; with it, its
+            children on the date (departments, teams, and internal organizations the caller reads, shown as legal organizations);
+            with term, every department and team under the employers whose name or id matches, ignoring case. Each row: name, kind
+            (organization, department or team), parent and since when, employer, lead, people (an organization's current
+            employees, a unit's current members), the children shown, whether the caller may change it and its revision.
+            organizationPartyId narrows the employers (ORGANIZATION_DENIED outside the scope); a parent outside it is refused as
+            a missing one (RECORD_UNAVAILABLE). Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="parentPartyId"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="units" type="List"><description>partyId, organizationName, unitKind, kindText, parentPartyId,
+                parentName, sinceText, employerPartyId, employerName, headPartyId, headName, peopleCount, childCount, canEdit,
+                revision</description></parameter>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="found" from="ec.resource.script(module).execute('findUnits', context)"/>
+            <set field="units" from="found.units"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Unit" allow-remote="false">
+        <description>One internal organization, department or team the caller reads, as of asOfDate: its row as find#Units gives
+            it, its parents (every dated rollup, newest first, with state and reason) and, for a department or team, its
+            memberships (every dated PrtMember row: person, member or lead, from, through, state and revision). Refuses one outside
+            the scope as a missing one (RECORD_UNAVAILABLE) and a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="unit" type="Map"/>
+            <parameter name="parents" type="List"/>
+            <parameter name="members" type="List"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="found" from="ec.resource.script(module).execute('getUnit', context)"/>
+            <set field="unit" from="found.unit"/>
+            <set field="parents" from="found.parents"/>
+            <set field="members" from="found.members"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Unit" allow-remote="false">
+        <description>A new department or team (unitKind) under a parent from fromDate (now when empty): an Organization with the
+            OrgDepartment or OrgTeam role, owned by its employer, and a dated PrtOrgRollup to the parent; or an existing unit's new
+            name, a move to another parent from fromDate (the rollup in effect ends then, a new one starts, both kept) and a new
+            lead (headPartyId, store#Membership's rules). changeReason is the ended row's audit and the new row's comment. Needs
+            PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: KIND_INVALID, NAME_REQUIRED, PARENT_REQUIRED; a parent
+            or unit outside the scope (RECORD_UNAVAILABLE); an internal organization, which is Admin's (NOT_A_UNIT); a department
+            under a team (PARENT_KIND); a move to another legal employer (EMPLOYER_CHANGE), under itself or a unit below it
+            (PARENT_CYCLE), on a date when the unit has no parent (DATE_STALE) or while a later move is set (PARENT_SCHEDULED);
+            an expectedRevision other than the unit's (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyId"><description>The unit to change; empty for a new one</description></parameter>
+            <parameter name="unitKind"><description>department or team, for a new unit</description></parameter>
+            <parameter name="organizationName"/>
+            <parameter name="parentPartyId"/>
+            <parameter name="headPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"><description>The unit's revision as find#Units or get#Unit read it, for a change</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="found" from="ec.resource.script(module).execute('storeUnit', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="revision" from="found.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Membership" allow-remote="false">
+        <description>A person joins a department or team (unitPartyId) as a member (from role Assignee) or its lead (Manager)
+            from fromDate (now when empty): a dated PrtMember row, never an employment; a member in the other role changes role
+            from the date, and a new lead's predecessor stays on as a member. With partyRelationshipId, that membership ends on
+            thruDate (now when empty). changeReason is the ended row's audit and the new row's comment. Needs PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT (PERMISSION_DENIED) and a unit in the scope (RECORD_UNAVAILABLE; NOT_A_UNIT for an internal
+            organization). Refuses: a person not employed by the unit's employer on the date (NOT_EMPLOYED), a membership in the
+            same role (ALREADY_MEMBER) or one starting later (MEMBERSHIP_SCHEDULED), ROLE_INVALID, PERSON_REQUIRED; for an end, a
+            membership not of the unit (RECORD_UNAVAILABLE), one already ended (MEMBERSHIP_ENDED), a date before it starts
+            (DATE_STALE) and an expectedRevision other than the row's (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="unitPartyId" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="memberRole" default-value="member"><description>member or lead</description></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="partyRelationshipId"><description>The membership to end</description></parameter>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="partyRelationshipId" from="ec.resource.script(module).execute('storeMembership', context).partyRelationshipId"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="ReportingTree" allow-remote="false">
+        <description>The reporting lines as a tree, a level at a time, as of asOfDate (now when empty): a node per current
+            employment by an employer the caller reads (organizationPartyId narrows them; ORGANIZATION_DENIED outside the scope),
+            placed under the manager of its line at that employer (a PrtManager from a manager the employer employs too). Without
+            a manager, the top: the employments with no manager at their employer (noManager), listed rather than lost; with
+            managerPartyId, that manager's reports; with parentNodeId (a node's id, organizationPartyId/partyId), that node's
+            reports; with partyId, that person's own nodes (RECORD_UNAVAILABLE when the employers do not employ them); with term,
+            the people whose name or id matches, ignoring case. Each node is the directory's public work identity (name, preferred
+            name, employer, job title, work email, phone and location), the manager and the count of direct reports; for an HR
+            editor also lineRevision (change#Manager's expectedRevision) and lineSinceText. Paged, or with pageNoLimit up to 2000.
+            Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="parentNodeId"/>
+            <parameter name="partyId"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="nodes" type="List"><description>nodeId, parentNodeId, partyId, personName, preferredName,
+                organizationPartyId, organizationName, jobTitle, managerPartyId, managerName, noManager, workEmail, workPhone,
+                workLocation, reportCount; for an HR editor lineRevision and lineSinceText</description></parameter>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="nodesCount" type="Integer"/>
+            <parameter name="nodesPageIndex" type="Integer"/>
+            <parameter name="nodesPageSize" type="Integer"/>
+            <parameter name="nodesPageMaxIndex" type="Integer"/>
+            <parameter name="nodesPageRangeLow" type="Integer"/>
+            <parameter name="nodesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="found" from="ec.resource.script(module).execute('reportingTree', context)"/>
+            <set field="nodes" from="found.nodes"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="nodesCount" from="found.nodesCount"/>
+            <set field="nodesPageIndex" from="found.nodesPageIndex"/>
+            <set field="nodesPageSize" from="found.nodesPageSize"/>
+            <set field="nodesPageMaxIndex" from="found.nodesPageMaxIndex"/>
+            <set field="nodesPageRangeLow" from="found.nodesPageRangeLow"/>
+            <set field="nodesPageRangeHigh" from="found.nodesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="change" noun="Manager" allow-remote="false">
+        <description>A dated reporting change at an employer: the person's line there ends on fromDate (now when empty) and,
+            with managerPartyId, a new one starts (PrtManager from the manager, role Manager, to the person, role Employee);
+            without it, the person has no manager there from the date. changeReason is the ended line's audit and the new line's
+            comment. organizationPartyId is the employer of the line, needed when two employers the caller reads employ the
+            person on the date. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: a person outside the scope
+            (RECORD_UNAVAILABLE) or not employed there on the date (NOT_EMPLOYED); ORGANIZATION_REQUIRED, PERSON_REQUIRED;
+            SELF_REPORTING; a manager the employer does not employ on the date (MANAGER_NOT_EMPLOYED); a manager below the person
+            at that employer (REPORTING_CYCLE); the manager they have (MANAGER_UNCHANGED); a line starting later
+            (MANAGER_SCHEDULED); a line ended or started that would also be a line at an employer the caller does not read, the
+            manager and the person both employed there (LINE_SHARED); an expectedRevision other than the line in effect
+            (REVISION_CHANGED; empty for no line).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"><description>get#ReportingTree's lineRevision; empty when the person has no
+                manager there</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="found" from="ec.resource.script(module).execute('changeManager', context)"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+        </actions>
+    </service>
+</services>

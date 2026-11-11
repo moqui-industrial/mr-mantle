@@ -14,6 +14,7 @@ const prefix = "PUR_REQUEST_SPEC"
 const org = prefix + "_ORG",
     otherOrg = prefix + "_OTHER_ORG",
     costCenter = prefix + "_CC",
+    department = prefix + "_DEPT",
     supplierA = prefix + "_SUP_A",
     supplierB = prefix + "_SUP_B",
     product = prefix + "_PRODUCT",
@@ -113,6 +114,16 @@ spec({
             toRoleTypeId: "OrgInternal",
             fromDate: since
         })
+        // a People department under the organization (OrgDepartment): a unit, never a cost centre (impl-people P3, F49)
+        organization(department, "Purchase Request Spec Department", "OrgDepartment")
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtOrgRollup",
+            fromPartyId: department,
+            fromRoleTypeId: "OrgDepartment",
+            toPartyId: org,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
         call("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {
             organizationPartyId: org,
             sourcePartyId: "DefaultSettings",
@@ -198,6 +209,12 @@ feature(
                 quantity: 1,
                 costCenterId: otherOrg
             })
+            const departmentCostCenter = run(state.requester, R + "store#PurchaseRequestItem", {
+                requestId,
+                productId: product,
+                quantity: 1,
+                costCenterId: department
+            })
             const otherEdit = run(state.otherRequester, R + "store#PurchaseRequestItem", {
                 requestId,
                 productId: product,
@@ -254,6 +271,7 @@ feature(
                 created,
                 line,
                 badCostCenter,
+                departmentCostCenter,
                 otherEdit,
                 outsiderRead,
                 submitted,
@@ -278,6 +296,7 @@ feature(
             r.created.error == ""
             r.line.error == ""
             r.badCostCenter.error.includes("COST_CENTER_INVALID")
+            r.departmentCostCenter.error.includes("COST_CENTER_INVALID")
             r.otherEdit.error.includes("PERMISSION_DENIED")
             r.outsiderRead.error.includes("RECORD_UNAVAILABLE")
             r.submitted.statusId == "ReqSubmitted"

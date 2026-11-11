@@ -127,14 +127,17 @@ function supplierCheck(organizationPartyId, supplierPartyId) {
     if (checked.result === "WARN") ec.message.addMessage(checked.message, "warning")
     return checked
 }
-// A cost centre of the organization: one of the organizations that roll up to it (PrtOrgRollup), as Accounting's choices.
+// A cost centre of the organization: one of the internal organizations that roll up to it (PrtOrgRollup), as Accounting's
+// choices and its ledger dimension rule (a department or team is People's unit, not a cost centre; impl-people P3, F49).
 function costCenterOf(organizationPartyId, costCenterId) {
     if (blank(costCenterId)) return null
-    const rollup = rows("mantle.party.PartyRelationship", {
-        fromPartyId: costCenterId,
-        toPartyId: organizationPartyId,
-        relationshipTypeEnumId: "PrtOrgRollup"
-    }).some(row => lib.active(row))
+    const rollup =
+        rows("mantle.party.PartyRelationship", {
+            fromPartyId: costCenterId,
+            toPartyId: organizationPartyId,
+            relationshipTypeEnumId: "PrtOrgRollup"
+        }).some(row => lib.active(row)) &&
+        rows("mantle.party.PartyRole", {partyId: costCenterId, roleTypeId: "OrgInternal"}).length > 0
     if (costCenterId !== organizationPartyId && !rollup)
         denied("COST_CENTER_INVALID", "Choose a cost centre of " + partyName(organizationPartyId))
     return String(costCenterId)

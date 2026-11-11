@@ -562,8 +562,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="PartyInternalOrgIds">
         <description>The internal organizations a party works in: the targets of its agent, employee and member
-            relationships that have the OrgInternal role, and their direct child organizations (PrtOrgRollup). Reads only,
-            so a read-fenced caller (an agent's Constitution provider) may use it.</description>
+            relationships that have the OrgInternal role, and their direct child organizations (PrtOrgRollup) that have it too:
+            a department or team (OrgDepartment, OrgTeam) is a unit of its employer, People's, never an organization of the
+            user's scope (impl-people P3, F49). Reads only, so a read-fenced caller (an agent's Constitution provider) may use
+            it.</description>
         <in-parameters><parameter name="partyId" required="true"/></in-parameters>
         <out-parameters><parameter name="userOrgIds" type="List"><parameter name="userOrgId"/></parameter></out-parameters>
         <actions>
@@ -592,9 +594,10 @@ along with this software (see the LICENSE.md file). If not, see
                     </entity-find>
                     <iterate list="childRelList" entry="childRel">
                         <if condition="!userOrgIds.includes(childRel.fromPartyId)">
-                            <entity-find-one entity-name="mantle.party.PartyDetail" value-field="childOrg" cache="true">
-                                <field-map field-name="partyId" from="childRel.fromPartyId"/></entity-find-one>
-                            <script>userOrgIds.push(childRel.fromPartyId)</script>
+                            <entity-find-one entity-name="mantle.party.PartyRole" value-field="childInternalRole" cache="true">
+                                <field-map field-name="partyId" from="childRel.fromPartyId"/><field-map field-name="roleTypeId" value="OrgInternal"/>
+                            </entity-find-one>
+                            <if condition="childInternalRole"><script>userOrgIds.push(childRel.fromPartyId)</script></if>
                         </if>
                     </iterate>
                 </if>

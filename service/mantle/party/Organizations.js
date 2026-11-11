@@ -102,6 +102,9 @@ function findInternalOrganizations(p) {
             )
         )
     const at = nowMs()
+    // a child organization is an internal one: a department or team rolling up to it is People's unit, not an organization
+    // (impl-people P3, F49)
+    const internalIds = new Set(rows("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).map(row => row.partyId))
     const rollups = rows(RELATIONSHIP, {relationshipTypeEnumId: ROLLUP}).filter(row => openAt(row, at))
     const parentOf = new Map(rollups.map(row => [row.fromPartyId, row.toPartyId]))
     const parentPartyId = text(p.parentPartyId)
@@ -116,7 +119,8 @@ function findInternalOrganizations(p) {
                 parentPartyId: parentId,
                 parentName: parentId ? organizationName(parentId) : "",
                 parentInScope: !!parentId && userScope.organizationIds.includes(parentId),
-                childCount: rollups.filter(rollup => rollup.toPartyId === row.partyId).length
+                childCount: rollups.filter(rollup => rollup.toPartyId === row.partyId && internalIds.has(rollup.fromPartyId))
+                    .length
             }
         })
     const limit = Math.max(1, Math.min(200, Number(p.pageSize || 50)))
@@ -151,7 +155,7 @@ function getInternalOrganization(p) {
         .sort((a, b) => (b.fromDate ?? 0) - (a.fromDate ?? 0))
     const current = parents.find(row => row.active) || null
     const children = rows(RELATIONSHIP, {toPartyId: partyId, relationshipTypeEnumId: ROLLUP})
-        .filter(row => openAt(row, at))
+        .filter(row => openAt(row, at) && isInternal(row.fromPartyId))
         .map(row => ({organizationPartyId: row.fromPartyId, organizationName: organizationName(row.fromPartyId)}))
     const memberRows = rows(RELATIONSHIP, {toPartyId: partyId}).filter(
         row =>

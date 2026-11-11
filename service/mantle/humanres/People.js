@@ -10,8 +10,9 @@
 //   Party is read with authorization off after these checks;
 // - a unit is an employer or an OrgDepartment or OrgTeam organization that rolls up to one (PrtOrgRollup, walked level by
 //   level here, not through filterOrgIds, which reaches one level only);
-// - a manager's reports are the people of their live PrtManager relationships (from the manager to the report), for a
-//   holder of PEOPLE_TEAM_VIEW;
+// - a manager's reports are the people of their live reporting lines (PrtManager from the manager to the report), for a
+//   holder of PEOPLE_TEAM_VIEW, each line at the employers that employ both of them (linesOf, P3): a team reader sees the
+//   report's employments there and not one at another employer;
 // - a supplied party is admitted as self (the caller's own party, with PEOPLE_SELF_SERVICE), team (a live report) or staff
 //   (an employment by an employer in scope, current on the date for a directory reader, any for an HR reader), and refused
 //   otherwise; a supplied party never widens self scope.
@@ -142,8 +143,69 @@ function employeeIdsOf(organizationPartyIds, asOf) {
     return Array.from(current(query, asOf).list()).map(row => row.fromPartyId)
 }
 
+// ===== reporting lines (P3; F50, F81, F86) =====
+// A reporting line is a live PrtManager relationship from the manager to the report (F50). The relationship names no employer,
+// so a line's employers are read from the employments on the date: the employers of the report that employ the manager too
+// (the line manages the report's employment there and no other); a manager employed by no one is a line at every employer of
+// the report (a line written before People, such as a project lead who is an agent). change#Manager writes a line only between
+// two employees of one employer. Two people both employed by the same two employers share one line at both: P6's assignments
+// carry the manager per employment.
+// The current employers of the people on the date: {partyId: [organizationPartyId]}, a person employed by no one absent.
+function employersOfParties(partyIds, asOf) {
+    const found = {}
+    if (!partyIds.length) return found
+    for (const row of Array.from(current(employmentFind().condition("fromPartyId", "in", partyIds), asOf).list()))
+        if (!(found[row.fromPartyId] || (found[row.fromPartyId] = [])).includes(row.toPartyId))
+            found[row.fromPartyId].push(row.toPartyId)
+    return found
+}
+// The lines live on the date of the reports or of the managers asked for, each with the employers it is a line at
+// (organizationPartyIds); a line at no employer (the report or the manager employed elsewhere only) is left out.
+function linesOf({reportPartyIds, managerPartyIds}, asOf) {
+    let query = find("mantle.party.PartyRelationship").condition("relationshipTypeEnumId", "PrtManager")
+    if (reportPartyIds) {
+        if (!reportPartyIds.length) return []
+        query = query.condition("toPartyId", "in", reportPartyIds)
+    }
+    if (managerPartyIds) {
+        if (!managerPartyIds.length) return []
+        query = query.condition("fromPartyId", "in", managerPartyIds)
+    }
+    const found = Array.from(current(query, asOf).orderBy("-fromDate").list())
+    if (!found.length) return []
+    const employed = employersOfParties(unique(found.flatMap(row => [row.fromPartyId, row.toPartyId])), asOf)
+    return found
+        .map(row => {
+            const reportEmployers = employed[row.toPartyId] || []
+            const managerEmployers = employed[row.fromPartyId]
+            return {
+                partyRelationshipId: row.partyRelationshipId,
+                managerPartyId: row.fromPartyId,
+                partyId: row.toPartyId,
+                organizationPartyIds: managerEmployers
+                    ? reportEmployers.filter(organizationPartyId => managerEmployers.includes(organizationPartyId))
+                    : reportEmployers,
+                fromDate: row.fromDate,
+                thruDate: row.thruDate,
+                lastUpdatedStamp: row.lastUpdatedStamp
+            }
+        })
+        .filter(line => line.organizationPartyIds.length)
+}
+// The managers of each employment of the people on the date: {"organizationPartyId/partyId": [managerPartyId]}, newest first.
+function managersByEmployment(partyIds, asOf) {
+    const found = {}
+    for (const line of linesOf({reportPartyIds: partyIds}, asOf))
+        for (const organizationPartyId of line.organizationPartyIds) {
+            const managers =
+                found[organizationPartyId + "/" + line.partyId] || (found[organizationPartyId + "/" + line.partyId] = [])
+            if (!managers.includes(line.managerPartyId)) managers.push(line.managerPartyId)
+        }
+    return found
+}
+
 // The scope of the current user (get#Scope without a party): their capabilities, the employers and units they read, their
-// own current employments and live reports.
+// own current employments and live reports (the people of their reporting lines, each with the employers the line is at).
 function scopeOf() {
     const caps = capabilities()
     const partyId = ec.user.userAccount?.partyId || null
@@ -152,27 +214,17 @@ function scopeOf() {
     const ownEmployments = partyId
         ? Array.from(current(employmentFind().condition("fromPartyId", partyId), null).list()).map(employmentOf)
         : []
-    const reportPartyIds =
-        partyId && caps.team
-            ? unique(
-                  Array.from(
-                      current(
-                          find("mantle.party.PartyRelationship")
-                              .condition("relationshipTypeEnumId", "PrtManager")
-                              .condition("fromPartyId", partyId),
-                          null
-                      )
-                          .selectField("toPartyId")
-                          .list()
-                  ).map(row => row.toPartyId)
-              )
-            : []
+    const reportLines = {}
+    if (partyId && caps.team)
+        for (const line of linesOf({managerPartyIds: [partyId]}, null))
+            reportLines[line.partyId] = unique((reportLines[line.partyId] || []).concat(line.organizationPartyIds))
     return Object.assign(employed, {
         capabilities: caps,
         partyId,
         unitPartyIds: unitsUnder(employed.organizationPartyIds),
         employments: ownEmployments,
-        reportPartyIds
+        reportPartyIds: Object.keys(reportLines),
+        reportLines
     })
 }
 function requireOrganization(userScope, organizationPartyId) {
@@ -190,8 +242,17 @@ function partyAccess(userScope, partyId, asOf) {
     }
     if (userScope.reportPartyIds.includes(partyId)) {
         kinds.push("team")
+        // the report's employments the caller's lines manage, not their employment at another employer (F86)
+        const lineEmployers = (userScope.reportLines || {})[partyId] || []
         employments = employments.concat(
-            Array.from(current(employmentFind().condition("fromPartyId", partyId), null).list()).map(employmentOf)
+            Array.from(
+                current(
+                    employmentFind()
+                        .condition("fromPartyId", partyId)
+                        .condition("toPartyId", "in", lineEmployers.length ? lineEmployers : ["_NA_"]),
+                    null
+                ).list()
+            ).map(employmentOf)
         )
     }
     if (caps.staff && userScope.organizationPartyIds.length) {
@@ -251,23 +312,21 @@ function organizationsFor(userScope, organizationPartyId) {
     return organizationPartyId ? [organizationPartyId] : userScope.organizationPartyIds
 }
 const employmentsOf = organizationPartyIds => employmentFind().condition("toPartyId", "in", organizationPartyIds)
-// The current employees of the organizations with no live manager (no current PrtManager relationship to them).
+// The current employments by the organizations with no live reporting line at their employer (linesOf), each {partyId,
+// organizationPartyId} once: a person managed at one employer and not at another is due at the other (F86).
 function withoutManager(organizationPartyIds, asOf) {
-    const employeeIds = employeeIdsOf(organizationPartyIds, asOf)
-    if (!employeeIds.length) return []
-    const managed = new Set(
-        Array.from(
-            current(
-                find("mantle.party.PartyRelationship")
-                    .condition("relationshipTypeEnumId", "PrtManager")
-                    .condition("toPartyId", "in", employeeIds),
-                asOf
-            )
-                .selectField("toPartyId")
-                .list()
-        ).map(row => row.toPartyId)
-    )
-    return employeeIds.filter(partyId => !managed.has(partyId))
+    const employments = Array.from(current(employmentsOf(organizationPartyIds), asOf).list())
+    if (!employments.length) return []
+    const managed = managersByEmployment(unique(employments.map(row => row.fromPartyId)), asOf)
+    const seen = new Set()
+    const found = []
+    for (const row of employments) {
+        const key = row.toPartyId + "/" + row.fromPartyId
+        if (seen.has(key) || managed[key]) continue
+        seen.add(key)
+        found.push({partyId: row.fromPartyId, organizationPartyId: row.toPartyId})
+    }
+    return found
 }
 function personNames(partyIds) {
     if (!partyIds.length) return {}
@@ -321,29 +380,21 @@ function home(p) {
     let dueWork = []
     let dueWorkCount = 0
     if (caps.hrView && organizationPartyIds.length) {
+        // an employment with no manager at its employer, so a person employed by two is due at the one that has none
         const unmanaged = withoutManager(organizationPartyIds, asOf)
         dueWorkCount = unmanaged.length
-        const names = personNames(unmanaged)
-        const employmentRows = Array.from(
-            current(
-                employmentsOf(organizationPartyIds).condition("fromPartyId", "in", unmanaged.length ? unmanaged : ["_NA_"]),
-                asOf
-            ).list()
-        )
-        const organizations = organizationNames(unique(employmentRows.map(row => row.toPartyId)))
+        const names = personNames(unique(unmanaged.map(row => row.partyId)))
+        const organizations = organizationNames(unique(unmanaged.map(row => row.organizationPartyId)))
         dueWork = unmanaged
-            .map(partyId => {
-                const organizationPartyId = employmentRows.find(row => row.fromPartyId === partyId)?.toPartyId || null
-                return {
-                    dueKind: "noManager",
-                    dueText: "No manager",
-                    partyId,
-                    personName: names[partyId] || partyId,
-                    organizationPartyId,
-                    organizationName: organizations[organizationPartyId] || ""
-                }
-            })
-            .sort((a, b) => a.personName.localeCompare(b.personName))
+            .map(row => ({
+                dueKind: "noManager",
+                dueText: "No manager",
+                partyId: row.partyId,
+                personName: names[row.partyId] || row.partyId,
+                organizationPartyId: row.organizationPartyId,
+                organizationName: organizations[row.organizationPartyId] || ""
+            }))
+            .sort((a, b) => a.personName.localeCompare(b.personName) || a.organizationName.localeCompare(b.organizationName))
             .slice(0, dueWorkLimit)
     }
     return {
@@ -437,7 +488,7 @@ function run(op, p) {
 }
 ;({
     execute: run,
-    // for the other People modules (Employees.js): the scope and its pieces, read once per call there
+    // for the other People modules (Employees.js, Organization.js): the scope and its pieces, read once per call there
     scopeOf,
     partyAccess,
     checkedAccess,
@@ -448,5 +499,9 @@ function run(op, p) {
     current,
     unique,
     personNames,
-    organizationNames
+    organizationNames,
+    employmentFind,
+    employersOfParties,
+    linesOf,
+    managersByEmployment
 })
