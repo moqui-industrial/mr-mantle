@@ -192,7 +192,7 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
         })
         const settled = call(O + "reconcile#MailOutcome", {
             emailMessageId: attempt.emailMessageId,
-            resolution: "sent",
+            resolution: "delivered",
             reason: "The provider's log shows it",
             expectedRevision: uncertain.revision
         })
@@ -234,8 +234,13 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
         r.uncertain.reconcileEligible === true
         r.again.reasonCode === "RECONCILE_REQUIRED"
         r.settled.applied === true
+        // the ledger's own record is the ledger's (resolve#Delivery); the stored message is never marked Sent by a person:
+        // it keeps what the transport left, with the settlement beside it
         r.delivery.stateEnumId === "MdsSent"
-        r.message.statusId === "ES_SENT"
+        r.settled.state === "settled"
+        r.message.statusId === "ES_READY"
+        r.message.sendOutcome === "uncertain"
+        r.message.sendSettlement === "delivered"
         r.forum.ownerKey === "forumDeliveries"
         r.forum.retryEligible === false
         r.forumRetried.reasonCode === "OWNER_RETRIES"
