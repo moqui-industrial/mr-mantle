@@ -22,10 +22,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="Scope" allow-remote="false">
         <description>The caller's People scope: capabilities from the People and payroll permissions (an edit permission alone
             reads nothing), the employers a staff reader sees (their own internal organizations, only the active one when it is
-            theirs; every one, or the active one, for a system administrator) and the units under them, their own party and
-            current employments, and a manager's live reports. With organizationPartyId, narrows to it and refuses one outside
-            the scope (ORGANIZATION_DENIED). With partyId, says how the scope admits that person (self, team or staff) and which
-            of their employments it shows (staff: an employment by an employer in scope, in effect on asOfDate for a directory
+            theirs; every one, or the active one, for a holder of PEOPLE_ALL_ORGANIZATIONS, which reads nothing by itself) and
+            the units under them, their own party and current employments, and a manager's live reports. With
+            organizationPartyId, narrows the employers, the units and a staff admission to it and refuses one outside the scope
+            (ORGANIZATION_DENIED). With partyId, says how the scope admits that person (self, team or staff) and which of their
+            employments it shows (staff: an employment by an employer in scope, in effect on asOfDate for a directory
             reader, any for an HR reader), and refuses a person it does not admit as it refuses a missing one
             (RECORD_UNAVAILABLE); a supplied party never widens self scope.</description>
         <in-parameters>

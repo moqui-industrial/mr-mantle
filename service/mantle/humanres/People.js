@@ -5,8 +5,8 @@
 // - capabilities come from the People permissions and the payroll ones (capabilityPermissions), never a group name; an edit
 //   permission alone reads nothing;
 // - a staff reader (staffReads) sees the employers among their own organizations (get#PartyOrganizationInfo's userOrgIds that
-//   hold OrgInternal), only the active one when it is theirs; a system administrator sees every internal organization, or the
-//   active one. PartyRelationship has no organization filter (MANTLE_USER_ORG_8 is off), so employment is checked here, and
+//   hold OrgInternal), only the active one when it is theirs; a holder of PEOPLE_ALL_ORGANIZATIONS (a system administrator too)
+//   sees every internal organization, or the active one, which widens the scope and reads nothing by itself. PartyRelationship has no organization filter (MANTLE_USER_ORG_8 is off), so employment is checked here, and
 //   Party is read with authorization off after these checks;
 // - a unit is an employer or an OrgDepartment or OrgTeam organization that rolls up to one (PrtOrgRollup, walked level by
 //   level here, not through filterOrgIds, which reaches one level only);
@@ -47,9 +47,12 @@ const capabilityPermissions = {
     configure: "PEOPLE_CONFIGURE",
     payrollView: "PAYROLL_VIEW",
     payrollEdit: "PAYROLL_EDIT",
-    payrollApprove: "PAYROLL_APPROVE"
+    payrollApprove: "PAYROLL_APPROVE",
+    // the scope of a staff read in every internal organization, as COMMERCE_ALL_ORGANIZATIONS and FACILITY_ALL_ORGANIZATIONS
+    allOrganizations: "PEOPLE_ALL_ORGANIZATIONS"
 }
-// The capabilities that read across an employer. An edit, import or approve permission alone reads nothing.
+// The capabilities that read across an employer. An edit, import or approve permission alone reads nothing, nor does
+// PEOPLE_ALL_ORGANIZATIONS, which only widens a read's employers.
 const staffReads = ["directory", "hrView", "recruitView", "developView", "caseHandle", "configure", "payrollView"]
 
 function capabilities() {
@@ -73,10 +76,11 @@ function partyIdsWithRole(partyIds, roleTypeIds) {
         .selectField("partyId")
     return unique(Array.from(query.list()).map(row => row.partyId))
 }
-// The employers a staff reader sees (null when the caller reads no employer), the active one and whether they are every one.
+// The employers a staff reader sees (none when the caller reads no employer), the active one and whether they are every one.
 function employers(caps, info) {
     if (!caps.staff) return {organizationPartyIds: [], activeOrganizationPartyId: null, allOrganizations: false}
-    if (access.systemAdmin()) {
+    // PEOPLE_ALL_ORGANIZATIONS (ADMIN holds every permission): every internal organization, or the active one
+    if (caps.allOrganizations) {
         const all = rows("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).map(row => row.partyId)
         const activeId = all.includes(info.activeOrgId) ? info.activeOrgId : null
         return {
@@ -121,6 +125,15 @@ const employmentOf = row => ({
 })
 function employmentFind() {
     return find("mantle.party.PartyRelationship").condition("relationshipTypeEnumId", "PrtEmployee").selectField(employmentFields)
+}
+// The people employed by the organizations on the date, each once (distinct in the query).
+function employeeIdsOf(organizationPartyIds, asOf) {
+    const query = find("mantle.party.PartyRelationship")
+        .condition("relationshipTypeEnumId", "PrtEmployee")
+        .condition("toPartyId", "in", organizationPartyIds)
+        .selectField("fromPartyId")
+        .distinct(true)
+    return Array.from(current(query, asOf).list()).map(row => row.fromPartyId)
 }
 
 // The scope of the current user (get#Scope without a party): their capabilities, the employers and units they read, their
@@ -192,14 +205,18 @@ function partyAccess(userScope, partyId, asOf) {
     return {kinds, employments: Array.from(byId.values())}
 }
 
-// get#Scope: the scope, narrowed to an organization asked for and with the access of a party asked for.
+// get#Scope: the scope, narrowed to an organization asked for (its employers, its units and a staff admission by its
+// employments) and with the access of a party asked for.
 function scope(p) {
     const userScope = scopeOf()
     requireOrganization(userScope, p.organizationPartyId)
     const out = Object.assign({}, userScope, {partyAccess: [], partyEmployments: []})
-    if (p.organizationPartyId) out.organizationPartyIds = [p.organizationPartyId]
+    if (p.organizationPartyId) {
+        out.organizationPartyIds = [p.organizationPartyId]
+        out.unitPartyIds = unitsUnder(out.organizationPartyIds)
+    }
     if (p.partyId) {
-        const admitted = partyAccess(userScope, p.partyId, asOfMillis(p.asOfDate))
+        const admitted = partyAccess(out, p.partyId, asOfMillis(p.asOfDate))
         out.partyAccess = admitted.kinds
         out.partyEmployments = admitted.employments.filter(
             row => !p.organizationPartyId || row.organizationPartyId === p.organizationPartyId
@@ -217,11 +234,7 @@ function organizationsFor(userScope, organizationPartyId) {
 const employmentsOf = organizationPartyIds => employmentFind().condition("toPartyId", "in", organizationPartyIds)
 // The current employees of the organizations with no live manager (no current PrtManager relationship to them).
 function withoutManager(organizationPartyIds, asOf) {
-    const employeeIds = unique(
-        Array.from(current(employmentsOf(organizationPartyIds), asOf).selectField("fromPartyId").list()).map(
-            row => row.fromPartyId
-        )
-    )
+    const employeeIds = employeeIdsOf(organizationPartyIds, asOf)
     if (!employeeIds.length) return []
     const managed = new Set(
         Array.from(
@@ -252,9 +265,8 @@ function organizationNames(partyIds) {
 const homeCounts = {
     headcount: {
         needs: "staff",
-        // count() counts rows whatever is selected, so the people's ids are read and told apart here
-        count: (organizationPartyIds, asOf) =>
-            unique(Array.from(current(employmentsOf(organizationPartyIds), asOf).list()).map(row => row.fromPartyId)).length
+        // count() counts rows whatever is selected, so the people's ids are read, distinct in the query
+        count: (organizationPartyIds, asOf) => employeeIdsOf(organizationPartyIds, asOf).length
     },
     employments: {
         needs: "staff",
@@ -364,7 +376,15 @@ function readiness(p) {
     const names = organizationNames(organizationPartyIds)
     const checks = []
     for (const organizationPartyId of organizationPartyIds) {
-        if (!current(employmentsOf([organizationPartyId]), asOf).count()) continue
+        // an organization whose employees cannot be counted is logged by name and the others go on
+        let employed
+        try {
+            employed = current(employmentsOf([organizationPartyId]), asOf).count() > 0
+        } catch (error) {
+            ec.logger.error("People readiness for " + organizationPartyId + " failed: " + error.message)
+            employed = true
+        }
+        if (!employed) continue
         for (const check of readinessChecks) {
             let found
             // one check that fails is shown unavailable, by name, and the others go on
