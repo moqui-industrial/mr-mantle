@@ -196,12 +196,27 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
             reason: "The provider's log shows it",
             expectedRevision: uncertain.revision
         })
+        // a forum notice (a stored message of a site's notice template) is the forum worker's, which tries it again itself
+        call("create#mantle.public.PublicSite", {siteId: "MDL_FORUM_SITE"})
+        call("create#mantle.forum.ForumMailSettings", {siteId: "MDL_FORUM_SITE", templateId: ids.sent})
+        call("create#moqui.basic.email.EmailMessage", {
+            emailMessageId: "MDL_FORUM_NOTICE",
+            statusId: "ES_READY",
+            emailTemplateId: ids.sent,
+            sendOutcome: "retryable",
+            sendError: "451 try again later"
+        })
+        const forum = outcome("MDL_FORUM_NOTICE")
+        const forumRetried = call(O + "retry#MailOutcome", {emailMessageId: "MDL_FORUM_NOTICE", expectedRevision: forum.revision})
+        call("delete#mantle.forum.ForumMailSettings", {siteId: "MDL_FORUM_SITE"})
         return {
             listed,
             retried,
             uncertain,
             again,
             settled,
+            forum,
+            forumRetried,
             sends: capture.count(),
             delivery: one("mantle.party.MessageDelivery", {deliveryId: waiting.deliveryId}),
             message: one("moqui.basic.email.EmailMessage", {emailMessageId: attempt.emailMessageId})
@@ -221,6 +236,9 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
         r.settled.applied === true
         r.delivery.stateEnumId === "MdsSent"
         r.message.statusId === "ES_SENT"
+        r.forum.ownerKey === "forumDeliveries"
+        r.forum.retryEligible === false
+        r.forumRetried.reasonCode === "OWNER_RETRIES"
         r.sends === 0
     }
 })

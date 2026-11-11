@@ -74,4 +74,14 @@
       <script>result = ec.resource.script('component://mr-mantle/service/mantle/forum/DeliveryWorker.js').execute('prepareDigest',{siteId:siteId,partyId:partyId})</script>
     </actions>
   </service>
+  <service verb="find" noun="MailOutcomeOwners" allow-remote="false">
+    <description>For the framework's mail queue (moqui.server.MailOutcomeOwner forumDeliveries; mr-boss impl-admin P12 R1):
+      which of the given EmailMessages are forum notices (a stored message of a site's ForumMailSettings template). The
+      delivery worker tries a failed notice again itself, so it offers no retry and no reconciliation here. No address or
+      content is returned.</description>
+    <implements service="org.moqui.admin.OperationServices.find#MailOutcomeOwners"/>
+    <actions>
+      <script>ownerList = ec.resource.script('component://mr-mantle/service/mantle/forum/DeliveryWorker.js').execute('mailOutcomeOwners',{emailMessageIdList:emailMessageIdList}).ownerList</script>
+    </actions>
+  </service>
 </services>
