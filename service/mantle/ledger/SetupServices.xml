@@ -1149,4 +1149,20 @@ along with this software (see the LICENSE.md file). If not, see
                     statusId:statusId})</script>
         </actions>
     </service>
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): the opening open items import's result contract for the framework's
+        org.moqui.admin.DataTransferServices (the target openingOpenItems, data/AccountingSetupData.xml) -->
+    <service verb="find" noun="OpenItemImportRuns" allow-remote="false">
+        <description>The last import of opening open items of each organization the caller administers in Accounting
+            (finance administration, as import#OpenItems): the setup run keeps the latest result only, so an
+            organization answers at most one run, with its counts and the parameter that opens Setup. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingActivation.js').execute('openItemImportRuns', context))</script></actions>
+    </service>
 </services>

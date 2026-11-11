@@ -786,4 +786,20 @@
         <out-parameters><parameter name="conflictRows" type="List"/></out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/CatalogImportAdapters.js').priceBatch(context))</script></actions>
     </service>
+    <!-- mr-boss impl-admin P15: the catalog import as a target of the framework's org.moqui.admin.DataTransferServices
+        (data/ProductImportData.xml): its five steps above are the import contract, and this answers its runs. -->
+    <service verb="find" noun="CatalogImportRuns" allow-remote="false">
+        <description>The catalog imports the caller may open (their own; every one for a system administrator), newest
+            first, as summaries: file and kind, owner organization, state, counts, who staged it and when. None without
+            catalog read authority.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/CatalogImport.js').execute('runs',context))</script></actions>
+    </service>
 </services>

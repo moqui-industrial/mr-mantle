@@ -174,7 +174,11 @@ feature("open items: a bad row is named and the rest kept; importing again makes
             rows: [{direction: "receivable", partyId: customer, documentNumber: "OLD-INV-1", documentDate: day(-40),
                 dueDate: day(-10), openAmount: "501"}]
         })
+        // the import as Admin's Imports lists it (find#OpenItemImportRuns, mr-boss impl-admin P15): the run keeps the latest
+        // result only, for finance administration
+        const listed = Array.from(setup("find#OpenItemImportRuns", {targetId: "openingOpenItems"}).runList).find(run => run.scopeKey === org)
         login(users.read)
+        const listedForReader = Array.from(setup("find#OpenItemImportRuns", {targetId: "openingOpenItems"}).runList)
         const denied = refused("import#OpenItems", {organizationPartyId: org, csvText})
         items = Object.fromEntries(first.rowResults.filter(row => row.invoiceId).map(row => [row.documentNumber, row.invoiceId]))
         const invoice = one("mantle.account.invoice.Invoice", {invoiceId: items["OLD-INV-1"]})
@@ -184,6 +188,8 @@ feature("open items: a bad row is named and the rest kept; importing again makes
             .one()
         return {
             checked,
+            listed,
+            listedForReader,
             madeBefore,
             first,
             again,
@@ -210,6 +216,8 @@ feature("open items: a bad row is named and the rest kept; importing again makes
         r.again.existingCount == 3
         r.again.rowResults.find(row => row.documentNumber == "OLD-INV-1").invoiceId == items["OLD-INV-1"]
         r.conflict.rowResults[0].reasonCode == "OPEN_ITEM_CONFLICT"
+        r.listed.state == "partial" && r.listed.errorCount == 1 && r.listed.ownerParameters.organizationPartyId == org
+        r.listedForReader.length == 0
         r.denied.includes("PERMISSION_DENIED")
         r.opened == 3
         r.invoice.statusId == "InvoiceFinalized"

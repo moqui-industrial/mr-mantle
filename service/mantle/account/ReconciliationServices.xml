@@ -1421,4 +1421,21 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="errorRows" from="applied.errorRows"/>
         </actions>
     </service>
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): the statement import's result contract for the framework's
+        org.moqui.admin.DataTransferServices (the target statementImports, data/AccountingSetupData.xml) -->
+    <service verb="find" noun="StatementImportRuns" allow-remote="false">
+        <description>The statement imports of the organizations the caller's accounting scope covers, for a caller who
+            may read a bank (bank reconciliation, accounting view or administration authority), newest first, as
+            summaries: the file's name, the organization, in review, committing or committed, the lines read, committed,
+            rejected and duplicate, who read it and when, and the parameters that open it in Banking. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/BankReconciliation.js').execute('statementImportRuns', context))</script></actions>
+    </service>
 </services>

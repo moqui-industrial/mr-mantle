@@ -346,44 +346,9 @@ function inviteUser(p) {
             }
         }
     }
-    const userScope = identityLib.scope()
-    const organizationPartyId = text(p.organizationPartyId)
-    if (!organizationPartyId || !isInternal(organizationPartyId) || !userScope.organizationIds.includes(organizationPartyId))
-        denied("RECORD_UNAVAILABLE", "Organization " + organizationPartyId + " is not available")
-    const relationshipTypeEnumId = text(p.relationshipTypeEnumId) || "PrtEmployee"
-    if (!staffRelationships.includes(relationshipTypeEnumId))
-        throw new Error("An invitation is for an employee, agent or member relationship")
-    const emailAddress = text(p.emailAddress).toLowerCase()
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailAddress)) throw new Error("Enter the address to invite")
-    const ids = Array.from(
-        new Set(
-            Array.from(p.bundleGroupIdList || [])
-                .map(text)
-                .filter(Boolean)
-        )
-    )
-    if (!ids.length) throw new Error("Choose the access the invitation proposes")
-    let partyId = text(p.partyId) || null
-    if (partyId) {
-        if (!one("mantle.party.Person", {partyId})) throw new Error("Party " + partyId + " is not a person")
-        const account = one(ACCOUNT, {partyId})
-        if (account && !sameAddress(account.emailAddress, emailAddress))
-            return refused("ADDRESS_MISMATCH", partyName(partyId) + "'s account has another address: invite that address")
-        const holder = accountOfAddress(emailAddress)
-        if (holder && holder.partyId !== partyId)
-            return refused("ADDRESS_IN_USE", "Another person's account has " + emailAddress + ": invite that person instead")
-    } else if (!text(p.firstName) && !text(p.lastName) && !accountOfAddress(emailAddress))
-        throw new Error("Give the person's name, or choose a person")
-    const pending = Array.from(
-        find(INVITATION).condition({organizationPartyId, statusId: "UinvPending"}).condition("emailAddress", emailAddress).list()
-    ).find(row => stateOf(row) === "pending")
-    if (pending) return refused("INVITATION_EXISTS", emailAddress + " already has a pending invitation: resend it")
-    const outside = identityRefusal(invitedParty(partyId, emailAddress), userScope.organizationIds, ec.user.hasPermission(GLOBAL))
-    if (outside) return outside
-    const blocked = invitationRefusal(ids)
-    if (blocked) return blocked
-    const proposal = callService("org.moqui.admin.AccessServices.check#GrantProposal", {bundleGroupIdList: ids})
-    if (!proposal.allowed) return refused(proposal.reasonCode, proposal.reason)
+    const proposed = invitationProposal(p)
+    if (proposed.refusal) return proposed.refusal
+    const {emailAddress, partyId, organizationPartyId, relationshipTypeEnumId, ids} = proposed
     const value = ec.entity.makeValue(INVITATION)
     value.setSequencedIdPrimary()
     value.setFields(
@@ -420,6 +385,191 @@ function inviteUser(p) {
             (sent.mailSent ? " by mail" : sent.linkPending ? ", the link to be shown" : ", mail failed")
     )
     return Object.assign({applied: true, reasonCode: null, reason: null, invitationId, state: "pending"}, sent)
+}
+// What invite#User checks before it writes, as the caller and changing nothing: the organization in the caller's scope, the
+// relationship, the address, the person, no pending invitation of the address there, the identity's other organizations and
+// the proposal (never a privileged group or a sealed-granting one; each bundle delegable by the caller). {refusal} for what a
+// person can act on, an Error for the rest, else what the invitation will hold. The import of invitations validates a row
+// with it, so a row's preview and its apply decide alike.
+function invitationProposal(p) {
+    requirePermission(MANAGE)
+    const userScope = identityLib.scope()
+    const organizationPartyId = text(p.organizationPartyId)
+    if (!organizationPartyId || !isInternal(organizationPartyId) || !userScope.organizationIds.includes(organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Organization " + organizationPartyId + " is not available")
+    const relationshipTypeEnumId = text(p.relationshipTypeEnumId) || "PrtEmployee"
+    if (!staffRelationships.includes(relationshipTypeEnumId))
+        throw new Error("An invitation is for an employee, agent or member relationship")
+    const emailAddress = text(p.emailAddress).toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailAddress)) throw new Error("Enter the address to invite")
+    const ids = Array.from(
+        new Set(
+            Array.from(p.bundleGroupIdList || [])
+                .map(text)
+                .filter(Boolean)
+        )
+    )
+    if (!ids.length) throw new Error("Choose the access the invitation proposes")
+    let partyId = text(p.partyId) || null
+    if (partyId) {
+        if (!one("mantle.party.Person", {partyId})) throw new Error("Party " + partyId + " is not a person")
+        const account = one(ACCOUNT, {partyId})
+        if (account && !sameAddress(account.emailAddress, emailAddress))
+            return {
+                refusal: refused("ADDRESS_MISMATCH", partyName(partyId) + "'s account has another address: invite that address")
+            }
+        const holder = accountOfAddress(emailAddress)
+        if (holder && holder.partyId !== partyId)
+            return {
+                refusal: refused(
+                    "ADDRESS_IN_USE",
+                    "Another person's account has " + emailAddress + ": invite that person instead"
+                )
+            }
+    } else if (!text(p.firstName) && !text(p.lastName) && !accountOfAddress(emailAddress))
+        throw new Error("Give the person's name, or choose a person")
+    const pending = Array.from(
+        find(INVITATION).condition({organizationPartyId, statusId: "UinvPending"}).condition("emailAddress", emailAddress).list()
+    ).find(row => stateOf(row) === "pending")
+    if (pending) return {refusal: refused("INVITATION_EXISTS", emailAddress + " already has a pending invitation: resend it")}
+    const outside = identityRefusal(invitedParty(partyId, emailAddress), userScope.organizationIds, ec.user.hasPermission(GLOBAL))
+    if (outside) return {refusal: outside}
+    const blocked = invitationRefusal(ids)
+    if (blocked) return {refusal: blocked}
+    const proposal = callService("org.moqui.admin.AccessServices.check#GrantProposal", {bundleGroupIdList: ids})
+    if (!proposal.allowed) return {refusal: refused(proposal.reasonCode, proposal.reason)}
+    return {emailAddress, partyId, organizationPartyId, relationshipTypeEnumId, ids}
+}
+
+// ===== the import of staff invitations (mr-boss impl-admin P15; design-admin §4 Invitations' bulk invite, §11.1) =====
+// The row services of the import target staffInvitations (the framework's moqui.server.TransferTarget, seeded in
+// data/PartyInvitationData.xml), called by org.moqui.admin.DataTransferServices for each row of a staged file, as the
+// importer. A row is an address, an optional existing person, a display name, and the access as registered bundles; the batch
+// is for one organization (its scope), and its expiry, relationship and note are the batch's options. A row is validated by
+// what invite#User checks (invitationProposal) and applied by invite#User itself, under the row's operation key, so a bulk
+// invitation is the single one made many times: the same authority, scope and proposal rules, never a password, a factor, a
+// token, a group that is not a registered bundle, or another organization.
+const rowText = value => String(value ?? "").trim()
+function invitationRow(p) {
+    const values = p.rowValues?.getMap ? p.rowValues.getMap() : Object.assign({}, p.rowValues || {})
+    const options = p.batchOptions?.getMap ? p.batchOptions.getMap() : Object.assign({}, p.batchOptions || {})
+    const fixed = p.fixedValues?.getMap ? p.fixedValues.getMap() : Object.assign({}, p.fixedValues || {})
+    const organizationPartyId = rowText(p.scopeKey)
+    if (!organizationPartyId) throw new Error("Choose the organization the invitations are for")
+    const rowOrganization = rowText(values.organizationPartyId)
+    if (rowOrganization && rowOrganization !== organizationPartyId)
+        throw new Error(
+            "This import is for " + partyName(organizationPartyId) + ": import another organization's invitations apart"
+        )
+    const displayName = rowText(values.displayName)
+    if (
+        displayName.length > 100 ||
+        /[\u0000-\u001f\u007f]/.test(displayName) ||
+        displayName.includes("${") ||
+        /[<>]/.test(displayName)
+    )
+        throw new Error("A name is at most 100 characters of plain text")
+    const cut = displayName.lastIndexOf(" ")
+    const split = value =>
+        rowText(value)
+            .split(/[;|,\s]+/)
+            .map(rowText)
+            .filter(Boolean)
+    // the bundles the registration always includes (an app's own root group) come first; the row's follow
+    const ids = Array.from(new Set(split(fixed.alwaysBundleGroupIds).concat(split(values.bundleGroupIds))))
+    if (ids.some(id => !/^[A-Za-z0-9_]{1,40}$/.test(id))) throw new Error("Name the access by its bundles' ids")
+    if (ids.length > 20) throw new Error("At most 20 bundles for one invitation")
+    return {
+        emailAddress: rowText(values.emailAddress).toLowerCase(),
+        partyId: rowText(values.partyId) || null,
+        firstName: (cut > 0 ? displayName.slice(0, cut) : displayName).trim() || null,
+        lastName: (cut > 0 ? displayName.slice(cut + 1) : "").trim() || null,
+        displayName,
+        organizationPartyId,
+        relationshipTypeEnumId: rowText(options.relationshipTypeEnumId) || "PrtEmployee",
+        bundleGroupIdList: ids,
+        rowBundleIds: split(values.bundleGroupIds),
+        expireDays: rowText(options.expireDays) ? Number(options.expireDays) : null,
+        message: rowText(options.message) || null
+    }
+}
+const plainReason = error => String(error?.message ?? error).replace(/^[A-Z_]+: /, "")
+function validateInvitationImportRow(p) {
+    requirePermission(MANAGE)
+    let row
+    try {
+        row = invitationRow(p)
+        // at an apply: the invitation this row's own key already made (an apply that stopped before its result was kept) is
+        // not a pending invitation in the row's way; invite#User answers it under the key
+        const made = rowText(p.operationKey) ? one(INVITATION, {operationKey: rowText(p.operationKey)}) : null
+        const proposed = made && made.inviterUserId === ec.user.userId ? {} : invitationProposal(row)
+        if (proposed.refusal) return {valid: false, errors: [proposed.refusal.reason], normalizedValues: {}}
+    } catch (error) {
+        ec.message.clearErrors()
+        return {valid: false, errors: [plainReason(error)], normalizedValues: {}}
+    }
+    return {
+        valid: true,
+        errors: [],
+        warnings: accountOfAddress(row.emailAddress) ? ["The address has an account: its owner signs in to accept"] : [],
+        normalizedValues: {
+            emailAddress: row.emailAddress,
+            partyId: row.partyId,
+            displayName: row.displayName || null,
+            organizationPartyId: row.organizationPartyId,
+            bundleGroupIds: row.rowBundleIds.join(";")
+        },
+        displayText:
+            row.emailAddress +
+            ": " +
+            bundleSummary(row.bundleGroupIdList)
+                .map(bundle => bundle.description || bundle.userGroupId)
+                .join(", ")
+    }
+}
+function applyInvitationImportRow(p) {
+    requirePermission(MANAGE)
+    const row = invitationRow(p)
+    let baseUrl = null
+    try {
+        baseUrl = ec.web.getWebappRootUrl() || null
+    } catch (error) {
+        baseUrl = null
+    }
+    const invited = callService("mantle.party.IdentityServices.invite#User", {
+        emailAddress: row.emailAddress,
+        partyId: row.partyId,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        organizationPartyId: row.organizationPartyId,
+        relationshipTypeEnumId: row.relationshipTypeEnumId,
+        bundleGroupIdList: row.bundleGroupIdList,
+        expireDays: row.expireDays,
+        message: row.message,
+        operationKey: rowText(p.operationKey),
+        baseUrl
+    })
+    if (!invited.applied) return {applied: false, reasonCode: invited.reasonCode, reason: invited.reason, resultRef: null}
+    return {
+        applied: true,
+        resultRef: invited.invitationId,
+        resultText: invited.mailSent
+            ? "Invitation sent"
+            : invited.retried
+              ? "Invitation already made"
+              : "Invitation made; its email was not sent: resend it from Invitations"
+    }
+}
+// The organizations the caller may import invitations into and read the imports of: those they administer.
+function findInvitationImportScopes() {
+    if (!ec.user.userId || (!access.has(MANAGE) && !access.has(VIEW))) return {scopeList: []}
+    return {
+        scopeList: identityLib
+            .scope()
+            .organizationIds.filter(isInternal)
+            .map(partyId => ({scopeKey: partyId, title: partyName(partyId)}))
+            .sort((a, b) => a.title.localeCompare(b.title))
+    }
 }
 
 // ===== find#Invitations =====
@@ -811,6 +961,9 @@ function confirmInvitationFactor(p) {
 
 const operations = {
     inviteUser,
+    validateInvitationImportRow,
+    applyInvitationImportRow,
+    findInvitationImportScopes,
     findInvitations,
     resendInvitation,
     revokeInvitation,

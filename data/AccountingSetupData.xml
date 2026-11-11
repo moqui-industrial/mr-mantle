@@ -24,4 +24,22 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="AttOpeningBalance" enumTypeId="AcctgTransType" description="Opening balance"/>
     <!-- the account opening items and balances post against, which nets to zero once accounting is activated -->
     <moqui.basic.Enumeration enumId="GatMigrationClearing" enumTypeId="GlAccountType" description="Migration clearing"/>
+
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): Accounting's two imports as registered targets of the framework's
+        org.moqui.admin.DataTransferServices. Each keeps its owner wizard (bank statement formats and their review; the
+        cutover's opening items), so only its result contract is registered: the service that answers, for the caller and
+        by Accounting's own authority and organization scope, the runs to list with the place that opens each. Nothing is
+        staged or applied through the registration, and it adds no right. -->
+    <moqui.server.TransferTarget targetId="statementImports" direction="import" targetMode="wizard" title="Bank statements"
+            description="Statement files of a bank account (BAI2, OFX, CSV), reviewed and committed in Accounting's Banking"
+            effectsNote="Committed lines become bank lines of the account, to reconcile; nothing is posted by the import."
+            ownerApp="Accounting" targetVersion="1" scopeLabel="Organization"
+            findService="mantle.account.ReconciliationServices.find#StatementImportRuns"
+            ownerRoute="accountingStatementImport" sequenceNum="40"/>
+    <moqui.server.TransferTarget targetId="openingOpenItems" direction="import" targetMode="wizard" title="Opening open items"
+            description="The open customer invoices and supplier bills at an organization's cutover, a step of Accounting's setup"
+            effectsNote="Each row becomes an open invoice or bill dated before the opening date; the setup run keeps the latest import's result."
+            ownerApp="Accounting" targetVersion="1" scopeLabel="Organization"
+            findService="mantle.ledger.SetupServices.find#OpenItemImportRuns"
+            ownerRoute="accountingOpenItems" sequenceNum="41"/>
 </entity-facade-xml>

@@ -574,7 +574,63 @@ function allowed(p) {
         return {recordVisible: false}
     }
 }
+// The imports the caller may open (the framework's DataTransferServices.find#TargetRuns, for its list of every target's
+// runs): their own, or every one for a system administrator, as get#CatalogImport reads one; none without catalog read
+// authority. Summaries only.
+function runs(p) {
+    let s
+    try {
+        s = policy().scope({})
+    } catch (e) {
+        return {runList: []}
+    }
+    let query = find(J, {operationType: "import"})
+    if (!s.systemAdmin) query = query.condition("submittedByUserId", ec.user.userId)
+    if (p.scopeKey) query = query.condition("ownerPartyId", p.scopeKey)
+    if (p.fromDate != null) query = query.condition("submittedDate", "greater-equals", String(Number(p.fromDate)))
+    if (p.thruDate != null) query = query.condition("submittedDate", "less", String(Number(p.thruDate)))
+    const stateText = {
+        staged: "Staged",
+        mapped: "Mapped",
+        validated: "Validated",
+        complete: "Complete",
+        partial: "Partly applied"
+    }
+    return {
+        runList: Array.from(
+            query
+                .orderBy("-submittedDate")
+                .limit(Math.min(Number(p.maxRows) || 100, 200))
+                .list()
+        ).map(row => {
+            let request = {}
+            try {
+                request = JSON.parse(row.requestJson || "{}")
+            } catch (e) {
+                request = {}
+            }
+            const all = rows(I, {operationKey: row.operationKey})
+            const account = one("moqui.security.UserAccount", {userId: row.submittedByUserId})
+            const organization = one("mantle.party.Organization", {partyId: row.ownerPartyId})
+            return {
+                runId: row.operationKey,
+                fileLabel: [request.filename, one(K, {kindId: request.kindId})?.description].filter(Boolean).join(" · "),
+                scopeKey: row.ownerPartyId,
+                scopeTitle: organization?.organizationName || row.ownerPartyId,
+                state: Object.prototype.hasOwnProperty.call(stateText, row.state) ? row.state : "staged",
+                stateText: stateText[row.state] || null,
+                startedDate: policy().ms(row.submittedDate),
+                userName: account?.userFullName || account?.username || null,
+                rowCount: all.length,
+                appliedCount: all.filter(r => r.result === "applied").length,
+                errorCount: all.filter(r => ["invalid", "failed", "stale"].includes(r.result)).length,
+                skippedCount: 0,
+                ownerParameters: {operationKey: row.operationKey}
+            }
+        })
+    }
+}
 function execute(op, p) {
-    return {kinds, stage, configure, validate, applyItem, failedItem, apply, get, report, sample, allowed}[op](p)
+    return {kinds, stage, configure, validate, applyItem, failedItem, apply, get, report, sample, allowed, runs}[op](p)
 }
 ;({execute, kind, normalize, numeric, dateValue})
