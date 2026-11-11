@@ -15,8 +15,9 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- People's guarded entry over the HR records (IronStone People design §1.1, §16.2 PeopleServices; People.js): the caller's
     scope, which every People service checks first and then reads and writes with authorization off, Home's counts and the setup
     readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
-    to ADMIN) and names no application group. Later services of the family (the directory, Employee360, hire and employment
-    change) join this file. -->
+    to ADMIN) and names no application group. P2 adds the employee record over Employees.js: the directory, Employee360's
+    regions, the employment history, the personal information correction and the employment content host. Later services of
+    the family (hire and employment change) join this file. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="Scope" allow-remote="false">
@@ -117,6 +118,211 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
             <set field="found" from="ec.resource.script(module).execute('readiness', context)"/>
             <set field="checks" from="found.checks"/>
+        </actions>
+    </service>
+    <!-- ===== P2: the employee record (design §4 Employees and Employee360, §13, §15; Employees.js) ===== -->
+    <service verb="find" noun="Employees" allow-remote="false">
+        <description>The employee directory (design §4 Employees, §15): one row per employment the caller's scope reaches as of
+            asOfDate (now when empty; a date alone is the end of that day): an employment by an employer a staff reader sees, a
+            live report's and, with PEOPLE_SELF_SERVICE, the caller's own. Each row is the public work identity (name, preferred
+            name, employer, job title, manager, work email, phone and location, the state); an HR reader (PEOPLE_HR_VIEW) gets the
+            employment's id and dates too, and with includeEnded the ended employments. Never a private contact, identification
+            or pay. Searched by term (name, preferred name or id) in the query ignoring case; filtered by employer (refused outside
+            the scope, ORGANIZATION_DENIED) and manager; paged, or with pageNoLimit (an export) every row up to 2000. Refuses a
+            caller the scope reaches no one for (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employees" type="List"><description>partyId, personName, preferredName, organizationPartyId,
+                organizationName, jobTitle, managerPartyId, managerName, workEmail, workPhone, workLocation, state, stateText;
+                for an HR reader partyRelationshipId, fromDate, thruDate, fromDateText, thruDateText, terminationReason</description></parameter>
+            <parameter name="hrColumns" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="employeesCount" type="Integer"/>
+            <parameter name="employeesPageIndex" type="Integer"/>
+            <parameter name="employeesPageSize" type="Integer"/>
+            <parameter name="employeesPageMaxIndex" type="Integer"/>
+            <parameter name="employeesPageRangeLow" type="Integer"/>
+            <parameter name="employeesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('findEmployees', context)"/>
+            <set field="employees" from="found.employees"/>
+            <set field="hrColumns" from="found.hrColumns"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="employeesCount" from="found.employeesCount"/>
+            <set field="employeesPageIndex" from="found.employeesPageIndex"/>
+            <set field="employeesPageSize" from="found.employeesPageSize"/>
+            <set field="employeesPageMaxIndex" from="found.employeesPageMaxIndex"/>
+            <set field="employeesPageRangeLow" from="found.employeesPageRangeLow"/>
+            <set field="employeesPageRangeHigh" from="found.employeesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Employee360" allow-remote="false">
+        <description>A person's record as the caller may read it (design §4 Employee360): the regions their access admits, each
+            one they may not read absent from the answer. Overview (any reader the scope admits): the public work identity and
+            the employments the scope shows of the person (an HR reader's with their dates). EmploymentHistory and PersonalInfo
+            (the person, and an HR reader of an employer of theirs): personalInfo holds the private contacts, birth date, gender
+            and the revision store#PersonalInfo checks, and for HR the identifications other than tax ones, values masked.
+            FilesAndActivity (an HR reader of the employer of the employment opened): hostEmploymentId, the employment content
+            host. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
+            one, then the newest. A person outside the scope is refused as a missing one (RECORD_UNAVAILABLE). Never pay, review,
+            case or leave data.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="access" type="List"><description>self, team and staff, as get#Scope admits the person</description></parameter>
+            <parameter name="regions" type="List"><description>overview, and employmentHistory, personalInfo and
+                filesAndActivity as admitted</description></parameter>
+            <parameter name="overview" type="Map"/>
+            <parameter name="personalInfo" type="Map"/>
+            <parameter name="partyRelationshipId"><description>The employment opened, for the person and HR; null for a directory
+                or team reader</description></parameter>
+            <parameter name="hostEmploymentId"/>
+            <parameter name="capabilities" type="Map"><description>editPersonal, editHr, selfFields (the fields the caller may
+                change), files</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('employee360', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="access" from="found.access"/>
+            <set field="regions" from="found.regions"/>
+            <set field="overview" from="found.overview"/>
+            <set field="personalInfo" from="found.personalInfo || null"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="hostEmploymentId" from="found.hostEmploymentId"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="EmploymentHistory" allow-remote="false">
+        <description>A person's employments, newest first, with employer, job title, dates, state and termination reason
+            (design §4 EmploymentHistory; P6 adds the dated assignments): an HR reader's of the employers in their scope, any
+            dates; the person's own, all of them. Refuses anyone else (PERMISSION_DENIED) and a person outside the scope
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters><parameter name="history" type="List"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="history" from="ec.resource.script(module).execute('employmentHistory', context).history"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PersonalInfo" allow-remote="false">
+        <description>Correct a person's private data (design §4 PersonalInfo). The person themselves (PEOPLE_SELF_SERVICE) may
+            change their preferred name and home and mobile phones; an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer
+            of theirs these and the legal names, birth date, gender and home address. A field left out is unchanged, an empty
+            one is cleared (a legal name cannot be, NAME_REQUIRED). Tax and bank fields are not taken here: they are reviewed
+            payroll setup. Refuses a person outside the scope (RECORD_UNAVAILABLE), a caller who may change nothing of the person
+            (PERMISSION_DENIED), a field the caller may not change (FIELD_NOT_PERMITTED) and an expectedRevision other than the
+            current one (REVISION_CHANGED, naming it). Contacts change by date: the one in effect ends and a new one
+            starts.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="expectedRevision" required="true"><description>personalInfo.revision of get#Employee360</description></parameter>
+            <parameter name="preferredName"/>
+            <parameter name="homePhone"/>
+            <parameter name="mobilePhone"/>
+            <parameter name="firstName"/>
+            <parameter name="middleName"/>
+            <parameter name="lastName"/>
+            <parameter name="suffix"/>
+            <parameter name="birthDate"/>
+            <parameter name="gender"/>
+            <parameter name="address1"/>
+            <parameter name="address2"/>
+            <parameter name="city"/>
+            <parameter name="postalCode"/>
+            <parameter name="stateProvinceGeoId"/>
+            <parameter name="countryGeoId"/>
+        </in-parameters>
+        <out-parameters><parameter name="revision"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="revision" from="ec.resource.script(module).execute('storePersonalInfo', context).revision"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="EmploymentAccess" allow-remote="false">
+        <description>Whether the caller reads an employment's files and activity, the employment content host (PE-01): an HR
+            reader (PEOPLE_HR_VIEW) of its employer in their scope; canEdit with PEOPLE_HR_EDIT. Never refuses: a relationship that
+            is not an employment, or not the caller's to read, answers recordVisible false, and so does a call with no user.
+            get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="partyRelationshipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('employmentAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="EmploymentContent">
+        <description>A file of an employment (EmploymentContent, the record files of get#RecordLinkInfo): the row, and the
+            uploaded file saved through save#EmploymentContentFile. Needs an HR editor of the employer (check#EmploymentAccess:
+            RECORD_UNAVAILABLE outside the scope, PERMISSION_DENIED without PEOPLE_HR_EDIT).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.employment.EmploymentContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="employmentContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.employment.EmploymentContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.PeopleServices.save#EmploymentContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="EmploymentContentFile" allow-remote="false">
+        <description>Internal to create#EmploymentContent, which checks the caller: the file of an EmploymentContent row of that
+            employment.</description>
+        <in-parameters>
+            <parameter name="employmentContentId" required="true"/>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.employment.EmploymentContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.partyRelationshipId != partyRelationshipId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${employmentContentId} is not of employment ${partyRelationshipId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/employment/${partyRelationshipId}/content_${employmentContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.employment.EmploymentContent" disable-authz="true"
+                    in-map="{employmentContentId:employmentContentId, contentLocation:contentLocation}"/>
         </actions>
     </service>
 </services>

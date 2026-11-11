@@ -63,7 +63,13 @@ function capabilities() {
 }
 
 // ===== scope =====
-const asOfMillis = value => ec.user.timestampMillis(value || ec.user.nowTimestamp)
+// An as-of time in milliseconds, now when empty. A date-only as-of (midnight in the user's zone, as a date field gives it) is
+// the end of that day, so an employment that begins or ends that day is current or ended on it (impl-people P2, F76).
+function asOfMillis(value) {
+    const millis = ec.user.timestampMillis(value || ec.user.nowTimestamp)
+    if (!value) return millis
+    return ec.l10n.format(new Date(millis), "HH:mm:ss.SSS") === "00:00:00.000" ? millis + day - 1 : millis
+}
 // a time for a find condition: a Date, which crosses as a timestamp (a number of milliseconds does not)
 const stamp = millis => (millis == null ? null : new Date(Number(millis)))
 const current = (query, asOf) => query.conditionDate("fromDate", "thruDate", stamp(asOf))
@@ -416,4 +422,17 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown People operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({
+    execute: run,
+    // for the other People modules (Employees.js): the scope and its pieces, read once per call there
+    scopeOf,
+    partyAccess,
+    requireOrganization,
+    capabilities,
+    asOfMillis,
+    stamp,
+    current,
+    unique,
+    personNames,
+    organizationNames
+})
