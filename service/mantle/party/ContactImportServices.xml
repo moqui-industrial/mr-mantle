@@ -471,7 +471,10 @@ along with this software (see the LICENSE.md file). If not, see
             The parties of a contact book (needs view permission; a group of it, or its favorites, with contactBookGroupId
             or favoritesOnly) or of partyIdList, those the user may see, as CSV in the Google Contacts column set (format
             csv, the default) or as vCard 4.0 (format vcard): the framework's VCard tool writes the cards when it is there
-            (its write(contacts, version), with the maps this service builds), else a writer here does.
+            (its write(contacts, version), with the maps this service builds), else a writer here does. With fieldList
+            only the groups of fields it names are written beside each contact's name (organization, emails, phones,
+            addresses, websites, birthday, notes, groups): an export through a registration that names its fields
+            (export#ContactBookTransfer). Without it every field is written, as before.
         </description>
         <in-parameters>
             <parameter name="contactBookId"/>
@@ -480,6 +483,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
             <parameter name="format" default-value="csv"><description>csv or vcard</description></parameter>
             <parameter name="vcardVersion" default-value="4.0"><description>4.0, or 3.0 (what phones read best; the CardDAV adapter's)</description></parameter>
+            <parameter name="fieldList" type="List"><parameter name="fieldName"/></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="fileText" allow-html="any"><description>The file's text, parsed by the framework tool, never shown as HTML; real vCard and ICS files hold &lt; (Apple labels, HTML descriptions)</description></parameter>
@@ -568,6 +572,17 @@ along with this software (see the LICENSE.md file). If not, see
                     birthDate: dayOf(party.birthDate), comments: party.comments ?? null,
                     name: ec.resource.expand('PartyFullNameTemplate', '', party).trim(), emails: emails, phones: phones,
                     addresses: addresses, websites: websites, groupNames: groupsByParty.get(id) || [], isFavorite: favorites.has(id)})
+            }
+            // with a list of field groups, only those are written beside the name (an organization's name is its name)
+            if (fieldList != null) {
+                const wanted = new Set(Array.from(fieldList).map((name) => String(name)))
+                for (const contact of contacts) {
+                    if (!wanted.has('organization') && !contact.isOrganization) { contact.organizationName = null; contact.jobTitle = null }
+                    for (const list of ['emails', 'phones', 'addresses', 'websites']) if (!wanted.has(list)) contact[list] = []
+                    if (!wanted.has('birthday')) contact.birthDate = null
+                    if (!wanted.has('notes')) contact.comments = null
+                    if (!wanted.has('groups')) { contact.groupNames = []; contact.isFavorite = false }
+                }
             }
             exportedCount = contacts.length
             const baseName = String(bookName).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'contacts'
@@ -676,6 +691,55 @@ along with this software (see the LICENSE.md file). If not, see
                 cards.push(lines.map(fold).join('\r\n'))
             }
             fileText = cards.length ? cards.join('\r\n') + '\r\n' : ''
+        ]]></script></actions>
+    </service>
+    <!-- ========== The export target of contact books (org.moqui.admin.DataTransferServices; mr-boss impl-admin P16) ========== -->
+    <!-- The services of the export target contactBookVCard (data/PartyContactExportData.xml), called by the framework's
+        dispatch as the exporter, whatever grant the call runs under: each checks the caller's own permission on the book
+        (check#ContactBookAccess: the owner of a personal book, or a share of a shared one), and a contact another user
+        owns privately is never written. -->
+    <service verb="find" noun="ContactExportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The contact books the caller may export: their own personal books and the shared books shared with
+            them or one of their groups (get#UserContactBooks), by name.</description>
+        <actions><script><![CDATA[
+            scopeList = []
+            if (!ec.user.userId) return
+            const books = ec.service.sync().name('mantle.party.ContactBookServices.get#UserContactBooks').call()?.contactBookList || []
+            if (ec.message.hasError()) return
+            for (const book of books) scopeList.push({scopeKey: book.contactBookId,
+                title: (book.contactBookName || book.contactBookId) + (book.visibilityEnumId === 'CbvShared' ? ' (shared)' : ' (personal)')})
+        ]]></script></actions>
+    </service>
+    <service verb="export" noun="ContactBookTransfer" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.run#TargetExport"/>
+        <description>A contact book the caller may view (scopeKey: its id; needs view permission on the book), or its
+            favorites (selection.favoritesOnly Y), as vCard 4.0 with the field groups asked for (fieldList), through
+            export#Contacts: the contacts the caller may see, none another user owns privately. rowCount is the book's
+            contacts the caller may see; with countOnly, or past maxRows, the count alone.</description>
+        <actions><script><![CDATA[
+            rowCount = 0
+            if (!ec.user.userId) { ec.message.addError('An export needs a user'); return }
+            if (!scopeKey) { ec.message.addError('Choose a contact book'); return }
+            // the caller's own permission on the book, whatever grant this call runs under
+            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess')
+                    .parameters({contactBookId: scopeKey, permissionEnumId: 'CbpView'}).call()
+            if (ec.message.hasError()) return
+            const favoritesOnly = (selection?.favoritesOnly ?? 'N') === 'Y'
+            const found = ec.service.sync().name('mantle.party.ContactBookServices.find#ContactBookParties')
+                    .parameters({contactBookId: scopeKey, favoritesOnly: favoritesOnly, pageSize: 1}).call()
+            if (ec.message.hasError()) return
+            rowCount = Number(found?.contactListCount || 0)
+            if (countOnly === true || (maxRows != null && rowCount > Number(maxRows))) return
+            const known = ['organization', 'emails', 'phones', 'addresses', 'websites', 'birthday', 'notes', 'groups']
+            const out = ec.service.sync().name('mantle.party.ContactImportServices.export#Contacts').parameters({contactBookId: scopeKey,
+                favoritesOnly: favoritesOnly, format: 'vcard', vcardVersion: '4.0',
+                fieldList: Array.from(fieldList || []).map((name) => String(name)).filter((name) => known.includes(name))}).call()
+            if (ec.message.hasError()) return
+            rowCount = Number(out.exportedCount || 0)
+            fileText = out.fileText || ''
+            fileName = out.fileName || 'contacts.vcf'
+            contentType = 'text/vcard'
         ]]></script></actions>
     </service>
 </services>
