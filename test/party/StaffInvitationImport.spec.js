@@ -152,6 +152,10 @@ feature(
                     organizationPartyId: orgId,
                     sourceText: "Email,Access bundles,Permission ID\n" + email("perm") + ",SINVI_BUNDLE,ADMIN_IDENTITY_GLOBAL\n"
                 }),
+                userId: step("stage#Import", {
+                    organizationPartyId: orgId,
+                    sourceText: "Email,Access bundles,User ID\n" + email("uid") + ",SINVI_BUNDLE,EX_JOHN_DOE\n"
+                }),
                 otherOrg: step("stage#Import", {organizationPartyId: otherOrgId, sourceText: good}),
                 noOrg: step("stage#Import", {sourceText: good}),
                 badOption: step("stage#Import", {organizationPartyId: orgId, sourceText: good, batchOptions: {expireDays: 90}}),
@@ -177,6 +181,7 @@ feature(
             out.password.reason.includes("Password")
             out.group.reasonCode == "COLUMN_REFUSED"
             out.permission.reasonCode == "COLUMN_REFUSED"
+            out.userId.reasonCode == "COLUMN_REFUSED"
             has(out.otherOrg.error, /you may import into/)
             has(out.noOrg.error, /you may import into/)
             has(out.badOption.error, /whole number from 1 to 30/)

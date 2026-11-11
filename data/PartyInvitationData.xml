@@ -42,7 +42,7 @@ along with this software (see the LICENSE.md file). If not, see
         of the framework's org.moqui.admin.DataTransferServices with no batch of its own (the framework keeps a
         TransferBatch). Its fields are exactly the address, an existing person, a display name, the organization (the
         batch's own) and the approved bundles; the expiry, the relationship and the note are options of the batch. A file
-        with a column named like a password, a factor, a token, a group or a permission is refused whole. Each row is
+        with a column named like a password, a factor, a token, a group, a permission or a user id is refused whole. Each row is
         validated by invite#User's own checks and applied by invite#User as the importer, in a transaction of its own.
         Besides ADMIN_IDENTITY_MANAGE, which the row services check, the registration asks for ADMIN_TRANSFER_RUN. -->
     <moqui.server.TransferTarget targetId="staffInvitations" direction="import" targetMode="rows" title="Staff invitations"
@@ -52,7 +52,7 @@ along with this software (see the LICENSE.md file). If not, see
             columnsJson="[{&quot;name&quot;:&quot;emailAddress&quot;,&quot;label&quot;:&quot;Email&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;partyId&quot;,&quot;label&quot;:&quot;Existing person ID&quot;},{&quot;name&quot;:&quot;displayName&quot;,&quot;label&quot;:&quot;Name&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Organization ID&quot;},{&quot;name&quot;:&quot;bundleGroupIds&quot;,&quot;label&quot;:&quot;Access bundles&quot;}]"
             keyFields="emailAddress"
             optionsJson="[{&quot;name&quot;:&quot;expireDays&quot;,&quot;label&quot;:&quot;Link expires after (days)&quot;,&quot;type&quot;:&quot;integer&quot;,&quot;min&quot;:1,&quot;max&quot;:30,&quot;default&quot;:&quot;7&quot;},{&quot;name&quot;:&quot;relationshipTypeEnumId&quot;,&quot;label&quot;:&quot;Works as&quot;,&quot;type&quot;:&quot;option&quot;,&quot;default&quot;:&quot;PrtEmployee&quot;,&quot;options&quot;:[{&quot;value&quot;:&quot;PrtEmployee&quot;,&quot;label&quot;:&quot;Employee&quot;},{&quot;value&quot;:&quot;PrtAgent&quot;,&quot;label&quot;:&quot;Agent&quot;},{&quot;value&quot;:&quot;PrtMember&quot;,&quot;label&quot;:&quot;Member&quot;}]},{&quot;name&quot;:&quot;message&quot;,&quot;label&quot;:&quot;Note in the email&quot;,&quot;type&quot;:&quot;text&quot;,&quot;maxLength&quot;:2000,&quot;multiline&quot;:true}]"
-            refusedColumns="group,permission,role,authz,privilege"
+            refusedColumns="group,permission,role,authz,privilege,userid"
             validateRowService="mantle.party.IdentityServices.validate#InvitationImportRow"
             applyRowService="mantle.party.IdentityServices.apply#InvitationImportRow"
             scopeService="mantle.party.IdentityServices.find#InvitationImportScopes"
