@@ -725,7 +725,15 @@ function storePaymentGatewayOrganization(p) {
                     fields[name] !== null &&
                     (name !== "isEnabled" || isEnabled === "N")
                 )
-                    lib.auditRow(BINDING, name, organizationPartyId, paymentGatewayConfigId, null, String(fields[name]), reason)
+                    lib.auditRow(
+                        BINDING,
+                        name,
+                        organizationPartyId,
+                        paymentGatewayConfigId,
+                        null,
+                        name === "isEnabled" ? isEnabled : iso(fields[name]),
+                        reason
+                    )
     }
     const after = map(one(BINDING, key))
     const stillNamed = inUse && !(after.isEnabled !== "N" && current(after, now + 1))
@@ -749,7 +757,8 @@ function storePaymentGatewayOrganization(p) {
 }
 
 // ===== where a framework connection is used by Mantle's records =====
-// find#RemoteConsumers: the gateways whose connection a remote is and the store integration it binds.
+// find#RemoteConsumers: the gateways whose connection a remote is (each owns it: the framework's remote kind then reads it
+// only, and it is changed as the gateway's connection) and the store integration it binds.
 function findRemoteConsumers(p) {
     lib.requireView(VIEW, MANAGE)
     const systemMessageRemoteId = text(p.connectionKey)
@@ -761,7 +770,9 @@ function findRemoteConsumers(p) {
             recordId: row.paymentGatewayConfigId,
             recordName: row.description || row.paymentGatewayConfigId,
             use: "The gateway's connection",
-            state: "ok"
+            state: "ok",
+            // the remote is changed through the gateway, so the gateway's rules (its provider's addresses) hold on every path
+            ownsConnection: true
         })
     for (const row of rows(SHIPPING, {systemMessageRemoteId}))
         found.push({
@@ -770,7 +781,9 @@ function findRemoteConsumers(p) {
             recordId: row.shippingGatewayConfigId,
             recordName: row.description || row.shippingGatewayConfigId,
             use: "The gateway's connection",
-            state: "ok"
+            state: "ok",
+            // the remote is changed through the gateway, so the gateway's rules (its provider's addresses) hold on every path
+            ownsConnection: true
         })
     const remote = one(REMOTE, {systemMessageRemoteId})
     const store = remote?.productStoreId ? one(STORE, {productStoreId: remote.productStoreId}) : null

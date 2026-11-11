@@ -192,6 +192,11 @@ feature("a gateway is a registered provider type with that type's services, and 
             out.tax = get("taxGateway", "LOCAL")
             out.taxNew = start("taxGateway", {connectionId: "SPEC_GWC_TAX", description: "Spec tax"})
             out.remoteUse = invoke(C + "find#ConnectionConsumers", {adapterKey: "remote", connectionKey: ids.anet})
+            // the gateway's connection is not repointed as a plain remote, past the gateway's own validation
+            out.asRemote = get("remote", ids.anet)
+            out.asRemoteStore = store("remote", ids.anet, {sendUrl: "https://elsewhere.example.com/api"})
+            out.asRemoteTest = invoke(C + "test#Connection", {adapterKey: "remote", connectionKey: ids.anet})
+            out.asRemoteRequests = http.count()
             // the adapter itself is no service a user calls
             out.direct = invoke(G + "run#GatewayConnectionAdapter", {
                 operation: "get",
@@ -253,6 +258,9 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.tax.connectionKey === "LOCAL"
         out.taxNew.reasonCode === "NOT_CREATABLE"
         out.remoteUse.consumerList.some(row => row.recordType === "PaymentGatewayConfig" && row.recordId === ids.anet)
+        out.asRemote.state === "readOnly" && out.asRemote.readOnlyReason.includes("Spec Authorize.Net")
+        out.asRemoteStore.reasonCode === "READ_ONLY" && out.asRemoteTest.reasonCode === "READ_ONLY"
+        out.asRemoteRequests === 0
         !!out.direct.error
         out.none == null
     }

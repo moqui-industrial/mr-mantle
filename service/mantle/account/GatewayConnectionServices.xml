@@ -79,8 +79,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="find" noun="RemoteConsumers" allow-remote="false">
         <description>Where Mantle's records use a remote system (a connection of the framework's remote kind): the payment and
-            shipping gateways whose connection it is, and the store integration it binds, for a store of an organization the
-            caller administers. Needs ADMIN_CONNECTION_VIEW.</description>
+            shipping gateways whose connection it is (ownsConnection: the remote is then changed as the gateway's connection
+            only, under the gateway's validation, and read only as a remote), and the store integration it binds, for a
+            store of an organization the caller administers. Needs ADMIN_CONNECTION_VIEW.</description>
         <implements service="org.moqui.admin.ConfigurationServices.find#AdapterConsumers"/>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('findRemoteConsumers', context))</script></actions>
     </service>
