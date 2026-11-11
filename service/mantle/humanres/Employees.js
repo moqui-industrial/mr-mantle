@@ -5,8 +5,8 @@
 // person's public work identity, nothing of another employer's (F59).
 //
 // The projections, by field category:
-// - the public work identity (any reader the scope admits): name and preferred name, employer, job title, manager (one employed
-//   by that employer, so a reader of one employer learns nothing of another's reporting line), the work email, phone and
+// - the public work identity (any reader the scope admits): name and preferred name, employer, job title, manager (the reporting
+//   line at that employer, People.js linesOf, so a reader of one employer learns nothing of another's), the work email, phone and
 //   address (the contact purposes of workPurposes: EmailWork, never EmailPrimary, which may be a personal address) and the
 //   employment's state;
 // - HR columns (an HR reader, of an employment by an employer in their scope only): the employment's id and dates, ended
@@ -97,39 +97,9 @@ function contactsOf(partyIds, purposes, withValues = false) {
     }
     return found
 }
-// The live managers of the people (PrtManager from the manager to the report, F50): {partyId: [managerPartyId]}.
-function managersOf(partyIds) {
-    const found = {}
-    if (!partyIds.length) return found
-    const query = find("mantle.party.PartyRelationship")
-        .condition("relationshipTypeEnumId", "PrtManager")
-        .condition("toPartyId", "in", partyIds)
-        .selectField(["fromPartyId", "toPartyId"])
-    for (const row of Array.from(people.current(query, null).list()))
-        (found[row.toPartyId] = found[row.toPartyId] || []).push(row.fromPartyId)
-    return found
-}
-// The current employers of the managers: {managerPartyId: [organizationPartyId]}, an unemployed manager absent.
-function employersOf(managerPartyIds) {
-    const found = {}
-    if (!managerPartyIds.length) return found
-    const query = find("mantle.party.PartyRelationship")
-        .condition("relationshipTypeEnumId", "PrtEmployee")
-        .condition("fromPartyId", "in", managerPartyIds)
-        .selectField(["fromPartyId", "toPartyId"])
-    for (const row of Array.from(people.current(query, null).list()))
-        (found[row.fromPartyId] = found[row.fromPartyId] || []).push(row.toPartyId)
-    return found
-}
-// The managers shown on employments by the organizations: a live PrtManager employed by one of them, or employed by none (a
-// reporting line names no employer; until P3's lines per employment, a manager at another employer of a person employed by two
-// is that employment's, which a reader of this one does not see).
-function managersAt(managerIds, employers, organizationPartyIds) {
-    return managerIds.filter(managerId => {
-        const theirs = employers[managerId]
-        return !theirs || theirs.some(organizationPartyId => organizationPartyIds.includes(organizationPartyId))
-    })
-}
+// The managers of the people's employments are their reporting lines at each employer (People.js managersByEmployment, P3):
+// {"organizationPartyId/partyId": [managerPartyId]}, so a manager at another employer of a person employed by two is that
+// employment's, which a reader of this one does not see.
 // The job title of each employment: its position's class title, else the position's description (positions are P4's).
 function titlesOf(employmentIds) {
     const found = {}
@@ -240,29 +210,38 @@ function findEmployees(p) {
     const employerIds = p.organizationPartyId ? [p.organizationPartyId] : Array.from(userScope.organizationPartyIds || [])
     if (caps.staff && employerIds.length)
         reach.push(all([factory.makeCondition("toPartyId", "in", employerIds), includeEnded ? null : dated]))
-    const own = Array.from(userScope.reportPartyIds || []).concat(caps.self && userScope.partyId ? [userScope.partyId] : [])
-    if (own.length && !p.organizationPartyId) reach.push(all([factory.makeCondition("fromPartyId", "in", own), dated]))
+    // the caller's own employments with self-service, and a report's at the employers of the caller's line to them (F86)
+    if (!p.organizationPartyId) {
+        if (caps.self && userScope.partyId)
+            reach.push(all([factory.makeCondition("fromPartyId", "equals", userScope.partyId), dated]))
+        for (const [reportPartyId, lineEmployers] of Object.entries(userScope.reportLines || {}))
+            reach.push(
+                all([
+                    factory.makeCondition("fromPartyId", "equals", reportPartyId),
+                    factory.makeCondition("toPartyId", "in", lineEmployers),
+                    dated
+                ])
+            )
+    }
     if (!reach.length) denied("PERMISSION_DENIED", "The employee directory is not available")
 
     let query = find("mantle.party.PartyFromAndRelationship")
         .condition("relationshipTypeEnumId", "PrtEmployee")
         .condition(factory.makeCondition(reach, "or"))
     if (p.managerPartyId) {
-        const reports = Array.from(
-            people
-                .current(
-                    find("mantle.party.PartyRelationship")
-                        .condition("relationshipTypeEnumId", "PrtManager")
-                        .condition("fromPartyId", p.managerPartyId),
-                    null
+        // the employments the manager's reporting lines manage, each at its employers (People.js linesOf)
+        const managed = people
+            .linesOf({managerPartyIds: [p.managerPartyId]}, asOf)
+            .map(line =>
+                factory.makeCondition(
+                    factory.makeCondition("fromPartyId", "equals", line.partyId),
+                    "and",
+                    factory.makeCondition("toPartyId", "in", line.organizationPartyIds)
                 )
-                .selectField("toPartyId")
-                .list()
-        ).map(row => row.toPartyId)
-        query = query.condition("fromPartyId", "in", reports.length ? reports : ["_NA_"])
-        // the employments the manager is shown on: by an employer of theirs, when they have one (managersAt)
-        const managerEmployers = employersOf([p.managerPartyId])[p.managerPartyId]
-        if (managerEmployers) query = query.condition("toPartyId", "in", managerEmployers)
+            )
+        query = query.condition(
+            managed.length ? factory.makeCondition(managed, "or") : factory.makeCondition("fromPartyId", "equals", "_NA_")
+        )
     }
     const term = String(p.term || "").trim()
     if (term)
@@ -298,14 +277,12 @@ function findEmployees(p) {
     }))
     const partyIds = people.unique(found.map(row => row.partyId))
     const contacts = contactsOf(partyIds, workPurposes)
-    const managers = managersOf(partyIds)
-    const allManagerIds = people.unique([].concat(...Object.values(managers)))
-    const managerEmployers = employersOf(allManagerIds)
-    const managerNames = people.personNames(allManagerIds)
+    const managers = people.managersByEmployment(partyIds, asOf)
+    const managerNames = people.personNames(people.unique([].concat(...Object.values(managers))))
     const shown = employmentRows(found, asOf, hrRow)
     const employees = found.map((row, index) => {
         const contact = contacts[row.partyId] || {}
-        const managerIds = managersAt(managers[row.partyId] || [], managerEmployers, [row.organizationPartyId])
+        const managerIds = managers[row.organizationPartyId + "/" + row.partyId] || []
         const out = Object.assign({}, shown[index], {
             partyId: row.partyId,
             personName: row.personName,
@@ -406,12 +383,10 @@ function employee360(p) {
     const selectedId = p.partyRelationshipId || employments[0]?.partyRelationshipId || null
     const person = one("mantle.party.Person", {partyId: p.partyId}) || {}
     const contacts = contactsOf([p.partyId], workPurposes)[p.partyId] || {}
-    // the managers of the employments shown (managersAt): none of another employer's reporting line
-    const allManagerIds = managersOf([p.partyId])[p.partyId] || []
-    const managerIds = managersAt(
-        allManagerIds,
-        employersOf(allManagerIds),
-        people.unique(employments.map(row => row.organizationPartyId))
+    // the managers of the employments shown (their reporting lines at those employers): none of another employer's line
+    const managed = people.managersByEmployment([p.partyId], asOf)
+    const managerIds = people.unique(
+        [].concat(...employments.map(row => managed[row.organizationPartyId + "/" + p.partyId] || []))
     )
     const managerNames = people.personNames(managerIds)
     // HR's dates and ids are of the employments by an employer in their scope; the person sees their own ids; a directory or
@@ -608,4 +583,10 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employee operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({
+    execute: run,
+    // for Organization.js's reporting tree: the public work identity of a list of people and employments
+    contactsOf,
+    titlesOf,
+    workPurposes
+})
