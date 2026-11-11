@@ -132,6 +132,16 @@ spec({
                 changedByUserId: users.Reader,
                 changeReason: "Spec " + key + " organization kept"
             })
+            // a party that is no organization (the person), disabled: never an organization's change, for any reader
+            call("create#moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.party.Party",
+                changedFieldName: "disabled",
+                pkPrimaryValue: parties[key],
+                newValueText: "Y",
+                changedDate: effectiveTime,
+                changedByUserId: users.Reader,
+                changeReason: "Spec " + key + " person disabled"
+            })
             // and an export each made, as the framework's run#Export records one
             call("create#moqui.entity.EntityAuditLog", {
                 changedEntityName: "moqui.server.TransferBatch",
@@ -143,6 +153,17 @@ spec({
                 changedByUserId: users[key]
             })
         }
+        // a gateway of the first organization: a field registered on its own, and one only the every-other-field registration covers
+        for (const changedFieldName of ["isEnabled", "fromDate"])
+            call("create#moqui.entity.EntityAuditLog", {
+                changedEntityName: "mantle.account.method.PaymentGatewayOrganization",
+                changedFieldName,
+                pkPrimaryValue: orgId,
+                pkSecondaryValue: "IAU_GATEWAY",
+                newValueText: changedFieldName === "isEnabled" ? "N" : String(effectiveTime),
+                changedDate: effectiveTime,
+                changedByUserId: users.Reader
+            })
     },
     cleanupSpec() {
         ec.artifactExecution.enableAuthz()
@@ -165,6 +186,7 @@ feature("an audit reader reads the changes of its own organization's staff and n
             out.transfers = result(A + "find#Changes", {category: "transfer"})
             out.left = result(A + "find#Changes", {auditProjectionId: "OrgMembershipThru"})
             out.organization = result(A + "find#Changes", {auditProjectionId: "OrganizationDisabled"})
+            out.gatewayOther = result(A + "find#Changes", {auditProjectionId: "GatewayOrgOther"})
             // Mantle's source, called directly: ids of what is in scope, of the entities it knows, whatever is asked for
             out.direct = result(S + "find#IdentityChanges", {
                 projectionList: [
@@ -179,6 +201,7 @@ feature("an audit reader reads the changes of its own organization's staff and n
         ec.artifactExecution.enableAuthz()
         out.admin = result(A + "find#Changes", {recordKey: users.Two})
         out.adminTransfers = result(A + "find#Changes", {category: "transfer"})
+        out.adminOrganization = result(A + "find#Changes", {auditProjectionId: "OrganizationDisabled"})
         ec.artifactExecution.disableAuthz()
         out.directIds = Array.from(out.direct.auditIdList || [])
         out.directRows = out.directIds.length
@@ -230,9 +253,17 @@ feature("an audit reader reads the changes of its own organization's staff and n
         JSON.stringify(out.left).includes("Spec One left") && !JSON.stringify(out.left).includes("Spec Two left")
         JSON.stringify(out.organization).includes("Spec One organization kept")
         !JSON.stringify(out.organization).includes("Spec Two organization kept")
+        // a registration of every other field neither lists nor counts a field registered on its own
+        out.gatewayOther.changeListCount === 1 && out.gatewayOther.changeList[0].changedFieldName === "fromDate"
+        out.gatewayOther.changeList[0].masked === true && out.gatewayOther.changeList[0].after === null
         // the instance administrator reads the other organization's too
         out.admin.changeListCount >= 3
         JSON.stringify(out.adminTransfers).includes("IAU_EXPORT_Two")
+        // and each organization's own record, but not a person's party as an organization's (the audit log read as it is
+        // would answer every party's)
+        JSON.stringify(out.adminOrganization).includes("Spec Two organization kept")
+        !JSON.stringify(out.adminOrganization).includes("person disabled")
+        !JSON.stringify(out.organization).includes("person disabled")
     }
 })
 

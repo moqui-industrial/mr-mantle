@@ -11,7 +11,8 @@
 // or every one; nothing in scope when neither is named, but for an instance administrator). An account that works for no
 // internal organization (a site identity, someone whose memberships all ended) is in no organization's scope: only an instance
 // administrator with no organization active reads its changes, for whom the audit log's rows of these entities are read as
-// they are, with no organization to join.
+// they are, with no organization to join (but a party's and a relationship's, which are an organization's and a membership's
+// only through their views).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {denied} = lib
 const access = lib.access
@@ -34,8 +35,12 @@ const views = {
     "moqui.server.TransferBatch": "mantle.party.AuditLogActorOrganization"
 }
 const LOG = "moqui.entity.EntityAuditLog"
+// the views that say what a row is (an internal organization, a staff membership), not only whose
+const typedViews = ["mantle.party.AuditLogOrganization", "mantle.party.AuditLogRelationshipOrganization"]
 
-// The fields asked for of each entity this source knows, by view: {view: Map(entityName, fieldNames or null for every field)}.
+// The fields asked for of each entity this source knows, by view: {view: Map(entityName, {fields, except})}; except, when
+// set, is a registration of every other field (*): every field of the entity but those names (the fields registered on their
+// own and not asked for here).
 function wanted(projectionList) {
     const byView = new Map()
     for (const projection of Array.from(projectionList || [])) {
@@ -45,8 +50,10 @@ function wanted(projectionList) {
         const view = views[entityName]
         if (!byView.has(view)) byView.set(view, new Map())
         const entities = byView.get(view)
-        if (fieldName === "*") entities.set(entityName, null)
-        else if (entities.get(entityName) !== null) entities.set(entityName, (entities.get(entityName) || []).concat([fieldName]))
+        if (!entities.has(entityName)) entities.set(entityName, {fields: [], except: null})
+        const entry = entities.get(entityName)
+        if (fieldName === "*") entry.except = Array.from(projection.exceptFieldNames || []).map(text).filter(Boolean)
+        else entry.fields.push(fieldName)
     }
     return byView
 }
@@ -58,14 +65,13 @@ function scoped(view, entities, p) {
     const factory = ec.entity.conditionFactory
     found.condition(
         factory.makeCondition(
-            Array.from(entities.entries()).map(([entityName, fieldNames]) =>
-                fieldNames
-                    ? factory.makeCondition([
-                          factory.makeCondition("changedEntityName", "equals", entityName),
-                          factory.makeCondition("changedFieldName", "in", fieldNames)
-                      ])
-                    : factory.makeCondition("changedEntityName", "equals", entityName)
-            ),
+            Array.from(entities.entries()).map(([entityName, entry]) => {
+                const parts = [factory.makeCondition("changedEntityName", "equals", entityName)]
+                const except = entry.except ? entry.except.filter(name => !entry.fields.includes(name)) : []
+                if (!entry.except) parts.push(factory.makeCondition("changedFieldName", "in", entry.fields))
+                else if (except.length) parts.push(factory.makeCondition("changedFieldName", "not-in", except))
+                return factory.makeCondition(parts)
+            }),
             "or"
         )
     )
@@ -96,10 +102,17 @@ function findIdentityChanges(p) {
     let byView = wanted(p.projectionList)
     // an instance administrator with no organization active reads every organization's, and the records of none: the audit
     // log itself, for the entities asked for (Identity.js scope: all)
+    // An entity whose rows are an organization's only by its view's own join (a party that is an internal organization, a
+    // relationship that is a staff membership) stays on its view, which needs no caller's scope: read from the log itself
+    // every party's and every relationship's rows would be answered as an organization's and a membership's.
     if (byView.size && identity.scope().all && !ec.user.context.activeOrgId) {
         const entities = new Map()
-        for (const found of byView.values()) for (const [entityName, fieldNames] of found) entities.set(entityName, fieldNames)
-        byView = new Map([[LOG, entities]])
+        const kept = new Map()
+        for (const [view, found] of byView) {
+            if (typedViews.includes(view)) kept.set(view, found)
+            else for (const [entityName, entry] of found) entities.set(entityName, entry)
+        }
+        byView = new Map(entities.size ? [[LOG, entities], ...kept] : [...kept])
     }
     for (const [view, entities] of byView) {
         const count = scoped(view, entities, p)
