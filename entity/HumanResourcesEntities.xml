@@ -935,6 +935,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payGradeId" type="id" is-pk="true"/>
         <field name="description" type="text-medium"/>
         <field name="comments" type="text-medium"/>
+        <field name="organizationPartyId" type="id"><description>The employer that owns the grade: read by that employer's
+            readers and changed by its payroll editors. Empty for a grade shared by every employer, changed only with
+            PEOPLE_ALL_ORGANIZATIONS (IronStone People, mantle.humanres.PayrollSetupServices)</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
     </entity>
     <entity entity-name="PayGradeSalary" package="mantle.humanres.rate" use="configuration">
         <field name="payGradeId" type="id" is-pk="true"/>

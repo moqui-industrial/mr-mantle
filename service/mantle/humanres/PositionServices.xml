@@ -263,14 +263,15 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="Position" allow-remote="false">
         <description>A new position, planned (EmpsPlanned; its activation is an approval decision), of an employer in the caller's
             scope, of a current job class, in a department of the employer (an OrgDepartment whose rollups reach it, F10), with a
-            grade by name, from fromDate (now when empty) and an optional end; or a position's new terms: name, department, class,
-            grade, dates, hours a week and the employment flags. The department, class and grade are audited, with changeReason.
-            Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED),
-            one outside the scope (ORGANIZATION_DENIED) or another one for an existing position (EMPLOYER_CHANGE), no class
-            (CLASS_REQUIRED) or an ended one (CLASS_ENDED), a department that is not one (NOT_A_DEPARTMENT) or not the employer's
-            (DEPARTMENT_OUTSIDE), a missing class, grade or position (RECORD_UNAVAILABLE), an end on or before the start
-            (DATES_INVALID), hours outside 0 to 168 (HOURS_INVALID), an end before a holder's last day (OCCUPIED_AFTER_END), a start
-            after a holder's first (OCCUPIED_BEFORE_START) and a revision other than the one read (REVISION_CHANGED).</description>
+            grade by name (the employer's own or a shared one), from fromDate (now when empty) and an optional end; or a position's
+            new terms: name, department, class, grade, dates, hours a week and the employment flags. The department, class and
+            grade are audited, with changeReason. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED),
+            no employer (ORGANIZATION_REQUIRED), one outside the scope (ORGANIZATION_DENIED) or another one for an existing
+            position (EMPLOYER_CHANGE), no class (CLASS_REQUIRED) or an ended one (CLASS_ENDED), a department that is not one
+            (NOT_A_DEPARTMENT) or not the employer's (DEPARTMENT_OUTSIDE), a missing class or position and a grade missing or
+            another employer's (RECORD_UNAVAILABLE), an end on or before the start (DATES_INVALID), hours outside 0 to 168
+            (HOURS_INVALID), an end before a holder's last day (OCCUPIED_AFTER_END), a start after a holder's first
+            (OCCUPIED_BEFORE_START) and a revision other than the one read (REVISION_CHANGED).</description>
         <in-parameters>
             <parameter name="emplPositionId"/>
             <parameter name="organizationPartyId"/>
@@ -306,7 +307,8 @@ along with this software (see the LICENSE.md file). If not, see
             (RECORD_UNAVAILABLE), not in effect on the date (POSITION_NOT_IN_EFFECT) or inactive (POSITION_INACTIVE), no person
             (PERSON_REQUIRED), one the employer does not employ on the date (NOT_EMPLOYED), another holder in the same period
             (POSITION_OCCUPIED: a seat has one holder at a time), and an end of a holding that is not the position's
-            (RECORD_UNAVAILABLE), has ended (HOLDER_ENDED) or is on or before its start (DATE_STALE).</description>
+            (RECORD_UNAVAILABLE), has ended (HOLDER_ENDED), is on or before its start (DATE_STALE) or moves later into another
+            holder's period (POSITION_OCCUPIED); a holding ends with the position at the latest.</description>
         <in-parameters>
             <parameter name="emplPositionId" required="true"/>
             <parameter name="partyId"/>

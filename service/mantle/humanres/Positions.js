@@ -384,7 +384,7 @@ function getPosition(p) {
 // PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED); no employer (ORGANIZATION_REQUIRED), one outside the scope
 // (ORGANIZATION_DENIED) or another one for an existing position (EMPLOYER_CHANGE); no class (CLASS_REQUIRED), a missing one
 // (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED); a department that is not one (NOT_A_DEPARTMENT) or does not roll up to the
-// employer (DEPARTMENT_OUTSIDE); a missing grade (RECORD_UNAVAILABLE); an end on or before the start (DATES_INVALID); hours
+// employer (DEPARTMENT_OUTSIDE); a missing grade or another employer's (RECORD_UNAVAILABLE); an end on or before the start (DATES_INVALID); hours
 // outside 0 to 168 (HOURS_INVALID); an end before a holder's last day (OCCUPIED_AFTER_END) or a start after a holder's first
 // (OCCUPIED_BEFORE_START); a position outside the scope (RECORD_UNAVAILABLE); a revision other than the one read
 // (REVISION_CHANGED). The department, class and grade are audited, with the change reason.
@@ -425,10 +425,12 @@ function checkDepartment(departmentPartyId, organizationPartyId, at) {
             (people.organizationNames([organizationPartyId])[organizationPartyId] || organizationPartyId)
     )
 }
-function checkGrade(payGradeId) {
+// A grade the employer's positions take: its own or a shared one (PayrollSetup.js); another employer's is a missing one.
+function checkGrade(payGradeId, organizationPartyId) {
     const id = text(payGradeId)
     if (!id) return null
-    if (!one("mantle.humanres.rate.PayGrade", {payGradeId: id}))
+    const grade = one("mantle.humanres.rate.PayGrade", {payGradeId: id})
+    if (!grade || (grade.organizationPartyId && grade.organizationPartyId !== organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Pay grade " + id + " is not available")
     return id
 }
@@ -454,7 +456,7 @@ function storePosition(p) {
             organizationPartyId,
             emplPositionClassId: checkClass(p.emplPositionClassId, checkAt),
             departmentPartyId: checkDepartment(p.departmentPartyId, organizationPartyId, checkAt),
-            payGradeId: checkGrade(p.payGradeId),
+            payGradeId: checkGrade(p.payGradeId, organizationPartyId),
             description: text(p.description) || null,
             statusId: "EmpsPlanned",
             fromDate: new Date(fromMs),
@@ -487,7 +489,7 @@ function storePosition(p) {
     if (given(p.departmentPartyId) && (text(p.departmentPartyId) || null) !== (position.departmentPartyId || null))
         changes.departmentPartyId = checkDepartment(p.departmentPartyId, position.organizationPartyId, checkAt)
     if (given(p.payGradeId) && (text(p.payGradeId) || null) !== (position.payGradeId || null))
-        changes.payGradeId = checkGrade(p.payGradeId)
+        changes.payGradeId = checkGrade(p.payGradeId, position.organizationPartyId)
     if (given(p.description)) changes.description = text(p.description) || null
     if (given(p.standardHoursPerWeek)) changes.standardHoursPerWeek = checkHours(p.standardHoursPerWeek)
     for (const field of ["fullTimeFlag", "temporaryFlag", "salaryFlag", "overtimeFlag"])
@@ -527,7 +529,8 @@ function storePosition(p) {
 // caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED); a position outside the scope (RECORD_UNAVAILABLE), not in
 // effect on the date (POSITION_NOT_IN_EFFECT) or inactive (POSITION_INACTIVE); no person (PERSON_REQUIRED) or one the employer
 // does not employ on the date (NOT_EMPLOYED); a holder in the same period (POSITION_OCCUPIED: one holder at a time); an end of a
-// holding that is not the position's (RECORD_UNAVAILABLE), has ended (HOLDER_ENDED) or is on or before its start (DATE_STALE).
+// holding that is not the position's (RECORD_UNAVAILABLE), has ended (HOLDER_ENDED), is on or before its start (DATE_STALE) or
+// moves later into another holder's period (POSITION_OCCUPIED). A holding ends with the position at the latest.
 function storePositionHolder(p) {
     const userScope = editorScope("Changing a position's holder")
     const position = one(POSITION, {emplPositionId: text(p.emplPositionId)})
@@ -535,16 +538,37 @@ function storePositionHolder(p) {
         denied("RECORD_UNAVAILABLE", "Position " + text(p.emplPositionId) + " is not available")
     const partyId = text(p.partyId)
     if (!partyId) denied("PERSON_REQUIRED", "Choose the person")
-    const name = people.personNames([partyId])[partyId] || partyId
+    // the person's name only once they hold the position or are employed by its employer: a supplied party is not named
+    const nameOf = () => people.personNames([partyId])[partyId] || partyId
+    const holders = holdersOf([position.emplPositionId])[position.emplPositionId] || []
+    // another holder in the period (the person's own employment naming the seat is the holding being written, not another)
+    const otherHolder = (holding, except) =>
+        holders.find(
+            holder =>
+                holder !== except && !(holder.partyId === partyId && holder.source === "employment") && overlaps(holder, holding)
+        )
+    const occupied = other =>
+        denied(
+            "POSITION_OCCUPIED",
+            (people.personNames([other.partyId])[other.partyId] || other.partyId) +
+                " holds this position then; a seat has one holder"
+        )
     if (text(p.holderFromDate)) {
         const holderFromMs = /^\d+$/.test(text(p.holderFromDate)) ? Number(text(p.holderFromDate)) : effective(p.holderFromDate)
         const row = rows(HOLDER, {emplPositionId: position.emplPositionId, partyId, roleTypeId: holderRole}).find(
             found => ms(found.fromDate) === holderFromMs
         )
         if (!row) denied("RECORD_UNAVAILABLE", "This holding is not available")
-        if ((ms(row.thruDate) ?? Infinity) <= nowMs()) denied("HOLDER_ENDED", name + "'s holding has ended")
-        const thruMs = effective(p.thruDate)
+        if ((ms(row.thruDate) ?? Infinity) <= nowMs()) denied("HOLDER_ENDED", nameOf() + "'s holding has ended")
+        let thruMs = effective(p.thruDate)
         if (thruMs <= holderFromMs) denied("DATE_STALE", "A holding ends after it starts")
+        // a holding ends with the position at the latest, and a later end overlaps no other holder
+        if (ms(position.thruDate) != null && thruMs > ms(position.thruDate)) thruMs = ms(position.thruDate)
+        const self = holders.find(
+            holder => holder.source === "position" && holder.partyId === partyId && holder.fromMs === holderFromMs
+        )
+        const other = otherHolder({fromMs: holderFromMs, thruMs}, self)
+        if (other) occupied(other)
         call("update#" + HOLDER, {
             emplPositionId: row.emplPositionId,
             partyId: row.partyId,
@@ -570,19 +594,12 @@ function storePositionHolder(p) {
     if (!employed)
         denied(
             "NOT_EMPLOYED",
-            name +
-                " is not employed by " +
+            "The person is not employed by " +
                 (people.organizationNames([position.organizationPartyId])[position.organizationPartyId] || "the employer") +
                 " on that date"
         )
-    const holding = {fromMs, thruMs}
-    const other = (holdersOf([position.emplPositionId])[position.emplPositionId] || []).find(holder => overlaps(holder, holding))
-    if (other)
-        denied(
-            "POSITION_OCCUPIED",
-            (people.personNames([other.partyId])[other.partyId] || other.partyId) +
-                " holds this position then; a seat has one holder"
-        )
+    const other = otherHolder({fromMs, thruMs})
+    if (other) occupied(other)
     call("create#" + HOLDER, {
         emplPositionId: position.emplPositionId,
         partyId,

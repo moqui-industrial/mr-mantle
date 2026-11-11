@@ -4,7 +4,9 @@
 // the holders at a date, a second holder in the same period refused, an end before a holder's last day refused, the directory's
 // job title from the seat held; a manager reading the positions of the department they lead only; a pay grade's dated band, in
 // order and with its currency and frequency, ending the band before it and changing no salary; and a grade's amounts absent for
-// an HR reader without PAYROLL_VIEW, on the grade and the position alike. Standalone: spec-local organizations, people,
+// an HR reader without PAYROLL_VIEW, on the grade and the position alike; a grade owned by an employer read and changed by that
+// employer's payroll alone, a shared grade changed only with PEOPLE_ALL_ORGANIZATIONS, and a position taking its employer's
+// grades and the shared ones (impl-people §4, Nov 11, 2026). Standalone: spec-local organizations, people,
 // employments, groups and users, with artifact authorization disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec PeoplePositions
 const prefix = "PEOPLE_POS_SPEC"
@@ -98,6 +100,8 @@ spec({
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgB])
         state.reader = user("READER", ["PEOPLE_DIRECTORY_VIEW"], [orgA])
         state.payroll = user("PAY", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
+        state.payrollB = user("PAYB", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgB])
+        state.payrollAll = user("PAYALL", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_ALL_ORGANIZATIONS"], [orgA])
         state.manager = user("LEAD", ["PEOPLE_TEAM_VIEW"], [], state.LEAD)
         // A's departments (Stores led by LEAD, Office) with a team under Stores; B's department
         const unit = (username, unitKind, organizationName, parentPartyId, headPartyId = null) =>
@@ -293,6 +297,13 @@ feature(
                 })
             )
             const ended = hold({partyId: state.HOLDER, holderFromDate: String(from), thruDate: from + 15 * day})
+            // a later holder, and the first holding's end moved into that holder's period refused
+            const next = hold({partyId: state.OTHER, fromDate: from + 16 * day, thruDate: from + 18 * day})
+            const extended = code(
+                hold({partyId: state.HOLDER, holderFromDate: String(from), thruDate: from + 17 * day, changeReason: "Stays"})
+            )
+            // a person the employer does not employ is not named in the refusal
+            const unnamed = hold({partyId: state.BETA, fromDate: from + 5 * day, emplPositionId: state.second}).error
             const endAfter = run(state.hr, S + "store#Position", {
                 emplPositionId: state.first,
                 thruDate: from + 20 * day,
@@ -311,6 +322,9 @@ feature(
                 holders: position.holders.map(row => [row.personName, row.state, row.source].join(" ")),
                 endEarly,
                 ended: ended.error,
+                next: next.error,
+                extended,
+                unnamed: unnamed.includes("BETA"),
                 endAfter: endAfter.error,
                 stale: code(
                     run(state.hr, S + "store#Position", {
@@ -340,6 +354,9 @@ feature(
             holders,
             endEarly,
             ended,
+            next,
+            extended,
+            unnamed,
             endAfter,
             stale,
             employer,
@@ -355,6 +372,9 @@ feature(
             holders == ["Pos HOLDER future position"]
             endEarly == "OCCUPIED_AFTER_END"
             ended == ""
+            next == ""
+            extended == "POSITION_OCCUPIED"
+            unnamed == false
             endAfter == ""
             stale == "REVISION_CHANGED"
             employer == "EMPLOYER_CHANGE"
@@ -375,7 +395,11 @@ feature(
                 amount: "2500",
                 maxAmount: "3000"
             }
-            const created = store(state.payroll, Object.assign({gradeName: "Grade 4", fromDate: since}, band))
+            const created = store(
+                state.payroll,
+                Object.assign({gradeName: "Grade 4", organizationPartyId: orgA, fromDate: since}, band)
+            )
+            state.gradeA = created.payGradeId
             const gradeId = created.payGradeId
             // an employment salary on the grade, which a band change leaves as it is
             call("create#mantle.humanres.employment.EmploymentSalary", {
@@ -388,11 +412,22 @@ feature(
             })
             const next = state.now + 30 * day
             const refusals = {
-                order: code(store(state.payroll, Object.assign({gradeName: "X"}, band, {minAmount: "2600"}))),
-                currency: code(store(state.payroll, Object.assign({gradeName: "X"}, band, {currencyUomId: ""}))),
-                frequency: code(store(state.payroll, Object.assign({gradeName: "X"}, band, {timePeriodTypeId: "FiscalMonth"}))),
-                missing: code(store(state.payroll, Object.assign({gradeName: "X"}, band, {maxAmount: ""}))),
-                hr: code(store(state.hr, Object.assign({gradeName: "X"}, band))),
+                order: code(
+                    store(state.payroll, Object.assign({gradeName: "X", organizationPartyId: orgA}, band, {minAmount: "2600"}))
+                ),
+                currency: code(
+                    store(state.payroll, Object.assign({gradeName: "X", organizationPartyId: orgA}, band, {currencyUomId: ""}))
+                ),
+                frequency: code(
+                    store(
+                        state.payroll,
+                        Object.assign({gradeName: "X", organizationPartyId: orgA}, band, {timePeriodTypeId: "FiscalMonth"})
+                    )
+                ),
+                missing: code(
+                    store(state.payroll, Object.assign({gradeName: "X", organizationPartyId: orgA}, band, {maxAmount: ""}))
+                ),
+                hr: code(store(state.hr, Object.assign({gradeName: "X", organizationPartyId: orgA}, band))),
                 revision: code(
                     store(state.payroll, Object.assign({payGradeId: gradeId, expectedRevision: "0", fromDate: next}, band))
                 )
@@ -489,6 +524,122 @@ feature(
             positionGrade == "Grade 4"
             !/2500|2700|USD/.test(positionAnswer)
             salary == "2400"
+        }
+    }
+)
+
+feature(
+    "a grade owned by an employer is read and changed by that employer's payroll alone; a shared grade is changed only with PEOPLE_ALL_ORGANIZATIONS; a position takes its employer's grades and the shared ones",
+    {
+        when() {
+            const store = (username, parameters) => run(username, G + "store#PayGrade", parameters)
+            const band = {
+                currencyUomId: "USD",
+                timePeriodTypeId: "PayrollMonth",
+                minAmount: "1000",
+                amount: "1200",
+                maxAmount: "1400",
+                fromDate: state.now + 40 * day
+            }
+            const revisionOf = (username, payGradeId) =>
+                run(username, G + "find#PayGrades", {payGradeId}).payGrades?.[0]?.revision || "0"
+            const shared = store(state.payrollAll, {gradeName: "Pos spec shared grade"})
+            const listed = (username, parameters = {}) =>
+                ids(run(username, G + "find#PayGrades", Object.assign({term: "grade"}, parameters)), "payGrades", "payGradeId")
+                    .filter(id => [state.gradeA, shared.payGradeId].includes(id))
+                    .map(id => (id === state.gradeA ? "A" : "shared"))
+            const plan = (username, organizationPartyId, payGradeId) =>
+                code(
+                    run(username, S + "store#Position", {
+                        organizationPartyId,
+                        emplPositionClassId: state.classId,
+                        departmentPartyId: organizationPartyId === orgA ? state.office : state.depB,
+                        payGradeId,
+                        description: "Pos spec graded"
+                    })
+                )
+            const canEdit = username =>
+                run(username, G + "find#PayGrades", {term: "grade"})
+                    .payGrades.filter(row => [state.gradeA, shared.payGradeId].includes(row.payGradeId))
+                    .map(row => (row.payGradeId === state.gradeA ? "A " : "shared ") + row.canEdit)
+            return {
+                shared: shared.error,
+                refusals: {
+                    newShared: code(store(state.payroll, {gradeName: "Pos spec another shared"})),
+                    sharedBand: code(
+                        store(
+                            state.payroll,
+                            Object.assign(
+                                {payGradeId: shared.payGradeId, expectedRevision: revisionOf(state.payroll, shared.payGradeId)},
+                                band
+                            )
+                        )
+                    ),
+                    otherBand: code(
+                        store(
+                            state.payrollB,
+                            Object.assign(
+                                {payGradeId: state.gradeA, expectedRevision: revisionOf(state.payroll, state.gradeA)},
+                                band
+                            )
+                        )
+                    ),
+                    otherOwner: code(store(state.payrollB, {gradeName: "Pos spec of A", organizationPartyId: orgA})),
+                    ownerChange: code(
+                        store(state.payrollAll, {
+                            payGradeId: shared.payGradeId,
+                            organizationPartyId: orgB,
+                            expectedRevision: revisionOf(state.payrollAll, shared.payGradeId)
+                        })
+                    )
+                },
+                sharedBand: code(
+                    store(
+                        state.payrollAll,
+                        Object.assign(
+                            {payGradeId: shared.payGradeId, expectedRevision: revisionOf(state.payrollAll, shared.payGradeId)},
+                            band
+                        )
+                    )
+                ),
+                listed: {
+                    payroll: listed(state.payroll),
+                    payrollB: listed(state.payrollB),
+                    hr: listed(state.hr),
+                    hrB: listed(state.hrB),
+                    forB: listed(state.payrollAll, {organizationPartyId: orgB}),
+                    otherEmployer: code(run(state.payrollB, G + "find#PayGrades", {organizationPartyId: orgA}))
+                },
+                canEdit: {payroll: canEdit(state.payroll), payrollAll: canEdit(state.payrollAll)},
+                positions: {
+                    otherGrade: plan(state.hrB, orgB, state.gradeA),
+                    sharedGrade: plan(state.hrB, orgB, shared.payGradeId),
+                    ownGrade: plan(state.hr, orgA, state.gradeA)
+                }
+            }
+        },
+        then({shared, refusals, sharedBand, listed, canEdit, positions}) {
+            shared == ""
+            refusals ==
+                {
+                    newShared: "PERMISSION_DENIED",
+                    sharedBand: "PERMISSION_DENIED",
+                    otherBand: "RECORD_UNAVAILABLE",
+                    otherOwner: "ORGANIZATION_DENIED",
+                    ownerChange: "OWNER_CHANGE"
+                }
+            sharedBand == ""
+            listed ==
+                {
+                    payroll: ["A", "shared"],
+                    payrollB: ["shared"],
+                    hr: ["A", "shared"],
+                    hrB: ["shared"],
+                    forB: ["shared"],
+                    otherEmployer: "ORGANIZATION_DENIED"
+                }
+            canEdit == {payroll: ["A true", "shared false"], payrollAll: ["A true", "shared true"]}
+            positions == {otherGrade: "RECORD_UNAVAILABLE", sharedGrade: "", ownGrade: ""}
         }
     }
 )
