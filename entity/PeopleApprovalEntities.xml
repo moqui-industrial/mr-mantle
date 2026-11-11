@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's approvals (IronStone People design §12 ApprovalPolicies, §13 Approvals, PE-15; impl-people P5): an employer's dated
+    approval rules (PeopleApprovalPolicy, its key fields audit-logged), a request for approval of a source (PeopleApproval: a
+    position's activation now, leave, expenses, offers and employment changes with their phases) bound to the source's revision,
+    and each decision, a fact of its own (PeopleApprovalDecision: who decided which step, what, when and why, at which revision).
+    mantle.humanres.PeopleApprovalServices and Approvals.js read and write them; the domain decision services
+    (PositionServices.decide#PositionApproval) call record#Decision. An HR vocabulary value (an Enumeration of a family People
+    maintains, PeopleServices.store#Lookup) is ended, never deleted: Enumeration.thruDate. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PeopleApprovalPolicy" package="mantle.humanres.approval" cache="never">
+        <description>One approval step of an employer's kind of People approval, effective-dated. The rows in effect for a request
+            are chosen in order: those naming the request's employee (employeePartyId, an override), else those of the nearest
+            department at or above the source's department, else the employer's type rule (no department and no employee);
+            each chosen row is a step, decided in sequenceNum order, and every step is required. With no row the request goes
+            to the employee's manager (or, for a position, the head of its department). A step's approvers come from its role:
+            the department head (the lead of the department, P3), the manager (the reporting line at the employer), a named
+            person, or HR (the named person, else the employer's HR editors); when none may decide (absent, or the requester),
+            the alternate decides, else the employer's HR fallback (ParHrFallback rows), else the request waits. Nobody
+            approves their own request. A change ends the row in effect and starts the next (store#Policy).</description>
+        <field name="peopleApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"><description>The legal employer</description></field>
+        <field name="approvalKindEnumId" type="id" enable-audit-log="true"><description>PeopleApprovalKind</description></field>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>A department of the employer (an
+            OrgDepartment rolling up to it): the rule of the requests of that department and the departments under it without
+            rules of their own; empty for the employer's type rule</description></field>
+        <field name="employeePartyId" type="id" enable-audit-log="true"><description>An override for the requests about this
+            employee</description></field>
+        <field name="sequenceNum" type="number-integer" enable-audit-log="true"><description>The step's place, from 1</description></field>
+        <field name="approverRoleEnumId" type="id" enable-audit-log="true"><description>PeopleApproverRole: ParDepartmentHead,
+            ParManager, ParPerson, ParHr, or ParHrFallback (the employer's fallback for a step no one else may decide, not a step
+            of its own)</description></field>
+        <field name="approverPartyId" type="id" enable-audit-log="true"><description>The person of ParPerson and ParHrFallback,
+            and the designated HR officer of ParHr</description></field>
+        <field name="alternatePartyId" type="id" enable-audit-log="true"><description>Decides the step when no one of its role
+            may (absent or conflicted)</description></field>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="description" type="text-medium"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PeopleApprovalKind" related="moqui.basic.Enumeration" short-alias="approvalKind">
+            <key-map field-name="approvalKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PeopleApproverRole" related="moqui.basic.Enumeration" short-alias="approverRole">
+            <key-map field-name="approverRoleEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Department" related="mantle.party.Party" short-alias="department">
+            <key-map field-name="departmentPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Employee" related="mantle.party.Party" short-alias="employee">
+            <key-map field-name="employeePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="mantle.party.Party" short-alias="approver">
+            <key-map field-name="approverPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Alternate" related="mantle.party.Party" short-alias="alternate">
+            <key-map field-name="alternatePartyId" related="partyId"/></relationship>
+        <index name="PPL_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="approvalKindEnumId"/></index>
+        <seed-data>
+            <!-- each kind is seeded with the phase that builds its decision service (impl-people §4) -->
+            <moqui.basic.EnumerationType description="People Approval Kind" enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.Enumeration enumId="PakPosition" description="Position activation" sequenceNum="1"
+                    enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.EnumerationType description="People Approver Role" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParDepartmentHead" description="Department head" sequenceNum="1"
+                    enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParManager" description="Manager" sequenceNum="2" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParPerson" description="Named person" sequenceNum="3"
+                    enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParHr" description="HR officer" sequenceNum="4" enumTypeId="PeopleApproverRole"/>
+            <moqui.basic.Enumeration enumId="ParHrFallback" description="HR fallback" sequenceNum="5"
+                    enumTypeId="PeopleApproverRole"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PeopleApproval" package="mantle.humanres.approval" cache="never">
+        <description>A request for a People approval of a source record (a position's activation now) at the source's revision:
+            the requester, the employer and department it routes by, the person it concerns (none for a position), the
+            effective date and justification, and its state. Waiting until every step of its route is approved, refused at a
+            refusal, superseded when the source's terms change before it is decided. A request whose route names no one who may
+            decide waits; nothing is approved by default. Written by the domain request services (request#PositionApproval)
+            and record#Decision.</description>
+        <field name="peopleApprovalId" type="id" is-pk="true"/>
+        <field name="approvalKindEnumId" type="id"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="id"/>
+        <field name="sourceRevision" type="text-short"><description>The source's revision the request is bound to</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"/>
+        <field name="subjectPartyId" type="id"><description>The person the request is about (never one of its approvers)</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedByPartyId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="effectiveDate" type="date-time"/>
+        <field name="justification" type="text-long"/>
+        <field name="statusId" type="id"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="operationKey" type="text-short"><description>The requester's key: a retry with it answers the first request</description></field>
+        <relationship type="one" title="PeopleApprovalKind" related="moqui.basic.Enumeration" short-alias="approvalKind">
+            <key-map field-name="approvalKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PeopleApproval" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="RequestedBy" related="moqui.security.UserAccount" short-alias="requestedBy">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <index name="PPL_APR_SOURCE"><index-field name="sourceEntityName"/><index-field name="sourceId"/></index>
+        <index name="PPL_APR_ORG_STATUS"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="People Approval" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapPending" description="Waiting" sequenceNum="1" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapApproved" description="Approved" sequenceNum="2" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapRefused" description="Refused" sequenceNum="3" statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusItem statusId="PapSuperseded" description="Superseded by a change" sequenceNum="4"
+                    statusTypeId="PeopleApproval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PapPending" toStatusId="PapSuperseded" transitionName="Supersede"/>
+            <!-- a planned position activated by its approval (PositionServices.decide#PositionApproval) -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EmpsPlanned" toStatusId="EmpsActive" transitionName="Activate"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PeopleApprovalDecision" package="mantle.humanres.approval" cache="never">
+        <description>One decision of a step of a People approval: who decided, what, when and why, at which revision of the
+            source, against which rule row and role. Written only by PeopleApprovalServices.record#Decision; never changed.</description>
+        <field name="peopleApprovalDecisionId" type="id" is-pk="true"/>
+        <field name="peopleApprovalId" type="id"/>
+        <field name="sequenceNum" type="number-integer"><description>The step decided</description></field>
+        <field name="peopleApprovalPolicyId" type="id"><description>The rule row of the step; empty for the default route</description></field>
+        <field name="approverRoleEnumId" type="id"/>
+        <field name="decisionEnumId" type="id"/>
+        <field name="decisionDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="sourceRevision" type="text-short"/>
+        <field name="reason" type="text-long"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.humanres.approval.PeopleApproval" short-alias="approval"/>
+        <relationship type="one" title="PeopleApprovalDecision" related="moqui.basic.Enumeration" short-alias="decision">
+            <key-map field-name="decisionEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.approval.PeopleApprovalPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" title="DecidedBy" related="moqui.security.UserAccount" short-alias="decidedBy">
+            <key-map field-name="decidedByUserId" related="userId"/></relationship>
+        <index name="PPL_APR_DEC_APPROVAL"><index-field name="peopleApprovalId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="People Approval Decision" enumTypeId="PeopleApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PpdApproved" description="Approved" sequenceNum="1" enumTypeId="PeopleApprovalDecision"/>
+            <moqui.basic.Enumeration enumId="PpdRefused" description="Refused" sequenceNum="2" enumTypeId="PeopleApprovalDecision"/>
+        </seed-data>
+    </entity>
+
+    <!-- an HR vocabulary value ended, never deleted (PeopleServices.store#Lookup): the records that hold it keep it, and no new
+        record takes it. Other families ignore it. -->
+    <extend-entity entity-name="Enumeration" package="moqui.basic">
+        <field name="thruDate" type="date-time"><description>Ended from this time: kept for the records that hold it and offered
+            for no new one (People's lookups)</description></field>
+    </extend-entity>
+</entities>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- People's approval topics (IronStone People design §12 ApprovalPolicies, PE-15; impl-people §4, F42): each seeded here,
+        beside its decision service, with the phase that builds that service, so no topic names a missing one. P5: a position's
+        activation (request#PositionApproval), sent to the approvers of the step waiting, one message for the step;
+        approve#NotificationMessage and refuse#NotificationMessage call mantle.humanres.PositionServices approve#PositionApproval
+        and refuse#PositionApproval as the user, which decide the request at the position's revision in the message
+        (decide#PositionApproval over PeopleApprovalServices.record#Decision): the last step's approval activates the position,
+        a refusal needs a reason. The message holds peopleApprovalId, emplPositionId, sourceRevision, positionName,
+        organizationName, departmentName and stepText, and no pay. The app that shows them sets the link (IronStone People:
+        BossSetupData.xml). Later phases add PeopleLeaveApproval, PeopleExpenseApproval and the others of design §12. -->
+    <moqui.security.user.NotificationTopic topic="PeoplePositionApproval" inboxEnumId="NinNotifications"
+            description="Position activation to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PositionServices.approve#PositionApproval"
+            refuseServiceName="mantle.humanres.PositionServices.refuse#PositionApproval" refuseReasonRequired="Y"
+            titleTemplate="Approve the activation of position ${positionName} (${organizationName}, ${stepText})"/>
+
+    <!-- the skill levels People's lookups maintain (PeopleServices find#Lookups and store#Lookup; design §12 Lookups, PE-03):
+        the vocabulary of PartySkill.skillLevel and of a requirement's level (P18), each value's enumCode its number -->
+    <moqui.basic.EnumerationType description="Skill Level" enumTypeId="SkillLevel"/>
+    <moqui.basic.Enumeration enumId="SklBasic" enumTypeId="SkillLevel" enumCode="1" description="Basic" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SklWorking" enumTypeId="SkillLevel" enumCode="2" description="Working" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SklProficient" enumTypeId="SkillLevel" enumCode="3" description="Proficient" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SklAdvanced" enumTypeId="SkillLevel" enumCode="4" description="Advanced" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="SklExpert" enumTypeId="SkillLevel" enumCode="5" description="Expert" sequenceNum="5"/>
+</entity-facade-xml>
