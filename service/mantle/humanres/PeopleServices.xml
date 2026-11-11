@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's guarded entry over the HR records (IronStone People design §1.1, §16.2 PeopleServices; People.js): the caller's
+    scope, which every People service checks first and then reads and writes with authorization off, Home's counts and the setup
+    readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
+    to ADMIN) and names no application group. Later services of the family (the directory, Employee360, hire and employment
+    change) join this file. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="Scope" allow-remote="false">
+        <description>The caller's People scope: capabilities from the People and payroll permissions (an edit permission alone
+            reads nothing), the employers a staff reader sees (their own internal organizations, only the active one when it is
+            theirs; every one, or the active one, for a holder of PEOPLE_ALL_ORGANIZATIONS, which reads nothing by itself) and
+            the units under them, their own party and current employments, and a manager's live reports. With
+            organizationPartyId, narrows the employers, the units and a staff admission to it and refuses one outside the scope
+            (ORGANIZATION_DENIED). With partyId, says how the scope admits that person (self, team or staff) and which of their
+            employments it shows (staff: an employment by an employer in scope, in effect on asOfDate for a directory
+            reader, any for an HR reader), and refuses a person it does not admit as it refuses a missing one
+            (RECORD_UNAVAILABLE); a supplied party never widens self scope.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyId"/>
+            <parameter name="asOfDate" type="Timestamp"><description>The date a directory reader's employments are in effect
+                on; now when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="capabilities" type="Map"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyIds" type="List"/>
+            <parameter name="activeOrganizationPartyId"/>
+            <parameter name="allOrganizations" type="Boolean"/>
+            <parameter name="unitPartyIds" type="List"/>
+            <parameter name="employments" type="List"><description>The caller's own current employments: partyRelationshipId,
+                partyId, organizationPartyId, fromDate, thruDate</description></parameter>
+            <parameter name="reportPartyIds" type="List"/>
+            <parameter name="partyAccess" type="List"><description>self, team and staff, as each admits the party asked
+                for</description></parameter>
+            <parameter name="partyEmployments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('scope', context)"/>
+            <set field="capabilities" from="found.capabilities"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="organizationPartyIds" from="found.organizationPartyIds"/>
+            <set field="activeOrganizationPartyId" from="found.activeOrganizationPartyId"/>
+            <set field="allOrganizations" from="found.allOrganizations"/>
+            <set field="unitPartyIds" from="found.unitPartyIds"/>
+            <set field="employments" from="found.employments"/>
+            <set field="reportPartyIds" from="found.reportPartyIds"/>
+            <set field="partyAccess" from="found.partyAccess"/>
+            <set field="partyEmployments" from="found.partyEmployments"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Home" allow-remote="false">
+        <description>People Home's summary for a staff reader, over the employers in scope or the one asked for (refused outside
+            the scope, ORGANIZATION_DENIED), as of asOfDate (now when empty): headcount (distinct people) and employments for a
+            staff reader, the joins and exits of the last 30 days for an HR reader, each count of a later phase absent; and the
+            due work an HR reader clears (employees with no manager, by name, the first 20 of dueWorkCount). Pay is never
+            counted. Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyIds" type="List"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="counts" type="Map"><description>headcount, employments, joins and exits, each present only for a
+                caller who may read it</description></parameter>
+            <parameter name="hasEmployees" type="Boolean"/>
+            <parameter name="dueWork" type="List"><description>dueKind, dueText, partyId, personName, organizationPartyId,
+                organizationName</description></parameter>
+            <parameter name="dueWorkCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('home', context)"/>
+            <set field="organizationPartyIds" from="found.organizationPartyIds"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="counts" from="found.counts"/>
+            <set field="hasEmployees" from="found.hasEmployees"/>
+            <set field="dueWork" from="found.dueWork"/>
+            <set field="dueWorkCount" from="found.dueWorkCount"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Readiness" allow-remote="false">
+        <description>People's setup readiness, answering Admin's readiness contract with no adapter: called with providerKey and
+            an organizationPartyId (or none, for every employer in the caller's scope), returns checks of checkKey, title, state
+            (ready, warning, failed or unavailable), reasonCode, message and fixPath, with the organization's id and name. The
+            checks of what is built, for an organization with current employees (one with none answers no check): a department
+            set up, every employee with a manager. Later phases add theirs. Refuses a caller without PEOPLE_CONFIGURE
+            (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="providerKey"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('readiness', context)"/>
+            <set field="checks" from="found.checks"/>
+        </actions>
+    </service>
+</services>
