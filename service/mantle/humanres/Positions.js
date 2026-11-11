@@ -10,7 +10,9 @@
 //   deleted, so its positions keep it and no new position takes it;
 // - a position is a dated seat, an EmplPosition of its legal employer (organizationPartyId, which create#Employment checks), in a
 //   department (departmentPartyId, an OrgDepartment that rolls up to the employer), of a class, with a pay grade by name only.
-//   A new position is planned (EmpsPlanned); its activation is an approval decision (P5). Ending it (thruDate) keeps it;
+//   A new position is planned (EmpsPlanned); its activation is an approval decision (P5: request#PositionApproval and
+//   decide#PositionApproval over Approvals.js, the request bound to the position's revision, so new terms supersede it). Ending
+//   it (thruDate) keeps it;
 // - a position's holders are its dated occupancy rows (EmplPositionParty, role Employee), and an employment that names the
 //   position (Employment.emplPositionId, over the employment's dates) for a person with no occupancy row of it. A seat has one
 //   holder at a time: an overlapping holder is refused, and an end before a holder's last day is refused. Vacancy is computed
@@ -20,6 +22,7 @@
 // grade is its name (PayrollSetup.js gives a band's amounts to PAYROLL_VIEW). Missing and unauthorized records are refused
 // alike (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -376,7 +379,12 @@ function getPosition(p) {
             )
         })
         .sort((a, b) => rank[a.state] - rank[b.state] || (b.fromMs ?? 0) - (a.fromMs ?? 0))
-    return {position: row, holders: holderRows, asOfDate: at}
+    // P5: the seat's latest activation request, and whether an HR editor may ask for one (a planned seat not ended, with none
+    // waiting); an approver of the step waiting may decide it here (canDecide)
+    const approval = approvals().sourceSummary(approvalKind, position.emplPositionId)
+    row.canRequestApproval =
+        !!row.canEdit && row.statusId === "EmpsPlanned" && row.state !== "ended" && !(approval && approval.waiting)
+    return {position: row, holders: holderRows, approval, asOfDate: at}
 }
 
 // ===== store#Position =====
@@ -517,7 +525,11 @@ function storePosition(p) {
     }
     for (const field of ["emplPositionClassId", "departmentPartyId", "payGradeId"])
         if (Object.hasOwn(changes, field)) changes[field + "_changeReason"] = reason
-    if (Object.keys(changes).length > 1) call("update#" + POSITION, changes)
+    if (Object.keys(changes).length > 1) {
+        call("update#" + POSITION, changes)
+        // new terms supersede an activation request made at the earlier revision (P5)
+        approvals().sourceChanged(approvalKind, position.emplPositionId)
+    }
     return {
         emplPositionId: position.emplPositionId,
         revision: String(stampOf(one(POSITION, {emplPositionId: position.emplPositionId})))
@@ -609,6 +621,91 @@ function storePositionHolder(p) {
         comments: text(p.changeReason) || null
     })
     return {emplPositionId: position.emplPositionId, partyId, fromMs}
+}
+
+// ===== the activation approval (P5) =====
+const approvalKind = "PakPosition"
+// request#PositionApproval: an HR editor asks for a planned seat's activation, at the revision read, with the effective date and
+// a justification; routed by the employer's rules for the position's department (Approvals.js), never to the requester. A retry
+// with the same operation key answers the first request. Refused: a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT
+// (PERMISSION_DENIED); a position outside the scope (RECORD_UNAVAILABLE); one not planned or ended (NOT_PLANNED); no
+// justification (JUSTIFICATION_REQUIRED); a revision other than the one read (REVISION_CHANGED); a request already waiting
+// (APPROVAL_PENDING).
+function requestPositionApproval(p) {
+    const userScope = editorScope("Asking for a position's activation")
+    const position = one(POSITION, {emplPositionId: text(p.emplPositionId)})
+    if (!position || !userScope.organizationPartyIds.includes(position.organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Position " + text(p.emplPositionId) + " is not available")
+    if (text(p.operationKey)) {
+        const first = rows("mantle.humanres.approval.PeopleApproval", {
+            sourceEntityName: POSITION,
+            sourceId: position.emplPositionId,
+            operationKey: text(p.operationKey)
+        }).find(row => row.requestedByUserId === ec.user.userId)
+        if (first)
+            return approvals().request({
+                approvalKindEnumId: approvalKind,
+                sourceId: position.emplPositionId,
+                operationKey: text(p.operationKey)
+            })
+    }
+    if (position.statusId !== "EmpsPlanned" || (ms(position.thruDate) ?? Infinity) <= nowMs())
+        denied("NOT_PLANNED", "Only a planned position that has not ended is asked to be activated")
+    const revision = String(stampOf(position))
+    if (text(p.expectedRevision) !== revision)
+        denied("REVISION_CHANGED", "This position changed since you read it; open it again (revision " + revision + ")")
+    if (!text(p.justification)) denied("JUSTIFICATION_REQUIRED", "Say why the position is needed")
+    return approvals().request({
+        approvalKindEnumId: approvalKind,
+        sourceId: position.emplPositionId,
+        organizationPartyId: position.organizationPartyId,
+        departmentPartyId: position.departmentPartyId,
+        effectiveDate: p.effectiveDate,
+        justification: p.justification,
+        operationKey: p.operationKey
+    })
+}
+// decide#PositionApproval: the step waiting of a seat's activation request decided (PeopleApprovalServices.record#Decision, which
+// rechecks the decider's authority and the position's revision); the last step's approval activates the planned seat
+// (EmpsActive). A decision retried answers the first and activates nothing again.
+function decidePositionApproval(p) {
+    const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
+        approvalKindEnumId: approvalKind,
+        peopleApprovalId: text(p.peopleApprovalId) || null,
+        sourceId: text(p.emplPositionId) || null,
+        decision: text(p.decision) || "approve",
+        reason: text(p.reason) || null,
+        sourceRevision: text(p.sourceRevision) || null,
+        operationKey: text(p.operationKey) || null
+    })
+    const position = one(POSITION, {emplPositionId: decided.sourceId})
+    let activated = false
+    if (decided.complete && !decided.repeated && position && position.statusId === "EmpsPlanned") {
+        call("update#" + POSITION, {emplPositionId: position.emplPositionId, statusId: "EmpsActive"})
+        activated = true
+    }
+    return {
+        peopleApprovalId: decided.peopleApprovalId,
+        peopleApprovalDecisionId: decided.peopleApprovalDecisionId,
+        statusId: decided.statusId,
+        emplPositionId: decided.sourceId,
+        positionStatusId: one(POSITION, {emplPositionId: decided.sourceId})?.statusId || null,
+        activated,
+        repeated: decided.repeated
+    }
+}
+// approve#PositionApproval and refuse#PositionApproval, the PeoplePositionApproval topic's services, which the framework calls
+// as the user deciding a notice: decide#PositionApproval at the request and revision in the message.
+function decideNotice(p, decision) {
+    const message = p.message || {}
+    if (p.recordEntityName && p.recordEntityName !== POSITION) denied("SOURCE_INVALID", "Not a position approval")
+    return decidePositionApproval({
+        emplPositionId: p.recordId,
+        peopleApprovalId: message.peopleApprovalId,
+        sourceRevision: message.sourceRevision,
+        decision,
+        reason: p.reason
+    })
 }
 
 // ===== job classes =====
@@ -756,7 +853,8 @@ function storeJobClass(p) {
 // store#JobRequirement: a skill a job class requires, added or removed (class and skill only until P18 adds levels and dates).
 // Refused: a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED); a missing class (RECORD_UNAVAILABLE) or an
 // ended one (CLASS_ENDED); no skill (SKILL_REQUIRED) or one that is not a skill type (SKILL_INVALID); a skill required already
-// (ALREADY_REQUIRED) or, to remove, not required (RECORD_UNAVAILABLE).
+// (ALREADY_REQUIRED) or ended (VALUE_ENDED, P5's lookups; an ended one is still removed) or, to remove, not required
+// (RECORD_UNAVAILABLE).
 function storeJobRequirement(p) {
     editorScope("Changing a job class")
     const id = text(p.emplPositionClassId)
@@ -774,6 +872,8 @@ function storeJobRequirement(p) {
         return {emplPositionClassId: id, skillTypeEnumId}
     }
     if (existing) denied("ALREADY_REQUIRED", (skill.description || skillTypeEnumId) + " is required already")
+    // an ended skill type (People's lookups, Enumeration.thruDate) is kept where it is held and taken by no new requirement
+    if ((ms(skill.thruDate) ?? Infinity) <= nowMs()) denied("VALUE_ENDED", (skill.description || skillTypeEnumId) + " has ended")
     call("create#" + CLASS_SKILL, {emplPositionClassId: id, skillTypeEnumId})
     return {emplPositionClassId: id, skillTypeEnumId}
 }
@@ -786,7 +886,11 @@ const operations = {
     findPositions,
     getPosition,
     storePosition,
-    storePositionHolder
+    storePositionHolder,
+    requestPositionApproval,
+    decidePositionApproval,
+    approveNotice: p => decideNotice(p, "approve"),
+    refuseNotice: p => decideNotice(p, "refuse")
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown position operation " + op)

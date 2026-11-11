@@ -298,8 +298,10 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="enumId"/>
         </member-entity>
         <alias-all entity-alias="PID"/>
+        <!-- thruDate is the group member's (EGM), as before Enumeration.thruDate (PeopleApprovalEntities.xml) -->
         <alias-all entity-alias="ENUM">
             <exclude field="sequenceNum"/>
+            <exclude field="thruDate"/>
         </alias-all>
         <alias-all entity-alias="EGM"/>
     </view-entity>

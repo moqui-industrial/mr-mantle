@@ -17,7 +17,8 @@ along with this software (see the LICENSE.md file). If not, see
     readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
     to ADMIN) and names no application group. P2 adds the employee record over Employees.js: the directory, Employee360's
     regions, the employment history, the personal information correction and the employment content host. Later services of
-    the family (hire and employment change) join this file. -->
+    the family (hire and employment change) join this file. P5 adds People's HR vocabularies over Lookups.js (find#Lookups,
+    store#Lookup). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="Scope" allow-remote="false">
@@ -331,6 +332,59 @@ along with this software (see the LICENSE.md file). If not, see
             </script>
             <service-call name="update#mantle.humanres.employment.EmploymentContent" disable-authz="true"
                     in-map="{employmentContentId:employmentContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <!-- P5: People's HR vocabularies (design §12 Lookups, PE-03; Lookups.js) -->
+    <service verb="find" noun="Lookups" allow-remote="false">
+        <description>People's HR vocabularies, a whitelist of Enumeration families (termination reasons and types, skill types and
+            levels; later phases add theirs), each with its value count; with enumTypeId, its values in order, current unless
+            includeEnded, each with how many records hold it (useCount), whether it has ended and whether the caller may change
+            it. Read by the People administrator and an HR reader (PEOPLE_CONFIGURE or PEOPLE_HR_VIEW; PERMISSION_DENIED
+            otherwise); refuses another family (FAMILY_INVALID).</description>
+        <in-parameters>
+            <parameter name="enumTypeId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="families" type="List"><description>enumTypeId, title, valueCount</description></parameter>
+            <parameter name="values" type="List"><description>enumId, enumTypeId, description, enumCode, sequenceNum, useCount,
+                ended, stateText, canEdit, revision</description></parameter>
+            <parameter name="enumTypeId"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Lookups.js').execute('findLookups', context)"/>
+            <set field="families" from="found.families"/>
+            <set field="values" from="found.values"/>
+            <set field="enumTypeId" from="found.enumTypeId"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Lookup" allow-remote="false">
+        <description>A new value of one of People's HR vocabularies (its name, code and order), a value's new name, code or order,
+            or its end (end true, from now): an ended value stays for the records that hold it and is offered for no new one;
+            nothing is deleted. Refuses a caller without PEOPLE_CONFIGURE (PERMISSION_DENIED), a family not People's
+            (FAMILY_INVALID), a value of another family (RECORD_UNAVAILABLE), no name (DESCRIPTION_REQUIRED), a name a current
+            value of the family has (DUPLICATE_VALUE), an order that is not a whole number from 0 to 9999 (SEQUENCE_INVALID), an
+            ended value (VALUE_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="enumTypeId" required="true"/>
+            <parameter name="enumId"/>
+            <parameter name="description"/>
+            <parameter name="enumCode"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="enumId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Lookups.js').execute('storeLookup', context)"/>
+            <set field="enumId" from="stored.enumId"/>
+            <set field="revision" from="stored.revision"/>
         </actions>
     </service>
 </services>

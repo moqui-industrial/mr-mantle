@@ -16,7 +16,9 @@ along with this software (see the LICENSE.md file). If not, see
     positions (IronStone People design §5 JobClasses, JobClassDetail, Positions and PositionDetail, PE-03; impl-people P4, F10, F35;
     Positions.js): job classes (EmplPositionClass with its work types and required skills, shared by every employer, ended and never
     deleted), positions (an EmplPosition of its legal employer, in a department that rolls up to it, planned when new) and their
-    holders (dated EmplPositionParty rows, one holder at a time; vacancy computed from them at a date). Each People service checks the
+    holders (dated EmplPositionParty rows, one holder at a time; vacancy computed from them at a date); P5: a planned seat's activation
+    asked for and decided (request#PositionApproval, decide#PositionApproval and the PeoplePositionApproval topic's approve and
+    refuse services, over mantle.humanres.PeopleApprovalServices). Each People service checks the
     caller's People scope (PeopleServices get#Scope's rules, People.js) and the People permissions itself, then reads and writes with
     authorization off, and names no application group. Pay amounts are never part of an answer here: a grade is its name. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
@@ -168,8 +170,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A skill a job class requires (EmplPositionClassSkill), added, or removed with remove; class and skill only
             until P18 adds levels and dates. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a
             missing class (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a
-            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED) and, to remove, one not required
-            (RECORD_UNAVAILABLE).</description>
+            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED,
+            People's lookups; P5) and, to remove, one not required (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="emplPositionClassId" required="true"/>
             <parameter name="skillTypeEnumId"/>
@@ -251,12 +253,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="position" type="Map"/>
             <parameter name="holders" type="List"><description>partyId, personName, fromMs, fromDateText, thruDateText, periodText,
                 source, sourceText, partyRelationshipId, comments, state, stateText</description></parameter>
+            <parameter name="approval" type="Map"><description>P5: the latest activation request (statusId, statusText, waiting,
+                unresolved, waitingText, requestedByName, requestedDateText, effectiveDateText, justification, steps with their
+                explanation, decisions, canDecide for the caller), or null; the position's canRequestApproval says whether an HR
+                editor may ask for one</description></parameter>
             <parameter name="asOfDate" type="Timestamp"/>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('getPosition', context)"/>
             <set field="position" from="found.position"/>
             <set field="holders" from="found.holders"/>
+            <set field="approval" from="found.approval"/>
             <set field="asOfDate" from="found.asOfDate"/>
         </actions>
     </service>
@@ -271,7 +278,8 @@ along with this software (see the LICENSE.md file). If not, see
             (NOT_A_DEPARTMENT) or not the employer's (DEPARTMENT_OUTSIDE), a missing class or position and a grade missing or
             another employer's (RECORD_UNAVAILABLE), an end on or before the start (DATES_INVALID), hours outside 0 to 168
             (HOURS_INVALID), an end before a holder's last day (OCCUPIED_AFTER_END), a start after a holder's first
-            (OCCUPIED_BEFORE_START) and a revision other than the one read (REVISION_CHANGED).</description>
+            (OCCUPIED_BEFORE_START) and a revision other than the one read (REVISION_CHANGED). P5: a change supersedes an
+            activation request made at the earlier revision (its notices read; the activation is asked for again).</description>
         <in-parameters>
             <parameter name="emplPositionId"/>
             <parameter name="organizationPartyId"/>
@@ -327,6 +335,110 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="emplPositionId" from="stored.emplPositionId"/>
             <set field="partyId" from="stored.partyId"/>
             <set field="fromMs" from="stored.fromMs"/>
+        </actions>
+    </service>
+    <!-- P5: a planned seat's activation (design §5 PositionDetail's Requisition, §12 ApprovalPolicies; impl-people P5) -->
+    <service verb="request" noun="PositionApproval" allow-remote="false">
+        <description>Ask for a planned position's activation (design §5 Requisition): a PeopleApproval of kind PakPosition at the
+            position's revision read (expectedRevision), with the effective date and the justification, routed by the
+            employer's approval rules for the position's department (PeopleApprovalServices; never to the requester) and sent
+            to the first step's approvers on the PeoplePositionApproval topic; with no one who may decide it waits, and nothing
+            is approved by default. A retry with the same operationKey answers the first request. Refuses a caller without
+            PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a position outside the scope (RECORD_UNAVAILABLE), one not
+            planned or ended (NOT_PLANNED), no justification (JUSTIFICATION_REQUIRED), a revision other than the one read
+            (REVISION_CHANGED) and a request already waiting (APPROVAL_PENDING).</description>
+        <in-parameters>
+            <parameter name="emplPositionId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="justification"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="statusId"/>
+            <parameter name="unresolved" type="Boolean"/>
+            <parameter name="waitingText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('requestPositionApproval', context)"/>
+            <set field="peopleApprovalId" from="requested.peopleApprovalId"/>
+            <set field="statusId" from="requested.statusId"/>
+            <set field="unresolved" from="!!requested.unresolved"/>
+            <set field="waitingText" from="requested.waitingText"/>
+            <set field="repeated" from="!!requested.repeated"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="PositionApproval" allow-remote="false">
+        <description>The decision service of a position's activation (design §12's PeoplePositionApproval): the step waiting of
+            the request (peopleApprovalId, else the position's latest) approved, or refused with a reason, through
+            PeopleApprovalServices.record#Decision, which rechecks that the caller is an approver of that step (never the
+            requester) and that the position has not changed since the request (sourceRevision, the notice's, when given).
+            The last step's approval activates the planned position (EmpsActive); a refusal leaves it planned. A decision the
+            caller already made answers the first (repeated) and activates nothing again. Refuses as record#Decision does.</description>
+        <in-parameters>
+            <parameter name="emplPositionId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="peopleApprovalDecisionId"/>
+            <parameter name="statusId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="positionStatusId"/>
+            <parameter name="activated" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('decidePositionApproval', context)"/>
+            <set field="peopleApprovalId" from="decided.peopleApprovalId"/>
+            <set field="peopleApprovalDecisionId" from="decided.peopleApprovalDecisionId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="emplPositionId" from="decided.emplPositionId"/>
+            <set field="positionStatusId" from="decided.positionStatusId"/>
+            <set field="activated" from="decided.activated"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="PositionApproval" allow-remote="false">
+        <description>The PeoplePositionApproval topic's approve service, which the framework's approve#NotificationMessage calls
+            as the user deciding the notice: decide#PositionApproval at the request and revision in the message (a notice of an
+            earlier revision is refused, REVISION_CHANGED or SOURCE_CHANGED); refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="activated" type="Boolean"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="activated" from="decided.activated"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="PositionApproval" allow-remote="false">
+        <description>The PeoplePositionApproval topic's refuse service, with the reason (the topic requires one): as
+            approve#PositionApproval, the request refused and the position left planned.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Positions.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="repeated" from="decided.repeated"/>
         </actions>
     </service>
 </services>
