@@ -182,6 +182,38 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_VIEW" fromDate="0"/>
     <userPermissions userPermissionId="PAYROLL_EDIT" description="Payroll Edit (an employee's pay rate)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_EDIT" fromDate="0"/>
+    <!-- People (IronStone People; checked by mantle.humanres.PeopleServices and the People service families that follow it): the
+        directory, self-service, team, HR, recruiting, development, case and configuration permissions, People's own import
+        permission, and the approval of a payroll run, each a view or an edit apart (an edit permission alone reads nothing).
+        Each is granted to ADMIN here; an application grants them to its own groups. -->
+    <userPermissions userPermissionId="PEOPLE_DIRECTORY_VIEW" description="People Directory View (the public work identity of employees)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DIRECTORY_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_SELF_SERVICE" description="People Self Service (own employment, requests and corrections)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_SELF_SERVICE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_TEAM_VIEW" description="People Team View (a manager's live reports)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_TEAM_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_REQUEST_APPROVE" description="People Request Approve (approval steps assigned to the user)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_REQUEST_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_HR_VIEW" description="People HR View (employment and private person data of an employer)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_HR_EDIT" description="People HR Edit (employment and private person data of an employer)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_RECRUIT_VIEW" description="People Recruit View (openings, applications and offers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_RECRUIT_EDIT" description="People Recruit Edit (openings, applications and offers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_DEVELOP_VIEW" description="People Develop View (skills, training and reviews)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DEVELOP_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_DEVELOP_EDIT" description="People Develop Edit (skills, training and reviews)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_DEVELOP_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_CASE_HANDLE" description="People Case Handle (confidential cases the user is assigned)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CASE_HANDLE" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_IMPORT" description="People Import (People's own employee and time imports)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_IMPORT" fromDate="0"/>
+    <userPermissions userPermissionId="PEOPLE_CONFIGURE" description="People Configure (People policy, setup and readiness)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="PAYROLL_APPROVE" description="Payroll Approve (a payroll run another prepared)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_APPROVE" fromDate="0"/>
     <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
     <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>
