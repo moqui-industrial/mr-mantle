@@ -352,6 +352,8 @@ feature(
             r.changed.agreementRevision == r.made.decided.agreementRevision + 1
             r.pendingRelease.error.includes("AGREEMENT_CHANGE_PENDING")
             r.notices.length >= 1
+            // the agreement's own wording, taken from the message by name (a title is expanded as a script when sent)
+            r.notices.every(notice => String(notice.titleText).startsWith("Approve purchase agreement " + r.made.agreementId))
             r.stale.error.includes("STALE_REVISION")
             r.unpriced.decided.error == ""
             r.unpricedRelease.error.includes("PRICE_UNAVAILABLE")

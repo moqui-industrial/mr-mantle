@@ -350,7 +350,9 @@ function notify(source, state = null) {
             .filter(user => !refusalFor(source, state, user.userId, user.partyId))
             .map(user => user.userId)
         if (!userIds.length) return {notifiedCount: 0}
-        const message = messageOf(source, state)
+        // a source of its own wording (P13) quotes stored names (a supplier's): a notification's title is a template expanded as
+        // a script when it is sent, so the wording is taken from the message by name and nothing in it runs
+        const message = Object.assign({}, messageOf(source, state), source.title ? {noticeTitle: source.title(state)} : {})
         const batches = quorumOf(step) > 1 ? userIds.map(userId => [userId]) : [userIds]
         for (const batch of batches) {
             const notice = ec
@@ -361,7 +363,7 @@ function notify(source, state = null) {
                 .actorUserId(ec.user.userId)
                 .userIds(batch)
             // P13: a source of its own wording (an agreement on the purchase order topic)
-            if (source.title) notice.title(source.title(state))
+            if (source.title) notice.title("${noticeTitle}")
             notice.send()
         }
         return {notifiedCount: userIds.length}
