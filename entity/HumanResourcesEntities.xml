@@ -763,6 +763,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id" is-pk="true"/>
         <field name="pseudoId" type="text-short" default="emplPositionId"/>
         <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>The department of the seat, an
+            OrgDepartment organization that rolls up (PrtOrgRollup) to organizationPartyId, the legal employer (IronStone People,
+            mantle.humanres.PositionServices.store#Position)</description></field>
         <field name="emplPositionClassId" type="id" enable-audit-log="true"/>
         <field name="description" type="text-medium"/>
         <field name="statusId" type="id"/>
@@ -781,6 +784,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="standardHoursPerWeek" type="number-integer"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Department" related="mantle.party.Party">
+            <key-map field-name="departmentPartyId"/></relationship>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass"/>
         <relationship type="one" title="EmplPosition" related="moqui.basic.StatusItem" short-alias="status"/>
         <relationship type="one" related="mantle.humanres.rate.PayGrade"/>
@@ -811,6 +816,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionClassId" type="id" is-pk="true"/>
         <field name="title" type="text-medium"/>
         <field name="description" type="text-long"/>
+        <field name="thruDate" type="date-time"><description>When the class was ended: an ended class keeps its positions and
+            history and is offered for no new position (mantle.humanres.PositionServices.store#JobClass)</description></field>
         <!-- FUTURE: associate skills with position class -->
         <seed-data>
             <!-- Work Type -->
@@ -928,6 +935,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payGradeId" type="id" is-pk="true"/>
         <field name="description" type="text-medium"/>
         <field name="comments" type="text-medium"/>
+        <field name="organizationPartyId" type="id"><description>The employer that owns the grade: read by that employer's
+            readers and changed by its payroll editors. Empty for a grade shared by every employer, changed only with
+            PEOPLE_ALL_ORGANIZATIONS (IronStone People, mantle.humanres.PayrollSetupServices)</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
     </entity>
     <entity entity-name="PayGradeSalary" package="mantle.humanres.rate" use="configuration">
         <field name="payGradeId" type="id" is-pk="true"/>
