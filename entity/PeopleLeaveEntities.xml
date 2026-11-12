@@ -18,7 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
     (LeaveAccrualRule: by months of service, an amount a period, a cap, a carry-over limit at the year's end, a rounding step); its
     dated assignments to employments (LeavePolicyAssignment, one policy of a leave type for an employment at a time); its blocked
     and mandatory days (LeaveBlockedInterval); allocations (LeaveAllocation, a grant or a reasoned adjustment for an entitlement
-    period); and the ledger every balance is read from (LeaveLedgerEntry: openings, grants, accruals, consumption, expiry,
+    period); P12: leave requests (LeaveRequest, its own id, so one person's morning and afternoon of a day are two requests) and
+    their segments (LeaveRequestSegment: days, a whole day or its morning or afternoon); and the ledger every balance is read from (LeaveLedgerEntry: openings, grants, accruals, consumption, expiry,
     adjustments and reversals, each with its source and a unique source key, posted once and never changed or deleted). Written
     only by mantle.humanres.LeaveServices (Leave.js), which checks the People scope first. Legacy EmploymentLeave rows stay as they
     are, read only and labelled historical (impl-people §5 Q8); no balance counts them. -->
@@ -207,5 +208,79 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="LletAdjustment" description="Adjustment" sequenceNum="6" enumTypeId="LeaveLedgerEntryType"/>
             <moqui.basic.Enumeration enumId="LletReversal" description="Reversal" sequenceNum="7" enumTypeId="LeaveLedgerEntryType"/>
         </seed-data>
+    </entity>
+    <entity entity-name="LeaveRequest" package="mantle.humanres.leave" cache="never">
+        <description>A request of leave of an employment (P12, design-people §7): its leave type, the policy in effect on its first
+            day, its segments (LeaveRequestSegment), what it charges in the policy's unit (counted from the employment's working
+            schedule less its holidays: recounted at the approval), its state (LeaveRequestStatus: waiting for approval, approved,
+            refused, withdrawn, cancellation asked, cancelled) and the person's reason, which is theirs, their approvers' and HR's to
+            read and reaches no AI tool (ai-opt-out, design-people PE-21). Approval is a People approval of kind PakLeave
+            (PeopleApproval, bound to the request's revision). The approval posts the consumption once (consumptionEntryId), a
+            cancellation of approved leave its reversal once (reversalEntryId): ledger entries are never changed or deleted. Approved
+            leave is projected as WetTimeOff work efforts (each segment's workEffortId), which capacity and calendars read, with no
+            reason and no leave type.</description>
+        <field name="leaveRequestId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The employment's department on the first day, which approval routing
+            and blocked days read</description></field>
+        <field name="leaveTypeEnumId" type="id"/>
+        <field name="leavePolicyId" type="id"/>
+        <field name="unitEnumId" type="id"/>
+        <field name="statusEnumId" type="id"><description>LeaveRequestStatus</description></field>
+        <field name="fromDay" type="date"/>
+        <field name="thruDay" type="date"/>
+        <field name="chargedAmount" type="number-decimal"><description>What it charges, in the unit</description></field>
+        <field name="reason" type="text-long" ai-opt-out="true"><description>The person's reason: never in a list, a notice, the
+            calendar, a document search reads or an AI tool's answer</description></field>
+        <field name="overrideBlocked" type="text-indicator"><description>Y: it falls on blocked days an approver may override,
+            which its approver decides knowingly</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="cancelledDate" type="date-time"/>
+        <field name="cancelledByUserId" type="id"><description>An HR editor who cancelled approved leave at once (none when the
+            person's cancellation was approved, which its approval records)</description></field>
+        <field name="cancelReason" type="text-medium"><description>Why HR cancelled it at once, told to the person on the
+            request's decision notice</description></field>
+        <field name="consumptionEntryId" type="id"/>
+        <field name="reversalEntryId" type="id"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one-nofk" related="mantle.humanres.leave.LeavePolicy" short-alias="policy"/>
+        <relationship type="one" title="LeaveRequestStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.leave.LeaveRequestSegment" short-alias="segments">
+            <key-map field-name="leaveRequestId"/></relationship>
+        <index name="LEAVE_REQ_EMPL"><index-field name="partyRelationshipId"/><index-field name="leaveTypeEnumId"/></index>
+        <index name="LEAVE_REQ_PARTY"><index-field name="partyId"/><index-field name="fromDay"/></index>
+        <index name="LEAVE_REQ_ORG"><index-field name="organizationPartyId"/><index-field name="fromDay"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Leave Request Status" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsApproved" description="Approved" sequenceNum="2" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsRefused" description="Refused" sequenceNum="3" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsWithdrawn" description="Withdrawn" sequenceNum="4" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsCancelRequested" description="Cancellation asked" sequenceNum="5" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.Enumeration enumId="LrsCancelled" description="Cancelled" sequenceNum="6" enumTypeId="LeaveRequestStatus"/>
+            <moqui.basic.EnumerationType description="Leave Day Part" enumTypeId="LeaveDayPart"/>
+            <moqui.basic.Enumeration enumId="LdpFull" description="Whole day" sequenceNum="1" enumTypeId="LeaveDayPart"/>
+            <moqui.basic.Enumeration enumId="LdpMorning" description="Morning" sequenceNum="2" enumTypeId="LeaveDayPart"/>
+            <moqui.basic.Enumeration enumId="LdpAfternoon" description="Afternoon" sequenceNum="3" enumTypeId="LeaveDayPart"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="LeaveRequestSegment" package="mantle.humanres.leave" cache="never">
+        <description>Days of a leave request, fromDay through thruDay: whole days, or the morning or the afternoon of one day
+            (dayPartEnumId). Approved, it is projected as one WetTimeOff work effort (workEffortId: "Out of office", the person's,
+            no reason or type) with a leave-start reminder on the first.</description>
+        <field name="leaveRequestId" type="id" is-pk="true"/>
+        <field name="segmentSeqId" type="id" is-pk="true"/>
+        <field name="fromDay" type="date"/>
+        <field name="thruDay" type="date"/>
+        <field name="dayPartEnumId" type="id"><description>LeaveDayPart</description></field>
+        <field name="workEffortId" type="id"/>
+        <relationship type="one" related="mantle.humanres.leave.LeaveRequest" short-alias="request"/>
+        <relationship type="one" title="LeaveDayPart" related="moqui.basic.Enumeration" short-alias="dayPart">
+            <key-map field-name="dayPartEnumId" related="enumId"/></relationship>
     </entity>
 </entities>

@@ -21,7 +21,11 @@ along with this software (see the LICENSE.md file). If not, see
         is matched by its UID, after the bookings of an event it moves are checked (check#ResourceBookings); a task a phone
         changes goes through the task services (update#Task, set#TaskStatus along its status flow); an event a phone deletes is
         cancelled, or only taken out of this calendar when it is in another too. Not carried over CalDAV: attendees and
-        organizer written by a client (the app's own are served), and the instances a client removes from a series. -->
+        organizer written by a client (the app's own are served), and the instances a client removes from a series.
+        Projected collections (impl-people P12, F22, F67; CX-SYNC): each CalendarProjection row (seeded by its owner's component)
+        is a read-only VEVENT collection projected-{projectionId}, listed for a user its owner service admits and answered by it
+        (define#ProjectionOwner): the kind reads no record of the owner, and a write to one is refused (the DAV server refuses a
+        read-only collection first). People's Team absence is the first. -->
 
     <service verb="get" noun="CalendarObjectTags">
         <description>The objects of a calendar for CalDAV: each event series (not cancelled) by its name (the davName a
@@ -140,10 +144,78 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="define" noun="ProjectionOwner" type="interface">
+        <description>What a projected collection's owner service answers (CalendarProjection.ownerServiceName), as the user:
+            admitted, whether the user sees the collection at all; and without checkOnly its events from start to end (epoch
+            millis; the owner's own window when none) as the ICalendar tool's event maps (uid, sequence, summary, status, allDay,
+            start and end in millis, or startDate and endDate days for an all-day event, timeZone, lastModified). The owner decides
+            what each user sees; the projection kind adds nothing to it.</description>
+        <in-parameters>
+            <parameter name="checkOnly" type="Boolean"/>
+            <parameter name="start" type="Long"/>
+            <parameter name="end" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="eventList" type="List"/>
+        </out-parameters>
+    </service>
+    <service verb="get" noun="ProjectionObjects">
+        <description>A projected collection's objects (collectionId projected-{projectionId}, its CalendarProjection not disabled)
+            for the user: its owner service's events (none when it does not admit the user), each named by its uid with an entity
+            tag over it, and the collection's ctag; admitted false for a user the owner does not admit or an unknown projection.
+            A failure of the owner is logged and answers nothing.</description>
+        <in-parameters>
+            <parameter name="collectionId" required="true"/>
+            <parameter name="checkOnly" type="Boolean"/>
+            <parameter name="start" type="Long"/>
+            <parameter name="end" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="projection" type="Map"/>
+            <parameter name="objectList" type="List"/>
+            <parameter name="ctag"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            admitted = false; projection = null; objectList = []; ctag = null
+            const hash = (text) => {
+                let a = 0x811c9dc5, b = 0x9747b28c
+                for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); a = Math.imul(a ^ c, 16777619); b = Math.imul(b ^ c, 2246822519) }
+                return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0')
+            }
+            const projectionId = String(collectionId).startsWith('projected-') ? String(collectionId).substring(10) : ''
+            const row = projectionId ? ec.entity.find('mantle.work.calendar.CalendarProjection').condition('projectionId', projectionId).disableAuthz().one() : null
+            if (row == null || row.disabled === 'Y' || !row.ownerServiceName) return
+            projection = {projectionId: row.projectionId, title: row.title, description: row.description ?? null, sequenceNum: row.sequenceNum ?? null}
+            let out = null
+            ec.message.pushErrors()
+            try {
+                out = ec.service.sync().name(row.ownerServiceName).parameters({checkOnly: !!checkOnly, start: start ?? null, end: end ?? null}).call()
+                if (ec.message.hasError()) { ec.logger.error(`Projected calendar ${projectionId}: ${ec.message.getErrorsString()}`); out = null }
+            } catch (error) {
+                ec.logger.error(`Projected calendar ${projectionId} was not answered: ${error.message}`); out = null
+            } finally { ec.message.clearErrors(); ec.message.popErrors() }
+            if (!out?.admitted) return
+            admitted = true
+            for (const event of Array.from(out.eventList || [])) {
+                const uid = String(event.uid || '')
+                if (!/^[A-Za-z0-9@._:+-]+$/.test(uid)) continue
+                objectList.push({name: `${uid}.ics`, uid: uid, event: event,
+                    start: event.allDay ? (event.startDate ? Date.parse(event.startDate + 'T00:00:00Z') : null) : event.start ?? null,
+                    end: event.allDay ? (event.endDate ? Date.parse(event.endDate + 'T00:00:00Z') : null) : event.end ?? null,
+                    etag: hash([uid, event.summary, event.allDay, event.start, event.end, event.startDate, event.endDate, event.lastModified, event.status]
+                        .map((part) => String(part ?? '')).join('|'))})
+            }
+            ctag = hash(`${collectionId}|` + objectList.map((object) => `${object.name}:${object.etag}`).sort().join('|'))
+        ]]></script></actions>
+    </service>
+
     <service verb="get" noun="DavCollections">
         <description>The CalDAV collections of the user: each calendar the user may view (not free/busy only), read only
             below edit permission and for a subscription, named with its owner when shared; and Tasks (collectionId tasks,
-            VTODO). With collectionId only that one.</description>
+            VTODO); and each projected collection whose owner admits the user (projected-{projectionId}, VEVENT, read only;
+            P12). With collectionId only that one.</description>
         <in-parameters><parameter name="collectionId"/></in-parameters>
         <out-parameters><parameter name="collectionList" type="List"/></out-parameters>
         <actions><script><![CDATA[
@@ -165,6 +237,19 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 collectionList.push({collectionId: 'tasks', name: ec.l10n.localize('Tasks'), description: ec.l10n.localize('The tasks assigned to you'),
                     order: order + 1, components: 'VTODO', ctag: tags.ctag, readOnly: false})
+            }
+            // the projected collections (P12): each whose owner admits the user, read only
+            if (!collectionId || String(collectionId).startsWith('projected-')) {
+                const projections = Array.from(ec.entity.find('mantle.work.calendar.CalendarProjection').orderBy(['sequenceNum', 'projectionId']).disableAuthz().list())
+                        .filter((row) => row.disabled !== 'Y' && (!collectionId || collectionId === `projected-${row.projectionId}`))
+                let extra = order + 1
+                for (const row of projections) {
+                    const found = ec.service.sync().name('mantle.work.CalendarDavServices.get#ProjectionObjects').parameters({collectionId: `projected-${row.projectionId}`}).call()
+                    if (!found?.admitted) continue
+                    extra++
+                    collectionList.push({collectionId: `projected-${row.projectionId}`, name: ec.l10n.localize(row.title || row.projectionId),
+                        description: row.description ? ec.l10n.localize(row.description) : null, order: extra, components: 'VEVENT', ctag: found.ctag, readOnly: true})
+                }
             }
         ]]></script></actions>
     </service>
@@ -188,6 +273,22 @@ along with this software (see the LICENSE.md file). If not, see
             const tool = withData ? ec.factory.getTool('ICalendar') : null
             if (withData && tool == null) { ec.message.addError('The ICalendar tool is not available'); return }
             const millis = (value) => value == null || value === '' ? null : (value instanceof Date ? value.getTime() : (/^-?\d+$/.test(String(value)) ? Number(String(value)) : Date.parse(String(value))))
+            // a projected collection (P12): its owner's events, read only
+            if (String(collectionId).startsWith('projected-')) {
+                if (componentType && componentType !== 'VEVENT') return
+                const found = ec.service.sync().name('mantle.work.CalendarDavServices.get#ProjectionObjects').parameters({collectionId: collectionId,
+                        start: start ?? null, end: end ?? null}).call()
+                if (!found?.admitted) { ec.message.addError(`Calendar ${collectionId} not found`); return }
+                for (const object of Array.from(found.objectList || [])) {
+                    if (names && !names.has(object.name)) continue
+                    if (start != null && object.end != null && object.end < start) continue
+                    if (end != null && object.start != null && object.start >= end) continue
+                    const entry = {name: object.name, etag: object.etag, componentType: 'VEVENT'}
+                    if (withData) entry.data = tool.write({calendarObject: true, timeZone: ec.user.timeZone, events: [object.event]})
+                    objectList.push(entry)
+                }
+                return
+            }
             if (collectionId === 'tasks') {
                 if (componentType && componentType !== 'VTODO') return
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
@@ -281,6 +382,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ifMatch && (!existing || (bare(ifMatch) !== '*' && bare(ifMatch) !== existing.etag))) return true
                 return false
             }
+            // a projected collection is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const parsed = tool.parse(String(data))
             const toDate = (value) => value == null ? null : new Date(Number(value))
             if (collectionId === 'tasks') {
@@ -441,6 +544,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="status" type="Integer"/></out-parameters>
         <actions><script><![CDATA[
             status = null
+            // a projected collection is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const cf = ec.entity.conditionFactory
             const bare = (tag) => String(tag || '').trim().replace(/^W\//, '').replace(/"/g, '')
             if (collectionId === 'tasks') {
