@@ -267,7 +267,10 @@ along with this software (see the LICENSE.md file). If not, see
             outage; completion and cancel restore nothing (end#ResourceUnavailability does). P10: complete with an outside-service
             line (serviceOrderId, serviceOrderItemSeqId, serviceAcceptedQuantity, the evidence serviceEvidenceContentId and
             serviceOperationKey) accepts it in the same transaction as accept#MaintenanceService does, under Purchasing's check;
-            completing the work completes no order line.</description>
+            completing the work completes no order line. A preventive plan's work (P14): complete or close counts its obligation
+            once, cancel opens it again; a meter plan's work needs the reading of the plan's meter taken in it, or meterValue
+            (READING_REQUIRED). At complete the order is the checklist's gate (P7), the reading (P14), the outside-service
+            acceptance (P10), then the obligation's credit.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="action" required="true"><description>approve, start, hold, resume, complete, close or cancel</description></parameter>
@@ -282,6 +285,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="offlineIntent"/>
             <parameter name="unavailabilityReasonEnumId"/>
             <parameter name="followUpName"/>
+            <parameter name="meterValue"><description>Complete of a meter plan's work: the reading of the plan's meter taken in the
+                work, recorded at the finish when the work has none (P14, F187; READING_REQUIRED without either)</description></parameter>
             <parameter name="serviceOrderId"/>
             <parameter name="serviceOrderItemSeqId"/>
             <parameter name="serviceAcceptedQuantity" type="BigDecimal"/>

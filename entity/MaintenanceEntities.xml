@@ -115,7 +115,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>An organization's maintenance work policy from fromDate (design-maintenance §9 MaintenanceSettings): the
             default maintenance type and team of new work, the planned-work approval threshold in hours (template, preventive
             and planned work above it needs a supervisor's approval; zero, the default, puts all of it before a supervisor, and
-            work with no estimated hours is over it; the cost half is impl-maintenance P11's), the closure policy (a supervisor
+            work with no estimated hours is over it), its cost half (an estimated-cost threshold with its currency, unset by
+            default; impl-maintenance P11), the closure policy (a supervisor
             closes completed work, or completion closes it) and whether the organization's production maintenance requests and
             warranty repairs become managed work (off by default; the adapters are later phases'), whether a procedure's
             last author may approve it (off by default), and whether a technician's voice note on a checklist step is sent to the
@@ -134,6 +135,13 @@ along with this software (see the LICENSE.md file). If not, see
             (off by default; impl-maintenance P6)</description></field>
         <field name="voiceNoteTranscription" type="text-indicator"><description>Y: a checklist step's voice note is transcribed
             by SpeechServices.transcribe#Audio (off by default; impl-maintenance P7 review, the user's call of Nov 12)</description></field>
+        <!-- impl-maintenance P11 (§4): the threshold's cost half, unset by default and compared only where set; the work's
+            estimated cost is computed at the Approve gate and never stored (MaintenanceCosts.js) -->
+        <field name="approvalThresholdCost" type="currency-amount"><description>Planned work whose estimated cost (its planned
+            parts at their approved standard cost and its estimated hours at the costing rate) is above this, or cannot be
+            priced, needs a supervisor's approval; empty: not compared</description></field>
+        <field name="approvalThresholdCurrencyUomId" type="id"><description>The threshold's currency; empty: the
+            organization's base currency</description></field>
         <field name="changedByUserId" type="id"/>
         <field name="comments" type="text-medium"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">

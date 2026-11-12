@@ -13,13 +13,16 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Maintenance's read-only projections (IronStone Maintenance design §3 Home, §8, §13.2 MaintenanceReportServices; impl-maintenance
-    P3): Home's counters, the user's work and the teams' work, in MaintenanceWork.js. The reports join in P17. -->
+    P3): Home's counters, the user's work and the teams' work, in MaintenanceWork.js; P14 the preventive compliance report, in
+    MaintenancePlans.js; P11: the cost reader's costs (WorkCosts and MaintenanceCostReport), in MaintenanceCosts.js. The other
+    reports join in P17. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="MaintenanceHome" allow-remote="false">
         <description>Home's counts over the user's maintenance scope (a work read; with the assigned view alone, the user's own
             work), narrowed to an organization or a facility (with those inside it): open, unassigned, high priority and overdue
-            work orders, read in a few queries; the counts of overdue preventive maintenance, unknown meter readings and
-            unavailable resources are not configured until their records exist (null, never zero). myWorkList: the user's open work,
+            work orders, read in a few queries; for a reader of work (MAINTENANCE_VIEW) the active plans overdue and the meter
+            plans whose due is unknown (P14; at most 200 plans read, pmCapped), null for anyone else (never zero); the unavailable
+            resources (P5). myWorkList: the user's open work,
             by priority and due; teamWorkList, for a broad reader only (teamTotals): per team its open, active, unscheduled,
             blocked and overdue work. No cost.</description>
         <in-parameters>
@@ -38,6 +41,88 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="myWorkList" from="answer.myWorkList"/>
             <set field="teamWorkList" from="answer.teamWorkList"/>
             <set field="teamTotals" from="answer.teamTotals"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceCompliance" allow-remote="false" read-only="true">
+        <description>Preventive compliance over obligations, not work orders (design §8 PreventiveComplianceReport; MAINTENANCE_VIEW
+            in the scope's organizations): the obligations due from fromDate through thruDate (the 90 days to the as-of time unless
+            given) of the active and ended plans of the scope, an organization, a plan, a piece of equipment or a facility (with
+            those inside it), at most 500 plans (capped). Each obligation is on time (satisfied by its due date), late, outstanding
+            (passed, not done; a coalesced one until its catch-up is done), skipped, unknown (a plan with no time zone, a meter
+            completion that took no reading, a meter plan whose reading is stale) or upcoming (due after the as-of time). The
+            summary's denominator is the obligations due (on time, late, outstanding and skipped) and its on-time percentage the on
+            time ones over it; unknown and upcoming ones are named as left out. A meter obligation is the threshold found reached,
+            on time when its completion's reading is within it; no crossing date is invented. No cost.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="maintenanceScheduleId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="outcome"><description>onTime, late, outstanding, skipped, unknown or upcoming: the rows of one outcome
+                (the summary counts all)</description></parameter>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="summary" type="Map"/>
+            <parameter name="complianceList" type="List"/>
+            <parameter name="complianceListCount" type="Integer"/>
+            <parameter name="complianceListPageIndex" type="Integer"/>
+            <parameter name="complianceListPageSize" type="Integer"/>
+            <parameter name="complianceListPageMaxIndex" type="Integer"/>
+            <parameter name="complianceListPageRangeLow" type="Integer"/>
+            <parameter name="complianceListPageRangeHigh" type="Integer"/>
+            <parameter name="capped" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('compliance', context)"/>
+            <set field="summary" from="answer.summary"/>
+            <set field="complianceList" from="answer.complianceList"/>
+            <set field="complianceListCount" from="answer.complianceListCount"/>
+            <set field="complianceListPageIndex" from="answer.complianceListPageIndex"/>
+            <set field="complianceListPageSize" from="answer.complianceListPageSize"/>
+            <set field="complianceListPageMaxIndex" from="answer.complianceListPageMaxIndex"/>
+            <set field="complianceListPageRangeLow" from="answer.complianceListPageRangeLow"/>
+            <set field="complianceListPageRangeHigh" from="answer.complianceListPageRangeHigh"/>
+            <set field="capped" from="!!answer.capped"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceCosts" allow-remote="false">
+        <description>The cost of maintenance work (design §3 WorkCosts, §8 MaintenanceCostReport; impl-maintenance P11), for the cost
+            reader only (MAINTENANCE_COST_VIEW with a work read; PERMISSION_DENIED otherwise, so no other caller is answered an
+            amount): one work order (workEffortId; a step reads as its work order, RECORD_UNAVAILABLE outside the scope) with its
+            estimate, or the work orders of the scope and the filters (any status; at most 2000, capped says so), the sources dated
+            in the period (fromDate inclusive, thruDate exclusive). Each source once: a part issued at its asset's cost and each
+            return naming it, less; each finished time entry, approved hours at the costing rate get#CostingRate answers for its
+            class and work type (never a person's pay rate), unapproved and unpriced hours apart; each outside-service line from
+            its bill, else its acceptance, once, what is ordered and not yet accepted pending. Totals by currency, never added
+            across currencies; priced amounts by project. costs: asOf, workOrderCount, capped, totalList (per currency: parts,
+            labor, outside, total, pending), unapprovedHours, unpricedHours, unpricedParts, projectList, currencies, sourceList
+            (component, sourceType, sourceId, workEffortId, stepName, date, description, quantity, amount, currencyUomId, state,
+            postingText, rateText for labor, costCenterId, projectWorkEffortId, with texts), sourcesCapped and, for one work order,
+            estimate (known, amount, parts, labor, currencyUomId, unknownList: the Approve gate's cost half, never stored).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="projectWorkEffortId"/>
+            <parameter name="maintenanceKindEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="component"><description>parts, labor or outside; every component when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="costs" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceCosts.js').execute('costs', context)"/>
+            <set field="costs" from="answer.costs"/>
         </actions>
     </service>
 </services>
