@@ -313,6 +313,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- Termination Reason -->
             <moqui.basic.EnumerationType description="Termination Reason" enumTypeId="TerminationReason"/>
+            <!-- generic reasons for leaving (IronStone People's separation offers them; the People administrator ends or adds
+                values in Lookups) -->
+            <moqui.basic.Enumeration description="Resignation" enumId="TrResignation" sequenceNum="1" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="End of contract" enumId="TrEndOfContract" sequenceNum="2" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Dismissal" enumId="TrDismissal" sequenceNum="3" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Retirement" enumId="TrRetirement" sequenceNum="4" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Redundancy" enumId="TrRedundancy" sequenceNum="5" enumTypeId="TerminationReason"/>
 
             <!-- Identity Type -->
             <moqui.basic.EnumerationType description="Identity Type" enumTypeId="IdentityType"/>
@@ -485,6 +492,26 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchRefused" transitionName="Refuse"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchSuperseded" transitionName="Supersede"/>
         </seed-data>
+    </entity>
+    <entity entity-name="EmploymentDraft" package="mantle.humanres.employment" cache="never">
+        <description>An unfinished hire or employment change of one HR user (IronStone People's HireEmployee and EmploymentChange
+            wizards; style-guide §3.10: a wizard that can be abandoned saves a draft record; the user's call, Nov 11): what the
+            wizard's steps have taken so far (draftJson, the parameters of preview#Hire or preview#EmploymentChange only), from
+            fromDate, with the operation key its hire or change is made with, so a retry answers the first. Owned by its user
+            (userId): only they read, change or discard it (mantle.humanres.PeopleServices get#, store# and delete#EmploymentDraft,
+            Employment.js), and it is discarded when the hire or change is made. A change's draft is of one employment and kind;
+            a hire's of an employer. Not a business record: never read by another user, an export or a search.</description>
+        <field name="employmentDraftId" type="id" is-pk="true"/>
+        <field name="userId" type="id"><description>The owner: the HR user who started it</description></field>
+        <field name="draftKind" type="text-short"><description>hire, or change</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="partyRelationshipId" type="id"><description>A change's employment</description></field>
+        <field name="changeKind" type="text-short"><description>A change's kind: transfer, manager, leave, return or separation</description></field>
+        <field name="draftJson" type="text-very-long"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="fromDate" type="date-time"><description>When it was started</description></field>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="EMPL_DRAFT_USER"><index-field name="userId"/><index-field name="draftKind"/></index>
     </entity>
     <entity entity-name="EmploymentApplication" package="mantle.humanres.employment" use="nontransactional">
         <field name="employmentApplicationId" type="id" is-pk="true"/>

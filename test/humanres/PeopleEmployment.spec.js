@@ -50,10 +50,17 @@ function organization(partyId, name) {
     call("create#mantle.party.Organization", {partyId, organizationName: name})
     call("create#mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
 }
+// a person with a work email: someone with no relationship to the HR user's employers is found and hired by it alone
+const emailOf = partyId => partyId.toLowerCase() + "@spec.example"
 function person(kind, firstName = "Emp") {
     const partyId = prefix + "_" + kind
     call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
     call("create#mantle.party.Person", {partyId, firstName, lastName: kind})
+    call("mantle.party.ContactServices.create#EmailAddress", {
+        emailAddress: emailOf(partyId),
+        partyId,
+        contactMechPurposeId: "EmailWork"
+    })
     return partyId
 }
 function employ(partyId, organizationPartyId, fromDate = since) {
@@ -141,8 +148,17 @@ const revisionOf = partyRelationshipId =>
     ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js").employmentRevision(partyRelationshipId)
 const previewHire = (parameters, username = state.hr) =>
     run(username, P + "preview#Hire", Object.assign({organizationPartyId: orgA, fromDate: since}, parameters))
+// a hire of a person chosen by id gives the email they are found by
 const hire = (parameters, username = state.hr) =>
-    run(username, P + "hire#Employee", Object.assign({organizationPartyId: orgA, fromDate: since}, parameters))
+    run(
+        username,
+        P + "hire#Employee",
+        Object.assign(
+            {organizationPartyId: orgA, fromDate: since},
+            parameters.partyId ? {workEmail: emailOf(parameters.partyId)} : {},
+            parameters
+        )
+    )
 const change = (partyRelationshipId, parameters, username = state.hr) =>
     run(
         username,
@@ -284,14 +300,20 @@ feature(
     {
         when() {
             const out = {}
-            // B's employee: A's HR finds them by name, by public identity only
+            // B's employee: A's HR does not find them by name (no relationship with A; the user's call), only by their exact
+            // email, by public identity only; a person related to A (the contractor) is found by name
             const dual = person("DUAL", "Priya")
             employ(dual, orgB)
-            const preview = previewHire({term: "Priya"})
+            const dualEmail = emailOf(dual)
+            out.byName = previewHire({term: "Priya"}).matches.some(row => row.partyId === dual)
+            out.related = previewHire({term: "Nadia"}).matches.some(row => row.partyId === state.CONTRACTOR)
+            const preview = previewHire({term: dualEmail.toUpperCase()})
             const match = preview.matches.find(row => row.partyId === dual)
-            out.found = [!!match, match?.relationshipText || "", Object.keys(match || {}).includes("workEmail")]
-            // a new person by the same names is refused unless confirmed
-            out.duplicate = code(hire({firstName: "Priya", lastName: "DUAL"}))
+            out.found = [!!match, match?.relationshipText || "", match?.matchedBy, Object.keys(match || {}).includes("workEmail")]
+            // a new person by the same names and email is refused unless confirmed
+            out.duplicate = code(hire({firstName: "Priya", lastName: "DUAL", workEmail: dualEmail}))
+            // chosen by id alone they are not available (an id names no one); with the email they were found by, hired
+            out.byId = code(previewHire({partyId: dual}))
             const hired = hire({partyId: dual, managerPartyId: state.MGR})
             out.hired = [hired.error, employments(dual, orgA).length, employments(dual, orgB).length]
             out.persons = rows("mantle.party.Person", {firstName: "Priya", lastName: "DUAL"}).length
@@ -350,8 +372,11 @@ feature(
             return out
         },
         then(out) {
-            out.found.join() == "true,,false"
+            out.byName == false
+            out.related == true
+            out.found.join() == "true,,email,false"
             out.duplicate == "PERSON_MATCHES"
+            out.byId == "RECORD_UNAVAILABLE"
             out.hired.join() == ",1,1"
             out.persons == 1
             out.owner != orgA
@@ -442,7 +467,17 @@ feature(
                 .map(row => row.fromPartyId + (row.thruDate ? ":ended" : ":open"))
                 .sort()
                 .join()
-            out.employmentSeat = one("mantle.humanres.employment.Employment", {partyRelationshipId: employment}).emplPositionId
+            // Employment.emplPositionId holds the seat in effect (the user's call): the yard until the transfer's date, when the
+            // daily job sets the office; a rerun changes nothing
+            const seatOf = () => one("mantle.humanres.employment.Employment", {partyRelationshipId: employment}).emplPositionId
+            const job = () => run("john.doe", P + "apply#DueAssignments", {partyRelationshipIds: [employment]}).applied
+            out.employmentSeat = [seatOf(), job()]
+            ec.user.setEffectiveTime(ec.user.timestampMillis(from) + 60 * 60 * 1000)
+            try {
+                out.employmentSeat.push(job(), seatOf(), job())
+            } finally {
+                ec.user.setEffectiveTime(null)
+            }
             // the manager now is MGR (the transfer is next week's); BOSS from its date
             out.managerNow = managersAt(worker, orgA)
             // a second transfer asked, then a manager change applied meanwhile: the waiting transfer is superseded
@@ -480,7 +515,7 @@ feature(
             out.seats == [state.seatOffice + ":open", state.seatYard + ":ended"].join()
             out.member == [state.office + ":open", state.yard + ":ended"].join()
             out.lines == [state.BOSS + ":open", state.MGR + ":ended"].join()
-            out.employmentSeat == state.seatOffice
+            out.employmentSeat.join() == [state.seatYard, 0, 1, state.seatOffice, 0].join()
             out.managerNow == state.MGR
             out.secondWaiting == "EchRequested"
             out.managerApplied.join() == ",EchApplied"
@@ -718,6 +753,63 @@ feature(
             out.rollup == true
             out.moved == ["ended:annex", "open:" + state.stores].join()
             out.storesMember == 1
+        }
+    }
+)
+
+feature(
+    "a wizard's draft is a dated record of its HR user's alone: resumed with its operation key, kept to the kind's fields, discarded by its owner only",
+    {
+        when() {
+            const draft = (service, parameters, username = state.hr) =>
+                run(username, P + service + "#EmploymentDraft", parameters)
+            const stored = draft("store", {
+                draftKind: "hire",
+                draft: {organizationPartyId: orgA, firstName: "Ada", lastName: "Draft", workPhone: "", salary: "100"}
+            })
+            const again = draft("store", {
+                draftKind: "hire",
+                draft: {organizationPartyId: orgA, firstName: "Ada", lastName: "Drafted"}
+            })
+            const resumed = draft("get", {draftKind: "hire"})
+            const out = {
+                stored: [stored.error, !!stored.operationKey, Object.keys(stored.draft).sort().join("|")],
+                resumed: [
+                    again.employmentDraftId === stored.employmentDraftId,
+                    resumed.operationKey === stored.operationKey,
+                    resumed.draft.lastName,
+                    !!resumed.fromDateText
+                ],
+                // another HR user: their own drafts only; the id of this one is missing
+                other: [
+                    draft("get", {draftKind: "hire"}, state.hrBoth).employmentDraftId || "",
+                    code(draft("get", {draftKind: "hire", employmentDraftId: stored.employmentDraftId}, state.hrBoth)),
+                    draft("delete", {employmentDraftId: stored.employmentDraftId}, state.hrBoth).deleted
+                ],
+                reader: code(draft("get", {draftKind: "hire"}, state.reader)),
+                otherEmployer: code(draft("store", {draftKind: "hire", draft: {organizationPartyId: orgB}})),
+                // a change's draft is of an employment in the caller's scope
+                change: code(
+                    draft(
+                        "store",
+                        {draftKind: "change", partyRelationshipId: state.WORKER_EMP, changeKind: "transfer", draft: {}},
+                        state.hrB
+                    )
+                ),
+                deleted: draft("delete", {employmentDraftId: stored.employmentDraftId}).deleted,
+                gone: draft("get", {draftKind: "hire"}).employmentDraftId || ""
+            }
+            return out
+        },
+        then(out) {
+            out.stored.join() == ",true,firstName|lastName|organizationPartyId|workPhone"
+            out.resumed.join() == "true,true,Drafted,true"
+            out.other.join() == ",RECORD_UNAVAILABLE,false"
+            out.reader == "PERMISSION_DENIED"
+            out.otherEmployer == "ORGANIZATION_DENIED"
+            out.change == "RECORD_UNAVAILABLE"
+            out.deleted == true
+            out.gone == ""
         }
     }
 )

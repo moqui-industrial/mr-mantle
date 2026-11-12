@@ -42,6 +42,13 @@ along with this software (see the LICENSE.md file). If not, see
             refuseServiceName="mantle.humanres.PeopleServices.refuse#EmploymentChange" refuseReasonRequired="Y"
             titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
 
+    <!-- P6 (the user's call, Nov 11): Employment.emplPositionId holds the seat in effect; a change dated later sets it on its date,
+        through this daily job (mantle.humanres.PeopleServices.apply#DueAssignments: each employment in its own transaction, a
+        failing one logged and the rest going on; a rerun changes nothing) -->
+    <moqui.service.job.ServiceJob jobName="apply_EmploymentDueAssignments" description="Set each employment's seat in effect"
+            serviceName="mantle.humanres.PeopleServices.apply#DueAssignments" cronExpression="0 15 0 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+
     <!-- the skill levels People's lookups maintain (PeopleServices find#Lookups and store#Lookup; design §12 Lookups, PE-03):
         the vocabulary of PartySkill.skillLevel and of a requirement's level (P18), each value's enumCode its number -->
     <moqui.basic.EnumerationType description="Skill Level" enumTypeId="SkillLevel"/>

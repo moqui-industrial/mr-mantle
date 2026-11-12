@@ -339,14 +339,33 @@ function moveMembership(partyId, before, after, at, thruMs, reason) {
     }
 }
 // The person's seat moves with the assignment's position: the holding before ends on the date and the one after starts (to the
-// employment's end), refused when another holds it (Positions.js holdSeat).
-function moveSeat(partyId, before, after, at, thruMs, reason) {
+// employment's end), refused when another holds it (Positions.js holdSeat). A seat held only by Employment.emplPositionId (written
+// before People, with no occupancy row) gets its dated row from the employment's start to the date, so the seat is free after it
+// while Employment.emplPositionId still names it until the date (Positions.js holdersOf reads the row before the Employment).
+function moveSeat(employment, before, after, at, thruMs, reason) {
     if (before === after) return
+    const partyId = employment.partyId
     if (before) {
         const position = one(POSITION, {emplPositionId: before})
-        const holding = rows(HOLDER, {emplPositionId: before, partyId, roleTypeId: "Employee"}).find(row => openAt(row, at))
+        const held = rows(HOLDER, {emplPositionId: before, partyId, roleTypeId: "Employee"})
+        const holding = held.find(row => openAt(row, at))
         if (position && holding && ms(holding.fromDate) < at)
             positions().endHolding(position, partyId, ms(holding.fromDate), at, reason)
+        else if (
+            position &&
+            !held.length &&
+            employment.fromMs != null &&
+            employment.fromMs < at &&
+            one(EMPLOYMENT, {partyRelationshipId: employment.partyRelationshipId})?.emplPositionId === before
+        )
+            call("create#" + HOLDER, {
+                emplPositionId: before,
+                partyId,
+                roleTypeId: "Employee",
+                fromDate: stamp(employment.fromMs),
+                thruDate: stamp(at),
+                comments: reason || null
+            })
     }
     if (after) positions().holdSeat(one(POSITION, {emplPositionId: after}), partyId, at, thruMs, reason)
 }
@@ -403,13 +422,14 @@ function endRow(row, at, reason) {
         thruDate_changeReason: reason || null
     })
 }
-// The projections of a change of terms on the date. Employment.emplPositionId follows the newest primary seat (TimeServices'
-// rates and the contact card read it), except at a separation, where it keeps the last one.
+// The projections of a change of terms on the date. Employment.emplPositionId holds the seat in effect (TimeServices' rates and
+// the contact card read it; the user's call, Nov 11): a change in effect now sets it at once, one dated later leaves it until its
+// date, when the daily job apply#DueAssignments sets it; a separation keeps the last one.
 function project(employment, before, after, at, thruMs, reason, separation = false) {
     moveMembership(employment.partyId, before.departmentPartyId, after.departmentPartyId, at, thruMs, reason)
-    moveSeat(employment.partyId, before.emplPositionId, after.emplPositionId, at, thruMs, reason)
+    moveSeat(employment, before.emplPositionId, after.emplPositionId, at, thruMs, reason)
     moveLine(employment, before.managerPartyId, after.managerPartyId, at, reason)
-    if (!separation && (before.emplPositionId || null) !== (after.emplPositionId || null)) {
+    if (!separation && at <= nowMs() && (before.emplPositionId || null) !== (after.emplPositionId || null)) {
         const row = one(EMPLOYMENT, {partyRelationshipId: employment.partyRelationshipId})
         if (row && (row.emplPositionId || null) !== (after.emplPositionId || null))
             call("update#" + EMPLOYMENT, {
@@ -417,6 +437,67 @@ function project(employment, before, after, at, thruMs, reason, separation = fal
                 emplPositionId: after.emplPositionId || null
             })
     }
+}
+// The daily job (apply#DueAssignments): each employment open now whose primary assignment in effect names another seat than
+// Employment.emplPositionId gets the assignment's seat (of partyRelationshipIds when given), each in its own transaction, a failing one logged by its employment and the
+// rest going on. A rerun changes nothing (idempotent); an employment with no assignment in effect (one written before People, an
+// ended one) is left as it is.
+function applyDueAssignments(p) {
+    const at = nowMs()
+    let query = find(ASSIGNMENT).condition("isPrimary", "Y")
+    const only = Array.from(p.partyRelationshipIds || [])
+        .map(String)
+        .filter(Boolean)
+    if (only.length) query = query.condition("partyRelationshipId", "in", only)
+    const due = Array.from(people.current(query, at).list())
+    const failedList = []
+    let applied = 0
+    const pageSize = 200
+    for (let start = 0; start < due.length; start += pageSize) {
+        const page = due.slice(start, start + pageSize)
+        const employments = new Map(
+            Array.from(
+                find(EMPLOYMENT)
+                    .condition(
+                        "partyRelationshipId",
+                        "in",
+                        page.map(row => row.partyRelationshipId)
+                    )
+                    .list()
+            ).map(row => [row.partyRelationshipId, row])
+        )
+        for (const assignment of page) {
+            const row = employments.get(assignment.partyRelationshipId)
+            if (!row || (row.emplPositionId || null) === (assignment.emplPositionId || null)) continue
+            ec.message.pushErrors()
+            try {
+                ec.service
+                    .sync()
+                    .name("update#" + EMPLOYMENT)
+                    .parameters({
+                        partyRelationshipId: assignment.partyRelationshipId,
+                        emplPositionId: assignment.emplPositionId || null
+                    })
+                    .requireNewTransaction(true)
+                    .disableAuthz()
+                    .call()
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                applied++
+            } catch (error) {
+                ec.logger.error(
+                    "The seat of employment " +
+                        assignment.partyRelationshipId +
+                        " was not set from its assignment: " +
+                        error.message
+                )
+                failedList.push({partyRelationshipId: assignment.partyRelationshipId, message: String(error.message)})
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+    }
+    return {applied, failed: failedList.length, failedList}
 }
 // A new assignment of the employment from the date with the terms (and state): the one in effect ends on the date (audited with
 // the reason) and the projections follow, from the terms before (the caller's, else those in effect) to the new ones.
@@ -566,7 +647,8 @@ function separate(employment, change, before, at, reason) {
         terminationReasonEnumId_changeReason: reason,
         terminationTypeEnumId_changeReason: reason
     })
-    // the person's memberships of the employer's units (a lead's, a team's) end
+    // the person's memberships of the employer's units (a lead's, a team's) end, one starting later on its own start (never in
+    // effect)
     const units = people.unitsUnder([org])
     if (units.length)
         for (const row of Array.from(
@@ -574,8 +656,8 @@ function separate(employment, change, before, at, reason) {
                 .condition({relationshipTypeEnumId: "PrtMember", fromPartyId: partyId})
                 .condition("toPartyId", "in", units)
                 .list()
-        ).filter(row => openAt(row, at) && (ms(row.fromDate) ?? -Infinity) < at))
-            endRow(row, at, reason)
+        ).filter(row => (ms(row.thruDate) ?? Infinity) > at))
+            endRow(row, Math.max(at, ms(row.fromDate) ?? at), reason)
     // the reports at the employer: an assignment naming the leaver continues with no manager; a line they manage with no
     // assignment ends unless another employment of the report uses it
     const reportAssignments = Array.from(
@@ -620,14 +702,18 @@ function separate(employment, change, before, at, reason) {
 }
 
 // ===== preview#Hire and hire#Employee =====
-// The people who may be the person hired (People's own search, with the filters off and their public identity only, F59): by the
-// name searched (two characters at least) or the first and last names given, and by a work or primary email given, each with
-// their relationships with the employer (never another employer's).
-function matchesOf(p, organizationPartyId) {
+// The people who may be the person hired (People's own search, with the filters off and their public identity only, F59; the
+// user's call, Nov 11): a name (the name searched, two characters at least, or the first and last names given) finds only people
+// with a relationship to one of the caller's employers (an employee, a contractor, a contact, an applicant to one of their
+// positions; any dates); anyone else is found only by an exact email (the work email given, or a searched term that is an email),
+// so a person another employer employs is found and not made again. Each with their relationships with the employer (never
+// another employer's).
+function matchesOf(p, organizationPartyId, userScope) {
     const factory = ec.entity.conditionFactory
     const conditions = []
     const term = text(p.term)
-    if (term.length >= matchMinLength)
+    const termEmail = isEmail(term) ? term : ""
+    if (term.length >= matchMinLength && !termEmail)
         conditions.push(
             factory.makeCondition(
                 ["firstName", "lastName", "nickname"].map(field =>
@@ -645,39 +731,12 @@ function matchesOf(p, organizationPartyId) {
             )
         )
     const byEmail = new Set()
-    if (text(p.workEmail)) {
-        const mechIds = Array.from(
-            find("mantle.party.contact.ContactMech")
-                .condition("contactMechTypeEnumId", "CmtEmailAddress")
-                .condition(factory.makeCondition("infoString", "equals", text(p.workEmail)).ignoreCase())
-                .selectField("contactMechId")
-                .limit(matchLimit)
-                .list()
-        ).map(row => row.contactMechId)
-        if (mechIds.length)
-            for (const row of Array.from(
-                people
-                    .current(
-                        find("mantle.party.contact.PartyContactMech")
-                            .condition("contactMechId", "in", mechIds)
-                            .condition("contactMechPurposeId", "in", ["EmailWork", "EmailPrimary"]),
-                        null
-                    )
-                    .list()
-            ))
-                byEmail.add(row.partyId)
-    }
+    for (const email of unique([text(p.workEmail), termEmail].filter(Boolean)))
+        for (const partyId of personsByEmail(email)) byEmail.add(partyId)
     const partyIds = new Set(byEmail)
     if (conditions.length)
-        for (const row of Array.from(
-            find("mantle.party.Person")
-                .condition(factory.makeCondition(conditions, "or"))
-                .selectField("partyId")
-                .orderBy(["firstName", "lastName"])
-                .limit(matchLimit)
-                .list()
-        ))
-            partyIds.add(row.partyId)
+        for (const partyId of relatedByName(factory.makeCondition(conditions, "or"), userScope.organizationPartyIds))
+            partyIds.add(partyId)
     const ids = Array.from(partyIds).slice(0, matchLimit)
     if (!ids.length) return []
     const persons = Object.fromEntries(
@@ -697,6 +756,116 @@ function matchesOf(p, organizationPartyId) {
                 relationshipText: relationships.map(row => row.typeText + " (" + row.stateText.toLowerCase() + ")").join(", ")
             }
         })
+}
+const isEmail = value => /^[^\s@]+@[^\s@]+$/.test(value)
+// The people whose work or primary email is the address, exactly (ignoring case).
+function personsByEmail(email) {
+    const factory = ec.entity.conditionFactory
+    const mechIds = Array.from(
+        find("mantle.party.contact.ContactMech")
+            .condition("contactMechTypeEnumId", "CmtEmailAddress")
+            .condition(factory.makeCondition("infoString", "equals", email).ignoreCase())
+            .selectField("contactMechId")
+            .limit(matchLimit)
+            .list()
+    ).map(row => row.contactMechId)
+    if (!mechIds.length) return []
+    return unique(
+        Array.from(
+            people
+                .current(
+                    find("mantle.party.contact.PartyContactMech")
+                        .condition("contactMechId", "in", mechIds)
+                        .condition("contactMechPurposeId", "in", ["EmailWork", "EmailPrimary"]),
+                    null
+                )
+                .list()
+        ).map(row => row.partyId)
+    )
+}
+// The people matching the name condition (on Person's names) with a relationship of any type and dates to one of the employers,
+// either way, or an application to one of their positions; the first matchLimit by name.
+function relatedByName(nameCondition, organizationPartyIds) {
+    if (!organizationPartyIds.length) return []
+    const found = []
+    const add = (list, idField) => {
+        for (const row of list) found.push({partyId: row[idField], name: [row.firstName, row.lastName].join(" ")})
+    }
+    const related = (view, personField, organizationField) =>
+        Array.from(
+            find(view)
+                .condition(organizationField, "in", organizationPartyIds)
+                .condition(nameCondition)
+                .selectField([personField, "firstName", "lastName"])
+                .distinct(true)
+                .orderBy(["firstName", "lastName"])
+                .limit(matchLimit)
+                .list()
+        )
+    add(related("mantle.party.PartyFromAndRelationship", "fromPartyId", "toPartyId"), "fromPartyId")
+    add(related("mantle.party.PartyToAndRelationship", "toPartyId", "fromPartyId"), "toPartyId")
+    // the applicants to the employers' positions
+    const positionIds = Array.from(
+        find(POSITION).condition("organizationPartyId", "in", organizationPartyIds).selectField("emplPositionId").list()
+    ).map(row => row.emplPositionId)
+    const applicantIds = positionIds.length
+        ? unique(
+              Array.from(
+                  find("mantle.humanres.employment.EmploymentApplication")
+                      .condition("emplPositionId", "in", positionIds)
+                      .selectField("applyingPartyId")
+                      .distinct(true)
+                      .list()
+              )
+                  .map(row => row.applyingPartyId)
+                  .filter(Boolean)
+          )
+        : []
+    if (applicantIds.length)
+        add(
+            Array.from(
+                find("mantle.party.Person")
+                    .condition("partyId", "in", applicantIds)
+                    .condition(nameCondition)
+                    .selectField(["partyId", "firstName", "lastName"])
+                    .orderBy(["firstName", "lastName"])
+                    .limit(matchLimit)
+                    .list()
+            ),
+            "partyId"
+        )
+    return unique(
+        found
+            .filter(row => row.partyId)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(row => row.partyId)
+    ).slice(0, matchLimit)
+}
+// Whether a chosen person is one the caller may hire by id: related to one of their employers (as relatedByName reads it), or
+// matched by the exact email given. Anyone else is refused as missing (RECORD_UNAVAILABLE), so an id names no one.
+function personAdmitted(partyId, p, userScope) {
+    const orgIds = userScope.organizationPartyIds
+    if (orgIds.length) {
+        const related =
+            find(RELATIONSHIP).condition("fromPartyId", partyId).condition("toPartyId", "in", orgIds).count() ||
+            find(RELATIONSHIP).condition("toPartyId", partyId).condition("fromPartyId", "in", orgIds).count()
+        if (related) return true
+        const positionIds = Array.from(
+            find(POSITION).condition("organizationPartyId", "in", orgIds).selectField("emplPositionId").list()
+        ).map(row => row.emplPositionId)
+        if (
+            positionIds.length &&
+            find("mantle.humanres.employment.EmploymentApplication")
+                .condition("applyingPartyId", partyId)
+                .condition("emplPositionId", "in", positionIds)
+                .count()
+        )
+            return true
+    }
+    const term = text(p.term)
+    return unique([text(p.workEmail), isEmail(term) ? term : ""].filter(Boolean)).some(email =>
+        personsByEmail(email).includes(partyId)
+    )
 }
 const relationshipTexts = {
     employment: "Employment",
@@ -768,7 +937,11 @@ function planHire(p, userScope) {
     let matches = []
     if (partyId) {
         const found = one("mantle.party.Person", {partyId})
-        if (!found) denied("RECORD_UNAVAILABLE", "Person " + partyId + " is not available")
+        if (!found || !personAdmitted(partyId, p, userScope))
+            denied(
+                "RECORD_UNAVAILABLE",
+                "Person " + partyId + " is not available; a person not related to your employers is found by their exact email"
+            )
         person = {
             partyId,
             personName: [found.firstName, found.lastName].filter(Boolean).join(" ") || partyId,
@@ -776,7 +949,7 @@ function planHire(p, userScope) {
             isNew: false
         }
     } else {
-        matches = matchesOf(p, organizationPartyId)
+        matches = matchesOf(p, organizationPartyId, userScope)
         if (text(p.firstName) && text(p.lastName)) {
             person = {
                 partyId: null,
@@ -1397,6 +1570,128 @@ function reassignDepartment(departmentPartyId, toDepartmentPartyId, at, reason) 
     return moved
 }
 
+// ===== the wizards' drafts (get#, store# and delete#EmploymentDraft) =====
+// An HR editor's unfinished hire or change (EmploymentDraft): the caller's own alone; another user's, or one of an employment
+// outside the caller's scope, is missing (RECORD_UNAVAILABLE). Only the parameters of the kind's preview are kept.
+const DRAFT = "mantle.humanres.employment.EmploymentDraft"
+const draftFields = {
+    hire: [
+        "organizationPartyId",
+        "partyId",
+        "firstName",
+        "lastName",
+        "preferredName",
+        "workEmail",
+        "workPhone",
+        "confirmNewPerson",
+        "fromDate",
+        "thruDate",
+        "departmentPartyId",
+        "emplPositionId",
+        "managerPartyId",
+        "facilityId",
+        "reason"
+    ],
+    change: [
+        "effectiveDate",
+        "departmentPartyId",
+        "emplPositionId",
+        "managerPartyId",
+        "facilityId",
+        "returnDate",
+        "terminationReasonEnumId",
+        "terminationTypeEnumId",
+        "reason"
+    ]
+}
+function draftKindOf(p) {
+    const kind = text(p.draftKind)
+    if (!Object.hasOwn(draftFields, kind)) denied("KIND_INVALID", "A draft is of a hire or a change")
+    return kind
+}
+// the caller's draft by id, else their newest of the kind (a change's: of the employment and kind)
+function ownDraft(userScope, kind, p) {
+    const id = text(p.employmentDraftId)
+    if (id) {
+        const row = one(DRAFT, {employmentDraftId: id})
+        if (!row || row.userId !== ec.user.userId || row.draftKind !== kind)
+            denied("RECORD_UNAVAILABLE", "This draft is not available")
+        return row
+    }
+    const conditions = {userId: ec.user.userId, draftKind: kind}
+    if (kind === "change") {
+        employmentIn(userScope, p.partyRelationshipId)
+        Object.assign(conditions, {partyRelationshipId: text(p.partyRelationshipId), changeKind: text(p.changeKind)})
+    }
+    return Array.from(find(DRAFT).condition(conditions).orderBy("-fromDate").limit(1).list())[0] || null
+}
+function draftAnswer(row) {
+    let draft = {}
+    try {
+        draft = row?.draftJson ? JSON.parse(row.draftJson) : {}
+    } catch (error) {
+        ec.logger.warn("Employment draft " + row.employmentDraftId + " could not be read: " + error.message)
+    }
+    return {
+        employmentDraftId: row?.employmentDraftId || null,
+        draft,
+        operationKey: row?.operationKey || null,
+        fromDateText: row ? dateText(row.fromDate) : ""
+    }
+}
+function getEmploymentDraft(p) {
+    const userScope = editorScope("A hire or change draft")
+    return draftAnswer(ownDraft(userScope, draftKindOf(p), p))
+}
+// The draft kept: the caller's own (new when they have none of the kind, employment and kind), its values those of the kind's
+// fields only; the employer one of the caller's, the employment one in their scope.
+function storeEmploymentDraft(p) {
+    const userScope = editorScope("A hire or change draft")
+    const kind = draftKindOf(p)
+    const values = p.draft && typeof p.draft === "object" ? p.draft : {}
+    const draft = {}
+    // an empty value is kept: a change's term cleared stays cleared
+    for (const field of draftFields[kind]) if (values[field] != null) draft[field] = String(values[field])
+    let organizationPartyId = null
+    if (kind === "change") {
+        if (!Object.hasOwn(changeKinds, text(p.changeKind))) denied("KIND_INVALID", "Choose what changes")
+        organizationPartyId = employmentIn(userScope, p.partyRelationshipId).organizationPartyId
+    } else if (draft.organizationPartyId) {
+        people.requireOrganization(userScope, draft.organizationPartyId)
+        organizationPartyId = draft.organizationPartyId
+    }
+    const row = ownDraft(userScope, kind, p)
+    if (row) {
+        call("update#" + DRAFT, {
+            employmentDraftId: row.employmentDraftId,
+            organizationPartyId,
+            draftJson: JSON.stringify(draft)
+        })
+        return draftAnswer(one(DRAFT, {employmentDraftId: row.employmentDraftId}))
+    }
+    const employmentDraftId = call("create#" + DRAFT, {
+        userId: ec.user.userId,
+        draftKind: kind,
+        organizationPartyId,
+        partyRelationshipId: kind === "change" ? text(p.partyRelationshipId) : null,
+        changeKind: kind === "change" ? text(p.changeKind) : null,
+        draftJson: JSON.stringify(draft),
+        fromDate: ec.user.nowTimestamp
+    }).employmentDraftId
+    // the key the hire or change is made with, made once: a second Hire or Apply answers the first
+    call("update#" + DRAFT, {employmentDraftId, operationKey: "DRAFT-" + employmentDraftId})
+    return draftAnswer(one(DRAFT, {employmentDraftId}))
+}
+// The caller's own draft discarded (made, or given up); none is no error.
+function deleteEmploymentDraft(p) {
+    editorScope("A hire or change draft")
+    const id = text(p.employmentDraftId)
+    const row = id ? one(DRAFT, {employmentDraftId: id}) : null
+    if (!row || row.userId !== ec.user.userId) return {deleted: false}
+    call("delete#" + DRAFT, {employmentDraftId: id})
+    return {deleted: true}
+}
+
 // ===== get#EmploymentHistory's assignments =====
 // The dated assignments of the employments, newest first: their dates, state, department, position, manager, work location and
 // the change that started each.
@@ -1443,7 +1738,11 @@ const operations = {
     decideEmploymentChange,
     approveNotice: p => decideNotice(p, "approve"),
     refuseNotice: p => decideNotice(p, "refuse"),
-    findEmploymentChanges
+    findEmploymentChanges,
+    getEmploymentDraft,
+    storeEmploymentDraft,
+    deleteEmploymentDraft,
+    applyDueAssignments
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employment operation " + op)

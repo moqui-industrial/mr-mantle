@@ -705,4 +705,84 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="changes" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('findEmploymentChanges', context).changes"/>
         </actions>
     </service>
+    <service verb="get" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's own unfinished hire or change (EmploymentDraft; the wizards' draft record, style-guide §3.10): by
+            employmentDraftId, else their newest of the kind (draftKind hire, or change of partyRelationshipId and changeKind). An
+            HR editor's (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT, PERMISSION_DENIED otherwise); another user's draft, or a change of an
+            employment outside the caller's scope, is missing (RECORD_UNAVAILABLE). None found answers no draft.</description>
+        <in-parameters>
+            <parameter name="draftKind" required="true"><description>hire or change</description></parameter>
+            <parameter name="employmentDraftId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="changeKind"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentDraftId"/>
+            <parameter name="draft" type="Map"><description>The wizard's values so far (the kind's preview parameters)</description></parameter>
+            <parameter name="operationKey"><description>The key the hire or change is made with</description></parameter>
+            <parameter name="fromDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('getEmploymentDraft', context)"/>
+            <set field="employmentDraftId" from="found.employmentDraftId"/>
+            <set field="draft" from="found.draft"/>
+            <set field="operationKey" from="found.operationKey"/>
+            <set field="fromDateText" from="found.fromDateText"/>
+        </actions>
+    </service>
+    <service verb="store" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's unfinished hire or change kept (EmploymentDraft): their own draft of the kind (and, for a change,
+            the employment and kind) changed, else a new one from now with its operation key (made once). Only the kind's preview
+            parameters are kept. Refuses as get#EmploymentDraft, a kind not hire or change (KIND_INVALID), an employer outside the
+            caller's scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="draftKind" required="true"/>
+            <parameter name="employmentDraftId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="changeKind"/>
+            <parameter name="draft" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentDraftId"/>
+            <parameter name="draft" type="Map"/>
+            <parameter name="operationKey"/>
+            <parameter name="fromDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('storeEmploymentDraft', context)"/>
+            <set field="employmentDraftId" from="found.employmentDraftId"/>
+            <set field="draft" from="found.draft"/>
+            <set field="operationKey" from="found.operationKey"/>
+            <set field="fromDateText" from="found.fromDateText"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's own draft discarded, once its hire or change is made or when given up; another user's is left as it
+            is (deleted false). An HR editor's (PERMISSION_DENIED otherwise).</description>
+        <in-parameters><parameter name="employmentDraftId" required="true"/></in-parameters>
+        <out-parameters><parameter name="deleted" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="deleted" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('deleteEmploymentDraft', context).deleted"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="DueAssignments" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800">
+        <description>The apply_EmploymentDueAssignments job (daily): Employment.emplPositionId holds the seat in effect, so each
+            employment whose primary assignment in effect now names another seat (a change dated later, now come) gets it, each in
+            its own transaction, a failing one logged by its employment and the rest going on. A rerun changes nothing; an
+            employment with no assignment in effect is left as it is.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipIds" type="List"><description>Only these employments</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('applyDueAssignments', context)"/>
+            <set field="applied" from="out.applied"/>
+            <set field="failed" from="out.failed"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
 </services>
