@@ -142,6 +142,10 @@ along with this software (see the LICENSE.md file). If not, see
             priced, needs a supervisor's approval; empty: not compared</description></field>
         <field name="approvalThresholdCurrencyUomId" type="id"><description>The threshold's currency; empty: the
             organization's base currency</description></field>
+        <!-- impl-maintenance P8 (design §9 MaintenanceSettings, review Y8): the qualification check of assignment and Start -->
+        <field name="qualificationBlocks" type="text-indicator"><description>Y: assigning or starting work with a technician whose
+            required qualification is missing or expired is refused; empty or N (the default): it is allowed with a
+            warning</description></field>
         <field name="changedByUserId" type="id"/>
         <field name="comments" type="text-medium"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">

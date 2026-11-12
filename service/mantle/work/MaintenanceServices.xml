@@ -223,7 +223,9 @@ along with this software (see the LICENSE.md file). If not, see
             current Assignee rows, ending the others now; each a person employed by or an agent of the organization now,
             ASSIGNEE_UNAVAILABLE) and its planned window (DATES_INVALID). Scheduling grants no approval. The AssetMaintenance is
             scheduled with an approved root's window. New technicians are told on MaintenanceWork. At the revision read
-            (RECORD_CHANGED).</description>
+            (RECORD_CHANGED). P8 (review Y8): each person added is checked on the work's required skills and qualifications at
+            its planned start (People's staffing answer): one missing or expired is a qualificationWarnings entry, or refused
+            (QUALIFICATION_BLOCKED) when the organization's policy blocks.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="expectedRevision"/>
@@ -240,6 +242,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="revision" type="Integer"/>
             <parameter name="addedPartyIds" type="List"/>
             <parameter name="removedPartyIds" type="List"/>
+            <parameter name="qualificationWarnings" type="List"><description>partyId, personName, state, stateText,
+                explanation</description></parameter>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('scheduleWorkOrder', context)"/>
@@ -247,6 +251,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="revision" from="answer.revision"/>
             <set field="addedPartyIds" from="answer.addedPartyIds"/>
             <set field="removedPartyIds" from="answer.removedPartyIds"/>
+            <set field="qualificationWarnings" from="answer.qualificationWarnings"/>
         </actions>
     </service>
     <service verb="transition" noun="MaintenanceWorkOrder" allow-remote="false">
@@ -302,6 +307,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="resourceUnavailabilityId"/>
             <parameter name="followUpWorkEffortId"/>
             <parameter name="serviceAcceptanceId"/>
+            <parameter name="qualificationWarnings" type="List"><description>P8: Start's assignees missing or expired on the work's
+                qualifications (Start is refused instead, QUALIFICATION_BLOCKED, under the organization's block policy)</description></parameter>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('transitionWorkOrder', context)"/>
@@ -312,16 +319,24 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
             <set field="followUpWorkEffortId" from="answer.followUpWorkEffortId"/>
             <set field="serviceAcceptanceId" from="answer.serviceAcceptanceId"/>
+            <set field="qualificationWarnings" from="answer.qualificationWarnings"/>
         </actions>
     </service>
     <service verb="act" noun="MaintenanceWorkOrders" allow-remote="false">
         <description>One lifecycle action (transition#MaintenanceWorkOrder) on each of several work orders, each in its own
-            transaction: a result per work order (ok, resultCode, or the refusal's reasonCode and message), the rest going on.</description>
+            transaction: a result per work order (ok, resultCode, or the refusal's reasonCode and message), the rest going on. P8
+            (BulkWork): action assign (teamPartyId, assigneePartyIds) or schedule (estimatedStartDate, estimatedCompletionDate)
+            writes the same values to each through schedule#MaintenanceWorkOrder (resultCode ASSIGNED or SCHEDULED, a qualification
+            warning in its message); one of them is required (VALUE_REQUIRED).</description>
         <in-parameters>
             <parameter name="workEffortIds" type="List" required="true"/>
             <parameter name="action" required="true"/>
             <parameter name="holdReasonEnumId"/>
             <parameter name="cancelReasonEnumId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="assigneePartyIds" type="List"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"/>
@@ -333,6 +348,47 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="results" from="answer.results"/>
             <set field="successCount" from="answer.successCount"/>
             <set field="failedCount" from="answer.failedCount"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MaintenanceCandidates" allow-remote="false">
+        <description>The technicians a planner or supervisor (MAINTENANCE_PLAN or _SUPERVISE) may assign to a work order, ranked
+            (impl-maintenance P8; design §3 AssignSchedule, review Y8; MaintenanceDispatch.js): the organization's employees and
+            agents through ResourceServices.find#StaffingCandidates over the work's skills (each at the least level its open nodes
+            ask) and the free hours of the window (People's capacity: schedules, shifts, holidays, approved leave), with People's
+            staffing answer for its qualifications (never a certificate's number, issuer or file). The team's members first, and in
+            each group those with the hours first, then those whose qualifications meet the work, the team's default assignee, then
+            by skill and free hours.
+            The window is windowFrom and windowThru, else the work's planned start and due; the team teamPartyId, else the work's.
+            A work order out of scope or a step: RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="windowFrom" type="Timestamp"/>
+            <parameter name="windowThru" type="Timestamp"/>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="candidateList" type="List"><description>partyId, name, rank, onTeam, isDefault, assigned, fits, freeHours,
+                needHours, skills [{skillTypeEnumId, skillName, level, meets, selfDeclared}], qualificationState (null with no
+                requirement), qualificationText, warns, blocked, label</description></parameter>
+            <parameter name="requirementList" type="List"/>
+            <parameter name="windowFrom" type="Timestamp"/>
+            <parameter name="windowThru" type="Timestamp"/>
+            <parameter name="windowText"/>
+            <parameter name="hours" type="BigDecimal"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="qualificationBlocks" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceDispatch.js').execute('findCandidates', context)"/>
+            <set field="candidateList" from="answer.candidateList"/>
+            <set field="requirementList" from="answer.requirementList"/>
+            <set field="windowFrom" from="answer.windowFrom"/>
+            <set field="windowThru" from="answer.windowThru"/>
+            <set field="windowText" from="answer.windowText"/>
+            <set field="hours" from="answer.hours"/>
+            <set field="teamPartyId" from="answer.teamPartyId"/>
+            <set field="qualificationBlocks" from="answer.qualificationBlocks"/>
         </actions>
     </service>
     <service verb="start" noun="MaintenanceTimer" allow-remote="false">
