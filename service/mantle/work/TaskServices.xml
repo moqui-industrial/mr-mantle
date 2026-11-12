@@ -143,7 +143,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="Task">
-        <description>Create a Task in a Project.</description>
+        <description>Create a Task in a Project. Its parent, when given, is a task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
             <parameter name="rootWorkEffortId"><description>The ID of the Project</description></parameter>
@@ -178,6 +178,13 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{workEffortIdList:[parentWorkEffortId, rootWorkEffortId].filter((id) => !!id)}"/>
                 <if condition="ec.message.hasError()"><return/></if>
             </if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <if condition="!workEffortId &amp;&amp; rootWorkEffortId">
                 <!-- a bank of 1: the numbers have no gaps (create#Project starts them at 1) -->
                 <set field="seqName" value="Project_${rootWorkEffortId}"/>
@@ -196,6 +203,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="SimpleTask">
+        <description>Create a task outside a project. Its parent, when given, is a task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
             <parameter name="workEffortName" required="true"/>
@@ -218,6 +226,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="Object.assign({}, context, {workEffortTypeEnumId:'WetTask'})"/>
             <if condition="assignToPartyId">
                 <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:assignToPartyId,
@@ -230,7 +245,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Updates a task. A new rootWorkEffortId moves it to that project with its sub-tasks (the whole subtree takes
             the new project, design-projects.md §5 "The work item tree"): its parent stays only when it is in the new project
             (else it becomes a top-level task there; a parentWorkEffortId given with it must be in the new project), and the
-            memberships of the subtree in the old project's milestones, releases, sprints and components end.</description>
+            memberships of the subtree in the old project's milestones, releases, sprints and components end. A parent given is a
+            task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
@@ -244,6 +260,13 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <set field="movedProject" from="false"/>
             <if condition="rootWorkEffortId">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="before"/>
@@ -1126,6 +1149,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="newWorkEffortId"/></out-parameters>
         <actions>
+            <!-- a work effort of another type (an event, a goal) is passed over before the planning guard, which refuses a goal -->
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="completed"/>
+            <if condition="completed?.workEffortTypeEnumId != 'WetTask'"><return/></if>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[

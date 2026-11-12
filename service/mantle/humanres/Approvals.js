@@ -800,6 +800,15 @@ function notify(approval, state = null) {
 // on.
 function reroute(organizationPartyId, approvalKindEnumId = null) {
     let notified = 0
+    // P20: the employer's open reviews first (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
+    // feedback withdrawn, the review of one who left excluded), each review in a transaction of its own (follow-up 2), before this
+    // transaction touches a review's approval below, so neither waits on the other's lock
+    if (!approvalKindEnumId)
+        try {
+            reviews().rerouteSteps(organizationPartyId)
+        } catch (error) {
+            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
+        }
     const conditions = {organizationPartyId, statusId: "PapPending"}
     if (approvalKindEnumId) conditions.approvalKindEnumId = approvalKindEnumId
     const pending = Array.from(find(APPROVAL).condition(conditions).limit(pendingCap).list())
@@ -810,14 +819,6 @@ function reroute(organizationPartyId, approvalKindEnumId = null) {
             ec.logger.error("Approval request " + approval.peopleApprovalId + " was not routed again: " + error.message)
         }
     }
-    // P20: the employer's open reviews too (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
-    // feedback withdrawn, the review of one who left excluded), in the caller's transaction, each review on its own
-    if (!approvalKindEnumId)
-        try {
-            reviews().rerouteSteps(organizationPartyId)
-        } catch (error) {
-            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
-        }
     return notified
 }
 
