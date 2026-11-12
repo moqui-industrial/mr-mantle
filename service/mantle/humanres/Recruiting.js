@@ -5,20 +5,23 @@
 //   its applications;
 // - an application (EmploymentApplication) is of an applicant (a Person with the Applicant role, never an employee role or an
 //   account by applying) to an opening; its stage moves by change#ApplicationStage along the flow Received, Screening,
-//   Interview, Offer, with Refused and Withdrawn: Interview needs a scheduled interview, Offer an offer (P17), and Hired is never
-//   a stage change (P17 hires from an accepted offer); a bulk change names each failure and goes on, each in its own transaction;
+//   Interview, Offer, with Refused and Withdrawn: Interview needs a scheduled interview, Offer an open offer (Offers.js, P17:
+//   drafting one moves it), and Hired is never a stage change (hire#Employee hires from an accepted offer, P17); a bulk change names each failure and goes on, each in its own transaction;
 // - an interview (ApplicationInterview) is a private event (WetEvent, WevRestricted) with its panel and the candidate as
 //   attendees, a video call link when asked (org.moqui.call.CallServices.create#CallLink) and the iMIP invitation
 //   (mantle.work.EventServices.send#EventInvitations); each panel member is assigned the interview's scorecard, a form of the
 //   interview scorecard purpose (mantle.party.FormDefinitions), as a FormInvitation naming them and the application, with no link:
 //   they answer it once, here (submit#Scorecard), and read their own answer only;
+//   the event is People's (the EventManager PeopleInterview): changed and cancelled only here (change#Interview,
+//   cancel#Interview), never on Commons' EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026);
 // - mail intake (create#ApplicationFromEmail, the createApplication mail rule action): runs with authorization off, so it checks
 //   itself that the rule may file into the opening and answers a message once.
 // Who reads what: a recruiter (PEOPLE_RECRUIT_VIEW) of the employer, in People's scope (People.js scopeOf), reads its openings
 // and applications and every scorecard; PEOPLE_RECRUIT_EDIT changes them. A panel member (the user's call of Nov 12, 2026: from
 // People or from their self-service, find#MyInterviews and get#MyInterview) reads of an application they interview only the
 // applicant's name, the opening and its employer, the interviews they are on the panel of with their own scorecard, and the
-// files a recruiter shared with the panel (EmploymentApplicationContent.panelShared, get#ApplicationFile): never its stage,
+// files shared with the panel (EmploymentApplicationContent.panelShared: a resume when attached, P17, another file once a recruiter
+// shares it; get#ApplicationFile): never its stage,
 // source, referral, contact, notes or other files, the application's record (its notes and files host is the recruiters'),
 // another reviewer's scorecard nor another opening's candidates. Missing and unauthorized records are refused alike
 // (RECORD_UNAVAILABLE).
@@ -684,7 +687,14 @@ function stageProblem(application, statusId) {
         ]
     if (statusId === "EaInterview" && !rows(INTERVIEW, {employmentApplicationId: application.employmentApplicationId}).length)
         return ["INTERVIEW_REQUIRED", "Schedule an interview: it moves the application to Interview"]
-    if (statusId === "EaOffer") return ["OFFER_REQUIRED", "Make an offer first: it moves the application to Offer"]
+    // P17: an open offer of the application (drafting one moves it to Offer)
+    if (
+        statusId === "EaOffer" &&
+        !rows("mantle.humanres.recruitment.EmploymentOffer", {employmentApplicationId: application.employmentApplicationId}).some(
+            offer => ["OfrDraft", "OfrSubmitted", "OfrApproved", "OfrIssued", "OfrAccepted"].includes(offer.statusId)
+        )
+    )
+        return ["OFFER_REQUIRED", "Make an offer first: it moves the application to Offer"]
     return null
 }
 // change#ApplicationStage: a recruiter moves applications (employmentApplicationIds, or one with its revision) to a stage with a
@@ -811,6 +821,12 @@ function interviewRows(items, access, partyId) {
             location: access === "recruiter" || invitations.some(item => item.partyId === partyId) ? event.location || "" : "",
             hasCall: !!row.callLinkId,
             panelText: invitations.map(item => people_[item.partyId] || item.partyId).join(", "),
+            // the last failed send of its invitations, for its recruiters (send#InterviewInvitations; People follow-up 1 review)
+            invitationsFailed: access === "recruiter" && row.invitationSendStatus === "failed",
+            invitationProblemText:
+                access === "recruiter" && row.invitationSendStatus === "failed"
+                    ? "The invitations were not sent " + dateText(row.invitationSendDate) + ": " + (row.invitationSendError || "")
+                    : "",
             scorecards: scorecardRows(invitations, access, partyId)
         }
     })
@@ -917,6 +933,16 @@ function getApplication(p) {
             canSchedule: row.canEdit && ["EaReceived", "EaScreening", "EaInterview"].includes(application.statusId),
             scorecardFormId: opening?.scorecardFormId || ""
         })
+        // P17: its open offer, whether a new one is made (an application at Interview or Offer with none open) and the opening's
+        // seats it is made on
+        const openOffer = rows("mantle.humanres.recruitment.EmploymentOffer", {
+            employmentApplicationId: application.employmentApplicationId
+        }).find(offer => ["OfrDraft", "OfrSubmitted", "OfrApproved", "OfrIssued", "OfrAccepted"].includes(offer.statusId))
+        Object.assign(out, {
+            openOfferId: openOffer?.employmentOfferId || null,
+            canOffer: row.canEdit && !openOffer && ["EaInterview", "EaOffer"].includes(application.statusId),
+            openingSeats: application.jobOpeningId ? seatsOf([application.jobOpeningId])[application.jobOpeningId] || [] : []
+        })
     }
     return {application: out}
 }
@@ -952,8 +978,8 @@ function siteUrl() {
 // the link in the event's location, so the iMIP invitation carries it), with the panel (employees of the employer with an
 // account) and, when asked, the candidate as attendees; each panel member assigned the scorecard (the form given, else the
 // opening's, else the employer's only published interview scorecard; SCORECARD_REQUIRED for none) with no link. Moves a
-// received or screening application to Interview. The invitations go after (send#EventInvitations: a user is notified, the
-// candidate gets an email with the .ics); a failure to send is named and the interview stays.
+// received or screening application to Interview. The invitations go once it commits (send#InterviewInvitations: a user is
+// notified, the candidate gets an email with the .ics); a failure to send is logged and the interview stays.
 function scheduleInterview(p) {
     const userScope = recruiterScope(true)
     const application = editableApplication(userScope, p.employmentApplicationId)
@@ -1060,24 +1086,152 @@ function scheduleInterview(p) {
             statusId: "EaInterview",
             statusId_changeReason: "Interview scheduled"
         })
-    let invitationsSent = true
-    let invitationProblem = null
+    return {workEffortId, invitationIds, callPath}
+}
+// send#InterviewInvitations: the interview's attendees told of it (send#EventInvitations: the new or changed ones, a cancel when
+// it is cancelled) once schedule, change or cancel#Interview commits (their tx-commit rules, PeopleRecruiting.secas.xml; F358,
+// People follow-up 1), and again from the interview's row when the last send failed ("Send again"). Sent before the commit, a
+// failing send marked the interview's own transaction rollback-only, so the change was undone while the screen said it was made.
+// Who: a recruiter of the employer (the rule runs as the one who changed it; RECORD_UNAVAILABLE for another caller and for an
+// event that is not an interview, alike). As the system, since the event is People's (the EventManager PeopleInterview: no user
+// changes it on Commons' screens). The send runs in a transaction of its own, so its failure marks nothing else; a failure, or
+// an attendee not told (skipped: no address, a failed email), is logged, answered (invitationsSent false, invitationProblem) and
+// recorded on the interview (invitationSendStatus failed, invitationSendError), which ApplicantDetail shows its recruiters with
+// Send again; a send that tells everyone clears it. An attendee already told is not told again (send#EventInvitations compares
+// each one's digest), so a second run tells only those the first missed.
+function sendInterviewInvitations(p) {
+    const userScope = recruiterScope(true)
+    const workEffortId = text(p.workEffortId)
+    const interview = workEffortId ? one(INTERVIEW, {workEffortId}) : null
+    const application = interview ? one(APPLICATION, {employmentApplicationId: interview.employmentApplicationId}) : null
+    if (!interview || !application || !recruitEdits(userScope, application.organizationPartyId))
+        unavailable("Interview", workEffortId)
+    let problem = null
+    let skipped = []
     ec.message.pushErrors()
     try {
-        call("mantle.work.EventServices.send#EventInvitations", {
-            workEffortId,
-            // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
-            eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
-        })
+        const out = ec.artifactExecution.runAsSystem(() =>
+            ec.service
+                .sync()
+                .name("mantle.work.EventServices.send#EventInvitations")
+                .parameters({
+                    workEffortId,
+                    // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
+                    eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
+                })
+                .requireNewTransaction(true)
+                .call()
+        )
+        if (ec.message.hasError()) problem = ec.message.getErrorsString()
+        else skipped = Array.from(out?.skippedList || [])
     } catch (error) {
-        invitationsSent = false
-        invitationProblem = String(error.message || error)
-        ec.logger.error("Interview " + workEffortId + ": the invitations were not sent: " + invitationProblem)
+        problem = String(error.message || error)
     } finally {
         ec.message.clearErrors()
         ec.message.popErrors()
     }
-    return {workEffortId, invitationIds, callPath, invitationsSent, invitationProblem}
+    if (!problem && skipped.length) {
+        const names = people.personNames(unique(skipped.map(row => row.partyId)))
+        problem = "Not told: " + skipped.map(row => (names[row.partyId] || row.partyId) + " (" + row.reason + ")").join("; ")
+    }
+    if (problem) ec.logger.error("Interview " + workEffortId + ": the invitations were not sent: " + problem)
+    const status = problem ? "failed" : "sent"
+    // the outcome on the interview, for its recruiters (a failure only changes it, or a success after one)
+    if (problem || interview.invitationSendStatus === "failed")
+        call("update#" + INTERVIEW, {
+            workEffortId,
+            invitationSendStatus: status,
+            invitationSendDate: ec.user.nowTimestamp,
+            invitationSendError: problem ? problem.substring(0, 1000) : null
+        })
+    return {workEffortId, invitationsSent: !problem, invitationProblem: problem}
+}
+// change#Interview and cancel#Interview: a recruiter of the employer changes or cancels a scheduled interview here, the only
+// place its event changes (Commons calendar editors, Nov 12, 2026: the EventManager PeopleInterview keeps it from Commons'
+// EventDetail, the calendar and CalDAV). A cancelled interview is not changed (INTERVIEW_CANCELLED).
+function interviewToChange(p) {
+    const userScope = recruiterScope(true)
+    const interview = blank(p.workEffortId) ? null : one(INTERVIEW, {workEffortId: text(p.workEffortId)})
+    const application = interview ? one(APPLICATION, {employmentApplicationId: interview.employmentApplicationId}) : null
+    const event = interview ? one(WORK, {workEffortId: interview.workEffortId}) : null
+    if (!interview || !application || !event || !recruitEdits(userScope, application.organizationPartyId))
+        unavailable("Interview", p.workEffortId)
+    if (event.statusId === "WeCancelled") denied("INTERVIEW_CANCELLED", "This interview was cancelled; schedule another")
+    return {interview, event}
+}
+// change#Interview: a new start (from now on), length (10 minutes to 8 hours), place (not of a video interview, whose place is
+// its call link, kept open until a day after the new end) or note; what is not given stays. The attendees are told once it
+// commits (send#InterviewInvitations).
+function changeInterview(p) {
+    const {interview, event} = interviewToChange(p)
+    const workEffortId = interview.workEffortId
+    const oldStartMs = ms(event.estimatedStartDate)
+    const oldEndMs = ms(event.estimatedCompletionDate)
+    const startMs = blank(p.startDate) ? oldStartMs : Number(ms(p.startDate))
+    if (startMs == null || !Number.isFinite(startMs)) denied("START_REQUIRED", "Choose when the interview starts")
+    if (startMs !== oldStartMs && startMs < nowMs() - 5 * 60 * 1000)
+        denied("DATE_PAST", "An interview is moved to a time from now on")
+    const minutes = blank(p.durationMinutes)
+        ? oldStartMs != null && oldEndMs != null
+            ? Math.round((oldEndMs - oldStartMs) / 60000)
+            : 60
+        : Number(p.durationMinutes)
+    if (!Number.isInteger(minutes) || minutes < 10 || minutes > 480)
+        denied("DURATION_INVALID", "An interview lasts 10 minutes to 8 hours")
+    const endMs = startMs + minutes * 60 * 1000
+    const changes = {workEffortId, estimatedStartDate: stamp(startMs), estimatedCompletionDate: stamp(endMs)}
+    if (p.location != null && !interview.callLinkId) changes.location = text(p.location) || null
+    if (p.note != null) changes.description = text(p.note) || null
+    call("update#" + WORK, changes)
+    if (interview.callLinkId) {
+        const link = one("moqui.call.CallLink", {callLinkId: interview.callLinkId})
+        const wantMs = Math.min(nowMs() + 90 * 24 * hourMs, endMs + 24 * hourMs)
+        if (link && (ms(link.expiryDate) ?? Infinity) < wantMs)
+            call("update#moqui.call.CallLink", {callLinkId: interview.callLinkId, expiryDate: stamp(wantMs)})
+    }
+    return {workEffortId}
+}
+// cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its video call's link closed (closeCallLink)
+// and the attendees told once it commits (send#InterviewInvitations).
+function cancelInterview(p) {
+    const {interview} = interviewToChange(p)
+    const workEffortId = interview.workEffortId
+    call("update#" + WORK, {
+        workEffortId,
+        statusId: "WeCancelled",
+        statusId_changeReason: text(p.reason) || "Interview cancelled"
+    })
+    closeCallLink(interview.callLinkId)
+    return {workEffortId}
+}
+// The video call link of a cancelled interview takes no one more (Commons calendar editors review, Nov 12, 2026). The framework's
+// revoke#CallLink is its owner's (the recruiter who scheduled it): it revokes the link and removes its guests at once. Another
+// recruiter of the employer (checked by cancel#Interview) closes it as the system: the link is revoked, so its token and its
+// guests' credentials are refused, and the guests' credentials end now, so the call's minute job (expire#Calls) takes any still in
+// the meeting out and ends it. Nothing here may add an error, which would roll the cancel back: the preconditions of revoke#CallLink
+// are checked first.
+function closeCallLink(callLinkId) {
+    if (!callLinkId) return
+    const link = one("moqui.call.CallLink", {callLinkId})
+    if (!link || link.revokedDate) return
+    if (ec.user.userId && link.ownerUserId === ec.user.userId) {
+        call("org.moqui.call.CallServices.revoke#CallLink", {callLinkId})
+        return
+    }
+    ec.artifactExecution.runAsSystem(() => {
+        const now = ec.user.nowTimestamp
+        const row = ec.entity.find("moqui.call.CallLink").condition("callLinkId", callLinkId).forUpdate(true).one()
+        if (!row || row.revokedDate) return
+        row.set("revokedDate", now)
+        row.update()
+        for (const guest of Array.from(
+            ec.entity.find("moqui.call.CallGuest").condition("callLinkId", callLinkId).condition("revokedDate", null).list()
+        )) {
+            if ((ms(guest.credentialExpiry) ?? Infinity) <= nowMs()) continue
+            guest.set("credentialExpiry", now)
+            guest.update()
+        }
+    })
 }
 // submit#Scorecard: a panel member answers the scorecard assigned to them (the invitation's party is the caller's: another's is
 // not available), once (ALREADY_ANSWERED), the values checked against the form as of now (FORM_VALUES_INVALID).
@@ -1483,8 +1637,8 @@ function createApplicationFromEmail(p) {
     }
 }
 
-// Files of a received message or chat event kept as an application's private files, the first its resume; a file that cannot
-// be copied is logged and the rest go on.
+// Files of a received message or chat event kept as an application's private files, the first its resume, which is shared with
+// the interview panel (the user's call of Nov 12, 2026, P17); a file that cannot be copied is logged and the rest go on.
 function keepFiles(employmentApplicationId, files, what) {
     let first = !rows(CONTENT, {employmentApplicationId}).length
     for (const file of files) {
@@ -1493,6 +1647,7 @@ function keepFiles(employmentApplicationId, files, what) {
             const applicationContentId = call("create#" + CONTENT, {
                 employmentApplicationId,
                 contentTypeEnumId: first ? "EactResume" : "EactOther",
+                panelShared: first ? "Y" : "N",
                 description: name,
                 contentDate: ec.user.nowTimestamp
             }).applicationContentId
@@ -1645,6 +1800,9 @@ const operations = {
     storeApplication,
     changeApplicationStage,
     scheduleInterview,
+    changeInterview,
+    cancelInterview,
+    sendInterviewInvitations,
     submitScorecard,
     findInterviews,
     getInterviewProjection,
@@ -1668,4 +1826,8 @@ function run(op, p) {
         if (!wasDisabled) ec.artifactExecution.enableAuthz()
     }
 }
-;({execute: run})
+;({
+    execute: run,
+    // P17 review: the applicant's address an issued offer's letter is emailed to (Offers.js)
+    applicantEmails
+})

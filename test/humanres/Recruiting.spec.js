@@ -9,7 +9,9 @@
 // application only the applicant's name, the opening, their own interviews and scorecard and the files a recruiter shared with the
 // panel, never its record host; their self-service My interviews (the user's call of Nov 12, 2026); scorecard answers opted out
 // of AI on the entity; an application from a chat message once, by a recruiter, never from their own message; an owner who left
-// files no mail, and their openings are handed over through People's lifecycle participant.
+// files no mail, and their openings are handed over through People's lifecycle participant. P17 (the user's call of Nov 12, 2026):
+// an applicant's resume is shared with the interview panel when attached (by a recruiter, by mail), another file only when a
+// recruiter shares it, and the recruiter can stop sharing the resume.
 // Standalone: spec-local organizations, people, employments, positions, a published scorecard, groups and users, artifact
 // authorization disabled (the rules are the services' own checks). The form rules are FormDefinitions'.
 // Run: ./moq test mr-mantle --spec Recruiting
@@ -436,6 +438,7 @@ feature(
             r.row.referredByEnumId == "EarbEmail"
             r.files.length == 1
             r.files[0].contentTypeEnumId == "EactResume"
+            r.files[0].panelShared == "Y"
             ec.resource.getLocationReference(r.files[0].contentLocation).getText().includes("five years in retail")
         }
     }
@@ -622,3 +625,290 @@ feature(
         }
     }
 )
+
+feature(
+    "an applicant's resume is shared with the panel when attached, another file only when shared; the recruiter unshares it",
+    {
+        when() {
+            const attach = (contentTypeEnumId, description) =>
+                run(state.recruiter.userId, R + "create#ApplicationContent", {
+                    employmentApplicationId: state.dan,
+                    contentTypeEnumId,
+                    description
+                }).applicationContentId
+            const resumeId = attach("EactResume", "dan-resume.pdf")
+            const letterId = attach("EactCoverLetter", "dan-letter.pdf")
+            const row = id =>
+                ec.entity
+                    .find("mantle.humanres.employment.EmploymentApplicationContent")
+                    .condition("applicationContentId", id)
+                    .disableAuthz()
+                    .one()
+            const shared = {resume: row(resumeId).panelShared, letter: row(letterId).panelShared}
+            const unshared = run(state.recruiter.userId, R + "share#ApplicationContent", {
+                applicationContentId: resumeId,
+                shared: false
+            })
+            return {shared, unshared, after: row(resumeId).panelShared}
+        },
+        then(r) {
+            r.shared.resume == "Y"
+            r.shared.letter == "N"
+            r.unshared.shared == false
+            r.after == "N"
+        }
+    }
+)
+
+// Commons calendar editors (Nov 12, 2026): an interview's event is People's (the EventManager PeopleInterview). Its recruiter,
+// the event's organizer, sees it on Commons' screens and changes it only here (change#Interview, cancel#Interview); a panel
+// member puts it in no calendar of their own, whose editors and CalDAV would change it there
+feature("an interview's event changes only through recruiting: the organizer refused on Commons, the panel refused a calendar", {
+    when() {
+        const E = "mantle.work.EventServices."
+        const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+            employmentApplicationId: state.cara,
+            startDate: nextWeek(),
+            durationMinutes: 45,
+            panelPartyIds: state.ana.partyId,
+            location: "Room 4"
+        })
+        const workEffortId = scheduled.workEffortId
+        const event = () =>
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+        const anaCalendarId = call("create#mantle.work.calendar.Calendar", {
+            calendarName: "Recruit spec Ana's",
+            calendarKindEnumId: "CalkPersonal",
+            ownerPartyId: state.ana.partyId
+        }).calendarId
+        const startMs = Number(String(event().estimatedStartDate))
+        const out = {
+            scheduled,
+            access: run(state.recruiter.userId, E + "check#EventAccess", {workEffortId}),
+            moved: run(state.recruiter.userId, E + "update#EventOccurrence", {
+                workEffortId,
+                start: ec.l10n.format(new Date(startMs + 3600000), "yyyy-MM-dd HH:mm"),
+                end: ec.l10n.format(new Date(startMs + 7200000), "yyyy-MM-dd HH:mm")
+            }).error,
+            cancelledOnCommons: run(state.recruiter.userId, E + "cancel#EventOccurrence", {workEffortId}).error,
+            anaAdd: run(state.ana.userId, "mantle.work.CalendarServices.add#CalendarEvent", {
+                calendarId: anaCalendarId,
+                workEffortId
+            }).error,
+            readerChange: code(run(state.reader.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            otherChange: code(run(state.recruiterB.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            before: event()
+        }
+        out.changed = run(state.recruiter.userId, R + "change#Interview", {
+            workEffortId,
+            startDate: new Date(startMs + 3600000),
+            durationMinutes: 30,
+            location: "Room 5"
+        })
+        out.after = event()
+        out.cancelled = run(state.recruiter.userId, R + "cancel#Interview", {workEffortId, reason: "The candidate asked"})
+        out.afterCancel = event()
+        out.again = code(run(state.recruiter.userId, R + "cancel#Interview", {workEffortId}))
+        out.startMs = startMs
+        return out
+    },
+    then(r) {
+        r.scheduled.error == ""
+        r.access.canView && !r.access.canEdit && r.access.isOrganizer
+        r.access.managedBy == "its application's interviews in People"
+        r.moved.includes("is changed on its application's interviews in People")
+        r.cancelledOnCommons.includes("is changed on its application's interviews in People")
+        r.anaAdd.includes("not put in a calendar")
+        r.readerChange == "PERMISSION_DENIED"
+        r.otherChange == "RECORD_UNAVAILABLE"
+        Number(String(r.before.estimatedStartDate)) == r.startMs && r.before.location == "Room 4"
+        r.changed.error == ""
+        Number(String(r.after.estimatedStartDate)) == r.startMs + 3600000
+        Number(String(r.after.estimatedCompletionDate)) == r.startMs + 3600000 + 30 * 60000
+        r.after.location == "Room 5"
+        r.cancelled.error == ""
+        r.afterCancel.statusId == "WeCancelled"
+        r.again == "INTERVIEW_CANCELLED"
+    }
+})
+
+// F358 (People follow-up 1, Nov 12, 2026): an interview's invitations go once its schedule, change or cancel commits, as the
+// system, in a transaction of their own (send#InterviewInvitations, by tx-commit rules). Sent inside the change's transaction, a
+// failing send marked it rollback-only, so the change was undone while the screen said it was made. Its review: a send that leaves
+// an attendee untold (here the candidate, emailed from the organizer's address, which the recruiter does not have yet) is recorded
+// on the interview, shown to its recruiters alone, and a recruiter sends again, telling only who was missed
+feature(
+    "an interview's invitations go once its change commits; a failed send is recorded for its recruiters, who send it again",
+    {
+        when() {
+            const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+                employmentApplicationId: state.cara,
+                startDate: nextWeek(),
+                durationMinutes: 45,
+                panelPartyIds: state.ana.partyId,
+                location: "Room 6",
+                inviteCandidate: true
+            })
+            const workEffortId = scheduled.workEffortId
+            const candidateId = application(state.cara).applyingPartyId
+            const partyRow = partyId => () =>
+                ec.entity
+                    .find("mantle.work.effort.WorkEffortParty")
+                    .condition({workEffortId, partyId})
+                    .disableAuthz()
+                    .useCache(false)
+                    .one() || {}
+            const anaRow = partyRow(state.ana.partyId)
+            const caraRow = partyRow(candidateId)
+            const event = () =>
+                ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+            const interview = () =>
+                ec.entity
+                    .find("mantle.humanres.recruitment.ApplicationInterview")
+                    .condition("workEffortId", workEffortId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            const row = username =>
+                (run(username, R + "get#Application", {employmentApplicationId: state.cara}).application?.interviews || []).find(
+                    item => item.workEffortId == workEffortId
+                ) || {}
+            ec.factory.waitWorkerPoolEmpty(50)
+            const invited = anaRow()
+            const failed = interview()
+            // the change in a transaction of its own, read before it commits: nothing has been sent yet
+            let inside = null
+            ec.transaction.runRequireNew(null, "Recruit spec change", () => {
+                login(state.recruiter.userId)
+                ec.artifactExecution.disableAuthz()
+                try {
+                    ec.service
+                        .sync()
+                        .name(R + "change#Interview")
+                        .parameters({workEffortId, location: "Room 7"})
+                        .call()
+                    inside = {error: ec.message.hasError() ? ec.message.getErrorsString() : "", digest: anaRow().invitationDigest}
+                } finally {
+                    login("john.doe")
+                    ec.artifactExecution.disableAuthz()
+                }
+            })
+            ec.factory.waitWorkerPoolEmpty(50)
+            const told = anaRow()
+            const changed = event()
+            const recruiterView = row(state.recruiter.userId)
+            const panelView = row(state.ana.userId)
+            // Send again, once the recruiter has an address to send from: the candidate alone is told
+            const account = {userId: state.recruiter.userId}
+            call("update#moqui.security.UserAccount", Object.assign({emailAddress: "recruiter.spec@example.test"}, account))
+            const other = code(run(state.recruiterB.userId, R + "send#InterviewInvitations", {workEffortId}))
+            const again = run(state.recruiter.userId, R + "send#InterviewInvitations", {workEffortId})
+            call("update#moqui.security.UserAccount", Object.assign({emailAddress: null}, account))
+            const notInterview = code(
+                run(state.recruiter.userId, R + "send#InterviewInvitations", {workEffortId: "RECRUIT_SPEC_NONE"})
+            )
+            return {
+                scheduled,
+                invited,
+                failed,
+                inside,
+                told,
+                changed,
+                recruiterView,
+                panelView,
+                other,
+                again,
+                sent: interview(),
+                anaAfter: anaRow(),
+                cara: caraRow(),
+                notInterview
+            }
+        },
+        then(r) {
+            r.scheduled.error == ""
+            r.invited.invitationSentDate != null && r.invited.invitationDigest.length > 0
+            r.failed.invitationSendStatus == "failed" && r.failed.invitationSendError.includes("Cara Candidate")
+            r.failed.invitationSendError.includes("no email address of the organizer to send from")
+            r.inside.error == "" && r.inside.digest == r.invited.invitationDigest
+            r.changed.location == "Room 7"
+            r.told.invitationDigest != r.invited.invitationDigest
+            r.recruiterView.invitationsFailed == true && r.recruiterView.invitationProblemText.includes("Cara Candidate")
+            r.panelView.invitationsFailed == false && r.panelView.invitationProblemText == ""
+            r.other == "RECORD_UNAVAILABLE"
+            r.again.error == "" && r.again.invitationsSent == true && r.again.invitationProblem == null
+            r.sent.invitationSendStatus == "sent" && r.sent.invitationSendError == null
+            r.cara.invitationSentDate != null
+            // Ana, told already, is not told again
+            String(r.anaAfter.invitationSentDate) == String(r.told.invitationSentDate)
+            r.notInterview == "RECORD_UNAVAILABLE"
+        }
+    }
+)
+
+// Commons calendar review (Nov 12, 2026): a cancelled interview's video call link takes no one more. The recruiter who scheduled
+// it revokes it with the framework's revoke#CallLink (its guests removed at once); another recruiter of the employer closes it as
+// the system (the link revoked, so its token and its guests are refused, and its guests' credentials ended for the call's minute
+// job)
+feature("a cancelled interview's video call link is closed, by the recruiter who made it or another of the employer", {
+    when() {
+        const schedule = () =>
+            run(state.recruiter.userId, R + "schedule#Interview", {
+                employmentApplicationId: state.cara,
+                startDate: nextWeek(),
+                durationMinutes: 30,
+                panelPartyIds: state.ana.partyId,
+                videoCall: true
+            })
+        const linkIdOf = workEffortId =>
+            ec.entity
+                .find("mantle.humanres.recruitment.ApplicationInterview")
+                .condition("workEffortId", workEffortId)
+                .disableAuthz()
+                .one().callLinkId
+        const guestOf = callLinkId =>
+            call("create#moqui.call.CallGuest", {
+                callLinkId,
+                displayName: "Recruit spec candidate",
+                credentialHash: "recruit-spec-" + callLinkId,
+                credentialExpiry: new Date(Number(String(ec.user.nowTimestamp)) + 4 * 3600000),
+                createdDate: ec.user.nowTimestamp
+            }).callGuestId
+        const tokenValid = scheduled =>
+            call("org.moqui.call.CallServices.check#CallLinkToken", {token: String(scheduled.callPath).split("/").pop()}).valid
+        const row = (entity, field, id) => ec.entity.find(entity).condition(field, id).disableAuthz().one()
+        const out = {}
+        const colleague = user("RECRUITER_2", orgA, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
+        for (const [key, canceller] of [
+            ["mine", state.recruiter],
+            ["other", colleague]
+        ]) {
+            const scheduled = schedule()
+            const callLinkId = linkIdOf(scheduled.workEffortId)
+            const callGuestId = guestOf(callLinkId)
+            const validBefore = tokenValid(scheduled)
+            const cancelled = run(canceller.userId, R + "cancel#Interview", {workEffortId: scheduled.workEffortId})
+            out[key] = {
+                scheduled,
+                validBefore,
+                cancelled,
+                validAfter: tokenValid(scheduled),
+                link: row("moqui.call.CallLink", "callLinkId", callLinkId),
+                guest: row("moqui.call.CallGuest", "callGuestId", callGuestId),
+                nowMs: Number(String(ec.user.nowTimestamp))
+            }
+        }
+        return out
+    },
+    then({mine, other}) {
+        mine.scheduled.error == "" && mine.validBefore == true
+        mine.cancelled.error == ""
+        mine.link.revokedDate != null
+        mine.guest.revokedDate != null
+        mine.validAfter == false
+        other.scheduled.error == "" && other.validBefore == true
+        other.cancelled.error == ""
+        other.link.revokedDate != null
+        Number(String(other.guest.credentialExpiry)) <= other.nowMs
+        other.validAfter == false
+    }
+})

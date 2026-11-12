@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's confidential cases (IronStone People design §4 Grievances, §13 RequestDetail, PE-01, PE-21; impl-people P21), included
+    in mantle.request.RequestServices (its service-include rows), over PeopleCases.js: a case is a Request of the HR-confidential type
+    RqtHrCase read and changed by its people alone, the employee who filed it and its handlers (PEOPLE_CASE_HANDLE and an Assignee
+    row of the case). Every other caller is told the case is not available, a missing case alike (RECORD_UNAVAILABLE). Each service
+    checks the caller itself, then reads and writes with authorization off. Not exposed to MCP or the assistant (design §1.4). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="create" noun="PeopleCase" allow-remote="false">
+        <description>An employee files a confidential case with their employer: the subject, what happened, the day it happened and
+            how they want to be contacted, under a current employment of their own (partyRelationshipId; the only one when empty). Its
+            handlers are the employer's designated intake handlers (the PartySetting PeopleCaseIntake), each holding PEOPLE_CASE_HANDLE
+            and working for the employer, never the employee; they are told on PeopleCaseUpdate, whose title names nothing. No triage
+            notice, case profile or service-level clock follows (the Request rules leave the type alone). A retry with the same
+            operationKey answers the case filed (created false). Refuses a caller with no current employment (NOT_EMPLOYED), an
+            employment not theirs (RECORD_UNAVAILABLE), no employment chosen of several (EMPLOYMENT_REQUIRED), no subject
+            (SUBJECT_REQUIRED), a day in the future (DATE_INVALID) and an employer with no intake handler (NO_CASE_HANDLER).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="subject"/>
+            <parameter name="details"/>
+            <parameter name="incidentDate"/>
+            <parameter name="contactPreference"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('createCase', context)"/>
+            <set field="requestId" from="found.requestId"/>
+            <set field="created" from="found.created"/>
+        </actions>
+    </service>
+    <service verb="find" noun="PeopleCases" allow-remote="false">
+        <description>The caller's confidential cases: those they filed and those they handle (an Assignee of the case holding
+            PEOPLE_CASE_HANDLE), open (the default), closed or all, newest first, paged; requestId narrows to one. Each row: the
+            reference, subject, state, the caller's part, the employer, the handlers, the day it was filed and, for a handler, who
+            filed it. A manager, HR or anyone else reads none of them; a case not the caller's is not available (RECORD_UNAVAILABLE).
+            canFile and employerOptions: whether the caller has a current employment to file under, and which. Refuses a call with
+            no user (PERMISSION_DENIED) and a show that is not open, closed or all (SHOW_INVALID).</description>
+        <in-parameters>
+            <parameter name="show"/>
+            <parameter name="requestId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="cases" type="List"><description>requestId, referenceText, subject, statusId, stateText, stateColor, role
+                (filer or handler), roleText, organizationText, handlersText, filedByText (a handler's), submittedDateText, open</description></parameter>
+            <parameter name="casesCount" type="Integer"/>
+            <parameter name="casesPageIndex" type="Integer"/>
+            <parameter name="casesPageSize" type="Integer"/>
+            <parameter name="casesPageMaxIndex" type="Integer"/>
+            <parameter name="casesPageRangeLow" type="Integer"/>
+            <parameter name="casesPageRangeHigh" type="Integer"/>
+            <parameter name="canFile" type="Boolean"/>
+            <parameter name="employerOptions" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('findCases', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="PeopleCase" allow-remote="false">
+        <description>One confidential case for its people: what the employee wrote, the state, the employer, who filed it, its handlers
+            and outcome note, the caller's part and revision; the moves the caller may make (a handler's start, resolve, close and
+            reopen; the employee's withdraw); for a handler the tasks asked of others on it and the case handlers of the employer who
+            could be added. Anyone else, a missing case alike, is refused RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="peopleCase" type="Map"/>
+            <parameter name="moves" type="List"/>
+            <parameter name="canHandle" type="Boolean"/>
+            <parameter name="canAddFiles" type="Boolean"/>
+            <parameter name="tasks" type="List"/>
+            <parameter name="handlerOptions" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('getCase', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="change" noun="PeopleCase" allow-remote="false">
+        <description>A move of a confidential case at the revision read: a handler's start (to In progress), resolve (Resolved, with an
+            outcome note), close (closed without action, with a note) and reopen (a resolved case back to In progress); the employee's
+            withdraw while it is open. Its people are told on PeopleCaseUpdate. Refuses anyone not on the case (RECORD_UNAVAILABLE), a
+            move not theirs (PERMISSION_DENIED), one the state does not allow or not one (ACTION_INVALID) and a revision other than
+            the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="outcomeNote"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="stateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('changeCase', context)"/>
+            <set field="statusId" from="found.statusId"/>
+            <set field="stateText" from="found.stateText"/>
+        </actions>
+    </service>
+    <service verb="assign" noun="PeopleCaseHandler" allow-remote="false">
+        <description>A handler of an open confidential case adds another case handler of the employer (PEOPLE_CASE_HANDLE, working
+            for it, never the employee who filed it), who is told on PeopleCaseUpdate; or, with remove, takes a handler off, never the
+            last. Refuses anyone but its handlers (RECORD_UNAVAILABLE, PERMISSION_DENIED), a party who may not handle it
+            (HANDLER_INVALID), the last handler's removal (LAST_HANDLER), a closed case (CASE_CLOSED) and a revision other than the
+            one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="added" type="Boolean"/>
+            <parameter name="removed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('assignHandler', context)"/>
+            <set field="added" from="!!found.added"/>
+            <set field="removed" from="!!found.removed"/>
+        </actions>
+    </service>
+    <service verb="add" noun="PeopleCaseTask" allow-remote="false">
+        <description>A handler of an open confidential case asks someone for work on it: a task (its name the handler's words, a due
+            day) assigned to that person and linked to the case (RequestWorkEffort). The task is protected: left out of the CalDAV
+            Tasks collection and of every task list but its assignee's, and its assignee reads nothing of the case; they are told on
+            PeopleTaskAssigned (who asked and when it is due). Its status never moves the case. Refuses anyone but its handlers
+            (RECORD_UNAVAILABLE, PERMISSION_DENIED), a closed case (CASE_CLOSED), no name (NAME_REQUIRED) and no assignee
+            (ASSIGNEE_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="workEffortName"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueDate"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('addTask', context)"/>
+            <set field="workEffortId" from="found.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="check" noun="PeopleCaseAccess" allow-remote="false">
+        <description>Whether the caller is one of a confidential case's people (its files and notes, for get#RecordLinkInfo and
+            RecordFiles): the employee who filed it or a handler; canEdit while it is open. Never refuses: a request that is not a
+            case, or not the caller's, answers recordVisible false, and so does a call with no user.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="role"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('caseAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="role" from="found.role"/>
+        </actions>
+    </service>
+    <service verb="notify" noun="PeopleCaseUpdate" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the record notices (mantle.party.CommunicationServices notify#RecordMention and
+            notify#RecordFollowers): a note or message on a confidential case tells its people on PeopleCaseUpdate (no push, a title
+            that names nothing) in place of the generic topics, which carry the record's name and the start of the text; nobody else
+            is told. A request that is not a case tells no one.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="notifiedUserIds" type="List"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('tellUpdate', context)"/>
+            <set field="notifiedUserIds" from="found.notifiedUserIds"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CaseDocumentData" authenticate="anonymous-all" allow-remote="false">
+        <description>The manual data service of the search documents MantleRequest and MantleCommunicationEvent: a confidential case's
+            request, and a message or note filed on one, gain the field confidentialCase, which each document's post-query condition
+            leaves out of the index, so no case text is searched. Any other document is unchanged.</description>
+        <in-parameters>
+            <parameter name="dataDocumentId"/>
+            <parameter name="document" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="document" type="Map"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('documentData', context)"/>
+            <set field="document" from="found.document"/>
+        </actions>
+    </service>
+</services>

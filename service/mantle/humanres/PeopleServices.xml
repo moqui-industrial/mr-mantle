@@ -430,6 +430,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="emplPositionId"/>
             <parameter name="managerPartyId"/>
             <parameter name="facilityId"/>
+            <parameter name="employmentOfferId"><description>P17: the accepted offer the hire is made from: its employer and applicant
+                (the person by the offer, whoever else People knows), consumed once by the hire</description></parameter>
         </in-parameters>
     </service>
     <service verb="preview" noun="Hire" allow-remote="false">
@@ -483,7 +485,13 @@ along with this software (see the LICENSE.md file). If not, see
             the employer (NOT_A_DEPARTMENT, DEPARTMENT_OUTSIDE), a position not of the employer (RECORD_UNAVAILABLE), not in effect
             (POSITION_NOT_IN_EFFECT), inactive (POSITION_INACTIVE), of another department (POSITION_DEPARTMENT) or held then
             (POSITION_OCCUPIED), a manager not employed by the employer (MANAGER_NOT_EMPLOYED), a work location not the
-            employer's (FACILITY_OUTSIDE).</description>
+            employer's (FACILITY_OUTSIDE). P17: a hire from an accepted offer (employmentOfferId; the offer locked) is of its employer
+            and applicant, takes its working schedule from the first day and consumes it, exactly once: the offer is Hired and its
+            application Hired; refused: an offer hired from already (OFFER_USED: a second hire from it), not accepted
+            (OFFER_NOT_ACCEPTED), of another person or employer (OFFER_PERSON, OFFER_EMPLOYER), of an application refused or
+            withdrawn since (OFFER_APPLICATION_CLOSED), not of the editor's employers
+            (RECORD_UNAVAILABLE). The offer grants nothing else: no pay is recorded and no account is asked but by
+            requestAccount.</description>
         <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
         <in-parameters>
             <parameter name="reason"/>
@@ -1307,8 +1315,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Tells the users of a party newly assigned to a task of People's lifecycle work (a checklist step, an equipment
             return; mantle.work.TaskServices.notify#TaskAssigned hands such a task here) on the topic PeopleTaskAssigned, whose
             title names who assigned it and when it is due and nothing of the person or the change: workEffortId, assignedByName,
-            dueDateText, and the task as the record. Not the user who assigned it. A failure is logged, not the
-            assignment's.</description>
+            dueDateText, and the task as the record. Not the user who assigned it; to the assignee's users alone (directOnly: a
+            subscription to every message of the topic receives none). A failure is logged, not the assignment's.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="partyId" required="true"/>
@@ -1325,12 +1333,86 @@ along with this software (see the LICENSE.md file). If not, see
                 const assignedByName = (me ? [me.firstName, me.lastName].filter((part) => part).join(' ') : '') || ec.user.username || 'People'
                 const due = task.estimatedCompletionDate
                 const dueDateText = due ? ec.l10n.format(new Date(Number(String(due)) || Date.parse(String(due))), 'MMM d') : 'when you can'
+                // to the assignee alone (directOnly): a People task may be a protected checklist step or a confidential case's
+                // (People follow-up 1)
                 ec.makeNotificationMessage().topic('PeopleTaskAssigned').userIds(userIds)
                         .message({workEffortId: workEffortId, assignedByName: assignedByName, dueDateText: dueDateText})
-                        .record('mantle.work.effort.WorkEffort', workEffortId).send()
+                        .record('mantle.work.effort.WorkEffort', workEffortId).directOnly().send()
             } catch (err) {
                 ec.logger.error(`People task ${workEffortId} assigned to ${partyId}: notification not sent: ${err && err.message ? err.message : err}`)
             }
         ]]></script></actions>
+    </service>
+
+    <!-- impl-people P17 (design-people §15 "Employment/offer and lifecycle letters"; Letters.js): the lifecycle letter of an applied
+        employment change, on the template of the offer letter, stored when issued -->
+    <service verb="get" noun="EmploymentLetter" allow-remote="false">
+        <description>The letter of an employment change for an HR reader of its employer (PEOPLE_HR_VIEW; RECORD_UNAVAILABLE
+            outside, as a missing one; a letter holding pay terms with PAYROLL_VIEW too): once issued the stored letter (letter: its location, file name and type, who issued it and
+            when; never rendered again), before the preview (letterHtml, People's letter template marked as a draft) and whether
+            the caller issues it (canIssue). A change applied and not withdrawn has one when it is a hire, a transfer, a manager
+            change, a leave of absence, a return or a separation (offered, else problem says why).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="partyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="issued" type="Boolean"/>
+            <parameter name="letter" type="Map"/>
+            <parameter name="offered" type="Boolean"/>
+            <parameter name="problem"/>
+            <parameter name="title"/>
+            <parameter name="letterHtml"/>
+            <parameter name="canIssue" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getEmploymentLetter', context)"/>
+            <script>for (const key of ['employmentChangeId', 'partyId', 'partyRelationshipId', 'letter', 'problem', 'title', 'letterHtml']) context[key] = out[key]</script>
+            <set field="issued" from="!!out.issued"/>
+            <set field="offered" from="!!out.offered"/>
+            <set field="canIssue" from="!!out.canIssue"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="EmploymentLetter" allow-remote="false">
+        <description>An HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; PERMISSION_DENIED, RECORD_UNAVAILABLE outside)
+            issues the letter of an applied change (CHANGE_NOT_APPLIED for one waiting, refused, superseded or withdrawn;
+            LETTER_NOT_OFFERED for a working schedule or a reorganization): rendered once from People's letter template (the person,
+            the employer, the change's date and terms; never the change's reason) and stored as its PDF, or its html-print page where
+            the server has no PDF engine, with who issued it and when. One letter per change, the change locked: an issue retried
+            answers the first (repeated).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentLetterId"/>
+            <parameter name="location"/>
+            <parameter name="fileName"/>
+            <parameter name="contentType"/>
+            <parameter name="issuedDateText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('issueEmploymentLetter', context)"/>
+            <script>for (const key of ['employmentLetterId', 'location', 'fileName', 'contentType', 'issuedDateText']) context[key] = out[key]</script>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <!-- impl-people P17 review (the user's call of Nov 12, 2026): an employee's own issued lifecycle letters, in their self-service -->
+    <service verb="find" noun="MyLetters" allow-remote="false">
+        <description>The issued lifecycle letters addressed to the caller (a hire's confirmation, a transfer, a manager change, a
+            leave of absence, a return, a separation), newest first, with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): the caller's own
+            party alone (no party is taken). Each its title, employer, issue date and file name.</description>
+        <out-parameters><parameter name="letters" type="List"/></out-parameters>
+        <actions>
+            <set field="letters" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('findMyLetters', context).letters"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyLetter" allow-remote="false">
+        <description>One of the caller's own issued lifecycle letters as it was stored, whole (pay included: the letter is theirs),
+            with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): its location, file name and type. Another person's letter, an offer's or a
+            missing one is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="employmentLetterId" required="true"/></in-parameters>
+        <out-parameters><parameter name="letter" type="Map"/></out-parameters>
+        <actions>
+            <set field="letter" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getMyLetter', context).letter"/>
+        </actions>
     </service>
 </services>

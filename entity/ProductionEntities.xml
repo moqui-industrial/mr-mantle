@@ -87,6 +87,13 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="Operation" related="mantle.work.effort.WorkEffort" short-alias="operation">
             <key-map field-name="operationWorkEffortId" related="workEffortId"/></relationship>
         <index name="PRODRUNLINE_RUN"><index-field name="workEffortId"/></index>
+        <seed-data>
+            <!-- a production run (a WetEvent of purpose WepProductionRun, owned by its organization) is changed only by
+                Manufacturing's services, never by Mantle's event services, the calendar or CalDAV (impl-manufacturing F39, which
+                BOSS's get#EventAccessInfo guarded alone; People follow-up 1, Nov 12, 2026) -->
+            <mantle.work.calendar.EventManager eventManagerId="ProductionRun" entityName="mantle.work.effort.WorkEffort"
+                    purposeEnumId="WepProductionRun" managedByText="its production run in Manufacturing"/>
+        </seed-data>
     </entity>
 
     <!-- CX-PRODUCTION (impl-warehouse F7): the run line and operation of a production movement. The movement's workEffortId

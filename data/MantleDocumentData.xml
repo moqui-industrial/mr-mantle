@@ -105,8 +105,11 @@ along with this software (see the LICENSE.md file). If not, see
         <links linkSeqId="01" linkSet="boss" label="Party" urlType="plain"
                 linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.party.Party&amp;partyId=${partyId}"/>
     </dataDocuments>
+    <!-- IronStone People P21: a message or note filed on a confidential case is never indexed: the manual data service marks it
+        confidentialCase, which the post-query condition below leaves out (mantle.request.RequestServices.get#CaseDocumentData) -->
     <dataDocuments dataDocumentId="MantleCommunicationEvent" indexName="mantle" documentName="Communication Event"
-            primaryEntityName="mantle.party.communication.CommunicationEvent" documentTitle="${subject}">
+            primaryEntityName="mantle.party.communication.CommunicationEvent" documentTitle="${subject}"
+            manualDataServiceName="mantle.request.RequestServices.get#CaseDocumentData">
         <fields fieldSeqId="01" fieldPath="communicationEventId"/>
         <fields fieldSeqId="02" fieldPath="communicationEventTypeId"/>
         <fields fieldSeqId="03" fieldPath="type:description" fieldNameAlias="type" searchRole="category" sortable="Y"/>
@@ -141,6 +144,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="41" fieldPath="purposes:description" fieldNameAlias="purpose"/>
         <links linkSeqId="01" linkSet="boss" label="Communication" urlType="plain"
                 linkUrl="/apps/tools/Data/Browse/AutoEdit/AutoEditMaster?aen=mantle.party.communication.CommunicationEvent&amp;communicationEventId=${communicationEventId}"/>
+        <conditions conditionSeqId="90" fieldNameAlias="confidentialCase" postQuery="Y"/>
     </dataDocuments>
 
     <!-- ========== Product ========== -->

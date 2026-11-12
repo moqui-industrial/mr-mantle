@@ -272,7 +272,8 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="LeaveRequestSegment" package="mantle.humanres.leave" cache="never">
         <description>Days of a leave request, fromDay through thruDay: whole days, or the morning or the afternoon of one day
             (dayPartEnumId). Approved, it is projected as one WetTimeOff work effort (workEffortId: "Out of office", the person's,
-            no reason or type) with a leave-start reminder on the first.</description>
+            no reason or type) with a leave-start reminder on the first; the EventManager PeopleLeave keeps it, so it changes only
+            with the request.</description>
         <field name="leaveRequestId" type="id" is-pk="true"/>
         <field name="segmentSeqId" type="id" is-pk="true"/>
         <field name="fromDay" type="date"/>
@@ -282,5 +283,13 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.humanres.leave.LeaveRequest" short-alias="request"/>
         <relationship type="one" title="LeaveDayPart" related="moqui.basic.Enumeration" short-alias="dayPart">
             <key-map field-name="dayPartEnumId" related="enumId"/></relationship>
+        <index name="LEAVE_SEG_EVENT"><index-field name="workEffortId"/></index>
+        <seed-data>
+            <!-- approved leave's "Out of office" is changed only through LeaveServices (a cancellation or change of the request),
+                never by Mantle's event services, the calendar or CalDAV, though the employee owns it (F359, People follow-up 1,
+                Nov 12, 2026) -->
+            <mantle.work.calendar.EventManager eventManagerId="PeopleLeave" entityName="mantle.humanres.leave.LeaveRequestSegment"
+                    managedByText="its leave request in People"/>
+        </seed-data>
     </entity>
 </entities>

@@ -73,7 +73,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The registration of a purpose of the survey builder's forms (impl-people P16, F51, F62;
             mantle.party.FormDefinitions): a DbForm of a registered purpose is built and read through
             mantle.party.FormDefinitionServices (FormDefinitions.js), which check the permission that edits it (editPermission)
-            and the one that also reads it (viewPermission), and the organization it is owned by: one the scope service names
+            and the one that also reads it (viewPermission), each a permission or a comma list of them any one of which admits,
+            and the organization it is owned by: one the scope service names
             (scopeServiceName answers organizationPartyIds for the user; empty, the user's own internal organizations). A
             publication of such a form (FormPublication, its invitation links) takes only the access kinds accessEnumIds lists
             (a comma list of FormPublicationAccess ids); none means the form is answered only by the respondents an app's own

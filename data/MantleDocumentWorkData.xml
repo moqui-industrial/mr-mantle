@@ -139,8 +139,11 @@ along with this software (see the LICENSE.md file). If not, see
     </dataDocuments>
 
     <!-- Request -->
+    <!-- IronStone People P21: a confidential case (RqtHrCase) is never indexed: the manual data service marks it confidentialCase,
+        which the post-query condition below leaves out (mantle.request.RequestServices.get#CaseDocumentData) -->
     <dataDocuments dataDocumentId="MantleRequest" indexName="mantle" documentName="Request"
-            primaryEntityName="mantle.request.Request" documentTitle="${name}">
+            primaryEntityName="mantle.request.Request" documentTitle="${name}"
+            manualDataServiceName="mantle.request.RequestServices.get#CaseDocumentData">
         <fields fieldSeqId="01" fieldPath="requestId" searchRole="code" searchWeight="A"/>
         <fields fieldSeqId="02" fieldPath="requestName" fieldNameAlias="name" searchRole="title" searchWeight="A"/>
         <fields fieldSeqId="03" fieldPath="description" searchWeight="C"/>
@@ -181,6 +184,7 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="52" fieldPath="communicationEvents:communicationEvent:body" fieldNameAlias="comBody"/>
         <links linkSeqId="01" linkSet="boss" label="Request" urlType="plain"
                 linkUrl="/apps/Commons/Requests/RequestDetail?requestId=${requestId}"/>
+        <conditions conditionSeqId="90" fieldNameAlias="confidentialCase" postQuery="Y"/>
     </dataDocuments>
 
     <!-- ================ -->

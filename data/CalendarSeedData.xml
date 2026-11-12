@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Calendar data updates (mantle.work.CalendarServices), run on every seed load and with nothing to do once done. -->
+<entity-facade-xml type="seed">
+    <!-- the calendar links made before CalendarWorkEffort.viewOnly (Commons calendar editors, Nov 12, 2026): an attendee's
+        invitation put in a calendar of their own is marked to be seen only, so its calendar's editors do not change the event;
+        every other link is marked as it is (migrate#CalendarViewOnlyLinks) -->
+    <mantle.work.CalendarServices.migrate-CalendarViewOnlyLinks/>
+</entity-facade-xml>

@@ -15,11 +15,14 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- IronStone Projects (impl-projects.md P5): a request new to its triagers (made Submitted, a draft submitted, or a submitted
     one given a project) tells them on the topic RequestTriage, after the commit (queue#RequestTriage), so a request made and
     then given its project in one transaction tells them once. -->
+<!-- IronStone People P21 (F20): a confidential case (requestTypeEnumId RqtHrCase, People's grievances) gets none of these rules: no
+    triage notice, case profile or service-level clock; the support-case rules on its parties, messages and work find no case profile
+    (ensure#CaseProfile leaves the type alone), and complete#RequestFromWork never moves it. -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
     <eeca id="RequestTriageNotice" entity="mantle.request.Request" on-create="true" on-update="true" get-entire-entity="true" get-original-value="true">
         <condition><expression>statusId == 'ReqSubmitted' &amp;&amp; (eecaOperation == 'create' || originalValue == null ||
             originalValue.statusId != 'ReqSubmitted' || (rootWorkEffortId &amp;&amp; originalValue.rootWorkEffortId != rootWorkEffortId))
-            &amp;&amp; requestTypeEnumId != 'RqtPurchaseRfq'</expression></condition>
+            &amp;&amp; requestTypeEnumId != 'RqtPurchaseRfq' &amp;&amp; requestTypeEnumId != 'RqtHrCase'</expression></condition>
         <actions><service-call name="mantle.request.RequestServices.queue#RequestTriage" in-map="{requestId:requestId}"/></actions>
     </eeca>
     <!-- IronStone Customer Service (impl-customer-service P2, D23, F62): a request that may have become a support case (made,
@@ -28,7 +31,7 @@ along with this software (see the LICENSE.md file). If not, see
         makes its case; an organization with no ServicePolicy has no cases, and the rule does nothing. -->
     <eeca id="SupportCaseRule" entity="mantle.request.Request" on-create="true" on-update="true" get-entire-entity="true" get-original-value="true">
         <condition><expression>statusId &amp;&amp; statusId != 'ReqDraft' &amp;&amp; statusId != 'ReqCompleted' &amp;&amp; statusId != 'ReqCancelled'
-            &amp;&amp; (eecaOperation == 'create' || originalValue == null || originalValue.statusId != statusId
+            &amp;&amp; requestTypeEnumId != 'RqtHrCase' &amp;&amp; (eecaOperation == 'create' || originalValue == null || originalValue.statusId != statusId
                 || originalValue.requestTypeEnumId != requestTypeEnumId || originalValue.requestCategoryId != requestCategoryId)</expression></condition>
         <actions><service-call name="mantle.request.SupportCaseServices.queue#CaseProfile" in-map="{requestId:requestId}"/></actions>
     </eeca>
@@ -45,7 +48,7 @@ along with this software (see the LICENSE.md file). If not, see
         change of a request's status, due date or resolution, from any screen or service (record#CaseEvent; a request that is
         not a case does nothing there) -->
     <eeca id="SupportCaseSlaRule" entity="mantle.request.Request" on-update="true" get-entire-entity="true" get-original-value="true">
-        <condition><expression>originalValue != null &amp;&amp; (originalValue.statusId != statusId
+        <condition><expression>originalValue != null &amp;&amp; requestTypeEnumId != 'RqtHrCase' &amp;&amp; (originalValue.statusId != statusId
             || String(originalValue.responseRequiredDate ?? '') != String(responseRequiredDate ?? '')
             || (originalValue.requestResolutionEnumId ?? null) != (requestResolutionEnumId ?? null))</expression></condition>
         <actions><service-call name="mantle.request.SlaServices.record#CaseEvent" in-map="{requestId:requestId, kind:'status',

@@ -25,6 +25,7 @@
 // through the domain's handlers; the notices are read once the step is decided or the request ends.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const recruiting = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
+const offers = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Offers.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 const ms = lib.ms
@@ -39,6 +40,11 @@ const LEAVE_REQUEST = "mantle.humanres.leave.LeaveRequest"
 const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
 const EXPENSE_CLAIM = "mantle.humanres.expense.ExpenseClaim"
 const EMPLOYEE_ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
+const EMPLOYMENT_OFFER = "mantle.humanres.recruitment.EmploymentOffer"
+// P19: a place in a training session
+const PERSON_TRAINING = "mantle.humanres.ability.PersonTraining"
+const PERFORMANCE_REVIEW = "mantle.humanres.ability.PerformanceReview"
+const reviews = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Reviews.js")
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -244,6 +250,104 @@ const kinds = {
                 }
             }
         }
+    },
+    // P17: an offer of employment (RecruitingServices change#OfferState submit, approve and refuse), bound to the offer's last
+    // change, so changed terms supersede it. With no rule the employer's HR officers decide it (defaultRole: the applicant has no
+    // manager and the recruiter may not decide their own). What the notice says: the position, the opening, the applicant, the
+    // employer and department (the title names the position alone); never pay.
+    PakOffer: {
+        topic: "PeopleOfferApproval",
+        sourceEntityName: EMPLOYMENT_OFFER,
+        sourceField: "employmentOfferId",
+        defaultRole: "ParHr",
+        // P17 review: who drafted the offer decides it no more than who submitted it or the applicant
+        selfPartyIds(sourceId) {
+            const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
+            const creator = offer?.createdByUserId ? one("moqui.security.UserAccount", {userId: offer.createdByUserId}) : null
+            return creator?.partyId ? [creator.partyId] : []
+        },
+        describe(sourceId) {
+            const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
+            if (!offer) return {label: "offer " + sourceId}
+            const personName = people.personNames([offer.partyId])[offer.partyId] || offer.partyId
+            const names = people.organizationNames([offer.organizationPartyId, offer.departmentPartyId].filter(Boolean))
+            const position = offer.emplPositionId ? one(POSITION, {emplPositionId: offer.emplPositionId}) : null
+            const positionName = position?.description || offer.emplPositionId || ""
+            const openingTitle = offers().openingTitleOf(offer)
+            return {
+                label: "offer of " + (positionName || openingTitle || "a position") + " to " + personName,
+                message: {
+                    employmentOfferId: sourceId,
+                    partyId: offer.partyId,
+                    personName,
+                    positionName,
+                    openingTitle,
+                    subjectText: "an offer of " + (positionName || openingTitle || "a position"),
+                    organizationName: names[offer.organizationPartyId] || offer.organizationPartyId || "",
+                    departmentName: offer.departmentPartyId ? names[offer.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P19: a place in a training session the person asked for (DevelopmentServices.enroll#Training and decide#Enrollment), bound to
+    // the enrollment's last change, so a withdrawal or the session's cancellation supersedes it. The notice names the person, the
+    // course and the session's day, the employer and department; never the reason asked or a result.
+    PakTraining: {
+        topic: "PeopleTrainingApproval",
+        sourceEntityName: PERSON_TRAINING,
+        sourceField: "personTrainingId",
+        describe(sourceId) {
+            const enrollment = one(PERSON_TRAINING, {personTrainingId: sourceId})
+            if (!enrollment) return {label: "training " + sourceId}
+            const personName = people.personNames([enrollment.partyId])[enrollment.partyId] || enrollment.partyId
+            const names = people.organizationNames([enrollment.organizationPartyId, enrollment.departmentPartyId].filter(Boolean))
+            const course = one("mantle.humanres.ability.TrainingClass", {trainingClassId: enrollment.trainingClassId})
+            const event = one("mantle.work.effort.WorkEffort", {workEffortId: enrollment.workEffortId})
+            const courseText = course?.title || enrollment.trainingClassId || ""
+            const dayText = event?.estimatedStartDate ? ec.l10n.format(event.estimatedStartDate, "yyyy-MM-dd") : ""
+            return {
+                label: "training of " + personName + ": " + courseText,
+                message: {
+                    personTrainingId: sourceId,
+                    workEffortId: enrollment.workEffortId,
+                    partyId: enrollment.partyId,
+                    personName,
+                    subjectText: "training for " + personName + " (" + courseText + (dayText ? ", " + dayText : "") + ")",
+                    organizationName: names[enrollment.organizationPartyId] || enrollment.organizationPartyId || "",
+                    departmentName: enrollment.departmentPartyId ? names[enrollment.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P20: the finalizing of a review whose template asks for approval (ReviewServices.change#ReviewState finalize, approve and
+    // refuse), bound to the review's last change. With no rule the employer's HR officers decide it (defaultRole: the person's
+    // manager is usually the reviewer who asks). What the notice says: the cycle, the employer and department in its title (no
+    // person), the person in its message; never a rating, an answer or a note.
+    PakReview: {
+        topic: "PeopleReviewStep",
+        sourceEntityName: PERFORMANCE_REVIEW,
+        sourceField: "performanceReviewId",
+        defaultRole: "ParHr",
+        describe(sourceId) {
+            const review = one(PERFORMANCE_REVIEW, {performanceReviewId: sourceId})
+            if (!review) return {label: "review " + sourceId}
+            const personName = people.personNames([review.partyId])[review.partyId] || review.partyId
+            const names = people.organizationNames([review.organizationPartyId, review.departmentPartyId].filter(Boolean))
+            const cycle = one("mantle.humanres.ability.ReviewCycle", {reviewCycleId: review.reviewCycleId})
+            const cycleText = cycle?.cycleName || review.reviewCycleId || ""
+            return {
+                label: "review of " + personName + ": " + cycleText,
+                message: {
+                    performanceReviewId: sourceId,
+                    partyId: review.partyId,
+                    personName,
+                    // the title is lock-screen safe (design §1.4): the cycle, never the person reviewed
+                    subjectText: "a review for " + cycleText,
+                    organizationName: names[review.organizationPartyId] || review.organizationPartyId || "",
+                    departmentName: review.departmentPartyId ? names[review.departmentPartyId] || "" : ""
+                }
+            }
+        }
     }
 }
 function kindOf(approvalKindEnumId) {
@@ -428,15 +532,20 @@ function chooseRules(rules, request, at) {
     }
     const typeRows = general.filter(row => !row.departmentPartyId)
     if (typeRows.length) return {basis: "type", rows: typeRows}
-    // no rule: the person's manager, or for a request about no one (a position) the head of its department
-    const role = request.subjectPartyId ? "ParManager" : "ParDepartmentHead"
-    return {basis: "default", rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null}]}
+    // no rule: the kind's own default (P17: an offer's, HR), else the person's manager, or for a request about no one (a
+    // position) the head of its department
+    const role = kinds[request.approvalKindEnumId]?.defaultRole || (request.subjectPartyId ? "ParManager" : "ParDepartmentHead")
+    return {
+        basis: role === "ParHr" ? "defaultHr" : "default",
+        rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null}]
+    }
 }
 const basisTexts = {
     employee: "The rule for this employee",
     department: "The department's rule",
     type: "The employer's rule",
     default: "No rule: the manager decides",
+    defaultHr: "No rule: HR decides",
     defaultHead: "No rule: the head of the department decides"
 }
 // The candidates of a step's role, before who may decide: the department head (the lead of the nearest department with one), the
@@ -475,6 +584,12 @@ function roleCandidates(row, request, at) {
     }
     return {partyIds: []}
 }
+// The parties a kind keeps from deciding a request about its source beside the requester and the person it is about (P17: who
+// drafted an offer); none for a kind without its own rule or a request not yet made.
+function selfOfSource(request) {
+    const kind = kinds[request.approvalKindEnumId]
+    return kind?.selfPartyIds && request.sourceId ? kind.selfPartyIds(request.sourceId) : []
+}
 // The route of a request on the date: the basis of its rules and each step with who may decide it and how it was found (route,
 // alternate, fallback; none when unresolved). excludedByStep: the parties who decided each step (sequenceNum: [partyId]), so a
 // person decides one step of a request at most.
@@ -484,7 +599,7 @@ function resolve(request, at, excludedByStep = {}) {
     const fallbackPartyIds = rules
         .filter(row => row.approverRoleEnumId === "ParHrFallback" && row.approverPartyId)
         .map(row => row.approverPartyId)
-    const self = [request.requesterPartyId, request.subjectPartyId].filter(Boolean)
+    const self = [request.requesterPartyId, request.subjectPartyId].concat(selfOfSource(request)).filter(Boolean)
     const steps = chosen.rows.map((row, index) => {
         const sequenceNum = Number(row.sequenceNum || index + 1)
         const others = Object.entries(excludedByStep)
@@ -580,6 +695,7 @@ function explain(route, request) {
 const requestOf = approval => ({
     organizationPartyId: approval.organizationPartyId,
     approvalKindEnumId: approval.approvalKindEnumId,
+    sourceId: approval.sourceId,
     departmentPartyId: approval.departmentPartyId,
     subjectPartyId: approval.subjectPartyId,
     requesterPartyId: approval.requestedByPartyId
@@ -630,7 +746,9 @@ function clearNotices(approval) {
     return cleared
 }
 // The step waiting, to its approvers: one message for the step, unless the unread notices already go to them. A request no one
-// may decide waits with no notice. A failure is logged and the change stays.
+// may decide waits with no notice. To the approvers alone (directOnly): every kind is of a confidential record (a seat, a person's
+// employment change, leave, attendance, expenses, an advance, an offer, training), so a Tools subscription to every message of a
+// topic receives none (People follow-up 1). A failure is logged and the change stays.
 function notify(approval, state = null) {
     try {
         state = state || stateOf(approval)
@@ -667,6 +785,7 @@ function notify(approval, state = null) {
             .record(kind.sourceEntityName, approval.sourceId)
             .actorUserId(approval.requestedByUserId || ec.user.userId)
             .userIds(userIds)
+            .directOnly()
             .send()
         return {notifiedCount: userIds.length}
     } catch (error) {
@@ -691,6 +810,14 @@ function reroute(organizationPartyId, approvalKindEnumId = null) {
             ec.logger.error("Approval request " + approval.peopleApprovalId + " was not routed again: " + error.message)
         }
     }
+    // P20: the employer's open reviews too (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
+    // feedback withdrawn, the review of one who left excluded), in the caller's transaction, each review on its own
+    if (!approvalKindEnumId)
+        try {
+            reviews().rerouteSteps(organizationPartyId)
+        } catch (error) {
+            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
+        }
     return notified
 }
 
@@ -894,7 +1021,10 @@ function recordDecision(p) {
         denied("REVISION_CHANGED", "This notice is of an earlier version; open the request again")
     const reason = text(p.reason) || null
     if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing")
-    if (partyId && [approval.requestedByPartyId, approval.subjectPartyId].includes(partyId))
+    if (
+        partyId &&
+        [approval.requestedByPartyId, approval.subjectPartyId].concat(selfOfSource(requestOf(approval))).includes(partyId)
+    )
         denied("SELF_APPROVAL", "You may not decide your own request; another approver decides it")
     const state = stateOf(approval, decisions)
     const step = state.current
@@ -1325,6 +1455,21 @@ function findOwnedApprovals(p) {
     } catch (error) {
         ec.logger.error("The openings owned by " + account.userId + " could not be read: " + error.message)
     }
+    // P21 (the user's call of Nov 12, 2026): the open confidential cases they handle, by name alone, not transferable: when they
+    // leave, each goes back to the employer's case intake handlers (PeopleCases.js rerouteCases)
+    try {
+        const cases = ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js")
+        for (const row of cases.ownedCases(partyId)) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The confidential cases handled by " + account.userId + " could not be read: " + error.message)
+    }
+    // P20: the open reviews they review and the feedback asked of them, by name alone, not transferable: when they leave, each goes
+    // as Reviews.js rerouteSteps says
+    try {
+        for (const row of reviews().ownedSteps(partyId)) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The reviews of " + account.userId + " could not be read: " + error.message)
+    }
     const pending = Array.from(find(APPROVAL).condition("statusId", "PapPending").limit(pendingCap).list())
     for (const approval of pending) {
         try {
@@ -1370,6 +1515,13 @@ function transferApprovalOwner(p) {
         })
     if (resourceId.startsWith("approval:"))
         denied("NOT_TRANSFERABLE", "A waiting request follows its route; hand over the rule or reporting line instead")
+    if (resourceId.startsWith("case:"))
+        denied("NOT_TRANSFERABLE", "A confidential case goes back to its employer's case intake handlers when its handler leaves")
+    if (resourceId.startsWith("review:") || resourceId.startsWith("reviewStep:"))
+        denied(
+            "NOT_TRANSFERABLE",
+            "A review goes to the person's manager when its reviewer leaves; development may change the reviewer"
+        )
     const row = resourceId.startsWith("policy:")
         ? one(POLICY, {peopleApprovalPolicyId: resourceId.slice("policy:".length)})
         : null

@@ -653,8 +653,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .managedIds(taskIds)) byId.delete(id)
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds)
-                if (taskIds.length && ec.entity.find('mantle.humanres.checklist.ChecklistStep').condition('workEffortId', 'in', taskIds)
-                        .condition('isProtected', 'Y').disableAuthz().count() > 0)
+                // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)
+                if (taskIds.length && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').protectedTaskIds(taskIds).length > 0)
                     for (const id of ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').hiddenTaskIds(taskIds, partyId))
                         byId.delete(id)
                 for (const entry of byId.values()) {
@@ -712,7 +712,11 @@ along with this software (see the LICENSE.md file). If not, see
                     const addLink = (workEffortId, recordEntityName, recordId) => {
                         if (!links[workEffortId]) links[workEffortId] = {recordEntityName: recordEntityName, recordId: recordId}
                     }
-                    for (const row of ec.entity.find('mantle.request.RequestWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
+                    // IronStone People P21: a task's confidential case is not its record here (its assignee reads nothing of it)
+                    const requestLinks = Array.from(ec.entity.find('mantle.request.RequestWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
+                    const caseIds = new Set(requestLinks.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                            .caseIds(requestLinks.map((row) => row.requestId)) : [])
+                    for (const row of requestLinks) if (!caseIds.has(row.requestId))
                         addLink(row.workEffortId, 'mantle.request.Request', row.requestId)
                     for (const row of ec.entity.find('mantle.work.effort.WikiPageWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
                         addLink(row.workEffortId, 'moqui.resource.wiki.WikiPage', row.wikiPageId)

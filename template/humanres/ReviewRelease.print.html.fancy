@@ -1,0 +1,53 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A released review (IronStone People design §15 Review release; impl-people P20): rendered once when the review is released
+     (mantle.humanres.ReviewServices.change#ReviewState release, Reviews.js), stored as released (its page and PDF) and never
+     rendered again: reviewNumber, personName, cycleName, periodText, organizationName, reviewerName, ratingText (the overall rating),
+     sections (each step the person reads: title, byText, dateText, ratingText, summary and answers, each title and displayText) and
+     releasedText. No private note of the reviewer, and feedback only when the review's template shares it. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Review')} ${reviewNumber}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10.5pt Helvetica, Arial, sans-serif; color: #20252b; }
+.kind { text-transform: uppercase; letter-spacing: 2px; color: #59606b; font-size: 9pt; margin: 0 0 3mm; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+h2 { font-size: 12.5pt; margin: 7mm 0 2mm; border-bottom: 1px solid #c9ced6; padding-bottom: 1mm; }
+table { border-collapse: collapse; }
+th, td { padding: 2px 8px 2px 0; vertical-align: top; text-align: left; }
+th { color: #59606b; font-weight: normal; }
+.summary { white-space: pre-wrap; margin: 2mm 0; }
+.note { color: #59606b; font-size: 8.5pt; margin-top: 10mm; }
+</style></head>
+<body>
+<p class="kind">${organizationName}</p>
+<h1>${ec.l10n.localize('Review of')} ${personName}</h1>
+<table><tbody>
+    <tr><th>${ec.l10n.localize('Cycle')}</th><td>${cycleName}</td></tr>
+    <#if periodText><tr><th>${ec.l10n.localize('Period')}</th><td>${periodText}</td></tr></#if>
+    <#if reviewerName><tr><th>${ec.l10n.localize('Reviewer')}</th><td>${reviewerName}</td></tr></#if>
+    <#if ratingText><tr><th>${ec.l10n.localize('Overall rating')}</th><td>${ratingText}</td></tr></#if>
+</tbody></table>
+<#list sections as section>
+<h2>${section.title}</h2>
+<table><tbody>
+    <tr><th>${ec.l10n.localize('By')}</th><td>${section.byText}<#if section.dateText>, ${section.dateText}</#if></td></tr>
+    <#if section.ratingText><tr><th>${ec.l10n.localize('Rating')}</th><td>${section.ratingText}</td></tr></#if>
+    <#list section.answers as answer>
+    <tr><th>${answer.title}</th><td>${answer.displayText}</td></tr>
+    </#list>
+</tbody></table>
+<#if section.summary><p class="summary">${section.summary}</p></#if>
+</#list>
+<p class="note">${ec.l10n.localize('Released')} ${releasedText} · ${ec.l10n.localize('Review')} ${reviewNumber}</p>
+</body></html>

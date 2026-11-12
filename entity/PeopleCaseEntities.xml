@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's confidential cases (grievances; IronStone People design §4 Grievances, §13 RequestDetail, PE-01, PE-21; impl-people
+    P21): a case is a Request of the HR-confidential type RqtHrCase, which is not a RequestType value, so no other app's type list
+    offers it and every type check that asks for a RequestType refuses it. Its Request row says nothing: its name is "Confidential
+    case", it has no description, project, store, facility, category, customer or organization party, so a reader that finds requests
+    by any of those never finds it. What the employee wrote is on PeopleCase, opted out of AI (PE-21) and in no search index. Its
+    people are RequestParty rows: the employee who filed it (Reporter) and the case handlers (Assignee), who hold PEOPLE_CASE_HANDLE;
+    nobody else reads it, the employee's manager, HR and the instance administrator included. Written and read only through
+    mantle.request.RequestServices' case services (PeopleCases.js). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PeopleCase" package="mantle.request" cache="never">
+        <description>A confidential case's own facts, beside its Request (requestTypeEnumId RqtHrCase): the employer and the
+            employment it was filed under, what the employee wrote (subject, details, the day it happened, how they want to be
+            contacted), the handler's outcome note and the filing's operation key (a retry answers the case filed).</description>
+        <field name="requestId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer the case is filed with</description></field>
+        <field name="partyRelationshipId" type="id"><description>The employment it was filed under (PrtEmployee)</description></field>
+        <field name="subject" type="text-medium" ai-opt-out="true"/>
+        <field name="details" type="text-very-long" ai-opt-out="true"/>
+        <field name="incidentDate" type="date"/>
+        <field name="contactPreference" type="text-medium" ai-opt-out="true"><description>How the employee wants to be contacted</description></field>
+        <field name="outcomeNote" type="text-long" ai-opt-out="true"><description>The handler's note on closing the case, read by its
+            people</description></field>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one" related="mantle.request.Request" short-alias="request"/>
+        <relationship type="one" title="Employer" related="mantle.party.Party" short-alias="employer">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <index name="PPL_CASE_OPER"><index-field name="operationKey"/></index>
+        <seed-data>
+            <!-- not a RequestType: the confidential type is offered by no request type list and accepted by no type check of
+                another app (Projects, Customer Service, Commons, the client portal) -->
+            <moqui.basic.EnumerationType description="Confidential request type" enumTypeId="RequestConfidentialType"/>
+            <moqui.basic.Enumeration enumId="RqtHrCase" description="Confidential case" enumTypeId="RequestConfidentialType"/>
+        </seed-data>
+    </entity>
+</entities>

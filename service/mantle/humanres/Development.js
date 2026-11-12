@@ -1122,6 +1122,8 @@ function sendExpiryReminders() {
                                 expiryText: "on " + ec.l10n.format(new Date(ms(row.thruDate)), "yyyy-MM-dd")
                             })
                             .userIds(userIds)
+                            // the person's own document or permit: to them alone (People follow-up 1)
+                            .directOnly()
                             .send()
                     call("update#" + QUALIFICATION, {
                         partyQualificationId: row.partyQualificationId,

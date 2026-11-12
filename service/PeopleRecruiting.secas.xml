@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- An issued offer's letter is emailed to the applicant once the issue commits (IronStone People design §15; impl-people P17
+    review, the user's call of Nov 12, 2026): RecruitingServices.send#OfferLetter attaches the letter as it was stored and records
+    the outcome on the offer; a failed send is recorded and never undoes the issue, and an offer editor sends it again. The rule
+    runs as the issuer, on a service worker, at least once; the service sends a letter once.
+    An interview's invitations go once its schedule, change or cancel commits (F358, People follow-up 1, Nov 12, 2026): sent in
+    the interview's own transaction, a failing send marked it rollback-only and the change was undone while the screen said it was
+    made. RecruitingServices.send#InterviewInvitations sends them as the system in a transaction of its own, a failure logged and
+    recorded on the interview, where its recruiters send them again; the rules run as the recruiter, on a service worker. send#EventInvitations tells only the attendees whose invitation changed, so a
+    second run tells nobody again. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="PeopleOfferLetterEmail" service="mantle.humanres.RecruitingServices.change#OfferState" when="tx-commit">
+        <condition><expression>action == 'issue' &amp;&amp; employmentOfferId &amp;&amp; !repeated</expression></condition>
+        <actions><service-call name="mantle.humanres.RecruitingServices.send#OfferLetter" in-map="{employmentOfferId:employmentOfferId}"/></actions>
+    </seca>
+    <seca id="PeopleInterviewScheduledInvitations" service="mantle.humanres.RecruitingServices.schedule#Interview" when="tx-commit">
+        <condition><expression>workEffortId</expression></condition>
+        <actions><service-call name="mantle.humanres.RecruitingServices.send#InterviewInvitations" in-map="{workEffortId:workEffortId}"/></actions>
+    </seca>
+    <seca id="PeopleInterviewChangedInvitations" service="mantle.humanres.RecruitingServices.change#Interview" when="tx-commit">
+        <condition><expression>workEffortId</expression></condition>
+        <actions><service-call name="mantle.humanres.RecruitingServices.send#InterviewInvitations" in-map="{workEffortId:workEffortId}"/></actions>
+    </seca>
+    <seca id="PeopleInterviewCancelledInvitations" service="mantle.humanres.RecruitingServices.cancel#Interview" when="tx-commit">
+        <condition><expression>workEffortId</expression></condition>
+        <actions><service-call name="mantle.humanres.RecruitingServices.send#InterviewInvitations" in-map="{workEffortId:workEffortId}"/></actions>
+    </seca>
+</secas>

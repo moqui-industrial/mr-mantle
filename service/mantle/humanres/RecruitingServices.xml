@@ -178,7 +178,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A recruiter (PEOPLE_RECRUIT_EDIT) moves applications (employmentApplicationIds, or one at its revision) to a
             stage, with the reason kept as the stage's audit change reason; each in its own transaction. A stage moves along its flow
             (STAGE_INVALID, SAME_STAGE; a hired, refused or withdrawn one APPLICATION_CLOSED); Interview needs a scheduled interview
-            (INTERVIEW_REQUIRED), Offer an offer (OFFER_REQUIRED), and Hired is never a stage change (HIRED_BY_OFFER). Each refused or
+            (INTERVIEW_REQUIRED), Offer an open offer (OFFER_REQUIRED; drafting one moves it, P17), and Hired is never a stage change (HIRED_BY_OFFER). Each refused or
             failed application is named in failures with its code; the rest go on.</description>
         <in-parameters>
             <parameter name="employmentApplicationIds" type="List"/>
@@ -208,8 +208,8 @@ along with this software (see the LICENSE.md file). If not, see
             employer with an account, PANEL_REQUIRED, PANEL_INVALID) and with inviteCandidate the applicant (CANDIDATE_NO_EMAIL) as
             attendees; each panel member assigned the scorecard (formId, else the opening's, else the employer's only published
             interview scorecard; SCORECARD_REQUIRED, FORM_UNAVAILABLE) with no link. A received or screening application moves to
-            Interview. The invitations follow (mantle.work.EventServices.send#EventInvitations: users notified, the candidate
-            emailed with the .ics); a failure to send is named (invitationsSent false) and the interview stays.</description>
+            Interview. The invitations go once it commits (send#InterviewInvitations, by a tx-commit rule: users notified, the
+            candidate emailed with the .ics); a failure to send is logged and the interview stays.</description>
         <in-parameters>
             <parameter name="employmentApplicationId" required="true"/>
             <parameter name="startDate" type="Timestamp" required="true"/>
@@ -225,12 +225,69 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
             <parameter name="invitationIds" type="List"/>
             <parameter name="callPath"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('scheduleInterview', context)"/>
+            <script>for (const key of ['workEffortId', 'invitationIds', 'callPath']) context[key] = out[key]</script>
+        </actions>
+    </service>
+    <service verb="change" noun="Interview" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer; another's interview or a missing one is RECORD_UNAVAILABLE)
+            changes a scheduled interview: a new startDate (from now on, DATE_PAST), durationMinutes (10 to 480,
+            DURATION_INVALID), location (not of a video interview, whose place is its call link, kept open until a day after the
+            new end) or note; what is not given stays. A cancelled one is not changed (INTERVIEW_CANCELLED). The interview's event
+            is People's (the EventManager PeopleInterview): this and cancel#Interview are where it changes, never Commons'
+            EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026). The attendees whose invitation changed
+            are told once it commits (send#InterviewInvitations, by a tx-commit rule); a failure to send is logged and the change
+            stays.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="durationMinutes" type="Integer"/>
+            <parameter name="location"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('changeInterview', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Interview" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer; RECORD_UNAVAILABLE otherwise) cancels a scheduled interview
+            (INTERVIEW_CANCELLED when it already is): its event is cancelled, its scorecards stay as they are, and the attendees are
+            told once it commits (send#InterviewInvitations, by a tx-commit rule: the cancel); a failure to send is logged and the
+            cancel stays.
+            reason is kept as the status change's reason.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('cancelInterview', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="send" noun="InterviewInvitations" allow-remote="false">
+        <description>The invitations of an interview (an ApplicationInterview's event) to its new or changed attendees, or its cancel
+            (mantle.work.EventServices.send#EventInvitations as the system, the event being People's), run by the tx-commit rules of
+            schedule, change and cancel#Interview (PeopleRecruiting.secas.xml) once they commit (F358, People follow-up 1), and by a
+            recruiter's Send again on ApplicantDetail after a failed one. Who: a recruiter (PEOPLE_RECRUIT_EDIT) of the employer
+            (the rules run as the one who made the change); RECORD_UNAVAILABLE otherwise and for an event that is not an
+            interview. The send runs in a transaction of its own, so a failure, or an attendee not told, is logged, answered
+            (invitationsSent false, invitationProblem), adds no error, never undoes the interview and is recorded on it
+            (invitationSendStatus failed, invitationSendDate, invitationSendError) for its recruiters; a later send that tells
+            everyone marks it sent. An attendee already told is not told again.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
             <parameter name="invitationsSent" type="Boolean"/>
             <parameter name="invitationProblem"/>
         </out-parameters>
         <actions>
-            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('scheduleInterview', context)"/>
-            <script>for (const key of ['workEffortId', 'invitationIds', 'callPath', 'invitationsSent', 'invitationProblem']) context[key] = out[key]</script>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('sendInterviewInvitations', context)"/>
+            <set field="invitationsSent" from="!!out.invitationsSent"/>
+            <set field="invitationProblem" from="out.invitationProblem"/>
         </actions>
     </service>
     <service verb="submit" noun="Scorecard" allow-remote="false">
@@ -298,7 +355,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="create" noun="ApplicationContent">
         <description>A private file of an application (its resume, a cover letter): the row, and the uploaded file saved through
-            save#ApplicationContentFile. A recruiter of the employer with PEOPLE_RECRUIT_EDIT (check#ApplicationAccess:
+            save#ApplicationContentFile. A resume (EactResume) is shared with the interview panel unless panelShared says N (the user's
+            call of Nov 12, 2026); another file is not until a recruiter shares it (share#ApplicationContent). A recruiter of the employer with PEOPLE_RECRUIT_EDIT (check#ApplicationAccess:
             RECORD_UNAVAILABLE outside, PERMISSION_DENIED for a reader).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.humanres.employment.EmploymentApplicationContent" include="nonpk">
@@ -311,6 +369,9 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('contentAccess', context)</script>
             <set field="userId" from="ec.user.userId"/>
             <set field="contentDate" from="contentDate || ec.user.nowTimestamp"/>
+            <!-- an applicant's resume is shared with the interview panel when attached (the user's call of Nov 12, 2026, P17); another
+                file only when a recruiter shares it -->
+            <if condition="!panelShared"><set field="panelShared" from="contentTypeEnumId == 'EactResume' ? 'Y' : 'N'"/></if>
             <if condition="!description &amp;&amp; contentFile != null"><set field="description" from="contentFile.getName()"/></if>
             <service-call name="create#mantle.humanres.employment.EmploymentApplicationContent" in-map="context" out-map="context" disable-authz="true"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
@@ -353,7 +414,7 @@ along with this software (see the LICENSE.md file). If not, see
             applications and the rule may file into it: the opening's intake account is the message's, or the rule's owner is its
             recruiting owner now, with an enabled account, PEOPLE_RECRUIT_EDIT and still working for the employer. The sender is the applicant (the person of the address, else a new
             person with the Applicant role), the subject the notes, the attachments the application's private files (the first its
-            resume); a possible duplicate is flagged. Otherwise nothing is made and the reason is logged and answered.</description>
+            resume, shared with the interview panel, P17); a possible duplicate is flagged. Otherwise nothing is made and the reason is logged and answered.</description>
         <in-parameters>
             <parameter name="emailMessageId" required="true"/>
             <parameter name="emailAccountId"/>
@@ -438,7 +499,7 @@ along with this software (see the LICENSE.md file). If not, see
             message: NOT_AN_APPLICANT) to the opening of the room's record (a JobOpening's room), else the open opening whose plus
             tag the message names (+tag), else the one open opening the caller owns (OPENING_REQUIRED), one the caller changes
             (RECORD_UNAVAILABLE otherwise) that takes applications (OPENING_CLOSED); the message's first line its notes, its files
-            the application's private files (the first its resume, none shared with the panel). Once per message; a message of a
+            the application's private files (the first its resume, shared with the panel, P17). Once per message; a message of a
             room the caller does not read is RECORD_UNAVAILABLE, one of an end-to-end encrypted room ROOM_ENCRYPTED.</description>
         <in-parameters>
             <parameter name="chatRoomId" required="true"/>
@@ -454,6 +515,217 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="employmentApplicationId" from="out.employmentApplicationId"/>
             <set field="created" from="!!out.created"/>
             <set field="duplicateOfApplicationId" from="out.duplicateOfApplicationId"/>
+        </actions>
+    </service>
+
+    <!-- impl-people P17 (design-people §5 OfferDetail, §15 the offer letter, §12's PeopleOfferApproval; PE-04, PE-02; Offers.js):
+        an offer of employment to an applicant, its approval, its letter stored when issued, the candidate's answer and the hire that
+        consumes it once (PeopleServices.hire#Employee). Recruiters, HR and payroll readers of the employer read offers; recruiters
+        with PEOPLE_RECRUIT_EDIT and HR editors change them; pay terms are set with PAYROLL_VIEW and PAYROLL_EDIT and read with
+        PAYROLL_VIEW alone, on every path. -->
+    <service verb="find" noun="Offers" allow-remote="false">
+        <description>The offers of the employers the caller reads offers of (a recruiter, HR or payroll reader in People's scope;
+            PERMISSION_DENIED otherwise): of one application (RECORD_UNAVAILABLE outside), of one employer (ORGANIZATION_DENIED
+            outside), by state (statusId, a comma list; the open ones unless asked or an application is named); each with its terms
+            by name, dates, state (an issued one past its expiry reads expired), what the caller may do and its revision; the pay
+            terms only for a payroll reader (hasPayTerms for others). Newest first, paged.</description>
+        <in-parameters>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="includeClosed" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="offers" type="List"/>
+            <parameter name="offersCount" type="Integer"/>
+            <parameter name="offersPageIndex" type="Integer"/>
+            <parameter name="offersPageSize" type="Integer"/>
+            <parameter name="offersPageMaxIndex" type="Integer"/>
+            <parameter name="offersPageRangeLow" type="Integer"/>
+            <parameter name="offersPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('findOffers', context)"/>
+            <script>for (const key of ['', 'Count', 'PageIndex', 'PageSize', 'PageMaxIndex', 'PageRangeLow', 'PageRangeHigh']) context['offers' + key] = found['offers' + key]</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Offer" allow-remote="false">
+        <description>An offer the caller reads (RECORD_UNAVAILABLE otherwise, as a missing one): a recruiter, HR or payroll reader of
+            its employer, or an approver of the step waiting (who reads it without pay). Its terms by name, dates and note, state,
+            the candidate's answer, the hire it made, its approval (the route, each step's approvers, the decisions; canDecide for
+            the approver of the step waiting: names only), whether its letter is issued (letterRestricted when it holds pay the caller
+            does not read), what the caller may do (canEdit, canEditPay, canSubmit, canIssue, canRespond, canWithdraw, canHire) and,
+            for an HR editor of an accepted offer, hireTerms (what a hire from it starts with; never pay). Pay terms only for a payroll
+            reader of the employer.</description>
+        <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
+        <out-parameters><parameter name="offer" type="Map"/></out-parameters>
+        <actions>
+            <set field="offer" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('getOffer', context).offer"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Offer" allow-remote="false">
+        <description>A new offer of an application at Interview or Offer (APPLICATION_STAGE; one open offer at a time, OFFER_OPEN),
+            drafted by a recruiter with PEOPLE_RECRUIT_EDIT or an HR editor of its employer (PERMISSION_DENIED; RECORD_UNAVAILABLE
+            outside), which moves the application to Offer; or a change of an offer's terms at the revision read (REVISION_CHANGED)
+            while it is a draft, waiting or approved (OFFER_LOCKED): changed terms make a waiting or approved offer a draft again and
+            supersede its approval. The terms: a seat of the opening (POSITION_REQUIRED, POSITION_NOT_OF_OPENING) checked as a hire
+            checks it (POSITION_NOT_IN_EFFECT, POSITION_INACTIVE, POSITION_OCCUPIED), its department, a manager employed by the
+            employer (MANAGER_NOT_EMPLOYED), a work location of the employer (FACILITY_OUTSIDE), a working schedule of the employer
+            in effect then, the start (START_REQUIRED) before an optional end (DATES_INVALID), the expiry and a note (NO_EXPRESSIONS).
+            Pay terms (payAmount, currencyUomId, timePeriodTypeId; an empty amount clears them) only with PAYROLL_VIEW and
+            PAYROLL_EDIT of the employer (PERMISSION_DENIED; PAY_INCOMPLETE, AMOUNT_INVALID, CURRENCY_PRECISION, CURRENCY_INVALID,
+            FREQUENCY_INVALID). A term not given is kept.</description>
+        <in-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workingScheduleId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="expireDate"/>
+            <parameter name="note" allow-html="none"/>
+            <parameter name="payAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="timePeriodTypeId"/>
+            <parameter name="revision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="statusId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('storeOffer', context)"/>
+            <set field="employmentOfferId" from="out.employmentOfferId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="changed" from="!!out.changed"/>
+        </actions>
+    </service>
+    <service verb="change" noun="OfferState" allow-remote="false">
+        <description>An offer moved, under its lock (design §5 OfferDecision). submit: a draft asks for approval (a People approval
+            of kind PakOffer, PeopleOfferApproval to the first step's approvers: the employer's HR officers unless a rule says
+            otherwise; never who submitted it or the applicant; with none it waits), its terms checked again. approve and refuse
+            (a reason): the step waiting, through PeopleApprovalServices.record#Decision at the offer's revision (sourceRevision from a
+            notice); the last approval approves it, a refusal makes it a draft again with the reason. withdraw: an open offer (its
+            approval superseded). issue: an approved offer with an expiry to come (EXPIRY_REQUIRED, EXPIRY_PAST), its terms checked
+            again; its letter is rendered and stored once (EmploymentLetter, never rendered again) and, once the issue commits, emailed to
+            the applicant (send#OfferLetter, P17 review). accept and decline: the
+            candidate's answer to an issued offer before its expiry (OFFER_EXPIRED), dated today or earlier (DATE_FUTURE), with a
+            note and, for an acceptance, the signed letter (evidenceFile) kept. Each but approve and refuse needs PEOPLE_RECRUIT_EDIT
+            or PEOPLE_HR_EDIT of the employer (PERMISSION_DENIED). An action already done answers as it is (repeated). Refuses
+            ACTION_INVALID, RECORD_UNAVAILABLE, REVISION_CHANGED, NOT_DRAFT, NOT_APPROVED, NOT_ISSUED, NOT_OPEN, the terms' refusals
+            and record#Decision's (NOT_APPROVER, SELF_APPROVAL, ALREADY_DECIDED, SOURCE_CHANGED, REASON_REQUIRED, NOT_PENDING).</description>
+        <in-parameters>
+            <parameter name="employmentOfferId" required="true"/>
+            <parameter name="action" required="true"><description>submit, approve, refuse, withdraw, issue, accept or decline</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="revision"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+            <parameter name="responseDate"/>
+            <parameter name="responseNote" allow-html="none"/>
+            <parameter name="evidenceFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="statusId"/>
+            <parameter name="stateText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('changeOfferState', context)"/>
+            <script>for (const key of ['employmentOfferId', 'statusId', 'stateText']) context[key] = out[key]</script>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="Offer" allow-remote="false">
+        <description>The PeopleOfferApproval topic's approve service, which approve#NotificationMessage calls as the user deciding
+            the notice: change#OfferState approve at the offer and revision in the message (a notice of an earlier revision is
+            refused); a notice of another record is SOURCE_INVALID.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Offer" allow-remote="false">
+        <description>The PeopleOfferApproval topic's refuse service, with the reason (the topic requires one): as approve#Offer, the
+            offer a draft again with the reason.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="OfferLetter" allow-remote="false">
+        <description>The offer's letter for a reader of the offer (get#Offer's readers): once issued the stored letter (letter: its
+            location, file name and type, who issued it and when; never rendered again), one holding pay terms only for a payroll
+            reader of the employer (PERMISSION_DENIED); before, the preview (letterHtml, People's letter template marked as a draft,
+            with pay for a payroll reader alone).</description>
+        <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="issued" type="Boolean"/>
+            <parameter name="letter" type="Map"/>
+            <parameter name="letterHtml"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('getOfferLetter', context)"/>
+            <script>for (const key of ['employmentOfferId', 'letter', 'letterHtml']) context[key] = out[key]</script>
+            <set field="issued" from="!!out.issued"/>
+        </actions>
+    </service>
+    <service verb="get" noun="OfferEvidence" allow-remote="false">
+        <description>The candidate's signed acceptance of an offer kept with it, for a reader of the offer: its location and file
+            name (RECORD_UNAVAILABLE otherwise, as for none). The signed copy of a letter holding pay terms is read only with
+            PAYROLL_VIEW, as the letter (PERMISSION_DENIED; P17 review).</description>
+        <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
+        <out-parameters><parameter name="location"/><parameter name="fileName"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('offerEvidence', context)"/>
+            <set field="location" from="out.location"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+    <service verb="send" noun="OfferLetter" allow-remote="false">
+        <description>The stored letter of an issued offer emailed to the applicant's address as an attachment, as it was stored (the
+            user's call of Nov 12, 2026, P17 review): from the employer's address by the template PEOPLE_OFFER_LETTER, its message
+            naming the position and the expiry, never pay. Run by the issue's tx-commit rule (PeopleRecruiting.secas.xml) as the
+            issuer, who need not read the letter; or by a recruiter with PEOPLE_RECRUIT_EDIT or an HR editor of the employer again
+            after a failure (PERMISSION_DENIED; RECORD_UNAVAILABLE outside; NOT_ISSUED). Once: a letter sent or waiting in the mail
+            queue answers repeated. The outcome is recorded on the offer (letterSendStatus sent, queued or failed, the date, the
+            address and why it failed: no address, no sender, a failed send) and never undoes the issue.</description>
+        <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="letterSendStatus"/>
+            <parameter name="letterSendText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('sendOfferLetter', context)"/>
+            <script>for (const key of ['employmentOfferId', 'letterSendStatus', 'letterSendText']) context[key] = out[key]</script>
+            <set field="repeated" from="!!out.repeated"/>
         </actions>
     </service>
 </services>
