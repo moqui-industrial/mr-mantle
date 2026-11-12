@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Downtime and restoration (IronStone Maintenance design §6 Downtime, §7.1; impl-maintenance P5, F14): the reasons of a
+        resource's unavailability, each planned (optionIndicator Y: planned maintenance, an inspection) or unplanned (a fault, a
+        safety stop, a utility loss, damage); an equipment-fault ProductionDowntime records RurEquipmentFault. And the source of a
+        follow-up work order, which a completion that leaves its resource down may create. -->
+    <moqui.basic.EnumerationType description="Resource Unavailability Reason (optionIndicator Y: planned)"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurEquipmentFault" description="Equipment fault" sequenceNum="1" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurSafety" description="Safety stop" sequenceNum="2" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurUtility" description="Utility or supply failure" sequenceNum="3" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurDamage" description="Damage" sequenceNum="4" optionIndicator="N"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurMaintenance" description="Planned maintenance" sequenceNum="5" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+    <moqui.basic.Enumeration enumId="RurInspection" description="Inspection or calibration" sequenceNum="6" optionIndicator="Y"
+            enumTypeId="ResourceUnavailabilityReason"/>
+
+    <moqui.basic.Enumeration enumId="MsrcFollowUp" description="Follow-up" sequenceNum="6" enumTypeId="MaintenanceSource"/>
+</entity-facade-xml>

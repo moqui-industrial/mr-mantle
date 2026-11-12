@@ -424,6 +424,11 @@ feature(
             out.ledgerCount = ledger.entriesCount
             out.latest = [ledger.entries?.[0]?.entryTypeText, ledger.entries?.[0]?.balanceAfter].join("/")
             out.historical = JSON.stringify(ledger.historical || [])
+            // an allocation's reason is HR's working note (F202, the user's call of Nov 11, 2026): HR reads it, the person does not
+            out.ownReason = JSON.stringify(ledger.entries || []).includes("First quarter")
+            out.hrReason = JSON.stringify(
+                run(state.hr, L + "find#Ledger", {partyRelationshipId: state.anaEmp, asOfDate: "2026-06-30"}).entries || []
+            ).includes("First quarter")
             const team = run(state.uMgr, L + "get#Balances", {asOfDate: "2026-06-30"})
             out.team = (team.balances || []).map(row => row.personName + ":" + row.balance + ":" + row.canSeeLedger).join(",")
             out.teamLedger = code(run(state.uMgr, L + "find#Ledger", {partyRelationshipId: state.anaEmp}))
@@ -439,6 +444,7 @@ feature(
             out.ledgerCount === 8
             out.latest === "Accrual/10"
             out.historical.includes("Historical (recorded before People; not in the balance)")
+            !out.ownReason && out.hrReason
             out.historical.includes("2025-08-04")
             !out.historical.includes("Medical")
             !out.historical.includes("ElrMedical")

@@ -47,6 +47,12 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="costCenterId" type="id" enable-audit-log="update"/>
         <field name="projectWorkEffortId" type="id" enable-audit-log="update"/>
         <field name="revision" type="number-integer"/>
+        <!-- P5: downtime (design §3 WorkDowntime) -->
+        <field name="offlineIntent" type="text-indicator"><description>Y: starting the work takes its equipment or facility out
+            of service (records or links its outage)</description></field>
+        <field name="resourceUnavailabilityId" type="id"><description>The outage of the target this work order recorded or
+            linked (mantle.work.effort.ResourceUnavailability); a restoration (end#ResourceUnavailability) lists the open work
+            orders linked to it, which stay open, and needs a reason while any is</description></field>
         <field name="operationKey" type="text-medium"/>
         <field name="operationHash" type="text-medium"/>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
@@ -75,6 +81,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="MNT_WO_ASSET_MNT"><index-field name="assetMaintenanceId"/></index>
         <index name="MNT_WO_OPKEY"><index-field name="operationKey"/></index>
         <index name="MNT_WO_ASSET"><index-field name="assetId"/></index>
+        <index name="MNT_WO_OUTAGE"><index-field name="resourceUnavailabilityId"/></index>
     </entity>
 
     <view-entity entity-name="MaintenanceWorkOrderDetail" package="mantle.work.maintenance">

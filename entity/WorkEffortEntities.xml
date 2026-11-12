@@ -138,6 +138,19 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="CAL_WEFF_WEFF"><index-field name="workEffortId"/></index>
         <index name="CAL_WEFF_DAV"><index-field name="calendarId"/><index-field name="davName"/></index>
     </entity>
+    <entity entity-name="CalendarProjection" package="mantle.work.calendar" cache="never">
+        <description>A projected CalDAV collection (mantle.work.CalendarDavServices; CX-SYNC, impl-people P12, F22, F67): a
+            read-only collection, collectionId projected-{projectionId}, answered by its owner's service
+            (ownerServiceName, implementing mantle.work.CalendarDavServices.define#ProjectionOwner), which decides who it admits
+            and what each sees. The kind reads no record of the owner itself. Seeded by the owner's component; disabled Y leaves
+            it out.</description>
+        <field name="projectionId" type="id" is-pk="true"/>
+        <field name="title" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="ownerServiceName" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
 
     <!-- ========================================================= -->
     <!-- mantle.work.effort -->

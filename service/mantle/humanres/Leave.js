@@ -1,8 +1,10 @@
 // People's leave entitlement (mantle.humanres.LeaveServices find#Policies, get#Policy, store#Policy, store#AccrualRule,
 // assign#Policy, store#BlockedInterval, preview#Allocation, allocate#Leave, get#Balances, get#MyBalances, find#Ledger, run#Accrual,
 // run#AccrualJob and accrue#Assignment; IronStone People design §7 LeavePolicies, LeavePolicyDetail, LeaveAllocations and
-// LeaveBalances, §16.2 LeaveServices, PE-07; impl-people P11). Every service checks the caller's People scope first (People.js
-// scopeOf) and reads and writes with authorization off after it.
+// LeaveBalances, §16.2 LeaveServices, PE-07; impl-people P11; P12: preview#Request, submit#Request, get#Request, decide#Request with
+// the PeopleLeaveApproval topic's approve#Request and refuse#Request, find#Requests, get#TeamAbsences and get#AbsenceProjection, the
+// Team absence projected calendar; design §7 LeaveRequests and LeaveRequestDetail, §13 TeamCalendar, PE-21, PE-24). Every service
+// checks the caller's People scope first (People.js scopeOf) and reads and writes with authorization off after it.
 //
 // The records (PeopleLeaveEntities.xml):
 // - a policy (LeavePolicy) is an employer's dated rules for one leave type (the HR vocabulary PeopleLeaveType): its unit (days or
@@ -32,7 +34,9 @@
 // Who: an HR reader of the employer (PEOPLE_HR_VIEW) reads its policies; an HR editor (and PEOPLE_HR_EDIT) changes, assigns,
 // blocks, allocates and runs the accrual. Balances: the person (PEOPLE_SELF_SERVICE) their own, a manager (PEOPLE_TEAM_VIEW) their
 // live reports' at the line's employers (balances only), an HR reader the employer's; the ledger's movements the person and HR.
-// Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE). No leave reason is ever in an answer.
+// Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE). No leave reason is in a list, a notice or the calendar: a
+// request's reason (LeaveRequest.reason, ai-opt-out) is read on the request alone, by the person, who asked, their approvers and HR;
+// a legacy EmploymentLeave reason never; an allocation's reason by HR (P12, F202).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
@@ -869,7 +873,10 @@ function storeBlockedInterval(p) {
             "create#" + BLOCK,
             Object.assign({leavePolicyId: policy.leavePolicyId, organizationPartyId: policy.organizationPartyId}, values)
         )
-        return {leaveBlockedIntervalId: created.leaveBlockedIntervalId, overlappingRequests: []}
+        return {
+            leaveBlockedIntervalId: created.leaveBlockedIntervalId,
+            overlappingRequests: overlappingRequests(one(BLOCK, {leaveBlockedIntervalId: created.leaveBlockedIntervalId}))
+        }
     }
     const row = one(BLOCK, {leaveBlockedIntervalId: id})
     if (!row || !canEditAt(userScope, row.organizationPartyId))
@@ -887,7 +894,33 @@ function storeBlockedInterval(p) {
         return {leaveBlockedIntervalId: id, overlappingRequests: []}
     }
     call("update#" + BLOCK, Object.assign({leaveBlockedIntervalId: id}, blockValues(p, row.organizationPartyId, row)))
-    return {leaveBlockedIntervalId: id, overlappingRequests: []}
+    return {leaveBlockedIntervalId: id, overlappingRequests: overlappingRequests(one(BLOCK, {leaveBlockedIntervalId: id}))}
+}
+// P12: the leave asked for or approved on blocked days, to review (nothing is cancelled): the employer's requests waiting or approved
+// on its days, of its leave type and department (or a unit under it) when it names them; no reason.
+function overlappingRequests(block) {
+    if (!block || block.cancelledDate) return []
+    const fromDay = lib.calendarDateText(block.fromDay)
+    const thruDay = lib.calendarDateText(block.thruDay)
+    let query = find("mantle.humanres.leave.LeaveRequest")
+        .condition("organizationPartyId", block.organizationPartyId)
+        .condition("statusEnumId", "in", ["LrsRequested", "LrsApproved", "LrsCancelRequested"])
+        .condition("fromDay", "less-equals", thruDay)
+        .condition("thruDay", "greater-equals", fromDay)
+    if (block.leaveTypeEnumId) query = query.condition("leaveTypeEnumId", block.leaveTypeEnumId)
+    let found = Array.from(query.limit(batchCap).list())
+    if (block.departmentPartyId) {
+        const within = new Set([block.departmentPartyId].concat(people.unitsUnder([block.departmentPartyId])))
+        found = found.filter(row => within.has(row.departmentPartyId))
+    }
+    const persons = people.personNames(unique(found.map(row => row.partyId)))
+    return found.map(row => ({
+        leaveRequestId: row.leaveRequestId,
+        personName: persons[row.partyId] || row.partyId,
+        fromDay: lib.calendarDateText(row.fromDay),
+        thruDay: lib.calendarDateText(row.thruDay),
+        statusEnumId: row.statusEnumId
+    }))
 }
 
 // ===== preview#Allocation and allocate#Leave =====
@@ -1132,6 +1165,18 @@ function balanceRows(reach, at, leaveTypeEnumId) {
     const typeIds = keys.map(key => key.split("/")[1])
     const texts = enumTexts(typeIds.concat(Object.values(policies).map(row => row.unitEnumId)).concat(["LuDays", "LuHours"]))
     const byId = new Map(reach.map(row => [row.partyRelationshipId, row]))
+    // P12: what the requests waiting for approval reserve, by employment and leave type
+    const pendingByKey = {}
+    for (const row of Array.from(
+        find("mantle.humanres.leave.LeaveRequest")
+            .condition("partyRelationshipId", "in", ids)
+            .condition("statusEnumId", "LrsRequested")
+            .list()
+    )) {
+        if (leaveTypeEnumId && row.leaveTypeEnumId !== leaveTypeEnumId) continue
+        const key = row.partyRelationshipId + "/" + row.leaveTypeEnumId
+        pendingByKey[key] = r4((pendingByKey[key] || 0) + (num(row.chargedAmount) || 0))
+    }
     const persons = people.personNames(unique(reach.map(row => row.partyId)))
     const organizations = people.organizationNames(unique(reach.map(row => row.organizationPartyId)))
     return keys
@@ -1143,7 +1188,7 @@ function balanceRows(reach, at, leaveTypeEnumId) {
             const policy = policies[assignment?.leavePolicyId] || policies[entries[entries.length - 1]?.leavePolicyId] || null
             const unitEnumId = policy?.unitEnumId || entries[0]?.unitEnumId || null
             const moved = sums(entries, at)
-            const pending = 0
+            const pending = pendingByKey[key] || 0
             return Object.assign(
                 {
                     partyRelationshipId,
@@ -1218,8 +1263,8 @@ function getMyBalances(p) {
     return getBalances({asOfDate: p.asOfDate, leaveTypeEnumId: p.leaveTypeEnumId}, true)
 }
 // What an entry came from, in the reader's words.
-function sourceText(row, allocations, policies) {
-    const allocation = row.leaveAllocationId ? allocations[row.leaveAllocationId] : null
+function sourceText(row, allocations, policies, withReasons = true) {
+    const allocation = row.leaveAllocationId && withReasons ? allocations[row.leaveAllocationId] : null
     const period = row.periodFromDay
         ? lib.calendarDateText(row.periodFromDay) +
           (row.periodThruDay && lib.calendarDateText(row.periodThruDay) !== lib.calendarDateText(row.periodFromDay)
@@ -1249,6 +1294,8 @@ function findLedger(p) {
     const userScope = people.scopeOf()
     const access = employmentAccess(userScope, p.partyRelationshipId, ["self", "hr"])
     const partyRelationshipId = access.row.partyRelationshipId
+    // P12 (F202): an allocation's or adjustment's reason is HR's note, read by HR of the employer and not by the person
+    const hrReads = access.kinds.includes("hr")
     const at = p.asOfDate ? people.asOfMillis(p.asOfDate) : nowMs()
     const fromMs = p.fromDate ? effective(p.fromDate) : null
     let query = find(ENTRY)
@@ -1288,7 +1335,7 @@ function findLedger(p) {
             amount: r4(num(row.amount) || 0),
             unitText: texts[row.unitEnumId] || "",
             balanceAfter: running[typeId],
-            sourceText: sourceText(row, allocations, policies),
+            sourceText: sourceText(row, allocations, policies, hrReads),
             leaveAllocationId: row.leaveAllocationId || null,
             postedDateText: dateText(row.postedDate)
         })
@@ -1554,6 +1601,1132 @@ function runAccrualJob(p) {
     return accrueAll(accrualAssignments(null, asOf, only), asOf)
 }
 
+// ===== leave requests (P12; design-people §7 LeaveRequests and LeaveRequestDetail, §13 TeamCalendar) =====
+// A request of an employment for a leave type: its segments (whole days, or the morning or the afternoon of one day), charged in
+// the policy's unit from the employment's working schedule (People.js Schedules: the hours each day plans, no schedule a standard
+// Monday-to-Friday week of 8 hours) less the holidays of its calendar and of the employer: a whole working day is a day (its hours
+// for an hours policy), a half day half of it, a day off or a holiday nothing. It waits for a People approval of kind PakLeave
+// (Approvals.js, the person's manager unless a rule says otherwise); a step no one may decide is a block, not an approval. While it
+// waits it reserves its amount (pending, read by get#Balances); the last approval recounts the days, checks the other requests of
+// the day and the balance with the other reservations under the employment's lock and posts the leave taken once
+// (sourceKey leave:<id>), then projects it as WetTimeOff work efforts with a leave-start reminder. A cancellation of approved leave
+// is asked by the person (approved by the same route) or made by an HR editor of the employer at once; it posts the reversal once
+// (leave-reversal:<id>) and cancels the projection. The person's reason is read only by them, their approvers and HR: never in a
+// list, a notice, the calendar or the projection.
+const REQUEST = "mantle.humanres.leave.LeaveRequest"
+const SEGMENT = "mantle.humanres.leave.LeaveRequestSegment"
+const WORK_EFFORT = "mantle.work.effort.WorkEffort"
+const leaveKind = "PakLeave"
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+const requestStatusTexts = {
+    LrsRequested: "Waiting for approval",
+    LrsApproved: "Approved",
+    LrsRefused: "Refused",
+    LrsWithdrawn: "Withdrawn",
+    LrsCancelRequested: "Cancellation asked",
+    LrsCancelled: "Cancelled"
+}
+// the states that take their days (another request of the same day is refused) and the one that reserves its amount
+const holdingStates = ["LrsRequested", "LrsApproved", "LrsCancelRequested"]
+const partTexts = {LdpFull: "Whole day", LdpMorning: "Morning", LdpAfternoon: "Afternoon"}
+const weekdayTexts = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+// the longest request, in days, and the most requests a list reads
+const maxRequestDays = 366
+const requestCap = 500
+// with no working schedule: Monday to Friday, 8 hours a day
+const standardDayHours = 8
+// a leave-start reminder a day before
+const reminderMinutes = 1440
+
+const isoDayOfText = day => {
+    const [y, m, d] = String(day).slice(0, 10).split("-").map(Number)
+    const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+    return weekday === 0 ? 7 : weekday
+}
+function daysFrom(fromDay, thruDay) {
+    const out = []
+    for (let day = fromDay; day <= thruDay && out.length <= maxRequestDays; day = addDays(day, 1)) out.push(day)
+    return out
+}
+const slotsOf = part => (part === "LdpMorning" ? ["AM"] : part === "LdpAfternoon" ? ["PM"] : ["AM", "PM"])
+const datesTextOf = (fromDay, thruDay) => (fromDay === thruDay ? fromDay : fromDay + " to " + thruDay)
+const requestRow = id => (id ? one(REQUEST, {leaveRequestId: id}) : null)
+const segmentsOf = leaveRequestId =>
+    rows(SEGMENT, {leaveRequestId})
+        .map(row => ({
+            segmentSeqId: row.segmentSeqId,
+            fromDay: lib.calendarDateText(row.fromDay),
+            thruDay: lib.calendarDateText(row.thruDay),
+            dayPartEnumId: row.dayPartEnumId || "LdpFull",
+            workEffortId: row.workEffortId || null
+        }))
+        .sort((a, b) => a.fromDay.localeCompare(b.fromDay))
+
+// The segments a request names: a list of {fromDate, thruDate, dayPartEnumId}, or one given by fromDate, thruDate and
+// dayPartEnumId; each a run of days, a part only on one day; none overlapping another.
+function segmentsParam(p) {
+    const given = Array.isArray(p.segments) || (p.segments && typeof p.segments === "object" && p.segments.length != null)
+    const list = given ? Array.from(p.segments) : [{fromDate: p.fromDate, thruDate: p.thruDate, dayPartEnumId: p.dayPartEnumId}]
+    const segments = list.map(item => {
+        const fromDay = dayParam(item?.fromDate ?? item?.fromDay)
+        const thruDay = dayParam(item?.thruDate ?? item?.thruDay) || fromDay
+        const part = text(item?.dayPartEnumId) || "LdpFull"
+        if (!fromDay) denied("DATE_REQUIRED", "Enter the first day of the leave")
+        if (thruDay < fromDay) denied("DATES_INVALID", "The last day is on or after the first")
+        if (!partTexts[part]) denied("PART_INVALID", "Choose the whole day, the morning or the afternoon")
+        if (part !== "LdpFull" && thruDay !== fromDay) denied("PART_INVALID", "A morning or an afternoon is of one day")
+        if (daysFrom(fromDay, thruDay).length > maxRequestDays) denied("TOO_LONG", "A request is at most a year")
+        return {fromDay, thruDay, dayPartEnumId: part}
+    })
+    if (!segments.length) denied("DATE_REQUIRED", "Enter the first day of the leave")
+    const taken = new Set()
+    for (const segment of segments)
+        for (const day of daysFrom(segment.fromDay, segment.thruDay))
+            for (const slot of slotsOf(segment.dayPartEnumId)) {
+                if (taken.has(day + slot)) denied("SEGMENTS_OVERLAP", "The days of a request do not repeat")
+                taken.add(day + slot)
+            }
+    return segments.sort((a, b) => a.fromDay.localeCompare(b.fromDay))
+}
+
+// The employment a request is for: the one named (the person's own, or one of an employer an HR editor changes), else the
+// caller's own when they have one; the access kinds the caller has to it (self, hr).
+function requestEmployment(userScope, partyRelationshipId) {
+    const caps = userScope.capabilities
+    if (!text(partyRelationshipId)) {
+        const own = (userScope.employments || []).filter(row => !row.thruDate || ms(row.thruDate) > nowMs())
+        if (!caps.self || !own.length) denied("EMPLOYMENT_REQUIRED", "Choose the employment the leave is for")
+        if (own.length > 1) denied("EMPLOYMENT_REQUIRED", "You work for more than one employer: choose the employment")
+        partyRelationshipId = own[0].partyRelationshipId
+    }
+    const row = employmentRow(text(partyRelationshipId))
+    const kinds = []
+    if (row) {
+        if (caps.self && row.fromPartyId === userScope.partyId) kinds.push("self")
+        if (canEditAt(userScope, row.toPartyId)) kinds.push("hr")
+    }
+    if (!row || !kinds.length) denied("RECORD_UNAVAILABLE", "Employment " + text(partyRelationshipId) + " is not available")
+    return {row, kinds}
+}
+
+// The days of segments as the employment's schedule and holidays charge them: each day with its hours planned, its holiday,
+// its part and what it charges in the unit.
+function chargedDays(employment, segments, unitEnumId) {
+    const partyId = employment.fromPartyId
+    const organizationPartyId = employment.toPartyId
+    const allDays = unique(segments.flatMap(segment => daysFrom(segment.fromDay, segment.thruDay))).sort()
+    let planned = null
+    try {
+        planned = schedules().scheduledDays([partyId], allDays)[partyId] || null
+    } catch (error) {
+        ec.logger.error("Leave of " + partyId + ": the working schedule was not read, a standard week counts: " + error.message)
+    }
+    let calendarHolidays = {}
+    if (planned) {
+        const calendarIds = unique(Object.values(planned).flatMap(entry => entry.holidayCategoryIds || []))
+        if (calendarIds.length) calendarHolidays = schedules().holidaysOf(calendarIds, allDays)
+    }
+    const employerHolidays = {}
+    if (allDays.length)
+        for (const row of Array.from(
+            find(WORK_EFFORT)
+                .condition("purposeEnumId", "WepHoliday")
+                .condition("ownerPartyId", organizationPartyId)
+                .condition("allDayStart", "in", allDays)
+                .list()
+        ))
+            employerHolidays[lib.calendarDateText(row.allDayStart)] = row.workEffortName || "Holiday"
+    const out = []
+    for (const segment of segments)
+        for (const day of daysFrom(segment.fromDay, segment.thruDay)) {
+            const plannedDay = planned ? planned[day] : null
+            const hours = plannedDay ? r4(plannedDay.hours) : isoDayOfText(day) <= 5 ? standardDayHours : 0
+            const holiday =
+                employerHolidays[day] ||
+                (plannedDay
+                    ? (plannedDay.holidayCategoryIds || []).map(id => calendarHolidays[id]?.[day]).find(name => name)
+                    : null) ||
+                null
+            const share = segment.dayPartEnumId === "LdpFull" ? 1 : 0.5
+            const working = hours > 0 && !holiday
+            const charged = !working ? 0 : unitEnumId === "LuHours" ? r4(hours * share) : share
+            out.push({
+                day,
+                weekdayText: weekdayTexts[isoDayOfText(day)],
+                dayPartEnumId: segment.dayPartEnumId,
+                partText: partTexts[segment.dayPartEnumId],
+                hours,
+                holidayName: holiday || "",
+                charged,
+                note: holiday ? "Holiday: " + holiday : hours > 0 ? "" : "Not a working day",
+                source: plannedDay ? "schedule" : "standard"
+            })
+        }
+    return out
+}
+
+// The policy of a leave type an employment is under on a day, or null.
+function policyOn(partyRelationshipId, leaveTypeEnumId, day) {
+    const at = startOfDay(day) + dayMs / 2
+    const assignment = rows(ASSIGNMENT, {partyRelationshipId, leaveTypeEnumId}).find(row => !voided(row) && openAt(row, at))
+    return assignment ? one(POLICY, {leavePolicyId: assignment.leavePolicyId}) : null
+}
+// What the other requests of an employment and type waiting for approval reserve.
+function pendingOf(partyRelationshipId, leaveTypeEnumId, exceptId = null) {
+    return r4(
+        rows(REQUEST, {partyRelationshipId, leaveTypeEnumId, statusEnumId: "LrsRequested"})
+            .filter(row => row.leaveRequestId !== exceptId)
+            .reduce((sum, row) => sum + (num(row.chargedAmount) || 0), 0)
+    )
+}
+// The other requests of the person (any employment) that hold a day and part of these segments.
+function overlapping(partyId, segments, exceptId = null) {
+    const wanted = new Set()
+    for (const segment of segments)
+        for (const day of daysFrom(segment.fromDay, segment.thruDay))
+            for (const slot of slotsOf(segment.dayPartEnumId)) wanted.add(day + slot)
+    const first = segments[0].fromDay
+    const last = segments
+        .map(segment => segment.thruDay)
+        .sort()
+        .pop()
+    const others = Array.from(
+        find(REQUEST)
+            .condition("partyId", partyId)
+            .condition("statusEnumId", "in", holdingStates)
+            .condition("fromDay", "less-equals", last)
+            .condition("thruDay", "greater-equals", first)
+            .list()
+    ).filter(row => row.leaveRequestId !== exceptId)
+    return others.filter(row =>
+        segmentsOf(row.leaveRequestId).some(segment =>
+            daysFrom(segment.fromDay, segment.thruDay).some(day =>
+                slotsOf(segment.dayPartEnumId).some(slot => wanted.has(day + slot))
+            )
+        )
+    )
+}
+// The blocked and mandatory days of the employer on the request's days that apply to it (its department, or a unit above it, and
+// its leave type, when the interval names them).
+function blocksOn(organizationPartyId, departmentPartyId, leaveTypeEnumId, fromDay, thruDay) {
+    const within = departmentPartyId
+        ? new Set([departmentPartyId].concat(unitsAbove(departmentPartyId, organizationPartyId)))
+        : null
+    return Array.from(
+        find(BLOCK)
+            .condition("organizationPartyId", organizationPartyId)
+            .condition("cancelledDate", "is-null", null)
+            .condition("fromDay", "less-equals", thruDay)
+            .condition("thruDay", "greater-equals", fromDay)
+            .list()
+    ).filter(
+        row =>
+            (!row.leaveTypeEnumId || row.leaveTypeEnumId === leaveTypeEnumId) &&
+            (!row.departmentPartyId || (within && within.has(row.departmentPartyId)))
+    )
+}
+// the departments above a department, to the employer (a blocked interval of a department holds for the units under it)
+function unitsAbove(departmentPartyId, organizationPartyId) {
+    const out = []
+    let current = departmentPartyId
+    for (let depth = 0; depth < 12 && current && current !== organizationPartyId; depth++) {
+        const parent = Array.from(
+            find(RELATIONSHIP)
+                .condition("relationshipTypeEnumId", "PrtOrgRollup")
+                .condition("fromPartyId", current)
+                .conditionDate("fromDate", "thruDate", stamp(nowMs()))
+                .list()
+        )[0]
+        current = parent ? parent.toPartyId : null
+        if (current && current !== organizationPartyId) out.push(current)
+    }
+    return out
+}
+
+// What a request would be: its employment, policy, days charged, the balance and the reservations, the blocked days, the other
+// requests of its days and its approvers, with each problem that blocks it and each warning. checkFor: a request already made
+// (its own reservation and days are left out).
+function assess(userScope, p, existing = null) {
+    const employment = existing
+        ? {row: employmentRow(existing.partyRelationshipId), kinds: []}
+        : requestEmployment(userScope, p.partyRelationshipId)
+    const row = employment.row
+    if (!row) denied("RECORD_UNAVAILABLE", "This employment is not available")
+    const segments = existing ? segmentsOf(existing.leaveRequestId) : segmentsParam(p)
+    const leaveTypeEnumId = existing ? existing.leaveTypeEnumId : text(p.leaveTypeEnumId)
+    if (!leaveTypeEnumId) denied("TYPE_REQUIRED", "Choose the leave type")
+    const typeRow = one(ENUM, {enumId: leaveTypeEnumId})
+    if (!typeRow || typeRow.enumTypeId !== "PeopleLeaveType") denied("TYPE_INVALID", "Choose a leave type")
+    const fromDay = segments[0].fromDay
+    const thruDay = segments
+        .map(segment => segment.thruDay)
+        .sort()
+        .pop()
+    const problems = []
+    const warnings = []
+    const problem = (code, message) => problems.push({code, message})
+    // the employment covers the days
+    const employedFrom = row.fromDate ? dayOf(ms(row.fromDate)) : null
+    const employedThru = row.thruDate ? dayOf(ms(row.thruDate) - 1) : null
+    if ((employedFrom && fromDay < employedFrom) || (employedThru && thruDay > employedThru))
+        problem(
+            "DATE_OUTSIDE",
+            "The leave is outside the employment (" + (employedFrom || "") + " to " + (employedThru || "") + ")"
+        )
+    const policy = existing
+        ? one(POLICY, {leavePolicyId: existing.leavePolicyId}) || policyOn(row.partyRelationshipId, leaveTypeEnumId, fromDay)
+        : policyOn(row.partyRelationshipId, leaveTypeEnumId, fromDay)
+    if (!policy)
+        problem("NO_POLICY", "No " + (typeRow.description || "leave") + " policy applies to this employment then: HR assigns one")
+    const unitEnumId = policy?.unitEnumId || "LuDays"
+    const days = chargedDays(row, segments, unitEnumId)
+    const chargedAmount = r4(days.reduce((sum, day) => sum + day.charged, 0))
+    if (!chargedAmount) problem("NOTHING_CHARGED", "These days are not working days: there is nothing to take")
+    // the balance now, what the other waiting requests reserve and what is left after this one
+    const entries = entriesOf(row.partyRelationshipId, leaveTypeEnumId)
+    const balance = balanceAt(entries, Infinity)
+    const pending = pendingOf(row.partyRelationshipId, leaveTypeEnumId, existing?.leaveRequestId || null)
+    const available = r4(balance - pending)
+    const remainder = r4(available - chargedAmount)
+    const negativeLimit = num(policy?.negativeLimit) || 0
+    const needsBalance = policy ? truthy(policy.allocationRequired) : false
+    if (policy && needsBalance && remainder < -negativeLimit)
+        problem(
+            "BALANCE_INSUFFICIENT",
+            "Not enough leave: " +
+                amountText(available, unitTextOf(unitEnumId)) +
+                " available for " +
+                amountText(chargedAmount, unitTextOf(unitEnumId))
+        )
+    // the other requests of the same days
+    const clashes = overlapping(row.fromPartyId, segments, existing?.leaveRequestId || null)
+    if (clashes.length)
+        problem(
+            "OVERLAP",
+            "Leave is already asked for or approved on " +
+                clashes
+                    .map(other => datesTextOf(lib.calendarDateText(other.fromDay), lib.calendarDateText(other.thruDay)))
+                    .join(", ")
+        )
+    // blocked and mandatory days
+    const assignment = people.assignmentsAt([row.fromPartyId], startOfDay(fromDay) + dayMs / 2)[
+        row.toPartyId + "/" + row.fromPartyId
+    ]
+    const departmentPartyId = existing ? existing.departmentPartyId || null : assignment?.departmentPartyId || null
+    const blocks = blocksOn(row.toPartyId, departmentPartyId, leaveTypeEnumId, fromDay, thruDay)
+    const blockRows = blocks.map(block => ({
+        leaveBlockedIntervalId: block.leaveBlockedIntervalId,
+        blockKindEnumId: block.blockKindEnumId,
+        fromDay: lib.calendarDateText(block.fromDay),
+        thruDay: lib.calendarDateText(block.thruDay),
+        overrideAllowed: block.overrideAllowed === "Y",
+        reason: block.reason || ""
+    }))
+    let overrideBlocked = false
+    for (const block of blockRows) {
+        if (block.blockKindEnumId === "LbkMandatory") {
+            warnings.push({code: "MANDATORY_DAYS", message: "Mandatory leave from " + block.fromDay + " to " + block.thruDay})
+            continue
+        }
+        const what =
+            "Leave is blocked from " + block.fromDay + " to " + block.thruDay + (block.reason ? " (" + block.reason + ")" : "")
+        if (block.overrideAllowed) {
+            overrideBlocked = true
+            warnings.push({code: "BLOCKED_OVERRIDABLE", message: what + ": the approver decides"})
+        } else problem("BLOCKED_DAY", what)
+    }
+    // who would approve: a step no one may decide is a block
+    let route = {steps: [], unresolved: false}
+    if (!existing) {
+        route = approvals().previewRoute({
+            approvalKindEnumId: leaveKind,
+            organizationPartyId: row.toPartyId,
+            departmentPartyId,
+            subjectPartyId: row.fromPartyId,
+            requesterPartyId: ec.user.userAccount?.partyId || null
+        })
+        if (route.unresolved) problem("NO_APPROVER", "No one may approve this leave yet: HR sets who approves it")
+    }
+    if (policy && truthy(policy.evidenceRequired))
+        warnings.push({code: "EVIDENCE_REQUIRED", message: "This leave needs evidence: give it to HR"})
+    const texts = enumTexts([leaveTypeEnumId, unitEnumId])
+    const persons = people.personNames([row.fromPartyId])
+    const organizations = people.organizationNames([row.toPartyId])
+    return {
+        employment: row,
+        kinds: employment.kinds,
+        segments,
+        fromDay,
+        thruDay,
+        leaveTypeEnumId,
+        leaveTypeText: texts[leaveTypeEnumId] || leaveTypeEnumId,
+        policy,
+        unitEnumId,
+        unitText: texts[unitEnumId] || "",
+        departmentPartyId,
+        days,
+        chargedAmount,
+        balance,
+        pending,
+        available,
+        remainder,
+        negativeLimit,
+        needsBalance,
+        overrideBlocked,
+        blocks: blockRows,
+        route,
+        problems,
+        warnings,
+        personName: persons[row.fromPartyId] || row.fromPartyId,
+        organizationName: organizations[row.toPartyId] || row.toPartyId
+    }
+}
+const unitTextOf = unitEnumId => (unitEnumId === "LuHours" ? "hours" : "days")
+function assessmentAnswer(found) {
+    return {
+        partyRelationshipId: found.employment.partyRelationshipId,
+        partyId: found.employment.fromPartyId,
+        personName: found.personName,
+        organizationPartyId: found.employment.toPartyId,
+        organizationName: found.organizationName,
+        leaveTypeEnumId: found.leaveTypeEnumId,
+        leaveTypeText: found.leaveTypeText,
+        leavePolicyId: found.policy?.leavePolicyId || null,
+        policyName: found.policy?.policyName || "",
+        unitEnumId: found.unitEnumId,
+        unitText: found.unitText,
+        datesText: datesTextOf(found.fromDay, found.thruDay),
+        days: found.days,
+        chargedAmount: found.chargedAmount,
+        balance: found.balance,
+        pending: found.pending,
+        available: found.available,
+        remainder: found.remainder,
+        needsBalance: found.needsBalance,
+        blocks: found.blocks.map(block => Object.assign({}, block)),
+        approverSteps: found.route.steps.map(step => ({
+            stepText: step.stepText,
+            approverNames: step.approverNames,
+            explanation: step.explanation
+        })),
+        problems: found.problems,
+        warnings: found.warnings,
+        canSubmit: !found.problems.length
+    }
+}
+
+// preview#Request: what a request would charge and whether it may be made. Refuses only what names no request (no employment of
+// the caller's, no type, dates the wrong way); the rest are problems in the answer.
+function previewRequest(p) {
+    const userScope = people.scopeOf()
+    return assessmentAnswer(assess(userScope, p))
+}
+
+// submit#Request: the person (or an HR editor of the employer) asks for leave: assessed again under the employment's lock, refused
+// with the first problem, made and sent for approval. A retry with the same operationKey answers the first.
+function submitRequest(p) {
+    const userScope = people.scopeOf()
+    const operationKey = text(p.operationKey) || null
+    const firstOf = () =>
+        operationKey
+            ? Array.from(find(REQUEST).condition({operationKey, requestedByUserId: ec.user.userId}).limit(1).list())[0]
+            : null
+    let first = firstOf()
+    if (first) return Object.assign(requestAnswer(first), {repeated: true})
+    const employment = requestEmployment(userScope, p.partyRelationshipId)
+    lockEmployment(employment.row.partyRelationshipId)
+    // a retry that waited on the lock answers the first too
+    first = firstOf()
+    if (first) return Object.assign(requestAnswer(first), {repeated: true})
+    const found = assess(userScope, Object.assign({}, p, {partyRelationshipId: employment.row.partyRelationshipId}))
+    if (found.problems.length) denied(found.problems[0].code, found.problems.map(item => item.message).join("; "))
+    const reason = text(p.reason) || null
+    const created = call("create#" + REQUEST, {
+        partyRelationshipId: found.employment.partyRelationshipId,
+        partyId: found.employment.fromPartyId,
+        organizationPartyId: found.employment.toPartyId,
+        departmentPartyId: found.departmentPartyId,
+        leaveTypeEnumId: found.leaveTypeEnumId,
+        leavePolicyId: found.policy.leavePolicyId,
+        unitEnumId: found.unitEnumId,
+        statusEnumId: "LrsRequested",
+        fromDay: found.fromDay,
+        thruDay: found.thruDay,
+        chargedAmount: decimal(found.chargedAmount),
+        reason,
+        overrideBlocked: found.overrideBlocked ? "Y" : "N",
+        requestedByUserId: ec.user.userId || null,
+        requestedDate: ec.user.nowTimestamp,
+        operationKey
+    })
+    found.segments.forEach((segment, index) =>
+        call("create#" + SEGMENT, {
+            leaveRequestId: created.leaveRequestId,
+            segmentSeqId: String(index + 1).padStart(2, "0"),
+            fromDay: segment.fromDay,
+            thruDay: segment.thruDay,
+            dayPartEnumId: segment.dayPartEnumId
+        })
+    )
+    askApproval(requestRow(created.leaveRequestId))
+    return Object.assign(requestAnswer(requestRow(created.leaveRequestId)), {repeated: false})
+}
+// A People approval of the request at its revision, to its route's first step (the reason is never the justification).
+function askApproval(request) {
+    return approvals().request({
+        approvalKindEnumId: leaveKind,
+        sourceId: request.leaveRequestId,
+        organizationPartyId: request.organizationPartyId,
+        departmentPartyId: request.departmentPartyId || null,
+        subjectPartyId: request.partyId,
+        effectiveDate: startOfDay(lib.calendarDateText(request.fromDay))
+    })
+}
+const requestAnswer = request => ({
+    leaveRequestId: request.leaveRequestId,
+    statusEnumId: request.statusEnumId,
+    statusText: requestStatusTexts[request.statusEnumId] || request.statusEnumId,
+    chargedAmount: num(request.chargedAmount) || 0
+})
+
+// ===== who reads and decides a request =====
+// How the scope admits a request: self (the person's), requester (who asked for it), hr (an HR reader of the employer; hrEdit
+// when they change it), team (a manager of the person at the employer), approver (one who may decide its step waiting or decided
+// a step of it). Missing and unauthorized alike: RECORD_UNAVAILABLE.
+function requestAccess(userScope, request, summary) {
+    const caps = userScope.capabilities
+    const kinds = []
+    if (request) {
+        if (caps.self && request.partyId === userScope.partyId) kinds.push("self")
+        if (request.requestedByUserId && request.requestedByUserId === ec.user.userId) kinds.push("requester")
+        if (hrEmployers(userScope).includes(request.organizationPartyId)) kinds.push("hr")
+        if (canEditAt(userScope, request.organizationPartyId)) kinds.push("hrEdit")
+        if (caps.team && ((userScope.reportLines || {})[request.partyId] || []).includes(request.organizationPartyId))
+            kinds.push("team")
+        const partyId = userScope.partyId
+        if (
+            summary &&
+            (summary.canDecide || (partyId && Array.from(summary.decisions || []).some(row => row.decidedByPartyId === partyId)))
+        )
+            kinds.push("approver")
+    }
+    return kinds
+}
+function readableRequest(userScope, leaveRequestId) {
+    const request = requestRow(text(leaveRequestId))
+    const summary = request ? approvals().sourceSummary(leaveKind, request.leaveRequestId) : null
+    const kinds = requestAccess(userScope, request, summary && summaryDeciders(request, summary))
+    if (!request || !kinds.length) denied("RECORD_UNAVAILABLE", "Leave request " + text(leaveRequestId) + " is not available")
+    return {request, summary, kinds}
+}
+// the approval summary with the deciders' parties (sourceSummary names them): the parties of the request's decisions
+function summaryDeciders(request, summary) {
+    const decided = rows("mantle.humanres.approval.PeopleApproval", {sourceEntityName: REQUEST, sourceId: request.leaveRequestId})
+        .flatMap(approval =>
+            rows("mantle.humanres.approval.PeopleApprovalDecision", {peopleApprovalId: approval.peopleApprovalId})
+        )
+        .map(row => ({decidedByPartyId: row.decidedByPartyId}))
+    return {canDecide: summary.canDecide, decisions: decided}
+}
+// Whether the caller reads the person's reason: the person, the one who asked, HR of the employer and the approvers.
+const readsReason = kinds => kinds.some(kind => ["self", "requester", "hr", "approver"].includes(kind))
+
+// get#Request: a request the caller may read, with its days and what each charges, its balance statement (the balance, the other
+// reservations, this request and what is left), its approval (steps, decisions, who decides now), the decision notice, and what the
+// caller may do: approve or refuse (an approver of the step waiting), withdraw (the person or who asked, while it waits), cancel
+// (the person asks it of approved leave; an HR editor of the employer cancels at once). The reason only to those readsReason admits.
+function getRequest(p) {
+    const userScope = people.scopeOf()
+    const {request, summary, kinds} = readableRequest(userScope, p.leaveRequestId)
+    const found = assess(userScope, {}, request)
+    const status = request.statusEnumId
+    const own = kinds.includes("self") || kinds.includes("requester")
+    const decided = rows("mantle.humanres.approval.PeopleApproval", {sourceEntityName: REQUEST, sourceId: request.leaveRequestId})
+        .flatMap(approval =>
+            rows("mantle.humanres.approval.PeopleApprovalDecision", {peopleApprovalId: approval.peopleApprovalId})
+        )
+        .sort((a, b) => (ms(a.decisionDate) || 0) - (ms(b.decisionDate) || 0))
+    const last = decided[decided.length - 1] || null
+    const names = people.personNames(unique(decided.map(row => row.decidedByPartyId).filter(Boolean)))
+    // HR's cancellation at once is its own notice (who, when and why); the others are the last decision's
+    const hrName = () => {
+        const partyId = one("moqui.security.UserAccount", {userId: request.cancelledByUserId})?.partyId
+        return (partyId && people.personNames([partyId])[partyId]) || request.cancelledByUserId
+    }
+    const notice =
+        status === "LrsCancelled" && request.cancelledByUserId
+            ? {
+                  outcomeText: "Cancelled",
+                  decidedByName: hrName(),
+                  decidedDateText: dateText(request.cancelledDate),
+                  reason: request.cancelReason || ""
+              }
+            : ["LrsApproved", "LrsRefused", "LrsCancelled"].includes(status) && last
+              ? {
+                    outcomeText: requestStatusTexts[status],
+                    decidedByName: names[last.decidedByPartyId] || last.decidedByUserId || "",
+                    decidedDateText: dateText(last.decisionDate),
+                    reason: last.decisionEnumId === "PpdRefused" ? last.reason || "" : ""
+                }
+              : null
+    const charged = num(request.chargedAmount) || 0
+    // the balance statement: the posted balance (with this leave once taken), the other reservations, and what is left
+    const statement = {
+        balance: found.balance,
+        pending: found.pending,
+        thisRequest: charged,
+        reserved: status === "LrsRequested",
+        taken: ["LrsApproved", "LrsCancelRequested"].includes(status),
+        remainder: status === "LrsRequested" ? r4(found.available - charged) : found.available
+    }
+    const segmentRows = segmentsOf(request.leaveRequestId).map(segment =>
+        Object.assign({}, segment, {
+            partText: partTexts[segment.dayPartEnumId],
+            datesText: datesTextOf(segment.fromDay, segment.thruDay)
+        })
+    )
+    return {
+        request: {
+            leaveRequestId: request.leaveRequestId,
+            partyRelationshipId: request.partyRelationshipId,
+            partyId: request.partyId,
+            personName: found.personName,
+            organizationPartyId: request.organizationPartyId,
+            organizationName: found.organizationName,
+            leaveTypeEnumId: request.leaveTypeEnumId,
+            leaveTypeText: found.leaveTypeText,
+            leavePolicyId: request.leavePolicyId,
+            policyName: found.policy?.policyName || "",
+            unitText: found.unitText,
+            statusEnumId: status,
+            statusText: requestStatusTexts[status] || status,
+            fromDay: found.fromDay,
+            thruDay: found.thruDay,
+            datesText: datesTextOf(found.fromDay, found.thruDay),
+            chargedAmount: charged,
+            chargedText: amountText(charged, found.unitText),
+            overrideBlocked: request.overrideBlocked === "Y",
+            requestedDateText: dateText(request.requestedDate),
+            decidedDateText: dateText(request.decidedDate),
+            cancelledDateText: dateText(request.cancelledDate),
+            reason: readsReason(kinds) ? request.reason || "" : null,
+            revision: String(stampOf(request))
+        },
+        segments: segmentRows,
+        days: found.days,
+        statement,
+        blocks: found.blocks,
+        approval: summary,
+        notice,
+        access: kinds,
+        canDecide: !!summary?.canDecide && ["LrsRequested", "LrsCancelRequested"].includes(status),
+        canWithdraw: own && status === "LrsRequested",
+        canAskCancel: kinds.includes("self") && status === "LrsApproved",
+        canCancel:
+            kinds.includes("hrEdit") &&
+            request.partyId !== userScope.partyId &&
+            ["LrsApproved", "LrsCancelRequested"].includes(status)
+    }
+}
+
+// ===== decide#Request and the topic's services =====
+// approve or refuse (the step waiting, through record#Decision at the request's revision: the last approval of a request recounts,
+// checks and posts the leave taken once; of a cancellation posts the reversal once; a refusal needs a reason), withdraw (the person
+// or who asked, while it waits), cancel (approved leave: the person asks it, which waits for approval; an HR editor of the
+// employer cancels it at once, with a reason). Each under the employment's lock. A decision retried answers the first.
+function decideRequest(p) {
+    const userScope = people.scopeOf()
+    const action = text(p.decision) || "approve"
+    if (!["approve", "refuse", "withdraw", "cancel"].includes(action))
+        denied("DECISION_INVALID", "Approve, refuse, withdraw or cancel")
+    let request = requestRow(text(p.leaveRequestId))
+    if (!request) denied("RECORD_UNAVAILABLE", "Leave request " + text(p.leaveRequestId) + " is not available")
+    lockEmployment(request.partyRelationshipId)
+    request = requestRow(request.leaveRequestId)
+    // one who reads no part of it is answered as for a missing request, whatever they ask
+    const summary = approvals().sourceSummary(leaveKind, request.leaveRequestId)
+    const kinds = requestAccess(userScope, request, summary && summaryDeciders(request, summary))
+    if (!kinds.length) denied("RECORD_UNAVAILABLE", "Leave request " + request.leaveRequestId + " is not available")
+    if (action === "approve" || action === "refuse") return decideApproval(userScope, request, action, p)
+    if (text(p.expectedRevision) && text(p.expectedRevision) !== String(stampOf(request)))
+        denied("REVISION_CHANGED", "This request changed since you read it; open it again")
+    if (action === "withdraw") {
+        if (!kinds.includes("self") && !kinds.includes("requester"))
+            denied("NOT_YOURS", "Only the person or who asked for it withdraws a request")
+        if (request.statusEnumId !== "LrsRequested") denied("NOT_PENDING", "Only a request waiting for approval is withdrawn")
+        setStatus(request, {statusEnumId: "LrsWithdrawn", cancelledDate: ec.user.nowTimestamp})
+        approvals().sourceChanged(leaveKind, request.leaveRequestId)
+        return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: false})
+    }
+    // cancel
+    if (request.statusEnumId === "LrsRequested" && (kinds.includes("self") || kinds.includes("requester")))
+        return decideRequest(Object.assign({}, p, {decision: "withdraw"}))
+    if (!["LrsApproved", "LrsCancelRequested"].includes(request.statusEnumId))
+        denied("NOT_APPROVED", "Only approved leave is cancelled")
+    // HR cancels another person's leave at once, never their own (which they ask to cancel, as anyone does: no self-approval)
+    if (kinds.includes("hrEdit") && request.partyId !== userScope.partyId) {
+        const reason = text(p.reason)
+        if (!reason) denied("REASON_REQUIRED", "Give the reason for cancelling")
+        cancelTaken(request, {cancelledByUserId: ec.user.userId || null, cancelReason: reason})
+        if (request.statusEnumId === "LrsCancelRequested") approvals().sourceChanged(leaveKind, request.leaveRequestId)
+        tellPerson(requestRow(request.leaveRequestId), "Cancelled by HR")
+        return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: false})
+    }
+    if (!kinds.includes("self")) denied("NOT_YOURS", "Only the person asks to cancel their leave, or HR cancels it")
+    if (request.statusEnumId === "LrsCancelRequested") denied("CANCEL_PENDING", "Its cancellation already waits for approval")
+    setStatus(request, {statusEnumId: "LrsCancelRequested"})
+    askApproval(requestRow(request.leaveRequestId))
+    return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: false})
+}
+function setStatus(request, values) {
+    call("update#" + REQUEST, Object.assign({leaveRequestId: request.leaveRequestId}, values))
+}
+function decideApproval(userScope, request, action, p) {
+    const asked = request.statusEnumId
+    const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
+        approvalKindEnumId: leaveKind,
+        peopleApprovalId: text(p.peopleApprovalId) || null,
+        sourceId: request.leaveRequestId,
+        decision: action,
+        reason: text(p.reason) || null,
+        sourceRevision: text(p.sourceRevision) || null,
+        operationKey: text(p.operationKey) || null
+    })
+    if (decided.repeated) return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: true})
+    if (asked === "LrsRequested") {
+        if (decided.complete) {
+            // recounted, checked against the other requests and the balance with the other reservations, then taken once
+            const found = assess(userScope, {}, request)
+            const blocking = found.problems.filter(item => item.code !== "NO_APPROVER")
+            if (blocking.length) denied(blocking[0].code, blocking.map(item => item.message).join("; "))
+            takeLeave(request, found)
+            tellPerson(requestRow(request.leaveRequestId), "Approved")
+        } else if (decided.statusId === "PapRefused") {
+            setStatus(request, {statusEnumId: "LrsRefused", decidedDate: ec.user.nowTimestamp})
+            tellPerson(requestRow(request.leaveRequestId), "Refused")
+        }
+    } else if (asked === "LrsCancelRequested") {
+        if (decided.complete) {
+            cancelTaken(request)
+            tellPerson(requestRow(request.leaveRequestId), "Cancelled")
+        } else if (decided.statusId === "PapRefused") {
+            setStatus(request, {statusEnumId: "LrsApproved"})
+            tellPerson(requestRow(request.leaveRequestId), "Cancellation refused")
+        }
+    } else denied("NOT_PENDING", "This request is " + (requestStatusTexts[asked] || asked).toLowerCase())
+    return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: false})
+}
+// The leave taken: the consumption posted once (leave:<id>, when the policy keeps a balance), the request approved with what it
+// charges now, and its projection.
+function takeLeave(request, found) {
+    const entries = entriesOf(request.partyRelationshipId, request.leaveTypeEnumId)
+    const sourceKey = "leave:" + request.leaveRequestId
+    let consumptionEntryId = null
+    if (found.needsBalance && found.chargedAmount && !keyPosted(entries, sourceKey))
+        consumptionEntryId = post(entries, {
+            partyRelationshipId: request.partyRelationshipId,
+            partyId: request.partyId,
+            organizationPartyId: request.organizationPartyId,
+            leaveTypeEnumId: request.leaveTypeEnumId,
+            leavePolicyId: request.leavePolicyId,
+            entryTypeEnumId: "LletConsumption",
+            unitEnumId: found.unitEnumId,
+            amount: -found.chargedAmount,
+            effectiveMs: startOfDay(found.fromDay),
+            sourceKey,
+            periodFromDay: found.fromDay,
+            periodThruDay: found.thruDay,
+            description: "Leave taken " + datesTextOf(found.fromDay, found.thruDay)
+        })
+    setStatus(request, {
+        statusEnumId: "LrsApproved",
+        decidedDate: ec.user.nowTimestamp,
+        chargedAmount: decimal(found.chargedAmount),
+        consumptionEntryId
+    })
+    project(requestRow(request.leaveRequestId), found.days)
+}
+// A cancellation of approved leave: the reversal of what was taken posted once (leave-reversal:<id>), the projection cancelled.
+function cancelTaken(request, values = {}) {
+    const entries = entriesOf(request.partyRelationshipId, request.leaveTypeEnumId)
+    const sourceKey = "leave-reversal:" + request.leaveRequestId
+    let reversalEntryId = null
+    const taken = request.consumptionEntryId ? one(ENTRY, {leaveLedgerEntryId: request.consumptionEntryId}) : null
+    if (taken && !keyPosted(entries, sourceKey)) {
+        const fromDay = lib.calendarDateText(request.fromDay)
+        reversalEntryId = post(entries, {
+            partyRelationshipId: request.partyRelationshipId,
+            partyId: request.partyId,
+            organizationPartyId: request.organizationPartyId,
+            leaveTypeEnumId: request.leaveTypeEnumId,
+            leavePolicyId: request.leavePolicyId,
+            entryTypeEnumId: "LletReversal",
+            unitEnumId: taken.unitEnumId,
+            amount: -(num(taken.amount) || 0),
+            effectiveMs: ms(taken.effectiveDate) ?? startOfDay(fromDay),
+            sourceKey,
+            reversedEntryId: taken.leaveLedgerEntryId,
+            periodFromDay: fromDay,
+            periodThruDay: lib.calendarDateText(request.thruDay),
+            description: "Leave cancelled " + datesTextOf(fromDay, lib.calendarDateText(request.thruDay))
+        })
+    }
+    setStatus(
+        request,
+        Object.assign({statusEnumId: "LrsCancelled", cancelledDate: ec.user.nowTimestamp, reversalEntryId}, values)
+    )
+    for (const segment of segmentsOf(request.leaveRequestId)) {
+        if (!segment.workEffortId) continue
+        const effort = one(WORK_EFFORT, {workEffortId: segment.workEffortId})
+        if (effort && effort.statusId !== "WeCancelled")
+            call("update#" + WORK_EFFORT, {workEffortId: segment.workEffortId, statusId: "WeCancelled"})
+    }
+}
+// Approved leave as the person's WetTimeOff work efforts, one a segment ("Out of office": no type, no reason), which capacity
+// (mantle.work.ResourceServices.get#PartyCapacity) and the calendars read: whole days all day, a morning from 08:00 and an afternoon
+// from 13:00 for half the day's planned hours (capacity takes that many hours off the day). A reminder of the first, a day before
+// its start, for the person (the reminder job sends it on the WorkEffortReminder topic).
+function project(request, days) {
+    const hoursOf = Object.fromEntries(days.map(day => [day.day, day.hours || standardDayHours]))
+    let first = null
+    for (const segment of segmentsOf(request.leaveRequestId)) {
+        if (segment.workEffortId) continue
+        const fromMs = startOfDay(segment.fromDay)
+        const values = {
+            workEffortTypeEnumId: "WetTimeOff",
+            workEffortName: "Out of office",
+            statusId: "WeApproved",
+            ownerPartyId: request.partyId,
+            timeUomId: "TF_hr"
+        }
+        if (segment.dayPartEnumId === "LdpFull")
+            Object.assign(values, {
+                allDayStart: segment.fromDay,
+                allDayEnd: segment.thruDay,
+                estimatedStartDate: stamp(fromMs),
+                estimatedCompletionDate: stamp(startOfDay(addDays(segment.thruDay, 1)))
+            })
+        else {
+            const halfMs = (hoursOf[segment.fromDay] / 2) * 60 * 60 * 1000
+            const startMs = fromMs + (segment.dayPartEnumId === "LdpMorning" ? 8 : 13) * 60 * 60 * 1000
+            Object.assign(values, {
+                estimatedStartDate: stamp(startMs),
+                estimatedCompletionDate: stamp(startMs + halfMs),
+                estimatedWorkDuration: r4(hoursOf[segment.fromDay] / 2)
+            })
+        }
+        const workEffortId = call("create#" + WORK_EFFORT, values).workEffortId
+        call("create#mantle.work.effort.WorkEffortParty", {
+            workEffortId,
+            partyId: request.partyId,
+            roleTypeId: "Assignee",
+            fromDate: ec.user.nowTimestamp,
+            statusId: "WeptAssigned"
+        })
+        call("update#" + SEGMENT, {leaveRequestId: request.leaveRequestId, segmentSeqId: segment.segmentSeqId, workEffortId})
+        if (!first) first = workEffortId
+    }
+    if (first)
+        call("create#mantle.work.effort.WorkEffortReminder", {
+            workEffortId: first,
+            partyId: request.partyId,
+            reminderSeqId: "01",
+            offsetMinutes: reminderMinutes,
+            methodEnumId: "WermNotification"
+        })
+}
+// The decision told to the person (and to who asked, when another): PeopleLeaveDecision, with the days and the outcome only. A
+// failure is logged and the decision stays.
+function tellPerson(request, outcomeText) {
+    try {
+        const partyUsers = Array.from(find("moqui.security.UserAccount").condition("partyId", request.partyId).list()).map(
+            row => row.userId
+        )
+        const userIds = unique(partyUsers.concat(request.requestedByUserId ? [request.requestedByUserId] : [])).filter(
+            userId => userId && userId !== ec.user.userId
+        )
+        if (!userIds.length) return
+        ec.makeNotificationMessage()
+            .topic("PeopleLeaveDecision")
+            .message({
+                leaveRequestId: request.leaveRequestId,
+                datesText: datesTextOf(lib.calendarDateText(request.fromDay), lib.calendarDateText(request.thruDay)),
+                outcomeText
+            })
+            .record(REQUEST, request.leaveRequestId)
+            .userIds(userIds)
+            .send()
+    } catch (error) {
+        ec.logger.error("Leave decision notice of " + request.leaveRequestId + " was not sent: " + error.message)
+    }
+}
+function decideNotice(p, decision) {
+    const message = p.message || {}
+    if (p.recordEntityName && p.recordEntityName !== REQUEST) denied("SOURCE_INVALID", "Not a leave approval")
+    return decideRequest({
+        leaveRequestId: p.recordId,
+        peopleApprovalId: message.peopleApprovalId,
+        sourceRevision: message.sourceRevision,
+        decision,
+        reason: p.reason
+    })
+}
+const approveNotice = p => decideNotice(p, "approve")
+const refuseNotice = p => decideNotice(p, "refuse")
+
+// ===== find#Requests =====
+// The requests the caller reads: their own (mine, or self-service alone), their reports' (a manager at the line's employers), and
+// an HR reader's employers'; narrowed by a person, an employer, a state, a leave type and days; toDecide: those whose step waiting
+// the caller decides. Newest first. No reason in any row.
+function findRequests(p) {
+    const userScope = people.scopeOf()
+    const caps = userScope.capabilities
+    if (!caps.self && !caps.team && !caps.hrView && !caps.requestApprove)
+        denied(
+            "PERMISSION_DENIED",
+            "Leave requests need PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW, PEOPLE_REQUEST_APPROVE or PEOPLE_HR_VIEW"
+        )
+    const factory = ec.entity.conditionFactory
+    const reach = []
+    if (caps.self && userScope.partyId) reach.push(factory.makeCondition("partyId", "equals", userScope.partyId))
+    const mine = truthy(p.mine)
+    if (!mine) {
+        for (const [partyId, organizationPartyIds] of Object.entries(userScope.reportLines || {}))
+            if (organizationPartyIds.length)
+                reach.push(
+                    factory.makeCondition(
+                        factory.makeCondition("partyId", "equals", partyId),
+                        "and",
+                        factory.makeCondition("organizationPartyId", "in", organizationPartyIds)
+                    )
+                )
+        const employers = hrEmployers(userScope)
+        if (employers.length) reach.push(factory.makeCondition("organizationPartyId", "in", employers))
+    }
+    let waiting = null
+    if (!mine && caps.requestApprove) {
+        waiting = new Set(
+            approvals()
+                .waitingFor(requestCap)
+                .filter(row => row.approvalKindEnumId === leaveKind)
+                .map(row => row.sourceId)
+        )
+        if (waiting.size) reach.push(factory.makeCondition("leaveRequestId", "in", Array.from(waiting)))
+    }
+    if (!reach.length) return Object.assign(lib.pageList([], p, "requests"), {})
+    let query = find(REQUEST).condition(reach.length === 1 ? reach[0] : factory.makeCondition(reach, "or"))
+    if (text(p.partyId)) query = query.condition("partyId", text(p.partyId))
+    if (text(p.organizationPartyId)) query = query.condition("organizationPartyId", text(p.organizationPartyId))
+    if (text(p.leaveTypeEnumId)) query = query.condition("leaveTypeEnumId", text(p.leaveTypeEnumId))
+    const statuses = String(p.statusEnumId || "")
+        .split(",")
+        .map(text)
+        .filter(Boolean)
+    if (statuses.length) query = query.condition("statusEnumId", "in", statuses)
+    if (dayParam(p.fromDate)) query = query.condition("thruDay", "greater-equals", dayParam(p.fromDate))
+    if (dayParam(p.thruDate)) query = query.condition("fromDay", "less-equals", dayParam(p.thruDate))
+    if (truthy(p.toDecide)) {
+        const ids = waiting ? Array.from(waiting) : []
+        query = query.condition("leaveRequestId", "in", ids.length ? ids : ["_NA_"])
+    }
+    const found = Array.from(query.orderBy(["-fromDay", "-requestedDate"]).limit(requestCap).list())
+    const persons = people.personNames(unique(found.map(row => row.partyId)))
+    const organizations = people.organizationNames(unique(found.map(row => row.organizationPartyId)))
+    const texts = enumTexts(found.flatMap(row => [row.leaveTypeEnumId, row.unitEnumId]))
+    const requests = found.map(row => {
+        const fromDay = lib.calendarDateText(row.fromDay)
+        const thruDay = lib.calendarDateText(row.thruDay)
+        const amount = num(row.chargedAmount) || 0
+        const parts = rows(SEGMENT, {leaveRequestId: row.leaveRequestId}).map(segment => segment.dayPartEnumId)
+        return {
+            leaveRequestId: row.leaveRequestId,
+            partyId: row.partyId,
+            personName: persons[row.partyId] || row.partyId,
+            organizationPartyId: row.organizationPartyId,
+            organizationName: organizations[row.organizationPartyId] || row.organizationPartyId,
+            leaveTypeEnumId: row.leaveTypeEnumId,
+            leaveTypeText: texts[row.leaveTypeEnumId] || row.leaveTypeEnumId,
+            fromDay,
+            thruDay,
+            datesText: datesTextOf(fromDay, thruDay),
+            partText: parts.length === 1 && parts[0] !== "LdpFull" ? partTexts[parts[0]] : "",
+            chargedAmount: amount,
+            chargedText: amountText(amount, texts[row.unitEnumId] || ""),
+            statusEnumId: row.statusEnumId,
+            statusText: requestStatusTexts[row.statusEnumId] || row.statusEnumId,
+            toDecide: !!waiting && waiting.has(row.leaveRequestId),
+            own: row.partyId === userScope.partyId,
+            requestedDateText: dateText(row.requestedDate)
+        }
+    })
+    return lib.pageList(requests, p, "requests")
+}
+
+// ===== absences (the team calendar and its projected collection) =====
+// An employee's colleagues (the user's call of Nov 11, 2026): the people who now share a department or team with them (a current
+// PrtMember of the same unit, as member or lead) or a manager (a live line of the same manager at the employer), each with the
+// employers that employ both now, where their approved leave is shown as days alone: {partyId: [organizationPartyId]}.
+const unitRoleIds = ["OrgDepartment", "OrgTeam"]
+function colleaguesOf(userScope) {
+    const me = userScope.partyId
+    const mine = unique((userScope.employments || []).map(row => row.organizationPartyId))
+    const out = {}
+    if (!me || !mine.length) return out
+    const add = (partyId, organizationPartyIds) => {
+        if (partyId === me) return
+        const shared = organizationPartyIds.filter(organizationPartyId => mine.includes(organizationPartyId))
+        if (shared.length) out[partyId] = unique((out[partyId] || []).concat(shared))
+    }
+    const member = () => people.current(find(RELATIONSHIP).condition("relationshipTypeEnumId", "PrtMember"), null)
+    // the units: a department's members are its employees' assignments' rows, a team's its members'
+    const unitIds = unique(Array.from(member().condition("fromPartyId", me).list()).map(row => row.toPartyId))
+    const units = unitIds.length
+        ? unique(
+              Array.from(
+                  find("mantle.party.PartyRole")
+                      .condition("partyId", "in", unitIds)
+                      .condition("roleTypeId", "in", unitRoleIds)
+                      .list()
+              ).map(row => row.partyId)
+          )
+        : []
+    if (units.length) {
+        const mates = unique(Array.from(member().condition("toPartyId", "in", units).list()).map(row => row.fromPartyId)).filter(
+            partyId => partyId !== me
+        )
+        const employed = people.employersOfParties(mates, null)
+        for (const partyId of mates) add(partyId, employed[partyId] || [])
+    }
+    // the manager: the other reports of my managers, at the employers where the line is mine too
+    const managers = people.managersByEmployment([me], null)
+    const myLines = {}
+    for (const [key, managerPartyIds] of Object.entries(managers))
+        for (const managerPartyId of managerPartyIds)
+            (myLines[managerPartyId] || (myLines[managerPartyId] = [])).push(key.split("/")[0])
+    const managerIds = Object.keys(myLines)
+    if (managerIds.length)
+        for (const line of people.linesOf({managerPartyIds: managerIds}, null))
+            add(
+                line.partyId,
+                line.organizationPartyIds.filter(organizationPartyId =>
+                    myLines[line.managerPartyId].includes(organizationPartyId)
+                )
+            )
+    return out
+}
+// The approved leave of the people the caller sees, from start through end (days): their own, a manager's live reports at the
+// line's employers, an HR reader's employers' employees, and an employee's colleagues (colleaguesOf); each segment as "Out" with
+// its days (a morning or an afternoon said so), the person, never the leave type or the reason; openable: whether the caller reads
+// the request (the person, HR or the manager; never a colleague), which the calendar then links.
+function absences(userScope, startDay, endDay) {
+    const caps = userScope.capabilities
+    const factory = ec.entity.conditionFactory
+    const reach = []
+    if (caps.self && userScope.partyId) reach.push(factory.makeCondition("partyId", "equals", userScope.partyId))
+    const lineReach = Object.entries(userScope.reportLines || {})
+    if (caps.self) lineReach.push(...Object.entries(colleaguesOf(userScope)))
+    for (const [partyId, organizationPartyIds] of lineReach)
+        if (organizationPartyIds.length)
+            reach.push(
+                factory.makeCondition(
+                    factory.makeCondition("partyId", "equals", partyId),
+                    "and",
+                    factory.makeCondition("organizationPartyId", "in", organizationPartyIds)
+                )
+            )
+    const employers = hrEmployers(userScope)
+    if (employers.length) reach.push(factory.makeCondition("organizationPartyId", "in", employers))
+    if (!reach.length) return []
+    const found = Array.from(
+        find(REQUEST)
+            .condition(reach.length === 1 ? reach[0] : factory.makeCondition(reach, "or"))
+            .condition("statusEnumId", "in", ["LrsApproved", "LrsCancelRequested"])
+            .condition("fromDay", "less-equals", endDay)
+            .condition("thruDay", "greater-equals", startDay)
+            .limit(requestCap * 4)
+            .list()
+    )
+    const persons = people.personNames(unique(found.map(row => row.partyId)))
+    const out = []
+    for (const row of found)
+        for (const segment of segmentsOf(row.leaveRequestId)) {
+            if (segment.thruDay < startDay || segment.fromDay > endDay) continue
+            const personName = persons[row.partyId] || row.partyId
+            const part = segment.dayPartEnumId === "LdpFull" ? "" : " (" + partTexts[segment.dayPartEnumId].toLowerCase() + ")"
+            out.push({
+                key: "absence|" + row.leaveRequestId + "|" + segment.segmentSeqId,
+                leaveRequestId: row.leaveRequestId,
+                partyId: row.partyId,
+                personName,
+                title: personName + " · Out" + part,
+                fromDay: segment.fromDay,
+                thruDay: segment.thruDay,
+                dayPartEnumId: segment.dayPartEnumId,
+                allDay: segment.dayPartEnumId === "LdpFull",
+                openable:
+                    row.partyId === userScope.partyId ||
+                    employers.includes(row.organizationPartyId) ||
+                    ((userScope.reportLines || {})[row.partyId] || []).includes(row.organizationPartyId),
+                lastUpdatedMs: stampOf(row)
+            })
+        }
+    return out.sort((a, b) => a.fromDay.localeCompare(b.fromDay) || a.personName.localeCompare(b.personName))
+}
+// get#TeamAbsences: the team calendar's items from start to end (yyyy-MM-dd), as Commons' Calendar.qvue takes them (kind absence,
+// read only: whole days all day, a half day from 08:00 or 13:00 for four hours).
+function getTeamAbsences(p) {
+    const userScope = people.scopeOf()
+    const caps = userScope.capabilities
+    if (!caps.self && !caps.team && !caps.hrView)
+        denied("PERMISSION_DENIED", "The team calendar needs PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW or PEOPLE_HR_VIEW")
+    const startDay = dayParam(p.start) || dayOf(nowMs())
+    const endDay = dayParam(p.end) || addDays(startDay, 31)
+    if (endDay < startDay) denied("DATES_INVALID", "The end is on or after the start")
+    const eventList = absences(userScope, startDay, endDay).map(item => ({
+        kind: "absence",
+        key: item.key,
+        leaveRequestId: item.leaveRequestId,
+        openable: item.openable,
+        partyId: item.partyId,
+        title: item.title,
+        start: item.allDay ? item.fromDay : item.fromDay + (item.dayPartEnumId === "LdpMorning" ? " 08:00" : " 13:00"),
+        end: item.allDay ? addDays(item.thruDay, 1) : item.fromDay + (item.dayPartEnumId === "LdpMorning" ? " 12:00" : " 17:00"),
+        allDay: item.allDay,
+        canEdit: false
+    }))
+    return {eventList, startDay, endDay}
+}
+// get#AbsenceProjection: Team absence's projected CalDAV collection (mantle.work.CalendarDavServices, CX-SYNC): whether the caller
+// is admitted (a People user who sees absences: self-service, a manager or an HR reader), and with checkOnly false the events of
+// the range (start, end in epoch millis; 90 days back to a year ahead when none) as the ICalendar tool writes them.
+function getAbsenceProjection(p) {
+    const userScope = people.scopeOf()
+    const caps = userScope.capabilities
+    const admitted = !!(caps.self || caps.team || caps.hrView)
+    if (!admitted || truthy(p.checkOnly)) return {admitted, eventList: []}
+    const startDay = p.start != null && p.start !== "" ? dayOf(Number(p.start)) : addDays(dayOf(nowMs()), -90)
+    const endDay = p.end != null && p.end !== "" ? dayOf(Number(p.end)) : addDays(dayOf(nowMs()), 366)
+    const eventList = absences(userScope, startDay, endDay).map(item => {
+        const halfStart = item.dayPartEnumId === "LdpMorning" ? 8 : 13
+        const startMs = startOfDay(item.fromDay) + halfStart * 60 * 60 * 1000
+        return {
+            uid: "people-absence-" + item.leaveRequestId + "-" + item.key.split("|").pop(),
+            sequence: 0,
+            summary: item.title,
+            status: "CONFIRMED",
+            allDay: item.allDay,
+            start: item.allDay ? null : startMs,
+            end: item.allDay ? null : startMs + 4 * 60 * 60 * 1000,
+            startDate: item.allDay ? item.fromDay : null,
+            endDate: item.allDay ? addDays(item.thruDay, 1) : null,
+            timeZone: ec.user.timeZone || null,
+            lastModified: item.lastUpdatedMs || null
+        }
+    })
+    return {admitted, eventList}
+}
+
 const operations = {
     findPolicies,
     getPolicy,
@@ -1568,7 +2741,17 @@ const operations = {
     findLedger,
     accrueAssignment,
     runAccrual,
-    runAccrualJob
+    runAccrualJob,
+    // P12
+    previewRequest,
+    submitRequest,
+    getRequest,
+    decideRequest,
+    approveNotice,
+    refuseNotice,
+    findRequests,
+    getTeamAbsences,
+    getAbsenceProjection
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown leave operation " + op)

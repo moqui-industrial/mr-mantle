@@ -15,16 +15,21 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Resource availability (design-maintenance §7 and §12 MT-07): the one availability fact of a resource that planning,
     booking and Maintenance read. Manufacturing P11 builds the minimal record of review Y3 (design-manufacturing Downtime
     "One equipment outage fact"): an actual outage of an asset with its interval and its source production downtime, written
-    by mantle.work.ResourceBookingServices.record#ResourceUnavailability. Maintenance MT-07 extends it with planned blocks,
-    facility resources, reasons, work and step sources, bookings, end#ResourceUnavailability and corrections. -->
+    by mantle.work.ResourceBookingServices.record#ResourceUnavailability. Maintenance P5 (impl-maintenance F14) extends it with
+    facility resources, the reason and its planned or unplanned classification, the source work order and step, the
+    correction chain (a correction is a new row; the row it corrects keeps its values and names the row in force), a revision,
+    and the restoration (end#ResourceUnavailability: who ended it, when and with what disposition). Planned blocks are P15's.
+    A row superseded by a correction is history: every read of a resource's current availability leaves it out
+    (supersededByUnavailabilityId is empty on the row in force). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="ResourceUnavailability" package="mantle.work.effort" cache="never">
         <description>A time a resource cannot be used: an actual outage (RukActual) or a planned block (RukPlanned, MT-07).
             The resource is exactly one of assetId and facilityId. An open outage has no thruDate; only Maintenance's
             end#ResourceUnavailability restores the resource (MT-07), and closing the production downtime that recorded it
-            does not. One source occurrence yields one row: a later equipment-fault downtime of the asset links the open
-            one.</description>
+            does not. One source occurrence yields one row: a later equipment-fault downtime of the asset, a second fault
+            Maintenance records or a work order taken offline links the open one. A correction makes a new row and marks
+            this one superseded.</description>
         <field name="resourceUnavailabilityId" type="id" is-pk="true"/>
         <field name="unavailabilityKindEnumId" type="id"/>
         <field name="assetId" type="id"/>
@@ -37,6 +42,32 @@ along with this software (see the LICENSE.md file). If not, see
             (store#ProductionDowntime with an equipment-fault reason)</description></field>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
+        <!-- Maintenance P5 (impl-maintenance F14) -->
+        <field name="unavailabilityReasonEnumId" type="id" enable-audit-log="true"><description>ResourceUnavailabilityReason; a
+            reason with optionIndicator Y is planned (planned maintenance, an inspection), any other unplanned</description></field>
+        <field name="plannedOutage" type="text-indicator"><description>Y: the reason was a planned one when the row was
+            written</description></field>
+        <field name="workEffortId" type="id"><description>The maintenance work order (its root) that recorded the outage; other
+            work orders link it through MaintenanceWorkOrder.resourceUnavailabilityId</description></field>
+        <field name="stepWorkEffortId" type="id"><description>The work order's step that recorded it, when one did</description></field>
+        <field name="revision" type="number-integer"><description>Counts the changes of the row (its end, its
+            supersession) for expectedRevision; empty is 0</description></field>
+        <field name="originalUnavailabilityId" type="id"><description>The first row of a correction chain</description></field>
+        <field name="correctionOfUnavailabilityId" type="id"><description>The row this one corrects</description></field>
+        <field name="supersededByUnavailabilityId" type="id" enable-audit-log="true"><description>The correction in force
+            over this row; a superseded row is history and counts for no availability</description></field>
+        <field name="changeReason" type="text-long"><description>Why a correction was made</description></field>
+        <field name="correctedByUserId" type="id"/>
+        <field name="correctedDate" type="date-time"/>
+        <field name="endedByUserId" type="id"><description>Who restored the resource (end#ResourceUnavailability)</description></field>
+        <field name="endedDate" type="date-time"><description>When the restoration was recorded (thruDate is when the resource
+            became available)</description></field>
+        <field name="dispositionEnumId" type="id" enable-audit-log="true"><description>MaintenanceDisposition at the
+            restoration: available for use or usable with restrictions</description></field>
+        <field name="endComments" type="text-long"><description>The readiness evidence or reason given at the
+            restoration</description></field>
+        <field name="openWorkReason" type="text-long"><description>Why the resource was restored while work orders linked to the
+            outage were still open (they stay open; the user's call of Nov 12, impl-maintenance P5 review)</description></field>
         <relationship type="one" title="ResourceUnavailabilityKind" related="moqui.basic.Enumeration"
                 short-alias="kindEnum"><key-map field-name="unavailabilityKindEnumId"/></relationship>
         <relationship type="one" related="mantle.product.asset.Asset"/>
@@ -45,6 +76,20 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" title="Source" related="mantle.work.production.ProductionDowntime">
             <key-map field-name="sourceProductionDowntimeId" related="productionDowntimeId"/></relationship>
+        <relationship type="one" title="ResourceUnavailabilityReason" related="moqui.basic.Enumeration"
+                short-alias="reasonEnum"><key-map field-name="unavailabilityReasonEnumId"/></relationship>
+        <relationship type="one" title="Work" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="workEffortId"/></relationship>
+        <relationship type="one-nofk" title="Step" related="mantle.work.effort.WorkEffort">
+            <key-map field-name="stepWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one-nofk" title="SupersededBy" related="mantle.work.effort.ResourceUnavailability">
+            <key-map field-name="supersededByUnavailabilityId" related="resourceUnavailabilityId"/></relationship>
+        <relationship type="one-nofk" title="CorrectionOf" related="mantle.work.effort.ResourceUnavailability">
+            <key-map field-name="correctionOfUnavailabilityId" related="resourceUnavailabilityId"/></relationship>
+        <relationship type="one-nofk" title="MaintenanceDisposition" related="moqui.basic.Enumeration"
+                short-alias="dispositionEnum"><key-map field-name="dispositionEnumId"/></relationship>
         <index name="RESUNAVAIL_ASSET"><index-field name="assetId"/><index-field name="thruDate"/></index>
+        <index name="RESUNAVAIL_FACILITY"><index-field name="facilityId"/><index-field name="thruDate"/></index>
+        <index name="RESUNAVAIL_WORK"><index-field name="workEffortId"/></index>
     </entity>
 </entities>
