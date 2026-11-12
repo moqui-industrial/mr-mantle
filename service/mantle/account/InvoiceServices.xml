@@ -1612,6 +1612,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="ProjectExpenseInvoice">
+        <description>An expense invoice from a worker (fromPartyId) to a project's vendor (toPartyId, else the project's Vendor or
+            VendorBillFrom party), linked to the project (WorkEffortInvoice), or to toPartyId with no project. With expenseClaim
+            (People P15, design-people §9, impl-people F21) it is an employee's expense claim: the claimant (fromPartyId) creates
+            only their own (PEOPLE_SELF_SERVICE), unless a holder of PEOPLE_EXPENSE_MANAGE at the employer acts for them (the user's
+            call, impl-people §4, Nov 12, 2026), who is recorded (PERMISSION_DENIED); the employer is the one of the claimant's current employment
+            (partyRelationshipId, else the one with toPartyId, else their only one: EMPLOYMENT_REQUIRED, NOT_EMPLOYED); a project
+            must be one the claimant works on (PROJECT_UNAVAILABLE); and the claim's record is written (ExpenseClaim: a draft on
+            the accounts payable route, with purpose). A retry with the same operationKey answers the first claim. Without
+            expenseClaim its project behavior is unchanged.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.account.invoice.Invoice" include="nonpk"/>
             <parameter name="workEffortId"/>
@@ -1620,11 +1629,20 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="invoiceTypeEnumId" default-value="InvoiceSales"/>
             <parameter name="invoiceDate" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="currencyUomId"/>
+            <!-- People P15: an employee's expense claim -->
+            <parameter name="expenseClaim" type="Boolean" default="false"/>
+            <parameter name="partyRelationshipId"><description>The claimant's employment (expenseClaim)</description></parameter>
+            <parameter name="purpose" allow-html="none"/>
+            <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="invoiceId"/>
         </out-parameters>
         <actions>
+            <if condition="expenseClaim">
+                <set field="invoiceId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('createClaim', context).invoiceId"/>
+                <return/>
+            </if>
             <if condition="!workEffortId &amp;&amp; !toPartyId">
                 <return error="true" message="Must specify either Project (workEffortId) or To Party (toPartyId)"/></if>
 
@@ -2969,6 +2987,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             Called by SECA rule in AccountingInvoice.secas.xml on tx-commit so runs async from triggering thread.
             May also be called directly with toAddresses specified to send to other email address.
+
+            With no toAddresses or toAddressList and forceByType false (the rule's call), an address that already has a
+            message of this type for the invoice, ready or sent, is skipped: the rule runs again from its ServiceOutbox
+            row when its first run did not commit, and must not send a second time.
         </description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
@@ -2977,8 +2999,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toAddressList" type="List"><parameter name="toAddress"><text-email/></parameter></parameter>
             <parameter name="alsoPrimaryEmails" type="Boolean" default="false"/>
             <parameter name="setFinalizedInvoiceSent" type="Boolean" default="true"/>
+            <parameter name="forceByType" type="Boolean" default="false"/>
         </in-parameters>
         <actions>
+            <set field="skipSent" from="!forceByType &amp;&amp; !toAddresses &amp;&amp; !toAddressList?.length"/>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
             <service-call name="mantle.account.InvoiceServices.find#InvoiceProductStores" in-map="context" out-map="context"/>
             <if condition="!productStoreIdSet?.length"><return/></if>
@@ -3017,12 +3041,26 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!storeEmail.emailTemplateId"><continue/></if>
 
                     <iterate list="toAddressesList" entry="toAddressesCur">
+                        <if condition="skipSent">
+                            <entity-find-count entity-name="mantle.account.invoice.InvoiceEmailMessageDetail" count-field="sentCount">
+                                <econdition field-name="invoiceId"/><econdition field-name="emailTypeEnumId"/>
+                                <econdition field-name="toAddresses" from="toAddressesCur"/>
+                                <econdition field-name="statusId" operator="in" value="ES_READY,ES_SENT,ES_RECEIVED,ES_VIEWED"/>
+                            </entity-find-count>
+                            <if condition="sentCount">
+                                <message type="warning">Not sending ${emailTypeEnumId} email for invoice ${invoiceId} to ${toAddressesCur}, already sent</message>
+                                <continue/>
+                            </if>
+                        </if>
                         <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                                 in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                     toAddresses:toAddressesCur, bodyParameters:bodyParameters, toUserId:toUserId}"/>
+                        <!-- the link in a transaction of its own, as send#EmailTemplate stores the message, so a run that rolls
+                            back after the send still finds it -->
                         <if condition="sendOut.emailMessageId"><script><![CDATA[
                             ec.service.sync().name("create#mantle.account.invoice.InvoiceEmailMessage")
-                                .parameter("invoiceId", invoiceId).parameter("emailMessageId", sendOut.emailMessageId).disableAuthz().call()
+                                .parameter("invoiceId", invoiceId).parameter("emailMessageId", sendOut.emailMessageId)
+                                .requireNewTransaction(true).disableAuthz().call()
                             if (setFinalizedInvoiceSent && invoice.statusId === 'InvoiceFinalized') {
                                 ec.service.sync().name("update#mantle.account.invoice.Invoice")
                                     .parameter("invoiceId", invoiceId).parameter("statusId", "InvoiceSent").disableAuthz().call()

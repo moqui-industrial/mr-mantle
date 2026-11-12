@@ -175,6 +175,8 @@ function titlesOf(employmentIds, asOf = null) {
         const positionClass = position?.emplPositionClassId ? classes.get(position.emplPositionClassId) : null
         found[row.partyRelationshipId] = {
             jobTitle: positionClass?.title || position?.description || "",
+            // P18: the job class whose requirements the person is measured against (DevelopmentServices)
+            emplPositionClassId: position?.emplPositionClassId || null,
             terminationReasonEnumId: row.terminationReasonEnumId || null
         }
     }

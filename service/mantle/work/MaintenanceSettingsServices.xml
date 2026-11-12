@@ -15,14 +15,16 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- Maintenance settings (IronStone Maintenance design §9 Settings and Lookups, §13.2 MaintenanceSettingsServices; impl-maintenance
     P3, P18): an organization's work policy (MaintenancePolicy), a dated row a change ends and starts, in MaintenanceWork.js; the
     lookups (Maintenance's fixed kinds and its vocabularies, failure modes with their applicability) and the setup readiness, in
-    MaintenanceSettings.js (P18). Teams join in P8. -->
+    MaintenanceSettings.js (P18); P11's cost threshold is two
+    of the policy's fields, its estimate in MaintenanceCosts.js. Teams join in P8. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
             zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
             self-approval, no voice note transcription, and preventive work made on its day when a plan names no lead days
-            (pmLeadDays, P14).
+            (pmLeadDays, P14), and no cost threshold. The cost threshold (approvalThresholdCost and its currency, P11) is
+            answered to a settings editor or a cost reader only, in the policy and in planned and ended.
             planned: the policies set to start later (P18), in their order; ended: the last ten that ended, newest first (a
             withdrawn plan, ended at its own start, is in neither). canEdit says whether the user may change it.</description>
         <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
@@ -49,7 +51,10 @@ along with this software (see the LICENSE.md file). If not, see
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
             requests and warranty repairs become managed work, whether a procedure's last author may approve it
             (procedureSelfApproval, off by default; impl-maintenance P6), and whether a checklist step's voice note is transcribed
-            (voiceNoteTranscription, off by default; impl-maintenance P7 review).</description>
+            (voiceNoteTranscription, off by default; impl-maintenance P7 review), and the approval threshold's cost half
+            (approvalThresholdCost, zero or more, VALUE_INVALID; empty unsets it, not compared; approvalThresholdCurrencyUomId, a
+            currency, VALUE_INVALID, empty: the organization's base currency; impl-maintenance P11): planned work whose estimated
+            cost is above it, or cannot be priced, needs a supervisor's approval.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
@@ -64,6 +69,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pmLeadDays"><description>The days ahead preventive work is made for a plan whose terms name none
                 (P14; 0 to 365, empty: on the day)</description></parameter>
             <parameter name="voiceNoteTranscription"/>
+            <parameter name="approvalThresholdCost"><description>P11: the estimated cost above which planned work needs a supervisor
+                (empty: not compared)</description></parameter>
+            <parameter name="approvalThresholdCurrencyUomId"><description>P11: the cost threshold's currency (empty: the
+                organization's base currency)</description></parameter>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>

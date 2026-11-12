@@ -39,6 +39,11 @@ const capabilityPermissions = {
     requestApprove: "PEOPLE_REQUEST_APPROVE",
     hrView: "PEOPLE_HR_VIEW",
     hrEdit: "PEOPLE_HR_EDIT",
+    // P14: saving and publishing shifts (the user's call, impl-people §4, Nov 12, 2026), beside a manager's or HR editor's scope
+    rosterEdit: "PEOPLE_ROSTER_EDIT",
+    // P15: every expense claim and advance of the user's employers, and acting for an employee (the user's call, impl-people §4,
+    // Nov 12, 2026); not a staff read: it opens no person's People record (Expense.js reads its employers itself)
+    expenseManage: "PEOPLE_EXPENSE_MANAGE",
     recruitView: "PEOPLE_RECRUIT_VIEW",
     recruitEdit: "PEOPLE_RECRUIT_EDIT",
     developView: "PEOPLE_DEVELOP_VIEW",
@@ -707,6 +712,8 @@ function run(op, p) {
     checkedAccess,
     requireOrganization,
     capabilities,
+    // P15: the employers of an organization read (Expense.js, for PEOPLE_EXPENSE_MANAGE, which is no staff read)
+    employers,
     asOfMillis,
     stamp,
     current,

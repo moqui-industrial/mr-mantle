@@ -27,69 +27,171 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========================================================= -->
 
     <entity entity-name="PartySkill" package="mantle.humanres.ability" use="nontransactional">
+        <description>A party's current level of a skill. IronStone People (design §10, PE-14; impl-people P18) keeps each
+            evaluation as a PartySkillEvaluation and the accepted level here: an evaluation (sourceEnumId SksEvaluated, or
+            SksManagerEvaluated for a manager's evaluation of a report) sets it, a self-declaration (SksSelfDeclared) only where
+            no evaluation has (mantle.humanres.DevelopmentServices.store#Skill). A row with no source was recorded before People
+            (Projects' skills, a rating) and counts as recorded by staff.</description>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
         <field name="rating" type="number-integer"/>
-        <field name="skillLevel" type="number-integer"/>
+        <field name="skillLevel" type="number-integer"><description>The level, a SkillLevel value's number (enumCode, 1 to 5)</description></field>
         <field name="startedUsingDate" type="date-time"/>
         <field name="yearsExperience" type="number-integer"/>
+        <field name="sourceEnumId" type="id"><description>Where the level comes from (SkillSource): self-declared,
+            evaluated or a manager's evaluation; empty for a level recorded before People</description></field>
+        <field name="partySkillEvaluationId" type="id"><description>The evaluation the level is from</description></field>
+        <field name="evaluatedDate" type="date-time"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">
             <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="SkillSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.ability.PartySkillEvaluation"/>
 
         <seed-data>
             <!-- Skill Type -->
             <moqui.basic.EnumerationType description="Skill Type" enumTypeId="SkillType"/>
+            <!-- where a skill level comes from (impl-people P18): a self-declared level satisfies no requirement -->
+            <moqui.basic.EnumerationType description="Skill Source" enumTypeId="SkillSource"/>
+            <moqui.basic.Enumeration enumId="SksSelfDeclared" enumTypeId="SkillSource" description="Self-declared" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="SksEvaluated" enumTypeId="SkillSource" description="Evaluated" sequenceNum="2"/>
+            <!-- a manager's evaluation of a report (the user's call of Nov 12, 2026): meets a requirement as an evaluation does -->
+            <moqui.basic.Enumeration enumId="SksManagerEvaluated" enumTypeId="SkillSource" description="Manager's evaluation" sequenceNum="3"/>
         </seed-data>
     </entity>
+    <entity entity-name="PartySkillEvaluation" package="mantle.humanres.ability" cache="never">
+        <description>One evaluation of a party's skill (IronStone People design §10, PE-14; impl-people P18): a self-declaration
+            or an evaluation by an assessor, with its level, date and evidence (text, and a qualification it rests on). Kept as
+            history, never changed or deleted; PartySkill holds the accepted level. Written through
+            mantle.humanres.DevelopmentServices.store#Skill.</description>
+        <field name="partySkillEvaluationId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="skillTypeEnumId" type="id"/>
+        <field name="sourceEnumId" type="id"/>
+        <field name="skillLevel" type="number-integer"/>
+        <field name="evaluationDate" type="date-time"/>
+        <field name="assessorPartyId" type="id"><description>Who evaluated: the person themselves for a self-declaration</description></field>
+        <field name="evaluatedByUserId" type="id"/>
+        <field name="evidence" type="text-long"/>
+        <field name="partyQualificationId" type="id"><description>A qualification of the person the evaluation rests on</description></field>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="SkillType" related="moqui.basic.Enumeration">
+            <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="SkillSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="Assessor" related="mantle.party.Party">
+            <key-map field-name="assessorPartyId"/></relationship>
+        <relationship type="one" title="EvaluatedBy" related="moqui.security.UserAccount">
+            <key-map field-name="evaluatedByUserId"/></relationship>
+        <relationship type="one" related="mantle.humanres.ability.PartyQualification"/>
+        <index name="PTY_SKL_EVAL_PARTY"><index-field name="partyId"/><index-field name="skillTypeEnumId"/></index>
+    </entity>
 
-    <!-- not yet used so commented for now:
-    <entity entity-name="PartyQualification" package="mantle.humanres.ability" use="nontransactional">
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="qualificationTypeEnumId" type="id" is-pk="true"/>
-        <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="description" type="text-medium"/>
-        <field name="title" type="text-medium"><description>Title of degree or job</description></field>
-        <field name="statusId" type="id"><description>Status e.g. completed, part-time etc.</description></field>
-        <field name="verificationStatusId" type="id"/>
+    <entity entity-name="PartyQualification" package="mantle.humanres.ability" cache="never">
+        <description>A person's qualification: a degree, certificate, licence, work experience, identity document or work permit
+            (IronStone People design §10 Qualifications, PE-14; impl-people P18; refined from the commented sketch, F6). Each has
+            its own identity (a renewal is a new row naming the one it renews, so earlier evidence stays), a type, issuer,
+            reference (the document or certificate number), valid dates and a verification state: submitted (QlVerPending),
+            verified, rejected or revoked by an authorized verifier, never by the person (the state audit-logged with the
+            verifier's reason). An identity document or work permit (QualIdentityDocument, QualWorkPermit and the types under
+            them) needs an expiry, and its reference is read only by the person and HR of an employer of theirs. Its files are on
+            its own content host (PartyQualificationContent, PE-01), never on the Party: the person and HR read them. Staffing
+            reads only whether a verified qualification is valid or expiring (mantle.humanres.DevelopmentServices
+            .check#Qualifications). Written through DevelopmentServices store#Qualification and verify#Qualification.</description>
+        <field name="partyQualificationId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="qualificationTypeEnumId" type="id"/>
+        <field name="title" type="text-medium"><description>Its name, such as the degree or certificate</description></field>
+        <field name="issuerName" type="text-medium"/>
+        <field name="referenceNumber" type="text-medium" ai-opt-out="true"><description>The document or certificate number;
+            restricted for an identity document or work permit, and kept from every model tool (PE-21)</description></field>
+        <field name="fromDate" type="date-time"><description>Issued, or valid from</description></field>
+        <field name="thruDate" type="date-time"><description>Expires: required for an identity document or work permit</description></field>
+        <field name="verificationStatusId" type="id" enable-audit-log="true"/>
+        <field name="submittedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="verifiedByUserId" type="id"/>
+        <field name="verifiedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"><description>Why it was rejected or revoked</description></field>
+        <field name="renewsQualificationId" type="id"><description>The earlier qualification of the same person and type this
+            one renews</description></field>
+        <field name="reminderThruDate" type="date-time"><description>The expiry the person was last reminded of, so a reminder
+            is sent once per expiry</description></field>
+        <field name="comments" type="text-medium"/>
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
             <key-map field-name="qualificationTypeEnumId"/></relationship>
-        <relationship type="one" title="PartyQualification" related="moqui.basic.StatusItem"/>
         <relationship type="one" title="PartyQualificationVerification" related="moqui.basic.StatusItem">
             <key-map field-name="verificationStatusId"/></relationship>
+        <relationship type="one-nofk" title="Renews" related="mantle.humanres.ability.PartyQualification">
+            <key-map field-name="renewsQualificationId" related="partyQualificationId"/></relationship>
+        <index name="PTY_QUAL_PARTY"><index-field name="partyId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Qualification Type" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualDegree" description="Degree" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualCertification" description="Certification" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualExperience" description="Work experience" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualBTech" parentEnumId="DEGREE" description="Bachelor of Technology" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualMBA" parentEnumId="DEGREE" description="Master of Business Administration" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualMSC" parentEnumId="DEGREE" description="Master of Science" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualBSC" parentEnumId="DEGREE" description="Bachelor of Science" enumTypeId="QualificationType"/>
-
-            <moqui.basic.StatusType description="Party Qualification Status" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Completed" sequenceNum="11" statusId="QualCompleted" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Incomplete" sequenceNum="12" statusId="QualIncomplete" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Deferred" sequenceNum="13" statusId="QualDeferred" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Full-time" sequenceNum="21" statusId="QualFulltime" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Part-time" sequenceNum="22" statusId="QualParttime" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Contractor" sequenceNum="23" statusId="QualContractor" statusTypeId="PartyQualification"/>
+            <moqui.basic.Enumeration enumId="QualDegree" description="Degree" enumTypeId="QualificationType" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="QualCertification" description="Certification" enumTypeId="QualificationType" sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="QualLicence" description="Licence" enumTypeId="QualificationType" sequenceNum="3"/>
+            <moqui.basic.Enumeration enumId="QualExperience" description="Work experience" enumTypeId="QualificationType" sequenceNum="4"/>
+            <!-- restricted, with a required expiry: the reference read only by the person and HR -->
+            <moqui.basic.Enumeration enumId="QualIdentityDocument" description="Identity document" enumTypeId="QualificationType" sequenceNum="5"/>
+            <moqui.basic.Enumeration enumId="QualWorkPermit" description="Work permit" enumTypeId="QualificationType" sequenceNum="6"/>
 
             <moqui.basic.StatusType description="Party Qualification Verification Status" statusTypeId="PartyQualificationVerification"/>
-            <moqui.basic.StatusItem description="Not verified" sequenceNum="1" statusId="QlVerNotVerified" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Waiting for verification" sequenceNum="1" statusId="QlVerPending" statusTypeId="PartyQualificationVerification"/>
             <moqui.basic.StatusItem description="Verified" sequenceNum="2" statusId="QlVerVerified" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Rejected" sequenceNum="3" statusId="QlVerRejected" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Revoked" sequenceNum="4" statusId="QlVerRevoked" statusTypeId="PartyQualificationVerification"/>
         </seed-data>
     </entity>
-    <entity entity-name="PartyResume" package="mantle.humanres.ability" use="nontransactional">
-        <field name="resumeId" type="id" is-pk="true"/>
-        <field name="partyId" type="id"/>
+    <entity entity-name="PartyQualificationContent" package="mantle.humanres.ability" cache="never">
+        <description>A file of a qualification: a certificate, a scan of a document (IronStone People PE-01; impl-people P18).
+            The qualification is People's content host, so the file is never on the person's broadly visible Party record;
+            get#RecordLinkInfo and RecordFiles admit it only to the person and a People HR reader of an employer of theirs
+            (mantle.humanres.DevelopmentServices.check#QualificationAccess), and it has no Records-drive folder, so nothing shares
+            it. Written through mantle.humanres.DevelopmentServices.create#QualificationContent.</description>
+        <field name="partyQualificationContentId" type="id" is-pk="true"/>
+        <field name="partyQualificationId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
         <field name="contentLocation" type="text-medium"/>
-        <field name="resumeDate" type="date-time"/>
-        <field name="resumeText" type="text-very-long"/>
-        <relationship type="one" related="mantle.party.Party"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.ability.PartyQualification"/>
+        <relationship type="one" title="QualificationContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Qualification Content Type" enumTypeId="QualificationContentType"/>
+            <moqui.basic.Enumeration description="Certificate" enumId="QlcntCertificate" enumTypeId="QualificationContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Document" enumId="QlcntDocument" enumTypeId="QualificationContentType" sequenceNum="2"/>
+        </seed-data>
     </entity>
+    <entity entity-name="PartyResume" package="mantle.humanres.ability" cache="never">
+        <description>A line of a person's resume (IronStone People design §4 Employee360 SkillsAndReviews; impl-people P18;
+            refined from the commented sketch, F6): earlier work or education, with the organization, the role and the dates.
+            Read with the person's development record (the person, HR and development staff of an employer of theirs) and
+            changed by the person and an HR or development editor (mantle.humanres.DevelopmentServices.store#ResumeLine).</description>
+        <field name="partyResumeId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="resumeLineTypeEnumId" type="id"/>
+        <field name="organizationName" type="text-medium"><description>The employer, school or other organization</description></field>
+        <field name="title" type="text-medium"><description>The role or course</description></field>
+        <field name="fromDate" type="date"/>
+        <field name="thruDate" type="date"/>
+        <field name="description" type="text-long"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="ResumeLineType" related="moqui.basic.Enumeration">
+            <key-map field-name="resumeLineTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Resume Line Type" enumTypeId="ResumeLineType"/>
+            <moqui.basic.Enumeration enumId="RltExperience" description="Experience" enumTypeId="ResumeLineType" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="RltEducation" description="Education" enumTypeId="ResumeLineType" sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="RltOther" description="Other" enumTypeId="ResumeLineType" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+
+    <!-- the review and training sketches stay off until their phases (impl-people P19, P20; F6):
     <entity entity-name="PerformanceReview" package="mantle.humanres.ability" use="nontransactional">
         <field name="performanceReviewId" type="id" is-pk="true"/>
         <field name="employeePartyId" type="id"/>
@@ -992,7 +1094,6 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-long"/>
         <field name="thruDate" type="date-time"><description>When the class was ended: an ended class keeps its positions and
             history and is offered for no new position (mantle.humanres.PositionServices.store#JobClass)</description></field>
-        <!-- FUTURE: associate skills with position class -->
         <seed-data>
             <!-- Work Type -->
             <moqui.basic.EnumerationType description="Work Type" enumTypeId="WorkType"/>
@@ -1032,11 +1133,27 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
     </entity>
     <entity entity-name="EmplPositionClassSkill" package="mantle.humanres.position" use="configuration">
+        <description>A skill a job class requires (IronStone People design §5 JobClassDetail Requirements, §10, PE-14;
+            impl-people P4, P18): the least level, whether a verified qualification of a type must prove it, whether it is
+            required or desired, and the dates it is required between. Each period is its own row, keyed by its start
+            (fromDate, the user's call of Nov 12, 2026), so the requirement's history is kept: a change starts a new row, a
+            requirement removed ends its row (thruDate), never deleted, and a skill required again starts a new one
+            (mantle.humanres.PositionServices.store#JobRequirement). Readers take the row in effect at their date
+            (mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix, PositionServices get#JobClass).</description>
         <field name="emplPositionClassId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="minimumLevel" type="number-integer"><description>The least level, a SkillLevel value's number; empty
+            for any level</description></field>
+        <field name="qualificationTypeEnumId" type="id"><description>A qualification type a verified, valid qualification of
+            which must prove the skill (a certificate or licence)</description></field>
+        <field name="requiredFlag" type="text-indicator"><description>Y required (the default), N desired</description></field>
+        <field name="thruDate" type="date-time"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass"/>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">
             <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
     </entity>
     <entity entity-name="EmplPositionClassParty" package="mantle.humanres.position" use="nontransactional">
         <description>An alternative to EmplPosition and Employment to represent an employee in a position class for

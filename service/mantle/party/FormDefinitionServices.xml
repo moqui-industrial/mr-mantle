@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The survey builder's form definitions (design-drawers-commons §19, crosscut X16; impl-people P16, F51, F62;
+    FormDefinitions.js): a dated DbForm of a registered purpose (mantle.party.FormPurpose) and organization, its dated fields,
+    options and show and require rules, published from a date. Each service checks the permission the form's purpose names and
+    the organization (the purpose's scope service, else the user's own internal organizations) itself, then reads and writes
+    with authorization off. Customer Service's case template and case feedback services (SupportCaseServices,
+    CaseFeedbackServices) keep their names and call the same rules with the case defaults; the apps' screens (the survey
+    builder's Shared/SurveyForms and SurveyFormDetail) call these after the app's access check. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="create" noun="Form" allow-remote="false">
+        <description>A new dated form of a registered purpose for one of the user's organizations for it (PURPOSE_UNAVAILABLE
+            for a purpose with no registration, PERMISSION_DENIED without its edit permission, RECORD_UNAVAILABLE for another
+            organization): no field, or the published fields of another form of the same purpose and organization
+            (sourceFormId), as drafts until publish#Form.</description>
+        <in-parameters>
+            <parameter name="purposeEnumId" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="description" required="true"/>
+            <parameter name="comments"/>
+            <parameter name="sourceFormId"/>
+        </in-parameters>
+        <out-parameters><parameter name="formId"/></out-parameters>
+        <actions>
+            <set field="formId" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('createForm', context).formId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Form" allow-remote="false">
+        <description>A form for its editor or reader (its purpose's edit or view permission, and its organization; a missing
+            form and another organization's are RECORD_UNAVAILABLE alike): its summary (name, purpose, state, first published,
+            last change) and fields as of now, and with includeDrafts for an editor the rows an editor works on with their
+            states (editFields), its rules (conditions) and its problems.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="includeDrafts" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="form" type="Map"/></out-parameters>
+        <actions>
+            <set field="form" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('getForm', context).form"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Forms" allow-remote="false">
+        <description>The forms of the purposes asked for (the registered ones the user edits or reads; PERMISSION_DENIED for
+            none) of one of the user's organizations for them (organizationPartyId, else the first by name; RECORD_UNAVAILABLE
+            for another): each form's summary, purpose, version, the answers its assigned respondents gave and whether the user
+            changes it; the organizations to choose from, the purposes with whether the user builds each, and the published
+            forms to copy.</description>
+        <in-parameters>
+            <parameter name="purposeEnumIds" type="List" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="forms" type="List"/>
+            <parameter name="organizations" type="List"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="sourceOptions" type="List"/>
+            <parameter name="purposes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('findForms', context)"/>
+            <script>for (const name of ['forms', 'organizations', 'organizationPartyId', 'sourceOptions', 'purposes']) context[name] = out[name]</script>
+        </actions>
+    </service>
+    <service verb="rename" noun="Form" allow-remote="false">
+        <description>A form's name and what it is for (its purpose's edit permission and organization); no expression.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="description" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('renameForm', context)</script>
+        </actions>
+    </service>
+    <service verb="save" noun="FormField" allow-remote="false">
+        <description>A field of a form (its purpose's edit permission and organization): a draft changed in place; a published
+            field's label, help, required flag, order and options from now; a new kind or audience, or a change from a later
+            date, a successor field. Choices take their options as lines of "value | label"; no expression in any text; an
+            answered field is never redefined (FIELD_TYPE, OPTIONS_REQUIRED, NO_EXPRESSIONS, FIELD_ENDED, DATE_PAST,
+            TEMPLATE_INVALID for a change that would leave the form with a new problem).</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="fieldName"/>
+            <parameter name="newFieldName"/>
+            <parameter name="title"/>
+            <parameter name="tooltip"/>
+            <parameter name="fieldTypeEnumId"/>
+            <parameter name="audienceEnumId"><description>CfaCustomer or CfaInternal (the default)</description></parameter>
+            <parameter name="isRequired"/>
+            <parameter name="layoutSequenceNum"/>
+            <parameter name="optionText"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="fieldName"/><parameter name="successor" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('saveField', context)"/>
+            <set field="fieldName" from="saved.fieldName"/>
+            <set field="successor" from="!!saved.successor"/>
+        </actions>
+    </service>
+    <service verb="save" noun="FormCondition" allow-remote="false">
+        <description>A show or require rule between two fields of a form (its purpose's edit permission and organization): a
+            choice compared with its options, any field by empty or filled in; no cycle, no customer field depending on an
+            internal one.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="sourceFieldName" required="true"/>
+            <parameter name="operator"/>
+            <parameter name="value"/>
+            <parameter name="targetFieldName" required="true"/>
+            <parameter name="effect"/>
+        </in-parameters>
+        <out-parameters><parameter name="dependencySeqId"/></out-parameters>
+        <actions>
+            <set field="dependencySeqId" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('saveCondition', context).dependencySeqId"/>
+        </actions>
+    </service>
+    <service verb="end" noun="FormPart" allow-remote="false">
+        <description>A field (with its rules), an option or a rule of a form ends at thruDate (now or later); a draft is
+            deleted. An answered field or option is ended, never deleted.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="part" required="true"><description>field, option or condition</description></parameter>
+            <parameter name="fieldName"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="dependencySeqId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('endPart', context)</script>
+        </actions>
+    </service>
+    <service verb="publish" noun="Form" allow-remote="false">
+        <description>A form's drafts start at fromDate (now or later), each replacing the row it replaces; refused while the
+            form has a problem (FORM_INVALID: no field, a choice with no option, an expression, a cycle). A response reads the
+            form as of its time, so earlier answers keep their questions.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="publishedFieldNames" type="List"/></out-parameters>
+        <actions>
+            <set field="publishedFieldNames" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormDefinitions.js').execute('publishForm', context).publishedFieldNames"/>
+        </actions>
+    </service>
+</services>

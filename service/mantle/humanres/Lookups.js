@@ -34,6 +34,15 @@ const families = {
             ["mantle.humanres.leave.LeavePolicy", "leaveTypeEnumId"],
             ["mantle.humanres.leave.LeaveLedgerEntry", "leaveTypeEnumId"]
         ]
+    },
+    // P18: the kinds of qualification (design §10 Qualifications; identity documents and work permits among them) a person holds
+    // and a job class's requirement names
+    QualificationType: {
+        title: "Qualification types",
+        uses: [
+            ["mantle.humanres.ability.PartyQualification", "qualificationTypeEnumId"],
+            ["mantle.humanres.position.EmplPositionClassSkill", "qualificationTypeEnumId"]
+        ]
     }
 }
 // the most values a family lists

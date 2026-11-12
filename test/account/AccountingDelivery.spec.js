@@ -389,7 +389,7 @@ feature("a batch does each invoice on its own, names the stale one and keeps its
         other.found == false
     }
 })
-feature("a store's finalized notice is sent, and not for an invoice send#Invoice issued", {
+feature("a store's finalized notice is sent once, and not for an invoice send#Invoice issued", {
     when() {
         helper().call("create#mantle.product.store.ProductStore", {
             productStoreId: "NATIVE_SEND_STORE",
@@ -424,14 +424,20 @@ feature("a store's finalized notice is sent, and not for an invoice send#Invoice
         })
         assert(ec.factory.waitWorkerPoolEmpty(50), "Invoice mail worker pool did not drain")
         const noticeCount = capture.count()
+        // the rule's call again (its ServiceOutbox row run after a first run that did not commit): the address has its
+        // notice, so nothing is sent
+        native("send#InvoiceStoreEmail", {invoiceId: notice.invoiceId, emailTypeEnumId: "PsetInvoiceFinalized"})
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Invoice mail worker pool did not drain")
+        const replayCount = capture.count()
         const manual = helper().draft(f, "13")
         capture.clear()
         const sent = native("send#Invoice", Object.assign(sendRequest(manual, "native-store-manual"), {toAddresses: null}))
         assert(ec.factory.waitWorkerPoolEmpty(50), "Invoice mail worker pool did not drain")
-        return {noticeCount, manualCount: capture.count(), sent}
+        return {noticeCount, replayCount, manualCount: capture.count(), sent}
     },
-    then({noticeCount, manualCount, sent}) {
+    then({noticeCount, replayCount, manualCount, sent}) {
         noticeCount == 1
+        replayCount == 1
         manualCount == 1
         sent.recipientResults[0].recipient == "store@example.com"
     }
