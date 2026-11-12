@@ -1128,7 +1128,14 @@ const L = (text) => ec.l10n.localize(text)
             own person. IronStone People (impl-people P18, its SkillsMatrix's FindAvailable; an owner contract with Projects, whose
             callers pass neither): partyIdList bounds the people to those given (the people of the caller's People scope), and
             each candidate's skillSelfDeclared says the skill's level is the person's own claim (PartySkill sourceEnumId
-            SksSelfDeclared), which People labels and no requirement takes.
+            SksSelfDeclared), which People labels and no requirement takes. IronStone Maintenance (impl-maintenance P8, its technician
+            assignment; Projects' and People's callers pass none of these): skillList ranks by several skills, each with a least
+            level ({skillTypeEnumId, minimumLevel}): each candidate's skills [{skillTypeEnumId, level, selfDeclared, meets}] (a
+            self-declared level meets nothing), skillsMet, hasSkill (every one met) and skillRating (the mean level held); a window
+            (windowFrom and windowThru, timestamps, instead of the allocation's fields) counts the free hours of the days it covers
+            (each day's capacity, with schedules, holidays and leave, less its share of the person's allocations that week) against
+            windowHours (the window's length when not given): fits when they cover it; with a window every person of partyIdList is
+            a candidate.
         </description>
         <in-parameters>
             <parameter name="workEffortAllocationId"/>
@@ -1141,6 +1148,10 @@ const L = (text) => ec.l10n.localize(text)
             <parameter name="limit" type="Integer" default="20"/>
             <parameter name="withRates" type="Boolean" default="false"/>
             <parameter name="partyIdList" type="List"><description>Only these people (IronStone People's scope, P18)</description></parameter>
+            <parameter name="skillList" type="List"><description>Several skills, each {skillTypeEnumId, minimumLevel} (Maintenance P8)</description></parameter>
+            <parameter name="windowFrom" type="Timestamp"/>
+            <parameter name="windowThru" type="Timestamp"/>
+            <parameter name="windowHours" type="BigDecimal"/>
         </in-parameters>
         <out-parameters>
             <parameter name="candidateList" type="List"/>
@@ -1150,7 +1161,13 @@ const L = (text) => ec.l10n.localize(text)
             const dayOf = (value) => { if (value == null || value === '') return ''; const text = String(value); return /^-?\d+$/.test(text) ? new Date(Number(text)).toISOString().slice(0, 10) : text.slice(0, 10) }
 candidateList = []
             const round = (value) => Math.round(value * 100) / 100
-            if (workEffortAllocationId) {
+            const windowed = windowFrom != null && windowThru != null
+            if (windowed) {
+                if (ec.user.timestampMillis(windowThru) <= ec.user.timestampMillis(windowFrom)) { ec.message.addError(ec.l10n.localize('The window ends before it starts')); return }
+                const localDay = (stamp) => ec.l10n.format(new Date(ec.user.timestampMillis(stamp)), 'yyyy-MM-dd')
+                allocation = {fromDate: localDay(windowFrom), thruDate: localDay(windowThru), hoursPerWeek: null, allocationPercent: null,
+                    roleTypeId: roleTypeId || null, skillTypeEnumId: skillTypeEnumId || null}
+            } else if (workEffortAllocationId) {
                 const access = ec.service.sync().name('mantle.work.ResourceServices.get#AllocationAccess').parameters({workEffortAllocationId: workEffortAllocationId,
                     need: 'view'}).call() || {}
                 if (ec.message.hasError()) return
@@ -1164,6 +1181,10 @@ candidateList = []
             }
             const role = allocation.roleTypeId || null
             const skill = allocation.skillTypeEnumId || null
+            // Maintenance's skills, each with its least level (the single skill otherwise)
+            const skillAsks = (skillList != null ? Array.from(skillList) : []).map((row) => ({skillTypeEnumId: String(row.skillTypeEnumId || ''),
+                    minimumLevel: row.minimumLevel == null || row.minimumLevel === '' ? null : Number(String(row.minimumLevel))}))
+                    .filter((row) => row.skillTypeEnumId)
             const dayNum = (text) => Math.floor(Date.parse(String(text).slice(0, 10) + 'T00:00:00Z') / 86400000)
             const dayText = (num) => new Date(num * 86400000).toISOString().slice(0, 10)
             const isoDayOf = (text) => { const js = new Date(String(text).slice(0, 10) + 'T12:00:00Z').getUTCDay(); return js === 0 ? 7 : js }
@@ -1181,12 +1202,18 @@ candidateList = []
                 const skillRows = {}
                 if (skill) for (const row of ec.entity.find('mantle.humanres.ability.PartySkill').condition('skillTypeEnumId', skill).list()) {
                     pool.add(row.partyId); skillRows[row.partyId] = row }
+                const askedRows = {}
+                if (skillAsks.length) for (const row of ec.entity.find('mantle.humanres.ability.PartySkill')
+                        .condition('skillTypeEnumId', 'in', skillAsks.map((ask) => ask.skillTypeEnumId)).list()) {
+                    pool.add(row.partyId); askedRows[row.partyId + '/' + row.skillTypeEnumId] = row }
                 const roleHolders = new Set()
                 if (role) for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('roleTypeId', role).conditionDate('fromDate', 'thruDate', null)
                         .selectField('partyId').list()) { roleHolders.add(row.partyId); pool.add(row.partyId) }
                 // People's FindAvailable bounds the pool to the people of its scope (impl-people P18)
                 const bounded = partyIdList != null ? new Set(Array.from(partyIdList).map(String)) : null
                 if (bounded) for (const id of Array.from(pool)) if (!bounded.has(id)) pool.delete(id)
+                // Maintenance's window: every person given is a candidate, whether or not they keep time or hold a skill
+                if (bounded && windowed) for (const id of bounded) pool.add(id)
                 let people = pool.size ? Array.from(ec.entity.find('mantle.party.Person').condition('partyId', 'in', Array.from(pool)).selectField('partyId').list()).map((row) => row.partyId) : []
                 if (allocation.partyId) people = people.filter((id) => id !== allocation.partyId || allocation.statusId === 'WealRequested')
                 if (!people.length) return
@@ -1212,11 +1239,23 @@ candidateList = []
                     try {
                         const capacity = capacities[person]
                         if (!capacity) continue
-                        const need = weeksOf(allocation, capacity)
                         const taken = {}
                         for (const row of allocRows.filter((one) => one.partyId === person)) for (const [week, hours] of Object.entries(weeksOf(row.getMap(), capacity)))
                             taken[week] = (taken[week] || 0) + hours
                         let freeHours = 0, needHours = 0, shortWeeks = 0, minFree = null
+                        if (windowed) {
+                            // the window's days: each day's capacity less its share (by the day's base hours) of the week's allocations
+                            const weekBase = {}
+                            for (const week of Array.from(capacity.weekList || [])) weekBase[week.weekStart] = Number(week.base) || 0
+                            for (const day of Array.from(capacity.dayList || [])) {
+                                if (day.day < fromDay || day.day > thruDay) continue
+                                const share = weekBase[day.weekStart] > 0 ? (taken[day.weekStart] || 0) * (Number(day.base) || 0) / weekBase[day.weekStart] : 0
+                                freeHours += Math.max(0, (Number(day.capacity) || 0) - share)
+                            }
+                            needHours = windowHours != null ? Number(String(windowHours)) : (ec.user.timestampMillis(windowThru) - ec.user.timestampMillis(windowFrom)) / 3600000
+                            shortWeeks = freeHours + 0.01 < needHours ? 1 : 0
+                        }
+                        const need = windowed ? {} : weeksOf(allocation, capacity)
                         for (const week of Array.from(capacity.weekList || [])) {
                             const needWeek = need[week.weekStart] || 0
                             if (!(needWeek > 0)) continue
@@ -1235,6 +1274,21 @@ candidateList = []
                             skillSelfDeclared: skillRow?.sourceEnumId === 'SksSelfDeclared', hasRole: roleHolders.has(person),
                             fits: shortWeeks === 0 && needHours > 0, shortWeeks: shortWeeks, freeHours: round(freeHours), needHours: round(needHours),
                             minFreeWeek: minFree == null ? null : round(minFree), currentProjects: projects, costRate: null, costCurrencyUomId: null}
+                        if (skillAsks.length) {
+                            // Maintenance's skills: each level held, and met only by a level not self-declared at the least asked
+                            entry.skills = skillAsks.map((ask) => {
+                                const row = askedRows[person + '/' + ask.skillTypeEnumId]
+                                const level = row ? Number(String(row.skillLevel ?? row.rating ?? 0)) : null
+                                const selfDeclared = row?.sourceEnumId === 'SksSelfDeclared'
+                                return {skillTypeEnumId: ask.skillTypeEnumId, level: level, selfDeclared: selfDeclared,
+                                    meets: level != null && level > 0 && !selfDeclared && (ask.minimumLevel == null || level >= ask.minimumLevel)}
+                            })
+                            entry.skillsMet = entry.skills.filter((one) => one.meets).length
+                            entry.hasSkill = entry.skillsMet === skillAsks.length
+                            const held = entry.skills.filter((one) => one.level != null)
+                            entry.skillRating = held.length ? round(held.reduce((sum, one) => sum + one.level, 0) / held.length) : null
+                            entry.skillSelfDeclared = held.some((one) => one.selfDeclared)
+                        }
                         if (showRates && !payHidden.has(person)) {
                             const rate = Array.from(ec.entity.find('mantle.humanres.rate.RateAmount').condition('partyId', person).condition('ratePurposeEnumId', 'RaprVendor')
                                     .condition('workEffortId', 'is-null', null).conditionDate('fromDate', 'thruDate', nowStamp).orderBy('-fromDate').limit(1).list())[0]
@@ -1246,6 +1300,7 @@ candidateList = []
                     }
                 }
                 const scoreOf = (one) => (one.fits ? 1000 : 0) + (one.hasSkill ? 200 + 10 * (one.skillRating || 0) : 0) + (one.hasRole ? 100 : 0)
+                        + 20 * (one.skillsMet || 0)
                 candidateList.sort((a, b) => scoreOf(b) - scoreOf(a) || b.freeHours - a.freeHours || a.name.localeCompare(b.name))
                 candidateList = candidateList.slice(0, Math.max(1, Number(limit) || 20))
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }

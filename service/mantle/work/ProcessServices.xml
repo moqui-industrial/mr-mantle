@@ -253,8 +253,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>One planned requirement of a procedure's step (or its root), new, changed or removed (remove):
             kind product (a part, WorkEffortProduct of type consume, dated: a change ends the row and starts the next; productId,
             estimatedQuantity), asset (equipment needed, WorkEffortAssetNeeded; assetProductId, estimatedQuantity,
-            estimatedDuration) or skill (WorkEffortSkillStandard; skillTypeEnumId, estimatedNumPeople, estimatedDuration; People's
-            minimumSkillLevel joins in Maintenance's P8, impl-maintenance F75). WORK_PROCESS_EDIT.</description>
+            estimatedDuration) or skill (WorkEffortSkillStandard; skillTypeEnumId, estimatedNumPeople, estimatedDuration, People's
+            minimumSkillLevel (a skill level's number, VALUE_INVALID) and qualificationTypeEnumId (the QualificationType that must
+            prove it, VALUE_INVALID), which assignment checks; impl-maintenance P8, F75). WORK_PROCESS_EDIT.</description>
         <in-parameters>
             <parameter name="rootWorkEffortId" required="true"/>
             <parameter name="workEffortId"/>
@@ -265,6 +266,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedQuantity"/>
             <parameter name="estimatedNumPeople"/>
             <parameter name="estimatedDuration"/>
+            <parameter name="minimumSkillLevel"/>
+            <parameter name="qualificationTypeEnumId"/>
             <parameter name="remove" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>

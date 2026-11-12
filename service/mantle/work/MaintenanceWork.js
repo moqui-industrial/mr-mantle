@@ -20,14 +20,16 @@
 //   work is never approved on create as corrective work is.
 // - Assignments are schedule's (the generic WorkEffortParty writers refuse managed work, F59): a team (role OrgTeam, a team of the
 //   organization) and the people (Assignee, the organization's employees or agents), with the planned window. A new assignee is
-//   told on MaintenanceWork after the write.
+//   told on MaintenanceWork after the write. P8 (MaintenanceDispatch.js): the people added and Start's assignees are checked on
+//   the work's qualifications, a warning or, under the policy's block, a refusal; the bulk form assigns or schedules each order.
 // - Time (F66): the time services check no work access, so the work order's own entry points check the caller's assignment,
 //   the work in progress and no template, then call TimesheetServices start#Timer and stop#Timer and TimeServices.store#TimeEntry
 //   unchanged. A root's totals are the sum of the distinct TimeEntry rows of its tree, never a parent's rolled-up time plus its
 //   children's.
 // - Adoption (design §6, §13.2): an open AssetMaintenance with no linked work (Manufacturing's request, the baseline's) gets a
-//   managed root, once (a retry answers the first root); completed and cancelled history stays unmanaged, a warranty repair
-//   keeps Customer Service's path (P12).
+//   managed root, once (a retry answers the first root); completed and cancelled history stays unmanaged. P12: a warranty repair
+//   (link#WarrantyWork's) is adopted only where the organization's policy manages warranty repairs, its task the root; else it keeps
+//   Customer Service's path (OWNER_PATH). Its Start rechecks the claim's decision and consent (MaintenanceRepairs.js).
 // - Writes name the revision they read (expectedRevision; RECORD_CHANGED naming the current one), and create takes an operation
 //   key (a retry answers the first root; changed input under the key is OPERATION_KEY_CONFLICT).
 // - Lists (F83): a holder of every organization who chose an active organization lists that organization's work; a record
@@ -50,6 +52,10 @@ const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/w
 const materials = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceMaterials.js")
 // P11: the threshold's cost half
 const costs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceCosts.js")
+// P12: the customer repair (Customer Service's claim through WarrantyServices)
+const repairs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceRepairs.js")
+// P8: the qualification check of assignment and Start, and the bulk assignment's messages
+const dispatch = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceDispatch.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -205,6 +211,8 @@ const policyFields = {
     procedureSelfApproval: flagField("procedureSelfApproval"),
     // P7 review
     voiceNoteTranscription: flagField("voiceNoteTranscription"),
+    // P8: a technician missing or expired on the work's qualifications is refused (Y), not only warned of
+    qualificationBlocks: flagField("qualificationBlocks"),
     // P14: the days before a due date a plan's work is made when its terms name none (empty: on the day)
     pmLeadDays: {
         none: null,
@@ -769,6 +777,8 @@ function adoptWith(userScope, p) {
     const maintenance = assetMaintenanceId ? one(MAINTENANCE, {assetMaintenanceId}) : null
     if (!maintenance || !maintenance.assetId)
         denied("RECORD_UNAVAILABLE", "Maintenance " + (assetMaintenanceId || "") + " is not available")
+    // P12: a warranty repair's task becomes the root, read by its organization, not by the customer's asset
+    if (maintenance.maintenanceTypeEnumId === "MntTpWarranty") return adoptRepair(userScope, maintenance, p)
     const target = targetOf(userScope, {assetId: maintenance.assetId})
     const earlier = Array.from(find(ORDER, {assetMaintenanceId}).limit(1).list())[0]
     if (earlier) {
@@ -784,8 +794,6 @@ function adoptWith(userScope, p) {
             "RECORD_CLOSED",
             "Maintenance " + assetMaintenanceId + " is " + statusText(maintenance.statusId) + "; its history stays as it is"
         )
-    if (maintenance.maintenanceTypeEnumId === "MntTpWarranty")
-        denied("OWNER_PATH", "Maintenance " + assetMaintenanceId + " is a warranty repair, worked from its case")
     if (maintenance.taskWorkEffortId)
         denied("LINKED_WORK", "Maintenance " + assetMaintenanceId + " already has work " + maintenance.taskWorkEffortId)
     const asset = target.asset
@@ -809,6 +817,69 @@ function adoptWith(userScope, p) {
     )
     call("update#" + MAINTENANCE, {assetMaintenanceId, taskWorkEffortId: made.workEffortId})
     return Object.assign(made, {adopted: true})
+}
+
+// P12: a warranty repair Customer Service linked (an AssetMaintenance of type MntTpWarranty with its WepMaintenance task) made a
+// managed work order, once, where its organization's policy manages warranty repairs (else OWNER_PATH, worked from its case): the
+// task is the root, kept with its assignee and the organization that owns it (the claim's), the asset stays the customer's and is
+// never read as the organization's equipment, and the work is corrective and approved (in progress when the record is).
+function adoptRepair(userScope, maintenance, p) {
+    const assetMaintenanceId = maintenance.assetMaintenanceId
+    const task = maintenance.taskWorkEffortId ? one(WORK, {workEffortId: maintenance.taskWorkEffortId}) : null
+    const organizationPartyId = task?.ownerPartyId || null
+    if (!task || !maintenanceAccess.covers(userScope, organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Maintenance " + assetMaintenanceId + " is not available")
+    const earlier = one(ORDER, {workEffortId: task.workEffortId})
+    if (earlier) {
+        readOrder(userScope, earlier.workEffortId)
+        return {workEffortId: earlier.workEffortId, statusId: task.statusId, repeated: true}
+    }
+    const policy = policyOf(organizationPartyId)
+    if (!policy.warrantyRepairsManaged)
+        denied("OWNER_PATH", "Maintenance " + assetMaintenanceId + " is a warranty repair, worked from its case")
+    if (["AsMntCompleted", "AsMntCancelled"].includes(maintenance.statusId) || doneStatuses.includes(task.statusId))
+        denied(
+            "RECORD_CLOSED",
+            "Maintenance " + assetMaintenanceId + " is " + statusText(maintenance.statusId) + "; its history stays as it is"
+        )
+    if (
+        task.purposeEnumId !== "WepMaintenance" ||
+        task.isTemplate === "Y" ||
+        (task.rootWorkEffortId && task.rootWorkEffortId !== task.workEffortId)
+    )
+        denied("LINKED_WORK", "Maintenance " + assetMaintenanceId + " already has work " + task.workEffortId)
+    // the policy's team checked before any write: a refusal leaves the repair Customer Service's, unchanged (review R2)
+    const teamId =
+        policy.defaultTeamPartyId && !currentParties(task.workEffortId, teamRole).length
+            ? requireTeam(organizationPartyId, policy.defaultTeamPartyId)
+            : null
+    const statusId = maintenance.statusId === "AsMntInProcess" || task.statusId === "WeInProgress" ? "WeInProgress" : "WeApproved"
+    call("update#" + WORK, {
+        workEffortId: task.workEffortId,
+        statusFlowId: "WorkEffortMaintenance",
+        statusId,
+        timeUomId: "TF_hr",
+        priority: task.priority ?? (blank(p.priority) ? 5 : Number(p.priority)),
+        actualStartDate: statusId === "WeInProgress" ? task.actualStartDate || ec.user.nowTimestamp : task.actualStartDate || null
+    })
+    call("create#" + ORDER, {
+        workEffortId: task.workEffortId,
+        assetId: maintenance.assetId,
+        assetMaintenanceId,
+        maintenanceKindEnumId: "MkCorrective",
+        maintenanceTypeEnumId: "MntTpWarranty",
+        sourceEnumId: "MsrcWarranty",
+        revision: 1
+    })
+    if (teamId)
+        call("create#" + PARTY, {
+            workEffortId: task.workEffortId,
+            partyId: teamId,
+            roleTypeId: teamRole,
+            fromDate: ec.user.nowTimestamp,
+            statusId: "WeptAssigned"
+        })
+    return {workEffortId: task.workEffortId, statusId, approved: true, assetMaintenanceId, repeated: false, adopted: true}
 }
 
 // ===== store#MaintenanceWorkOrder =====
@@ -1007,12 +1078,15 @@ function scheduleWorkOrder(p) {
     requireWindow(fromDate, thruDate)
     if (ms(fromDate) !== ms(root.estimatedStartDate) || ms(thruDate) !== ms(root.estimatedCompletionDate))
         call("update#" + WORK, {workEffortId: root.workEffortId, estimatedStartDate: fromDate, estimatedCompletionDate: thruDate})
+    // P8 (review Y8): the people added checked on the work's qualifications at its planned start (now when none): a warning, or
+    // refused under the organization's block policy
+    const qualificationWarnings = dispatch().checkQualified(organizationPartyId, root.workEffortId, added, fromDate ?? now)
     const revision = bump(order)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     if (added.length) notifyAssigned(root.workEffortId, added)
     // P14 review: a plan's work reminds the people assigned to it a day before its due date
     if (order.maintenanceScheduleId) remindAssignees(root.workEffortId, added, removed)
-    return {workEffortId: root.workEffortId, revision, addedPartyIds: added, removedPartyIds: removed}
+    return {workEffortId: root.workEffortId, revision, addedPartyIds: added, removedPartyIds: removed, qualificationWarnings}
 }
 // The due reminders of a plan's work order (design §5.1, impl-maintenance P14 review): each person newly assigned to its root gets
 // a reminder a day before its due date (the root's planned finish; the reminder job, EventServices send#DueReminders, sends it on
@@ -1099,14 +1173,28 @@ function refusalOf(userScope, ctx, action) {
                 message: "Planned work over the approval threshold needs a supervisor's approval"
             }
         case "start":
-            if (executing(caps, assigned)) return null
-            return caps.execute
-                ? {reason: "NOT_ASSIGNED", message: "Work order " + root.workEffortId + " is not assigned to you"}
-                : {reason: "PERMISSION_DENIED", message: "A technician assigned to the work, or a supervisor, starts it"}
+            if (!executing(caps, assigned))
+                return caps.execute
+                    ? {reason: "NOT_ASSIGNED", message: "Work order " + root.workEffortId + " is not assigned to you"}
+                    : {reason: "PERMISSION_DENIED", message: "A technician assigned to the work, or a supervisor, starts it"}
+            // P8: Start rechecks its assignees' qualifications; under the block policy one missing or expired refuses it
+            if (policy.qualificationBlocks)
+                try {
+                    dispatch().checkStart(ctx.organizationPartyId, root.workEffortId)
+                } catch (error) {
+                    if (lib.reasonCode(error) !== "QUALIFICATION_BLOCKED") throw error
+                    return {
+                        reason: "QUALIFICATION_BLOCKED",
+                        message: String(error.message).replace(/^QUALIFICATION_BLOCKED: /, "")
+                    }
+                }
+            // P12: a customer repair starts only while its claim allows it (Customer Service's decision and consent)
+            return repairs().standingOf(order)
         case "resume": {
             const to = order.holdFromStatusId || "WeApproved"
             if (to === "WeInProgress") {
-                if (executing(caps, assigned)) return null
+                // P12 review R4: a customer repair resumes into progress only while its claim allows it, as Start
+                if (executing(caps, assigned)) return repairs().standingOf(order)
                 return {reason: "NOT_ASSIGNED", message: "A technician assigned to the work, or a supervisor, resumes it"}
             }
             // approved work is a supervisor's to hold and resume (the flow's row needs MAINTENANCE_SUPERVISE)
@@ -1175,10 +1263,10 @@ function actionsFor(userScope, ctx) {
                 needsCancelReason: action === "cancel",
                 needsCompletion: action === "complete",
                 needsDisposition: action === "complete" && !!ctx.order.assetId,
-                // P5: Start's offline intent and Complete's follow-up
-                needsOffline: action === "start",
+                // P5: Start's offline intent and Complete's follow-up (neither for a customer's unit away, P12 review R3)
+                needsOffline: action === "start" && !customerUnitAway(userScope, ctx.order),
                 offlineIntent: ctx.order.offlineIntent === "Y",
-                needsFollowUp: action === "complete",
+                needsFollowUp: action === "complete" && !customerUnitAway(userScope, ctx.order),
                 // P14 (F187): a meter plan's work asks for the reading it took when it has none
                 readingMeterName: action === "complete" ? plans().readingNeeded(ctx.order)?.meterName || null : null,
                 // P10: the outside-service lines the caller may accept at completion, with the work's files as evidence
@@ -1202,6 +1290,7 @@ function transitionWorkOrder(p) {
     const workFields = {workEffortId: root.workEffortId}
     const orderFields = {}
     let resultCode
+    let qualificationWarnings = []
     switch (action) {
         case "approve":
             workFields.statusId = "WeApproved"
@@ -1210,6 +1299,8 @@ function transitionWorkOrder(p) {
         case "start": {
             const started = p.actualStartDate || now
             if (ms(started) > nowMs() + minuteMs) denied("DATE_FUTURE", "Work starts now or earlier")
+            // P8: the assignees' qualifications rechecked (a warning; the block policy refused above)
+            qualificationWarnings = dispatch().checkStart(ctx.organizationPartyId, root.workEffortId)
             workFields.statusId = "WeInProgress"
             if (!root.actualStartDate) workFields.actualStartDate = started
             resultCode = "STARTED"
@@ -1288,9 +1379,16 @@ function transitionWorkOrder(p) {
         resultCode,
         resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
         followUpWorkEffortId: downtime.followUpWorkEffortId || null,
-        serviceAcceptanceId: accepted?.serviceAcceptanceId || null
+        serviceAcceptanceId: accepted?.serviceAcceptanceId || null,
+        qualificationWarnings
     }
 }
+// P12 review R3: a customer repair's unit that no facility of the user's organizations holds is in no Maintenance scope; the
+// organization records no outage of it and makes no follow-up on it (further work is linked from the claim)
+const customerUnitAway = (userScope, order) =>
+    order.sourceEnumId === "MsrcWarranty" &&
+    !!order.assetId &&
+    !maintenanceAccess.covers(userScope, maintenanceAccess.assetOrganization(order.assetId))
 // The downtime of a transition (P5): Start with offline intent (the order's, or offlineIntent given) records the target's outage
 // as planned maintenance, or links the one open; Complete leaving equipment still unavailable records its outage when none is
 // open, and a follow-up (followUpName) is a new corrective work order on the same target, caused by this one and linked to its
@@ -1299,8 +1397,12 @@ function downtimeOf(userScope, ctx, action, p, workFields) {
     const {root, order} = ctx
     const target = order.assetId ? {assetId: order.assetId} : {facilityId: root.facilityId}
     const answer = {}
+    const customerUnit = customerUnitAway(userScope, order)
+    const refuseCustomerUnit = what =>
+        denied("CUSTOMER_EQUIPMENT", "Equipment " + order.assetId + " is the customer's and away from your facilities: " + what)
     if (action === "start") {
         const offline = p.offlineIntent != null && p.offlineIntent !== "" ? flag(p.offlineIntent) : order.offlineIntent === "Y"
+        if (offline && customerUnit) refuseCustomerUnit("start the work without taking it out of service here")
         if (offline)
             answer.resourceUnavailabilityId = outages.record(
                 Object.assign({}, target, {
@@ -1313,6 +1415,10 @@ function downtimeOf(userScope, ctx, action, p, workFields) {
         return answer
     }
     if (action !== "complete") return answer
+    if (customerUnit) {
+        if (text(p.followUpName)) refuseCustomerUnit("further work on it is linked from its claim, not as a follow-up")
+        return answer
+    }
     const linked = outages.workOutage(one(ORDER, {workEffortId: root.workEffortId}))
     let openId = linked?.open ? linked.resourceUnavailabilityId : outages.openOutage(target)?.resourceUnavailabilityId || null
     if (!openId && order.assetId && text(p.dispositionEnumId) === "MdispUnavailable")
@@ -1353,11 +1459,35 @@ function downtimeOf(userScope, ctx, action, p, workFields) {
 }
 // act#MaintenanceWorkOrders: one action on each of several work orders, each in its own transaction; a refusal or failure is
 // named for its work order and the rest go on.
+// P8 (BulkWork): assign (a team and technicians, the same for each) and schedule (a planned window) go through
+// schedule#MaintenanceWorkOrder for each work order on its own, its qualification warnings in its result's message.
+const bulkScheduling = {assign: ["teamPartyId", "assigneePartyIds"], schedule: ["estimatedStartDate", "estimatedCompletionDate"]}
 function actWorkOrders(p) {
     scopeWithAny(["plan", "supervise", "execute"])
+    const scheduling = Object.hasOwn(bulkScheduling, p.action || "") ? bulkScheduling[p.action] : null
+    if (scheduling && !scheduling.some(name => p[name] != null))
+        denied("VALUE_REQUIRED", p.action === "assign" ? "Choose a team or technicians" : "Choose the planned start or due")
     const results = []
     for (const workEffortId of ids(Array.from(p.workEffortIds || []).map(text))) {
         try {
+            if (scheduling) {
+                const out = lib.probe(
+                    "mantle.work.MaintenanceServices.schedule#MaintenanceWorkOrder",
+                    Object.assign(
+                        {workEffortId},
+                        Object.fromEntries(scheduling.filter(name => p[name] != null).map(name => [name, p[name]]))
+                    )
+                )
+                const warnings = Array.from(out.qualificationWarnings || [])
+                results.push({
+                    workEffortId,
+                    ok: true,
+                    resultCode: p.action === "assign" ? "ASSIGNED" : "SCHEDULED",
+                    reasonCode: null,
+                    message: dispatch().warningText(warnings)
+                })
+                continue
+            }
             const out = lib.probe("mantle.work.MaintenanceServices.transition#MaintenanceWorkOrder", {
                 workEffortId,
                 action: p.action,
@@ -1366,12 +1496,14 @@ function actWorkOrders(p) {
             })
             results.push({workEffortId, ok: true, resultCode: out.resultCode, reasonCode: null, message: ""})
         } catch (error) {
+            // the service's error text ("Error: CODE: message"): its code and message (P8)
+            const message = String(error.message).replace(/^Error: /, "")
             results.push({
                 workEffortId,
                 ok: false,
                 resultCode: null,
-                reasonCode: lib.reasonCode(error),
-                message: String(error.message)
+                reasonCode: lib.reasonCode(error) || /^([A-Z][A-Z0-9_]+):/.exec(message)?.[1] || null,
+                message
             })
         }
     }
@@ -1456,6 +1588,8 @@ function getWorkOrder(p) {
         // P9: the cost centre and project it is charged to
         ...materials().chargeOf(order),
         overdue: open && root.estimatedCompletionDate != null && ms(root.estimatedCompletionDate) < now,
+        // P12: a customer repair's claim, coverage and consent, and its custody (the customer's asset, read through the repair)
+        repair: repairs().summaryOf(userScope, order),
         teamPartyId: teams[0]?.partyId || null,
         teamName: teams[0] ? names[teams[0].partyId] || teams[0].partyId : "",
         assigneeNames: assignees.map(row => names[row.partyId] || row.partyId).join(", "),
@@ -1497,6 +1631,10 @@ function getWorkOrder(p) {
               ]
             : []
         ).concat(
+            // P12: a customer repair whose claim no longer allows it (a missing or changed consent) is blocked, not approved here
+            open && workOrder.repair && !workOrder.repair.allowed
+                ? [{blocker: "Customer Service's decision", detail: workOrder.repair.blockerText}]
+                : [],
             // P7: the checklist's open required steps
             openSteps.length
                 ? [{blocker: "Steps open", detail: "Required steps are completed or waived first: " + openSteps.map(row => row.name).join(", ")}]

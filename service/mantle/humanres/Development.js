@@ -560,7 +560,8 @@ function requirementsAsked(p, at) {
         return rows(SKILL_STANDARD, {workEffortId: text(p.workEffortId)}).map(row => ({
             skillTypeEnumId: row.skillTypeEnumId,
             minimumLevel: row.minimumSkillLevel ?? null,
-            qualificationTypeEnumId: null,
+            // the qualification that proves it (impl-maintenance P8: a procedure step's required qualification)
+            qualificationTypeEnumId: row.qualificationTypeEnumId || null,
             required: true
         }))
     if (text(p.skillTypeEnumId) || text(p.qualificationTypeEnumId))
@@ -665,6 +666,11 @@ function checkQualifications(p) {
             .filter(Boolean)
     ).slice(0, 500)
     const admitted = partyIds.filter(partyId => accessTo(userScope, partyId).admitted)
+    return Object.assign(answerFor(partyIds, admitted, asked, at), {asOfDate: at, asOfText: dateText(at)})
+}
+// The staffing answer for the people admitted (the others unavailable), against the requirements asked or, with none, each
+// person's own job class's: check#Qualifications' results, and the staffing answer Maintenance's dispatch reads (staffingAnswer).
+function answerFor(partyIds, admitted, asked, at) {
     const own = asked ? null : classesOf(admitted, at)
     const ownRequirements = own ? classRequirements(unique(Object.values(own).flat()), at) : {}
     const requirementsFor = partyId =>
@@ -706,7 +712,28 @@ function checkQualifications(p) {
         const state = requirements.filter(row => row.required).reduce((worst, row) => worse(worst, row.state), "qualified")
         return {partyId, personName: personNames[partyId] || partyId, state, stateText: stateTexts[state], requirements}
     })
-    return {results, asOfDate: at, asOfText: dateText(at)}
+    return {results}
+}
+// The staffing answer of check#Qualifications for Mantle's own callers that have checked their caller first (Maintenance's
+// technician assignment, impl-maintenance P8: a dispatcher holds no People reach, impl-people P18's finding), never a service's
+// parameters: the people given against the requirements given ({skillTypeEnumId, minimumLevel, qualificationTypeEnumId,
+// required}) at a date, the same projection (no reference, issuer, title, reason or file). A restricted kind (an identity document
+// or a work permit) is never asked through it: its qualification part is left out (Maintenance P8 review).
+function staffingAnswer(partyIds, requirements, asOfDate) {
+    const at = asOfDate == null || asOfDate === "" ? nowMs() : ms(asOfDate)
+    const ids = unique(
+        Array.from(partyIds || [])
+            .map(text)
+            .filter(Boolean)
+    ).slice(0, 500)
+    const asked = Array.from(requirements || [])
+        .map(row =>
+            row.qualificationTypeEnumId && isRestricted(row.qualificationTypeEnumId)
+                ? Object.assign({}, row, {qualificationTypeEnumId: null})
+                : row
+        )
+        .filter(row => row.skillTypeEnumId || row.qualificationTypeEnumId)
+    return answerFor(ids, ids, asked, at).results
 }
 
 // ===== skills =====
@@ -1130,4 +1157,4 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown development operation " + op)
     return operations[op](p || {})
 }
-;({execute: run, isRestricted})
+;({execute: run, isRestricted, staffingAnswer})
