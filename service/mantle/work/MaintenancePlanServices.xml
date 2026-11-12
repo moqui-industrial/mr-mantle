@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Preventive maintenance plans and the due projection (IronStone Maintenance design §5.1, §13.2 MaintenancePlanServices, Plans
+    and PlanDetail, MT-05; impl-maintenance P13), in MaintenancePlans.js: the scoped list of plans, a plan's record, its writer
+    (create, change of terms, activate, end) and the due of one plan or of the scope's active plans. Each checks the maintenance
+    permission (MAINTENANCE_VIEW to read, MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE to write) and the plan's organization
+    (mantle/work/MaintenanceAccess.js), never a group or a calling screen; a missing plan and one outside the scope are refused
+    alike (RECORD_UNAVAILABLE). EquipmentServices.get#AssetMaintenanceNeeded stays the baseline's and is not called (F11). P14
+    adds the occurrences, generation and reconciliation here. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="MaintenanceSchedules" allow-remote="false">
+        <description>The plans of the user's maintenance scope (MAINTENANCE_VIEW; PERMISSION_DENIED without), found in the query
+            before paging: text (id or name), organization (ORGANIZATION_DENIED outside the scope), equipment, facility (with those
+            inside it), equipment model, state (open: draft and active, the default; draft; active; ended; all) and the trigger,
+            procedure or team of the terms in effect. Each row carries its target, organization, model default, procedure, team,
+            trigger and interval, its next due (a date in the target's zone, or a meter threshold), the age of its last reading,
+            its due state and its state. A holder of MAINTENANCE_ALL_ORGANIZATIONS with an active organization lists that
+            organization's plans (F83).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productId"/>
+            <parameter name="statusId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="templateWorkEffortId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scheduleList" type="List"/>
+            <parameter name="scheduleListCount" type="Integer"/>
+            <parameter name="scheduleListPageIndex" type="Integer"/>
+            <parameter name="scheduleListPageSize" type="Integer"/>
+            <parameter name="scheduleListPageMaxIndex" type="Integer"/>
+            <parameter name="scheduleListPageRangeLow" type="Integer"/>
+            <parameter name="scheduleListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('findSchedules', context)"/>
+            <set field="scheduleList" from="answer.scheduleList"/>
+            <set field="scheduleListCount" from="answer.scheduleListCount"/>
+            <set field="scheduleListPageIndex" from="answer.scheduleListPageIndex"/>
+            <set field="scheduleListPageSize" from="answer.scheduleListPageSize"/>
+            <set field="scheduleListPageMaxIndex" from="answer.scheduleListPageMaxIndex"/>
+            <set field="scheduleListPageRangeLow" from="answer.scheduleListPageRangeLow"/>
+            <set field="scheduleListPageRangeHigh" from="answer.scheduleListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceSchedule" allow-remote="false">
+        <description>One plan the user reads (MAINTENANCE_VIEW in its organization): its row (target, organization, model
+            default, procedure, team, interval, next due, states, the target's time zone, when it was activated or ended and why),
+            its terms in effect as of asOfDate (now when empty) with the origin of each value that can come from the model default
+            (plan or model default), the terms as stored (empty where the default applies), the history of its terms, its due
+            (get#MaintenanceDue's answer), what keeps a draft from activation (findings, each a reason code and its text) and what
+            the user may do (edit, activate, end).</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schedule" type="Map"/>
+            <parameter name="term" type="Map"/>
+            <parameter name="storedTerm" type="Map"/>
+            <parameter name="terms" type="List"/>
+            <parameter name="due" type="Map"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canActivate" type="Boolean"/>
+            <parameter name="canEnd" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('getSchedule', context)"/>
+            <set field="schedule" from="answer.schedule"/>
+            <set field="term" from="answer.term"/>
+            <set field="storedTerm" from="answer.storedTerm"/>
+            <set field="terms" from="answer.terms"/>
+            <set field="due" from="answer.due"/>
+            <set field="findings" from="answer.findings"/>
+            <set field="canEdit" from="!!answer.canEdit"/>
+            <set field="canActivate" from="!!answer.canActivate"/>
+            <set field="canEnd" from="!!answer.canEnd"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceSchedule" allow-remote="false">
+        <description>A preventive maintenance plan (MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE in the target's organization;
+            PERMISSION_DENIED, RECORD_UNAVAILABLE). With no maintenanceScheduleId a new draft for one piece of equipment (assetId)
+            or one facility (facilityId; TARGET_REQUIRED, TARGET_INVALID for both), optionally following a maintenance default of
+            the equipment's model (productMaintenanceId; VALUE_INVALID), under an operation key (a retry answers the first plan,
+            repeated; changed input is OPERATION_KEY_CONFLICT). With maintenanceScheduleId, at its revision (expectedRevision;
+            RECORD_CHANGED; PLAN_ENDED for an ended plan): with action activate, a draft becomes active, refused with the code of
+            its first finding (ZONE_REQUIRED: no time zone in the target's facility or above it; PROCEDURE_REQUIRED,
+            PROCEDURE_NOT_QUALIFIED: no approved procedure in effect of the organization that applies to the target;
+            INTERVAL_REQUIRED, FIRST_DUE_REQUIRED for a calendar; METER_REQUIRED, METER_NOT_COUNTING, BASELINE_REQUIRED for a
+            meter); with action end, the plan and its terms end now, with changeReason (REASON_REQUIRED); with no action, its name
+            and terms change: a draft's terms in place, an active plan's from effectiveDate (now when empty, after the terms in
+            effect began, never in the past; DATE_INVALID) with changeReason (REASON_REQUIRED), the terms in effect ended then and
+            kept, as the work done under them is. A term field left empty takes the model default's value. firstDueLocal is the
+            first obligation's local date and time in the target's zone (yyyy-MM-dd HH:mm; DATE_INVALID). A meter is one of the
+            equipment's model (METER_INVALID; a facility's plan is by the calendar).</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+            <parameter name="action"><description>activate or end; empty to change the name and terms</description></parameter>
+            <parameter name="scheduleName"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="productMaintenanceId"/>
+            <parameter name="triggerEnumId"><description>MaintenanceScheduleTrigger: MstCalendar or MstMeter (the model default's
+                when empty)</description></parameter>
+            <parameter name="cadenceEnumId"><description>MaintenanceScheduleCadence: MscFixed (the default) or MscCompletion</description></parameter>
+            <parameter name="intervalQuantity"/>
+            <parameter name="intervalUomId"><description>TF_day, TF_wk, TF_mon or TF_yr for a calendar</description></parameter>
+            <parameter name="firstDueLocal"/>
+            <parameter name="productMeterId"/>
+            <parameter name="baselineValue"/>
+            <parameter name="baselineDate" type="Timestamp"/>
+            <parameter name="maxReadingAgeDays"/>
+            <parameter name="businessDaysOnly"/>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="leadDays"/>
+            <parameter name="templateWorkEffortId"/>
+            <parameter name="maintenanceTypeEnumId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="maintenanceScheduleId"/>
+            <parameter name="statusId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('storeSchedule', context)"/>
+            <set field="maintenanceScheduleId" from="answer.maintenanceScheduleId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceDue" allow-remote="false">
+        <description>The due of one plan the user reads (MAINTENANCE_VIEW in its organization) as of asOfDate (now when empty),
+            changing nothing: its state (due, overdue, upcoming, or unknown with reasonCode: ZONE_REQUIRED, INTERVAL_REQUIRED,
+            FIRST_DUE_REQUIRED, METER_REQUIRED, BASELINE_REQUIRED, READING_STALE), the lines that explain it, and for a calendar the
+            due date (the obligation, in the target's zone), the planned date (the next business day when the terms ask for
+            business days; the due date kept), the day work is made from (the lead days), the number of due dates passed without
+            a completion and the last completion; for a meter the meter, the baseline (the reading of the last counted completion,
+            else the plan's), the last accepted reading and its age, the usage since the baseline across a reset, the increment,
+            what remains and the next threshold. A planned or cancelled maintenance and a reading made from a planned interval
+            advance nothing; a reading older than the plan's maximum age (30 days unless set) answers unknown, never not due.</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="due" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('getDue', context)"/>
+            <set field="due" from="answer.due"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MaintenanceDue" allow-remote="false">
+        <description>The due of the active plans of the user's maintenance scope (MAINTENANCE_VIEW), of an organization, a piece
+            of equipment or a facility (with those inside it), as of asOfDate (now when empty) through thruDate (a calendar due
+            after it is left out; a meter's is listed), of a state (due, overdue, upcoming, unknown, or attention: due, overdue and
+            unknown), overdue first, paged; each a plan's row with its due (get#MaintenanceDue's). A plan whose due cannot be read
+            is named in failures and the others are listed.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="state"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueList" type="List"/>
+            <parameter name="dueListCount" type="Integer"/>
+            <parameter name="dueListPageIndex" type="Integer"/>
+            <parameter name="dueListPageSize" type="Integer"/>
+            <parameter name="dueListPageMaxIndex" type="Integer"/>
+            <parameter name="dueListPageRangeLow" type="Integer"/>
+            <parameter name="dueListPageRangeHigh" type="Integer"/>
+            <parameter name="failures" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('findDue', context)"/>
+            <set field="dueList" from="answer.dueList"/>
+            <set field="dueListCount" from="answer.dueListCount"/>
+            <set field="dueListPageIndex" from="answer.dueListPageIndex"/>
+            <set field="dueListPageSize" from="answer.dueListPageSize"/>
+            <set field="dueListPageMaxIndex" from="answer.dueListPageMaxIndex"/>
+            <set field="dueListPageRangeLow" from="answer.dueListPageRangeLow"/>
+            <set field="dueListPageRangeHigh" from="answer.dueListPageRangeHigh"/>
+            <set field="failures" from="answer.failures"/>
+        </actions>
+    </service>
+</services>
