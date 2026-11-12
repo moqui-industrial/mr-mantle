@@ -550,6 +550,14 @@ function recordMeter(p) {
             denied("NOT_ASSIGNED", "Work " + p.workEffortId + " is not assigned to you")
     }
     const asset = equipmentOf(userScope, p.assetId, true)
+    // a reading in work is of the work's own equipment (impl-maintenance P7, F94): a work order's root or step whose target it is
+    if (inWork) {
+        const work = one("mantle.work.effort.WorkEffort", {workEffortId: p.workEffortId})
+        const rootId = work ? work.rootWorkEffortId || work.workEffortId : null
+        const order = rootId ? one("mantle.work.maintenance.MaintenanceWorkOrder", {workEffortId: rootId}) : null
+        if (!order || order.assetId !== asset.assetId)
+            denied("WORK_TARGET_MISMATCH", "Work " + p.workEffortId + " is not on equipment " + asset.assetId)
+    }
     const meter = meterOf(asset, p)
     if (!blank(p.meterUomId) && meter.meterUomId && p.meterUomId !== meter.meterUomId)
         denied("UNIT_MISMATCH", "This meter reads in " + meter.meterUomId)

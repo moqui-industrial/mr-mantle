@@ -117,8 +117,9 @@ along with this software (see the LICENSE.md file). If not, see
             and planned work above it needs a supervisor's approval; zero, the default, puts all of it before a supervisor, and
             work with no estimated hours is over it; the cost half is impl-maintenance P11's), the closure policy (a supervisor
             closes completed work, or completion closes it) and whether the organization's production maintenance requests and
-            warranty repairs become managed work (off by default; the adapters are later phases'), and whether a procedure's
-            last author may approve it (off by default). A change ends the row in
+            warranty repairs become managed work (off by default; the adapters are later phases'), whether a procedure's
+            last author may approve it (off by default), and whether a technician's voice note on a checklist step is sent to the
+            speech model to be transcribed (off by default; the audio is kept either way). A change ends the row in
             effect and starts the next; with no row the defaults hold.</description>
         <field name="organizationPartyId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
@@ -131,6 +132,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="warrantyRepairsManaged" type="text-indicator"/>
         <field name="procedureSelfApproval" type="text-indicator"><description>Y: a procedure's last author may approve it
             (off by default; impl-maintenance P6)</description></field>
+        <field name="voiceNoteTranscription" type="text-indicator"><description>Y: a checklist step's voice note is transcribed
+            by SpeechServices.transcribe#Audio (off by default; impl-maintenance P7 review, the user's call of Nov 12)</description></field>
         <field name="changedByUserId" type="id"/>
         <field name="comments" type="text-medium"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
