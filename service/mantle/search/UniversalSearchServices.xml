@@ -271,6 +271,11 @@ along with this software (see the LICENSE.md file). If not, see
                 keyNames.forEach((name, index) => { key[name] = body[name] != null ? body[name] : idParts[index] })
                 const current = ec.entity.find(document.primaryEntityName).condition(key).one()
                 if (current == null) continue
+                // IronStone People P21: a confidential case, and a message or note filed on one, is never a search result: its text
+                // is kept out of the index (PeopleCases.js documentData), and a hit of an older index is left out here, for everyone
+                if (hit.documentId === 'MantleRequest' && current.requestTypeEnumId === 'RqtHrCase') continue
+                if (hit.documentId === 'MantleCommunicationEvent' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                        .caseEvents([current.communicationEventId])[current.communicationEventId]) continue
                 // an invoice and a payment by their own reads, of their side (a receivable reader does not find a bill), as
                 // get#RecordLinkInfo has them; the organization limit above does not know the side (IronStone Accounting P21,
                 // F431, F438). A dropped hit makes the total the page's and the finance counts the page's (F439).
@@ -289,8 +294,9 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds, as get#RecordLinkInfo has it)
-                if (hit.documentId === 'MantleTask' && ec.entity.find('mantle.humanres.checklist.ChecklistStep')
-                        .condition('workEffortId', current.workEffortId).condition('isProtected', 'Y').disableAuthz().count() > 0
+                // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)
+                if (hit.documentId === 'MantleTask' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                        .protectedTaskIds([current.workEffortId]).length > 0
                         && ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                             .hiddenTaskIds([current.workEffortId], userPartyId).length > 0) continue
                 if (hit.documentId === 'MantleCommunicationEvent' && boundMailboxes.has(current.contactListId)) {

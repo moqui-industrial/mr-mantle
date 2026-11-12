@@ -42,9 +42,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="projectNames" from="{}"/>
             <!-- a protected People task (offboarding, an equipment return; ChecklistStep isProtected) stays in the app, as CalDAV
                 leaves it out (impl-people P7 review, F22) -->
-            <set field="protectedIds" from="assignedList.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
-                    .condition('workEffortId', 'in', Array.from(assignedList).map((row) => row.workEffortId)).condition('isProtected', 'Y')
-                    .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : []"/>
+            <!-- (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds) -->
+            <set field="protectedIds" from="assignedList.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                    .protectedTaskIds(Array.from(assignedList).map((row) => row.workEffortId)) : []"/>
             <iterate list="assignedList" entry="assigned">
                 <if condition="protectedIds.includes(assigned.workEffortId)"><continue/></if>
                 <if condition="taskList.some((task) => task.workEffortId == assigned.workEffortId)"><continue/></if>
@@ -119,9 +119,9 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
 
             <!-- a protected People task stays out of a calendar (impl-people P7 review, F22) -->
-            <set field="protectedIds" from="workEffortList.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
-                    .condition('workEffortId', 'in', Array.from(workEffortList).map((row) => row.workEffortId)).condition('isProtected', 'Y')
-                    .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : []"/>
+            <!-- (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds) -->
+            <set field="protectedIds" from="workEffortList.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                    .protectedTaskIds(Array.from(workEffortList).map((row) => row.workEffortId)) : []"/>
             <iterate list="workEffortList" entry="workEffortDef">
                 <if condition="protectedIds.includes(workEffortDef.workEffortId)"><continue/></if>
                 <set field="workEffort" from="workEffortDef"/><!-- put it in the context -->

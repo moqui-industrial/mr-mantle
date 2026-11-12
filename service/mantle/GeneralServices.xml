@@ -204,6 +204,8 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- Request -->
             <entity-find-one entity-name="mantle.request.Request" value-field="request">
                 <field-map field-name="requestId" from="lookupId"/></entity-find-one>
+            <!-- IronStone People P21: a confidential case is no lookup result for anyone (read in People alone) -->
+            <if condition="request?.requestTypeEnumId == 'RqtHrCase'"><set field="request" from="null"/></if>
             <if condition="request != null"><set field="requestId" from="request.requestId"/></if>
 
             <!-- Shipment -->

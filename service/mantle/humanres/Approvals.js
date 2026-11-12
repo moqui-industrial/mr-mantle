@@ -1412,6 +1412,14 @@ function findOwnedApprovals(p) {
     } catch (error) {
         ec.logger.error("The openings owned by " + account.userId + " could not be read: " + error.message)
     }
+    // P21 (the user's call of Nov 12, 2026): the open confidential cases they handle, by name alone, not transferable: when they
+    // leave, each goes back to the employer's case intake handlers (PeopleCases.js rerouteCases)
+    try {
+        const cases = ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js")
+        for (const row of cases.ownedCases(partyId)) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The confidential cases handled by " + account.userId + " could not be read: " + error.message)
+    }
     const pending = Array.from(find(APPROVAL).condition("statusId", "PapPending").limit(pendingCap).list())
     for (const approval of pending) {
         try {
@@ -1457,6 +1465,8 @@ function transferApprovalOwner(p) {
         })
     if (resourceId.startsWith("approval:"))
         denied("NOT_TRANSFERABLE", "A waiting request follows its route; hand over the rule or reporting line instead")
+    if (resourceId.startsWith("case:"))
+        denied("NOT_TRANSFERABLE", "A confidential case goes back to its employer's case intake handlers when its handler leaves")
     const row = resourceId.startsWith("policy:")
         ? one(POLICY, {peopleApprovalPolicyId: resourceId.slice("policy:".length)})
         : null

@@ -182,7 +182,9 @@ along with this software (see the LICENSE.md file). If not, see
             (resourceId approval:id, not transferable: a request follows its route and goes to the next approver once the rule
             or reporting line naming them changes) and the approval rule rows not ended (in effect or starting later) naming
             them as approver, alternate or HR fallback (resourceId policy:id, transferable), and the draft and open openings they are
-            the recruiting owner of (resourceId opening:id, transferable; impl-people P16), each {resourceId, resourceName,
+            the recruiting owner of (resourceId opening:id, transferable; impl-people P16), and the open confidential cases they
+            handle (resourceId case:id, named "Confidential case" alone, not transferable: when they leave, each goes back to the
+            employer's case intake handlers; impl-people P21, the user's call of Nov 12, 2026), each {resourceId, resourceName,
             resourceKind, transferable, note}; names only. The caller's own, or another user's with PEOPLE_APPROVAL_OWNER_CHANGE.</description>
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
         <actions>
@@ -194,7 +196,7 @@ along with this software (see the LICENSE.md file). If not, see
             effect ends now and its copy names the new person (a row not yet in effect changes in place), with the reason in
             the audit log; the waiting requests of its employer and kind are routed again. With PEOPLE_APPROVAL_OWNER_CHANGE, or
             by fromUserId holding PEOPLE_CONFIGURE in the rule's employer (PERMISSION_DENIED otherwise: an approver alone does
-            not choose who decides in their place). Refuses a resource that is not such a row (RECORD_UNAVAILABLE), a waiting request (NOT_TRANSFERABLE), a new owner with no enabled account and person
+            not choose who decides in their place). Refuses a resource that is not such a row (RECORD_UNAVAILABLE), a waiting request or a confidential case (NOT_TRANSFERABLE), a new owner with no enabled account and person
             (OWNER_INVALID), one who does not work for the employer (NOT_EMPLOYED) and the rule's own employee
             (SELF_APPROVAL). An opening (opening:id, impl-people P16) gets the new recruiting owner, audit-logged with the reason:
             with PEOPLE_APPROVAL_OWNER_CHANGE or as a recruiter who changes the employer's openings; the new owner works for the

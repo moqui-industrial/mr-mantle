@@ -915,13 +915,10 @@ function returnEquipment(p) {
 }
 
 // ===== get#TaskObjectTags: protected tasks (F22) =====
-// The tasks of the ids that are protected (offboarding, separation and grievance-linked tasks): left out of a phone's Tasks.
+// The tasks of the ids that are protected (offboarding, separation and grievance-linked tasks): left out of a phone's Tasks. P21:
+// the tasks linked to a confidential case too (mantle/request/PeopleCases.js, which holds the rule for both).
 function protectedTaskIds(workEffortIds) {
-    const ids = unique(Array.from(workEffortIds || []).filter(Boolean))
-    if (!ids.length) return []
-    return Array.from(find(STEP).condition("workEffortId", "in", ids).condition("isProtected", "Y").list()).map(
-        row => row.workEffortId
-    )
+    return ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js").protectedTaskIds(workEffortIds)
 }
 
 // A change withdrawn before its date (a separation set for later; the user's call, Nov 11): its checklists' and its equipment
