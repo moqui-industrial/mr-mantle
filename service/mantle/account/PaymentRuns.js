@@ -14,6 +14,10 @@ const I = lib.invoiceEntity,
 const instruments = ["PiAch", "PiCompanyCheck"]
 const openRunStatuses = ["PrunDraft", "PrunApproved"]
 const maxBills = 500
+// People P15 (the user's call, impl-people §4, Nov 12, 2026): an employee's expense claim reserved for payroll is settled by its
+// pay run (P27), never by a payment run; Expense.js names those of a list
+const payrollReserved = ids =>
+    ids.length ? ec.resource.script("component://mr-mantle/service/mantle/humanres/Expense.js").payrollReserved(ids) : []
 
 // ---- Scope and values
 
@@ -153,6 +157,9 @@ function select(p) {
             .limit(maxBills + 1)
             .list()
     )
+    // an expense claim reserved for payroll is not a payment run's to pay (P27's pay run settles it)
+    const reserved = new Set(payrollReserved(bills.map(row => row.invoiceId)))
+    if (reserved.size) bills.splice(0, bills.length, ...bills.filter(row => !reserved.has(row.invoiceId)))
     // more than the cap: the first by due date are selected and the run says that more are due
     const truncated = bills.length > maxBills
     if (truncated) bills.length = maxBills
@@ -522,6 +529,7 @@ function paySupplier(p) {
         ).map(row => [row.invoiceId, row])
     )
     const elsewhere = otherRunHolds(run.paymentRunId, Object.keys(bills), true)
+    const reserved = payrollReserved(Object.keys(bills))
     for (const item of list) {
         const bill = bills[item.invoiceId]
         lib.requireNotHeld(item.invoiceId)
@@ -529,6 +537,8 @@ function paySupplier(p) {
             denied("RUN_ITEM_IN_OTHER_RUN", "Bill " + item.invoiceId + ": " + elsewhere[item.invoiceId])
         if (!bill || bill.statusId !== "InvoiceApproved")
             denied("BILL_STATE_CHANGED", "Bill " + item.invoiceId + " is no longer approved")
+        if (reserved.includes(item.invoiceId))
+            denied("BILL_RESERVED", "Bill " + item.invoiceId + " is an expense claim reserved for payroll")
         if (!lib.totals(bill).unpaidTotal.eq(item.unpaidAmount))
             denied("BALANCE_CHANGED", "The open amount of bill " + item.invoiceId + " changed")
         if (

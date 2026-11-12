@@ -62,8 +62,16 @@ along with this software (see the LICENSE.md file). If not, see
                 join-optional="true" sub-select="true">
             <key-map field-name="invoiceId"/>
         </member-entity>
+        <!-- People P15 (design-accounting §5 ExpensePosting, impl-people P15): an employee's expense claim on the invoice, whose
+            business state and reserved route the expenses queue reads -->
+        <member-entity entity-alias="ECLM" entity-name="mantle.humanres.expense.ExpenseClaim" join-from-alias="INV" join-optional="true">
+            <key-map field-name="invoiceId"/>
+        </member-entity>
         <alias-all entity-alias="INV"/>
         <alias entity-alias="OHLD" name="openHoldCount"/>
+        <alias entity-alias="ECLM" name="claimStatusEnumId" field="statusEnumId"/>
+        <alias entity-alias="ECLM" name="claimReservedRouteEnumId" field="reservedRouteEnumId"/>
+        <alias entity-alias="ECLM" name="claimRouteEnumId" field="routeEnumId"/>
         <alias entity-alias="OHLD" name="heldInvoiceId" field="invoiceId"/>
         <alias entity-alias="SRC" name="sourceFromPartyId" field="fromPartyId"/>
         <alias entity-alias="SRC" name="sourceToPartyId" field="toPartyId"/>

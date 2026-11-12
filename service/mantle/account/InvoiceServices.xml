@@ -1612,6 +1612,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="ProjectExpenseInvoice">
+        <description>An expense invoice from a worker (fromPartyId) to a project's vendor (toPartyId, else the project's Vendor or
+            VendorBillFrom party), linked to the project (WorkEffortInvoice), or to toPartyId with no project. With expenseClaim
+            (People P15, design-people §9, impl-people F21) it is an employee's expense claim: the claimant (fromPartyId) creates
+            only their own (PEOPLE_SELF_SERVICE), unless a holder of PEOPLE_EXPENSE_MANAGE at the employer acts for them (the user's
+            call, impl-people §4, Nov 12, 2026), who is recorded (PERMISSION_DENIED); the employer is the one of the claimant's current employment
+            (partyRelationshipId, else the one with toPartyId, else their only one: EMPLOYMENT_REQUIRED, NOT_EMPLOYED); a project
+            must be one the claimant works on (PROJECT_UNAVAILABLE); and the claim's record is written (ExpenseClaim: a draft on
+            the accounts payable route, with purpose). A retry with the same operationKey answers the first claim. Without
+            expenseClaim its project behavior is unchanged.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.account.invoice.Invoice" include="nonpk"/>
             <parameter name="workEffortId"/>
@@ -1620,11 +1629,20 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="invoiceTypeEnumId" default-value="InvoiceSales"/>
             <parameter name="invoiceDate" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="currencyUomId"/>
+            <!-- People P15: an employee's expense claim -->
+            <parameter name="expenseClaim" type="Boolean" default="false"/>
+            <parameter name="partyRelationshipId"><description>The claimant's employment (expenseClaim)</description></parameter>
+            <parameter name="purpose" allow-html="none"/>
+            <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="invoiceId"/>
         </out-parameters>
         <actions>
+            <if condition="expenseClaim">
+                <set field="invoiceId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('createClaim', context).invoiceId"/>
+                <return/>
+            </if>
             <if condition="!workEffortId &amp;&amp; !toPartyId">
                 <return error="true" message="Must specify either Project (workEffortId) or To Party (toPartyId)"/></if>
 

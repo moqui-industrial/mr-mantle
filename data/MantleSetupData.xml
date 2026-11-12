@@ -202,6 +202,11 @@ along with this software (see the LICENSE.md file). If not, see
         manager (on their live reporting lines) and an HR editor (of the employer) need beside their own scope -->
     <userPermissions userPermissionId="PEOPLE_ROSTER_EDIT" description="People Roster Edit (save and publish shifts in the user's scope)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_ROSTER_EDIT" fromDate="0"/>
+    <!-- expense claims and advances (impl-people P15; the user's call, impl-people §4, Nov 12, 2026): reading every claim and advance
+        of the user's employers and acting for an employee (a claim made, changed, submitted or cancelled, an advance asked for them);
+        the claimant's own and the approvers' route need no more than their own scope -->
+    <userPermissions userPermissionId="PEOPLE_EXPENSE_MANAGE" description="People Expense Manage (every claim and advance of the user's employers)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_EXPENSE_MANAGE" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_RECRUIT_VIEW" description="People Recruit View (openings, applications and offers)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_VIEW" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_RECRUIT_EDIT" description="People Recruit Edit (openings, applications and offers)"/>
