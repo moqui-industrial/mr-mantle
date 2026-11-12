@@ -36,7 +36,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>An organization's work policy from now (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope),
             ending the row in effect: the approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
-            requests and warranty repairs become managed work.</description>
+            requests and warranty repairs become managed work, and whether a procedure's last author may approve it
+            (procedureSelfApproval, off by default; impl-maintenance P6).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="approvalThresholdHours"/>
@@ -45,6 +46,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="defaultTeamPartyId"/>
             <parameter name="productionRequestsManaged"/>
             <parameter name="warrantyRepairsManaged"/>
+            <parameter name="procedureSelfApproval"/>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>

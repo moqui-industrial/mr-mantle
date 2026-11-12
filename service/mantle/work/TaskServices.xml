@@ -501,6 +501,10 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
                     in-map="{workEffortId:workEffortId, targetWorkEffortId:toWorkEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a procedure and its steps) keeps its own
+                dependencies and time; its own services change them -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortIdList:[workEffortId, toWorkEffortId]}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             created = false
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
@@ -557,6 +561,10 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a procedure and its steps) keeps its own
+                dependencies and time; its own services change them -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortIdList:[workEffortId, toWorkEffortId]}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             removed = false
@@ -1344,6 +1352,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId" default="ec.user.userAccount.partyId"/>
         </in-parameters>
         <actions>
+            <!-- impl-maintenance P6 (F110): this generic path (also on the /mantle REST API) takes no time on managed work: a work
+                order's time is recorded through MaintenanceServices' own entry points (F66), and a template takes none -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.TimeServices.store#TimeEntry" in-map="context" out-map="context"/>
         </actions>
     </service>

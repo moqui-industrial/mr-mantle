@@ -46,6 +46,10 @@ along with this software (see the LICENSE.md file). If not, see
             declared at completion (completion does not imply restoration)</description></field>
         <field name="costCenterId" type="id" enable-audit-log="update"/>
         <field name="projectWorkEffortId" type="id" enable-audit-log="update"/>
+        <field name="procedureWorkEffortId" type="id"><description>The procedure (a template root) the work was made from
+            (impl-maintenance P6); its steps are the root's tree, each linked to its template step (WeatBasedOn)</description></field>
+        <field name="procedureDate" type="date-time"><description>When the work was made from the procedure: the definition
+            and instructions in effect then are the work's</description></field>
         <field name="revision" type="number-integer"/>
         <!-- P5: downtime (design §3 WorkDowntime) -->
         <field name="offlineIntent" type="text-indicator"><description>Y: starting the work takes its equipment or facility out
@@ -81,6 +85,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="MNT_WO_ASSET_MNT"><index-field name="assetMaintenanceId"/></index>
         <index name="MNT_WO_OPKEY"><index-field name="operationKey"/></index>
         <index name="MNT_WO_ASSET"><index-field name="assetId"/></index>
+        <index name="MNT_WO_PROCEDURE"><index-field name="procedureWorkEffortId"/></index>
         <index name="MNT_WO_OUTAGE"><index-field name="resourceUnavailabilityId"/></index>
     </entity>
 
@@ -112,7 +117,8 @@ along with this software (see the LICENSE.md file). If not, see
             and planned work above it needs a supervisor's approval; zero, the default, puts all of it before a supervisor, and
             work with no estimated hours is over it; the cost half is impl-maintenance P11's), the closure policy (a supervisor
             closes completed work, or completion closes it) and whether the organization's production maintenance requests and
-            warranty repairs become managed work (off by default; the adapters are later phases'). A change ends the row in
+            warranty repairs become managed work (off by default; the adapters are later phases'), and whether a procedure's
+            last author may approve it (off by default). A change ends the row in
             effect and starts the next; with no row the defaults hold.</description>
         <field name="organizationPartyId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
@@ -123,6 +129,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="closurePolicyEnumId" type="id"><description>MaintenanceClosurePolicy</description></field>
         <field name="productionRequestsManaged" type="text-indicator"/>
         <field name="warrantyRepairsManaged" type="text-indicator"/>
+        <field name="procedureSelfApproval" type="text-indicator"><description>Y: a procedure's last author may approve it
+            (off by default; impl-maintenance P6)</description></field>
         <field name="changedByUserId" type="id"/>
         <field name="comments" type="text-medium"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">

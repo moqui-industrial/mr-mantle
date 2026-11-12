@@ -202,8 +202,11 @@ along with this software (see the LICENSE.md file). If not, see
             project's estimate unit, beside the hours of estimatedWorkTime</description></field>
         <field name="healthEnumId" type="id"><description>For a project: on track, at risk or off track, from its latest
             status update (WorkEffortUpdate)</description></field>
-        <field name="isTemplate" type="text-indicator"><description>Y for a project kept as a template to copy
-            (ProjectServices.clone#Project), left out of the lists of projects and work</description></field>
+        <field name="isTemplate" type="text-indicator"><description>Y for a work effort kept as a definition to copy, never
+            done itself, and left out of the lists of projects and work: a project template (ProjectServices.clone#Project), a
+            routing or operation template (Manufacturing), or a process template and its steps (ProcessServices: People's
+            checklists, Maintenance's procedures, each with a WorkEffortProcessPolicy; a list of one kind filters on its type,
+            purpose and policy too)</description></field>
 
         <field name="methodDraft" type="text-indicator" enable-audit-log="true"/>
         <field name="methodRemoved" type="text-indicator" enable-audit-log="true"/>

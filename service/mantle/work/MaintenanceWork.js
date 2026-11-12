@@ -11,7 +11,12 @@
 //   the commit time over an entered finish (F7). A held order remembers where it was and resumes there.
 // - Approval: corrective work created or triaged by a planner or supervisor is approved on create; template, preventive and
 //   planned work above the organization's threshold in hours (MaintenancePolicy, zero by default: all of it) needs a
-//   supervisor; work with no estimated hours is over it. The cost half is P11's.
+//   supervisor; work with no estimated hours is over it. The estimate is the root's with its steps' (P6, F107). The cost half
+//   is P11's.
+// - From a procedure (P6, design §4.2): create takes templateWorkEffortId and makes the root and its steps in its transaction
+//   through ProcessServices' checked path (MaintenanceProcedures.js: approved, effective, applicable to the target, the caller's
+//   instantiation permission), the procedure of the work's organization; the root then becomes the work order. A procedure's
+//   work is never approved on create as corrective work is.
 // - Assignments are schedule's (the generic WorkEffortParty writers refuse managed work, F59): a team (role OrgTeam, a team of the
 //   organization) and the people (Assignee, the organization's employees or agents), with the planned window. A new assignee is
 //   told on MaintenanceWork after the write.
@@ -31,6 +36,7 @@
 //   with a follow-up work order linked to the same outage; nothing here ends an outage (end#ResourceUnavailability does).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
+const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 const {find, one, denied, call, ms} = lib
 
@@ -152,7 +158,8 @@ const defaultPolicy = {
     defaultMaintenanceTypeEnumId: null,
     defaultTeamPartyId: null,
     productionRequestsManaged: false,
-    warrantyRepairsManaged: false
+    warrantyRepairsManaged: false,
+    procedureSelfApproval: false
 }
 // The policy in effect for an organization, or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
@@ -171,6 +178,7 @@ function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
         defaultTeamPartyId: row.defaultTeamPartyId || null,
         productionRequestsManaged: flag(row.productionRequestsManaged),
         warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
+        procedureSelfApproval: flag(row.procedureSelfApproval),
         comments: row.comments || null
     }
 }
@@ -221,6 +229,7 @@ function storePolicy(p) {
         defaultTeamPartyId: teamId,
         productionRequestsManaged: flag(p.productionRequestsManaged) ? "Y" : "N",
         warrantyRepairsManaged: flag(p.warrantyRepairsManaged) ? "Y" : "N",
+        procedureSelfApproval: flag(p.procedureSelfApproval) ? "Y" : "N",
         changedByUserId: ec.user.userId,
         comments: text(p.comments)
     })
@@ -280,6 +289,16 @@ function treeIds(rootId) {
     return [rootId].concat(
         Array.from(find(WORK, {rootWorkEffortId: rootId}).selectField("workEffortId").list()).map(row => row.workEffortId)
     )
+}
+// The estimated hours of a root with its steps (F107: a procedure's work is estimated by its steps): the steps' sum when any step
+// has an estimate (Mantle's WorkEffortUpdateProject rollup also writes that sum on the root, so the two are not added), else the
+// root's own; null when none has one.
+function treeHours(rootId) {
+    const steps = Array.from(find(WORK, {rootWorkEffortId: rootId}).selectField("workEffortId,estimatedWorkTime").list())
+        .map(row => number(row.estimatedWorkTime))
+        .filter(value => value != null)
+    if (steps.length) return steps.reduce((total, value) => total + value, 0)
+    return number(one(WORK, {workEffortId: rootId})?.estimatedWorkTime)
 }
 function runningTimers(rootId) {
     return Array.from(
@@ -447,11 +466,20 @@ const createFields = [
     "estimatedWorkTime",
     "estimatedStartDate",
     "estimatedCompletionDate",
-    "teamPartyId"
+    "teamPartyId",
+    "templateWorkEffortId"
 ]
+// The request's fingerprint: text and numbers as they are, a date by its instant (P6: every text once hashed as NaN, Date.parse
+// of a name, so changed input under a key went unseen)
 function requestHash(p) {
-    const values = createFields.map(field => (p[field] == null ? "" : String(ms(p[field]) ?? p[field])))
-    // P5: offline intent, hashed only when set, so a create keyed before it hashes as it did
+    const valueOf = value => {
+        if (value == null) return ""
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value)
+        const millis = ms(value)
+        return Number.isFinite(millis) ? String(millis) : String(value)
+    }
+    const values = createFields.map(field => valueOf(p[field]))
+    // P5: offline intent, hashed only when set
     if (flag(p.offlineIntent)) values.push("offline")
     return lib.hash(values)
 }
@@ -473,7 +501,9 @@ function previousCreate(userScope, operationKey, hash) {
 }
 // The root, its row and the primary AssetMaintenance of new work (create and adoption share it).
 function makeOrder(userScope, target, p, options) {
-    const name = text(p.workEffortName)
+    const templateId = text(p.templateWorkEffortId)
+    const template = templateId ? one(WORK, {workEffortId: templateId}) : null
+    const name = text(p.workEffortName) || (template?.isTemplate === "Y" ? template.workEffortName : null)
     if (!name) denied("NAME_REQUIRED", "Name the work")
     const kind = requireEnum(p.maintenanceKindEnumId, "MaintenanceKind", "Kind") || "MkCorrective"
     const policy = policyOf(target.organizationPartyId)
@@ -490,14 +520,39 @@ function makeOrder(userScope, target, p, options) {
     requireWindow(p.estimatedStartDate, p.estimatedCompletionDate)
     const teamId = text(p.teamPartyId) || policy.defaultTeamPartyId
     if (teamId) requireTeam(target.organizationPartyId, teamId)
-    // corrective work by a planner or supervisor, any work a supervisor creates and planned work within the threshold is
-    // approved on create; the rest waits in planning for a supervisor
+    // from a procedure (P6): the root and its steps made through the checked path, in this transaction; the procedure is the
+    // work's organization's, and the people named for its roles are the organization's
+    let instantiatedId = null
+    if (templateId) {
+        if (template?.isTemplate === "Y" && template.ownerPartyId && template.ownerPartyId !== target.organizationPartyId)
+            denied("PROCESS_NOT_APPLICABLE", "Procedure " + templateId + " is another organization's")
+        const roleParties = {}
+        const named = p.roleParties && typeof p.roleParties === "object" ? p.roleParties : {}
+        for (const roleTypeId of Object.keys(named)) {
+            const partyId = text(named[roleTypeId])
+            if (partyId) roleParties[roleTypeId] = requireMember(target.organizationPartyId, partyId)
+        }
+        instantiatedId = procedures().execute("instantiateProcedure", {
+            templateWorkEffortId: templateId,
+            assetId: target.assetId,
+            facilityId: target.assetId ? null : target.facilityId,
+            startDate: p.estimatedStartDate || null,
+            roleParties,
+            rootFields: {workEffortName: name, description: text(p.description) ?? template.description ?? null, ownerPartyId: target.organizationPartyId}
+        }).workEffortId
+        if (hours != null) call("update#" + WORK, {workEffortId: instantiatedId, estimatedWorkTime: hours})
+    }
+    // corrective work by a planner or supervisor (not a procedure's), any work a supervisor creates and planned work within the
+    // threshold (the root's estimate with its steps', F107) is approved on create; the rest waits in planning for a supervisor
+    const totalHours = instantiatedId ? treeHours(instantiatedId) : hours
     const approved =
         options.statusId ||
-        (kind === "MkCorrective" || userScope.capabilities.supervise || withinThreshold(policy, hours)
+        ((kind === "MkCorrective" && !instantiatedId) ||
+        userScope.capabilities.supervise ||
+        withinThreshold(policy, totalHours)
             ? "WeApproved"
             : "WeInPlanning")
-    const workEffortId = call("create#" + WORK, {
+    const rootFields = {
         workEffortTypeEnumId: "WetTask",
         purposeEnumId: "WepMaintenance",
         statusId: approved,
@@ -505,14 +560,17 @@ function makeOrder(userScope, target, p, options) {
         ownerPartyId: target.organizationPartyId,
         facilityId: target.facilityId,
         workEffortName: name,
-        description: text(p.description),
+        description: text(p.description) ?? (instantiatedId ? template.description ?? null : null),
         priority,
         estimatedStartDate: p.estimatedStartDate || null,
         estimatedCompletionDate: p.estimatedCompletionDate || null,
         actualStartDate: approved === "WeInProgress" ? ec.user.nowTimestamp : null,
-        estimatedWorkTime: hours,
         timeUomId: "TF_hr"
-    }).workEffortId
+    }
+    if (!instantiatedId) rootFields.estimatedWorkTime = hours
+    const workEffortId = instantiatedId
+        ? (call("update#" + WORK, Object.assign({workEffortId: instantiatedId}, rootFields)), instantiatedId)
+        : call("create#" + WORK, rootFields).workEffortId
     let assetMaintenanceId = options.assetMaintenanceId || null
     if (target.assetId && !assetMaintenanceId) {
         const root = {
@@ -538,6 +596,8 @@ function makeOrder(userScope, target, p, options) {
         sourceEnumId: sourceId,
         severityEnumId: severityId,
         failureModeEnumId: failureId,
+        procedureWorkEffortId: instantiatedId ? templateId : null,
+        procedureDate: instantiatedId ? ec.user.nowTimestamp : null,
         revision: 1,
         offlineIntent: flag(p.offlineIntent) ? "Y" : null,
         operationKey: options.operationKey || null,
@@ -709,6 +769,41 @@ function scheduleWorkOrder(p) {
     const now = ec.user.nowTimestamp
     const added = []
     const removed = []
+    // a person replaced by another on the root and on each step of its tree (a leaver's work, Admin's offboarding; F113): their
+    // current assignee rows ended and the other's made on the same work efforts
+    if (text(p.replacePartyId)) {
+        const leaverId = text(p.replacePartyId)
+        const byId = text(p.withPartyId)
+        if (!byId) denied("ASSIGNEE_REQUIRED", "Name who takes the work")
+        requireMember(organizationPartyId, byId)
+        const held = Array.from(
+            find(PARTY, {partyId: leaverId, roleTypeId: assigneeRole})
+                .condition("workEffortId", "in", treeIds(root.workEffortId))
+                .conditionDate("fromDate", "thruDate", now)
+                .list()
+        )
+        for (const row of held) {
+            call("update#" + PARTY, {
+                workEffortId: row.workEffortId,
+                partyId: row.partyId,
+                roleTypeId: row.roleTypeId,
+                fromDate: row.fromDate,
+                thruDate: now
+            })
+            if (!currentParties(row.workEffortId, assigneeRole).some(other => other.partyId === byId))
+                call("create#" + PARTY, {
+                    workEffortId: row.workEffortId,
+                    partyId: byId,
+                    roleTypeId: assigneeRole,
+                    fromDate: now,
+                    statusId: "WeptAssigned"
+                })
+        }
+        if (held.length) {
+            removed.push(leaverId)
+            added.push(byId)
+        }
+    }
     // the people: the list given replaces the current assignees
     if (p.assigneePartyIds != null) {
         const wanted = ids(Array.from(p.assigneePartyIds || []).map(text))
@@ -825,7 +920,11 @@ function refusalOf(userScope, ctx, action) {
     switch (action) {
         case "approve":
             if (caps.supervise) return null
-            if (caps.plan && (kind === "MkCorrective" || withinThreshold(policy, root.estimatedWorkTime))) return null
+            if (
+                caps.plan &&
+                ((kind === "MkCorrective" && !order.procedureWorkEffortId) || withinThreshold(policy, treeHours(root.workEffortId)))
+            )
+                return null
             return {
                 reason: "APPROVAL_REQUIRED",
                 message: "Planned work over the approval threshold needs a supervisor's approval"
@@ -1152,6 +1251,13 @@ function getWorkOrder(p) {
         actualStartText: dateText(root.actualStartDate),
         actualCompletionText: dateText(root.actualCompletionDate),
         estimatedHours: number(root.estimatedWorkTime),
+        // the root's estimate with its steps' (F107)
+        totalEstimatedHours: treeHours(root.workEffortId),
+        procedureWorkEffortId: order.procedureWorkEffortId || null,
+        procedureName: order.procedureWorkEffortId
+            ? one(WORK, {workEffortId: order.procedureWorkEffortId})?.workEffortName || order.procedureWorkEffortId
+            : "",
+        procedureDateText: dateText(order.procedureDate),
         overdue: open && root.estimatedCompletionDate != null && ms(root.estimatedCompletionDate) < now,
         teamPartyId: teams[0]?.partyId || null,
         teamName: teams[0] ? names[teams[0].partyId] || teams[0].partyId : "",

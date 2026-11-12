@@ -18,8 +18,11 @@
 //   process policy guards execution (MANAGED_WORK). People's checklist tasks stay ordinary tasks: its policy does not guard.
 //
 // The services check the using policy's permission (policies below); a Mantle owner that checked its own records (People's
-// Checklists.js) calls the module's functions directly. Maintenance's P6 adds its policy, the checked path of design §4.2
-// (approval and effectivity) for a policy that guards execution, and its step fields; this path stays as it is.
+// Checklists.js) calls the module's functions directly. Maintenance's P6 added its policy, WppMaintenanceProcedure, with its own
+// edit and instantiation permissions and its checked path (MaintenanceProcedures.js: the organization's scope, the template's
+// state, approval, effectivity and applicability, then this module's storeStep and instantiate, then the requirements copied
+// after the clone, impl-maintenance F58), and the step fields its policy reads (stepFields: carried by storeStep and copied by
+// instantiate, empty for People's checklists). People's path is as it was.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call} = lib
 
@@ -30,8 +33,32 @@ const STEP = "mantle.work.effort.WorkEffortStepPolicy"
 const PARTY = "mantle.work.effort.WorkEffortParty"
 // a root that has a work order is managed (Maintenance's record, once it is built)
 const WORK_ORDER = "mantle.work.maintenance.MaintenanceWorkOrder"
-// The policies using a process: the permission their processes are changed and instantiated with through the services.
-const policies = {WppPeopleChecklist: {permission: "PEOPLE_HR_EDIT"}}
+// The policies using a process: the permission their processes are changed and instantiated with through the services, or a
+// policy's own checked path (a module whose storeStep and instantiate check it and call this module's), with the permissions it
+// names (for the record; the module checks them).
+const policies = {
+    WppPeopleChecklist: {permission: "PEOPLE_HR_EDIT"},
+    // impl-maintenance P6 (F58): authored with WORK_PROCESS_EDIT, made into work with MAINTENANCE_PLAN or _SUPERVISE through
+    // create#MaintenanceWorkOrder
+    WppMaintenanceProcedure: {
+        permission: "WORK_PROCESS_EDIT",
+        instantiatePermissions: ["MAINTENANCE_PLAN", "MAINTENANCE_SUPERVISE"],
+        checkedPath: "component://mr-mantle/service/mantle/work/MaintenanceProcedures.js"
+    }
+}
+// The step policy's fields beyond People's (impl-maintenance P6, design-maintenance §4.3): a change of any starts the next policy
+// row, and an execution's copy carries them. People's checklist steps leave them empty.
+const stepFields = [
+    "responseKindEnumId",
+    "measurementTypeId",
+    "measurementUomId",
+    "minimumValue",
+    "maximumValue",
+    "evidenceRequired",
+    "commentRequired",
+    "waiverAllowed"
+]
+const sameValue = (a, b) => String(a ?? "") === String(b ?? "")
 // the definition fields a node keeps in an execution (design-maintenance §4.2 step 2); everything else is fresh
 const definitionFields = [
     "workEffortTypeEnumId",
@@ -110,11 +137,14 @@ function storeStep(p) {
             dueOffsetDays:
                 p.dueOffsetDays != null && p.dueOffsetDays !== "" ? Number(p.dueOffsetDays) : (before?.dueOffsetDays ?? null)
         }
+        for (const field of stepFields)
+            next[field] = p[field] !== undefined ? (p[field] === "" ? null : p[field]) : (before?.[field] ?? null)
         const same =
             before &&
             before.isRequired === next.isRequired &&
             (before.roleTypeId || null) === next.roleTypeId &&
-            (before.dueOffsetDays ?? null) === (next.dueOffsetDays ?? null)
+            (before.dueOffsetDays ?? null) === (next.dueOffsetDays ?? null) &&
+            stepFields.every(field => sameValue(before[field], next[field]))
         if (!same) {
             if (before && ms(before.fromDate) < at)
                 call("update#" + STEP, {workEffortId: stepId, fromDate: before.fromDate, thruDate: stamp(at)})
@@ -141,13 +171,15 @@ function storeStep(p) {
             sequenceNum: p.sequenceNum != null && p.sequenceNum !== "" ? Number(p.sequenceNum) : null,
             estimatedWorkTime: p.estimatedWorkTime != null && p.estimatedWorkTime !== "" ? p.estimatedWorkTime : null
         }).workEffortId
-        call("create#" + STEP, {
+        const created = {
             workEffortId: stepId,
             fromDate: stamp(at),
             isRequired: p.isRequired != null ? (truthy(p.isRequired) ? "Y" : "N") : "Y",
             roleTypeId: text(p.roleTypeId) || null,
             dueOffsetDays: p.dueOffsetDays != null && p.dueOffsetDays !== "" ? Number(p.dueOffsetDays) : null
-        })
+        }
+        for (const field of stepFields) if (p[field] != null && p[field] !== "") created[field] = p[field]
+        call("create#" + STEP, created)
         treeIds.add(stepId)
     }
     if (p.dependsOnIds != null) {
@@ -298,14 +330,17 @@ function instantiate(p) {
             fromDate: stamp(at)
         })
         const stepPolicy = steps[node.workEffortId]
-        if (stepPolicy)
-            call("create#" + STEP, {
+        if (stepPolicy) {
+            const copied = {
                 workEffortId: idMap[node.workEffortId],
                 fromDate: stamp(at),
                 isRequired: stepPolicy.isRequired,
                 roleTypeId: stepPolicy.roleTypeId,
                 dueOffsetDays: stepPolicy.dueOffsetDays
-            })
+            }
+            for (const field of stepFields) if (stepPolicy[field] != null) copied[field] = stepPolicy[field]
+            call("create#" + STEP, copied)
+        }
         const partyId = stepPolicy?.roleTypeId ? text(roleParties[stepPolicy.roleTypeId]) : ""
         if (partyId)
             call("create#" + PARTY, {
@@ -385,11 +420,21 @@ function checkManagedWork(p) {
 }
 
 // ===== the services =====
+// A policy with its own checked path (Maintenance's procedures) runs it; any other is People's path, as built.
+function checkedPathOf(templateId) {
+    const policy = templateId ? processPolicyOf(templateId) : null
+    const known = policy ? policies[policy.processPolicyEnumId] : null
+    return known?.checkedPath ? ec.resource.script(known.checkedPath) : null
+}
 function storeProcessStep(p) {
+    const checked = checkedPathOf(text(p.rootWorkEffortId))
+    if (checked) return checked.execute("storeProcessStep", p)
     requirePolicy(text(p.rootWorkEffortId))
     return storeStep(p)
 }
 function instantiateWorkProcess(p) {
+    const checked = checkedPathOf(text(p.templateWorkEffortId))
+    if (checked) return checked.execute("instantiateProcedure", p)
     requirePolicy(text(p.templateWorkEffortId))
     return instantiate(p)
 }
@@ -404,6 +449,11 @@ const operations = {storeProcessStep, instantiateWorkProcess, checkManagedWork}
     storeStep,
     instantiate,
     processPolicyOf,
+    // impl-maintenance P6: the policies table, the step fields and the tree read for a policy's checked path
+    policies,
+    stepFields,
+    treeOf,
+    dependsOn,
     stepPolicyOf,
     managedReason,
     managedIds

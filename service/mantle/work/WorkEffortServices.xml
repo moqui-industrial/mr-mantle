@@ -86,6 +86,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a maintenance procedure and its steps) is not copied
+                field by field: new work is made of a procedure by instantiate#WorkProcess, and a procedure is cloned as a new draft by
+                store#WorkProcess; this service is also on the /mantle REST API. Projects' and Commons' copies are unchanged. -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:baseWorkEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId" from="baseWorkEffortId"/></entity-find-one>
 

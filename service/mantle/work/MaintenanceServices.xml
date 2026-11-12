@@ -138,6 +138,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="offlineIntent"><description>Y: starting the work takes its equipment or facility out of service
                 (P5)</description></parameter>
             <parameter name="operationKey"/>
+            <parameter name="templateWorkEffortId"><description>impl-maintenance P6: the procedure the work is made from (approved,
+                in effect, applicable to the target, of the work's organization); its steps become the root's tree in this
+                transaction (ProcessServices.instantiate#WorkProcess' checked path), and the work is never approved on create as
+                corrective work is: the threshold reads the root's estimate with its steps'</description></parameter>
+            <parameter name="roleParties" type="Map"><description>With a procedure: the person (of the organization) each step
+                role is assigned to; a role named for no one stays a requirement</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>
@@ -221,6 +227,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="assigneePartyIds" type="List"/>
             <parameter name="estimatedStartDate" type="Timestamp"/>
             <parameter name="estimatedCompletionDate" type="Timestamp"/>
+            <parameter name="replacePartyId"><description>A person replaced on the root and each step of its tree by withPartyId (a
+                leaver's work, Admin's offboarding; impl-maintenance F113)</description></parameter>
+            <parameter name="withPartyId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>
