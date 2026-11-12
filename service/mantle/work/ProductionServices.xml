@@ -867,7 +867,7 @@ along with this software (see the LICENSE.md file). If not, see
             ends the current one now (a future one at its start). The revision counts up. Requires PRODUCTION_PLAN; refuses a
             run outside the user's organizations (RECORD_UNAVAILABLE), a run done or cancelled (RUN_CLOSED), a changed revision
             (REVISION_CHANGED, REVISION_REQUIRED), equipment not at a facility of the run's owner (RECORD_UNAVAILABLE), stock
-            (EQUIPMENT_INVALID), equipment deactivated, on hold, delivered or in maintenance now (EQUIPMENT_BLOCKED), equipment
+            (EQUIPMENT_INVALID), equipment deactivated, on hold, delivered or in maintenance (an AssetMaintenance in process, not a planned one; EQUIPMENT_BLOCKED), equipment
             another open run holds over the same time (EQUIPMENT_OVERLAP), dates out of order (DATES_INVALID), a second
             assignment (ALREADY_ASSIGNED) and an end of none (NOT_ASSIGNED).</description>
         <in-parameters>

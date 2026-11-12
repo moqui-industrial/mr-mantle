@@ -343,6 +343,40 @@ function managedReason(workEffortIds) {
     }
     return null
 }
+// The managed ones among several work efforts, read in a few queries, by the same rule (a list's or a Today's filter: Maintenance's
+// P3 leaves managed work out of the generic lists, which an app's own source lists instead).
+function managedIds(workEffortIds) {
+    const wanted = Array.from(new Set(Array.from(workEffortIds || []).filter(Boolean)))
+    if (!wanted.length) return []
+    const at = nowMs()
+    const work = Array.from(
+        find(WORK).condition("workEffortId", "in", wanted).selectField("workEffortId,rootWorkEffortId,parentWorkEffortId").list()
+    )
+    const related = Array.from(
+        new Set(wanted.concat(work.flatMap(row => [row.rootWorkEffortId, row.parentWorkEffortId]).filter(Boolean)))
+    )
+    const guarded = new Set(
+        Array.from(find(PROCESS).condition("workEffortId", "in", related).condition("guardsExecution", "Y").list())
+            .filter(row => openAt(row, at))
+            .map(row => row.workEffortId)
+    )
+    const roots = Array.from(new Set(work.map(row => row.rootWorkEffortId || row.workEffortId)))
+    const orders =
+        ec.entity.isEntityDefined(WORK_ORDER) && roots.length
+            ? new Set(
+                  Array.from(find(WORK_ORDER).condition("workEffortId", "in", roots).selectField("workEffortId").list()).map(
+                      row => row.workEffortId
+                  )
+              )
+            : new Set()
+    return work
+        .filter(
+            row =>
+                [row.workEffortId, row.rootWorkEffortId, row.parentWorkEffortId].some(id => id && guarded.has(id)) ||
+                orders.has(row.rootWorkEffortId || row.workEffortId)
+        )
+        .map(row => row.workEffortId)
+}
 function checkManagedWork(p) {
     const ids = [text(p.workEffortId)].concat(Array.from(p.workEffortIdList || []).map(text))
     const reason = managedReason(ids)
@@ -371,5 +405,6 @@ const operations = {storeProcessStep, instantiateWorkProcess, checkManagedWork}
     instantiate,
     processPolicyOf,
     stepPolicyOf,
-    managedReason
+    managedReason,
+    managedIds
 })

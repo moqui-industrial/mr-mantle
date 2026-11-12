@@ -99,7 +99,11 @@ along with this software (see the LICENSE.md file). If not, see
             now, not cancelled, and completed or closed ones only for 30 days after they were completed, each named by its
             UID (universalId, else workEffortId) with .ics, an entity tag over the task and the user's assignment, and the
             collection's ctag. A protected task (People's offboarding, separation and grievance-linked tasks, ChecklistStep
-            isProtected; IronStone People design §12, F22) is left out, so a phone never lists, reads or changes it.</description>
+            isProtected; IronStone People design §12, F22) is left out, so a phone never lists, reads or changes it. A template
+            and a step of managed work (a maintenance work order's, or of a process whose policy guards execution) are left out
+            too, and a managed root (a maintenance work order) is listed read only (readOnly): a PUT or DELETE of it is refused
+            (403) before anything changes, and its status changes only through its own lifecycle (IronStone Maintenance design
+            §13.3; impl-maintenance P3, F63).</description>
         <out-parameters>
             <parameter name="objectList" type="List"/>
             <parameter name="ctag"/>
@@ -125,13 +129,20 @@ along with this software (see the LICENSE.md file). If not, see
             const protectedIds = new Set(tasks.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
                     .condition(cf.makeCondition('workEffortId', 'in', tasks.map((task) => task.workEffortId))).condition('isProtected', 'Y')
                     .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : [])
+            // a template and the steps of managed work are left out, and a managed root is read only (impl-maintenance P3, F63)
+            const managed = new Set(tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+                    .managedIds(tasks.map((task) => task.workEffortId)) : [])
             for (const task of tasks) {
                 if (protectedIds.has(task.workEffortId)) continue
+                if (task.isTemplate === 'Y') continue
+                const isRoot = !task.rootWorkEffortId || task.rootWorkEffortId === task.workEffortId
+                if (managed.has(task.workEffortId) && !isRoot) continue
                 const done = ['WeComplete', 'WeClosed'].includes(task.statusId)
                 if (done && (millis(task.actualCompletionDate) ?? millis(task.lastUpdatedStamp) ?? 0) < since) continue
                 const uid = task.universalId || null
                 const name = uid && /^[A-Za-z0-9@._:+-]+$/.test(uid) ? `${uid}.ics` : `${task.workEffortId}.ics`
                 objectList.push({workEffortId: task.workEffortId, name: name, uid: uid || `mantle-task-${task.workEffortId}`,
+                    readOnly: managed.has(task.workEffortId),
                     etag: hash([task.workEffortId, task.workEffortName, task.description, task.statusId, task.priority, task.percentComplete,
                         millis(task.estimatedStartDate), millis(task.estimatedCompletionDate), millis(task.actualCompletionDate),
                         millis(task.lastUpdatedStamp), millis(assigned.get(task.workEffortId).lastUpdatedStamp)].map((part) => String(part ?? '')).join('|'))})
@@ -290,6 +301,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 const existing = Array.from(tags.objectList || []).find((object) => object.name === objectName)
                 if (failsPreconditions(existing)) { status = 412; return }
+                // a maintenance work order is changed only through its lifecycle (impl-maintenance P3, F63)
+                if (existing?.readOnly) { status = 403; return }
                 const statusOf = {'NEEDS-ACTION': null, 'IN-PROCESS': 'WeInProgress', COMPLETED: 'WeComplete', CANCELLED: 'WeCancelled'}
                 const due = todo.dueDate ? ec.l10n.parseTimestamp(`${todo.dueDate} 00:00:00.000`, 'yyyy-MM-dd HH:mm:ss.SSS') : toDate(todo.due)
                 const fields = {workEffortName: todo.summary || ec.l10n.localize('(no title)'), description: todo.description ?? null,
@@ -448,6 +461,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .find((candidate) => candidate.name === objectName)
                 if (object == null) { status = 404; return }
                 if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
+                // a maintenance work order's assignments are its schedule's (impl-maintenance P3, F63)
+                if (object.readOnly) { status = 403; return }
                 const partyId = ec.user.userAccount?.partyId
                 for (const row of Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', object.workEffortId)
                         .condition('partyId', partyId).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())) {

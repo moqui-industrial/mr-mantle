@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Maintenance work orders (IronStone Maintenance design §3, §9 Lookups; impl-maintenance P3): the core lookups as
+        enumerations (Settings' Lookups maintain them from P18), the maintenance status flow over the existing WorkEffort statuses,
+        the AssetMaintenance transitions the synchronization needs, and the MaintenanceWork topic. -->
+
+    <!-- the kind of work, above the AssetMaintenance's MaintenanceType -->
+    <moqui.basic.EnumerationType description="Maintenance Kind" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MkCorrective" description="Corrective" sequenceNum="1" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MkPreventive" description="Preventive" sequenceNum="2" enumTypeId="MaintenanceKind"/>
+    <moqui.basic.Enumeration enumId="MntTpPreventive" description="Preventive Maintenance" enumTypeId="MaintenanceType"/>
+    <moqui.basic.Enumeration enumId="MntTpInspection" description="Inspection" enumTypeId="MaintenanceType"/>
+    <!-- how the work came -->
+    <moqui.basic.EnumerationType description="Maintenance Source" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcPlanned" description="Planned" sequenceNum="1" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcReport" description="Reported problem" sequenceNum="2" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcProduction" description="Production request" sequenceNum="3" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcAdopted" description="Adopted record" sequenceNum="4" enumTypeId="MaintenanceSource"/>
+    <moqui.basic.Enumeration enumId="MsrcSchedule" description="Preventive schedule" sequenceNum="5" enumTypeId="MaintenanceSource"/>
+    <!-- severity -->
+    <moqui.basic.EnumerationType description="Maintenance Severity" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevLow" description="Low" sequenceNum="1" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevMedium" description="Medium" sequenceNum="2" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevHigh" description="High" sequenceNum="3" enumTypeId="MaintenanceSeverity"/>
+    <moqui.basic.Enumeration enumId="MsevSafety" description="Safety" sequenceNum="4" enumTypeId="MaintenanceSeverity"/>
+    <!-- hold and cancel reasons -->
+    <moqui.basic.EnumerationType description="Maintenance Hold Reason" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrParts" description="Waiting for parts" sequenceNum="1" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrAccess" description="Waiting for access" sequenceNum="2" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrVendor" description="Waiting for a vendor" sequenceNum="3" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.Enumeration enumId="MhrOther" description="Other" sequenceNum="9" enumTypeId="MaintenanceHoldReason"/>
+    <moqui.basic.EnumerationType description="Maintenance Cancel Reason" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrDuplicate" description="Duplicate" sequenceNum="1" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrNotNeeded" description="No longer needed" sequenceNum="2" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrReplaced" description="Equipment replaced" sequenceNum="3" enumTypeId="MaintenanceCancelReason"/>
+    <moqui.basic.Enumeration enumId="McrOther" description="Other" sequenceNum="9" enumTypeId="MaintenanceCancelReason"/>
+    <!-- failure mode, a seeded type an organization's lookups extend -->
+    <moqui.basic.EnumerationType description="Maintenance Failure Mode" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmWear" description="Wear" sequenceNum="1" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmLeak" description="Leak" sequenceNum="2" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmElectrical" description="Electrical" sequenceNum="3" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmOperator" description="Operator error" sequenceNum="4" enumTypeId="MaintenanceFailureMode"/>
+    <moqui.basic.Enumeration enumId="MfmUnknown" description="Unknown" sequenceNum="9" enumTypeId="MaintenanceFailureMode"/>
+    <!-- completion: the outcome and the resource's state the technician declares (completion does not imply restoration) -->
+    <moqui.basic.EnumerationType description="Maintenance Outcome" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutRepaired" description="Repaired" sequenceNum="1" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutDone" description="Done as planned" sequenceNum="2" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutNoFault" description="No fault found" sequenceNum="3" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.Enumeration enumId="MoutNotRepaired" description="Not repaired" sequenceNum="4" enumTypeId="MaintenanceOutcome"/>
+    <moqui.basic.EnumerationType description="Maintenance Disposition" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispAvailable" description="Available for use" sequenceNum="1" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispRestricted" description="Usable with restrictions" sequenceNum="2" enumTypeId="MaintenanceDisposition"/>
+    <moqui.basic.Enumeration enumId="MdispUnavailable" description="Still unavailable" sequenceNum="3" enumTypeId="MaintenanceDisposition"/>
+    <!-- the closure policy of an organization's MaintenancePolicy -->
+    <moqui.basic.EnumerationType description="Maintenance Closure Policy" enumTypeId="MaintenanceClosurePolicy"/>
+    <moqui.basic.Enumeration enumId="MclSupervisor" description="A supervisor closes completed work" sequenceNum="1" enumTypeId="MaintenanceClosurePolicy"/>
+    <moqui.basic.Enumeration enumId="MclOnComplete" description="Completion closes the work" sequenceNum="2" enumTypeId="MaintenanceClosurePolicy"/>
+
+    <!-- The maintenance status flow over the existing WorkEffort statuses (design §3's lifecycle table): its labels and
+        get#TaskStatusFlow read it. The framework matches a transition by its from and to statuses over every flow
+        (impl-maintenance F65), so the flow gates nothing: transition#MaintenanceWorkOrder is the gate. A transition's permission
+        refuses only when every flow's row of the same move needs one the user lacks: Manufacturing's WeApproved and WeOnHold rows
+        need PRODUCTION_SUPERVISE, so this flow's need MAINTENANCE_SUPERVISE (a supervisor holds approved work and resumes it as
+        approved), and a user with neither is still refused the move on its own. -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortMaintenance" statusTypeId="WorkEffort" description="Maintenance work order"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeApproved" transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeInProgress" transitionName="Start"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeOnHold" transitionName="Hold"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeComplete" transitionName="Complete"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeApproved" transitionName="Resume"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInProgress" transitionName="Resume"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeComplete" toStatusId="WeClosed" transitionName="Close"/>
+
+    <!-- the AssetMaintenance transitions the synchronization with its root needs and the Default flow lacks (impl-maintenance
+        F10): in process to cancelled, completed back to in process, scheduled back to created -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntInProcess" toStatusId="AsMntCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntCompleted" toStatusId="AsMntInProcess" transitionName="Reopen"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AsMntScheduled" toStatusId="AsMntCreated" transitionName="Unschedule"/>
+
+    <!-- MaintenanceWork (design §1.2): a work order assigned to the user, told on this topic only (the generic WorkItemAssigned
+        notice leaves managed work out). Its title names the work order and its target, never a cost or a reporter; an app sets
+        its link. Registered for Admin's Topics (impl-maintenance F52): its audience is who executes maintenance work. -->
+    <moqui.security.user.NotificationTopic topic="MaintenanceWork" inboxEnumId="NinNotifications" description="Maintenance work assigned to you"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Work order ${workEffortId} assigned to you: ${workEffortName}${targetName ? ' (' + targetName + ')' : ''}"/>
+    <moqui.server.TopicRegistration topic="MaintenanceWork" ownerApp="Maintenance" purpose="A maintenance work order assigned to the user"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MAINTENANCE_EXECUTE" sequenceNum="10"/>
+</entity-facade-xml>

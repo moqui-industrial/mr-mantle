@@ -1235,7 +1235,8 @@ along with this software (see the LICENSE.md file). If not, see
             themselves) on the topic WorkItemAssigned: workEffortId, workEffortName, rootWorkEffortId, projectName, assignedByName,
             and the task as the record (the app's record link opens it). Run by the WorkEffortParty rule of WorkEffort.secas.xml;
             a failure is logged, not the assignment's. A task of People's lifecycle work (its root's process policy People's, WppPeopleChecklist) goes to
-            mantle.humanres.PeopleServices.notify#PeopleTaskAssigned instead, whose title names nothing private.</description>
+            mantle.humanres.PeopleServices.notify#PeopleTaskAssigned instead, whose title names nothing private. Managed work (a
+            maintenance work order's steps) is not told here: Maintenance tells its assignees on MaintenanceWork.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="partyId" required="true"/>
@@ -1244,6 +1245,8 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
                 if (task == null || task.workEffortTypeEnumId !== 'WetTask' || !task.rootWorkEffortId) return
+                // managed work (a maintenance work order's steps) is told on its app's own topic (MaintenanceWork), not twice
+                if (ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').managedIds([workEffortId]).length) return
                 // People's lifecycle work (a checklist step, an equipment return) is told on its own topic, whose title names
                 // neither the task nor its root, which name the person and the change (impl-people P8)
                 if (ec.entity.find('mantle.work.effort.WorkEffortProcessPolicy').condition('workEffortId', task.rootWorkEffortId)

@@ -1028,20 +1028,11 @@ function storeOrder(p) {
 }
 
 // ===== store#ProductionEquipment =====
+// Equipment in maintenance: an AssetMaintenance in process, not any open one, so a planned maintenance work order and a request
+// not yet started block nothing; an outage is recorded on its own (impl-maintenance §4, F13, F49; an owner contract with
+// Maintenance).
 function openMaintenance(assetId) {
-    const factory = ec.entity.conditionFactory
-    return find("mantle.product.maintenance.AssetMaintenance", {assetId})
-        .condition("statusId", "not-in", ["AsMntCompleted", "AsMntCancelled"])
-        .condition(
-            factory.makeCondition(
-                [
-                    factory.makeCondition("maintenanceDate", "is-null", null),
-                    factory.makeCondition("maintenanceDate", "less-equals", ec.user.nowTimestamp)
-                ],
-                "or"
-            )
-        )
-        .count()
+    return find("mantle.product.maintenance.AssetMaintenance", {assetId, statusId: "AsMntInProcess"}).count()
 }
 const overlaps = (aFrom, aThru, bFrom, bThru) =>
     (lib.ms(aFrom) ?? -Infinity) < (lib.ms(bThru) ?? Infinity) && (lib.ms(bFrom) ?? -Infinity) < (lib.ms(aThru) ?? Infinity)
