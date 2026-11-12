@@ -342,8 +342,6 @@ feature(
             const change = parameters =>
                 run(state.hr, O + "change#Manager", Object.assign({organizationPartyId: orgA}, parameters))
             const report = nodeOf({partyId: state.REPORT}, state.REPORT)
-            const dual = nodeOf({partyId: state.DUAL}, state.DUAL)
-            const shared = nodeOf({partyId: state.SHARED}, state.SHARED)
             const refusals = {
                 self: code(change({partyId: state.PEER, managerPartyId: state.PEER, expectedRevision: peer.lineRevision})),
                 cycle: code(change({partyId: state.HEAD, managerPartyId: state.REPORT, expectedRevision: ""})),
@@ -359,12 +357,7 @@ feature(
                         managerPartyId: state.MGR
                     })
                 ),
-                otherEmployer: code(run(state.hr, O + "change#Manager", {partyId: state.BETA, managerPartyId: state.DUAL})),
-                // A's HR may not start a line that would be B's too (BOTH and DUAL both employed by B), nor end one that is
-                sharedNew: code(change({partyId: state.DUAL, managerPartyId: state.BOTH, expectedRevision: dual.lineRevision})),
-                sharedEnded: code(
-                    change({partyId: state.SHARED, managerPartyId: state.MGR, expectedRevision: shared.lineRevision})
-                )
+                otherEmployer: code(run(state.hr, O + "change#Manager", {partyId: state.BETA, managerPartyId: state.DUAL}))
             }
             // REPORT moves from MGR to PEER from next month
             const next = state.now + 30 * day
@@ -402,9 +395,7 @@ feature(
                     stale: "REVISION_CHANGED",
                     unchanged: "MANAGER_UNCHANGED",
                     reader: "PERMISSION_DENIED",
-                    otherEmployer: "RECORD_UNAVAILABLE",
-                    sharedNew: "LINE_SHARED",
-                    sharedEnded: "LINE_SHARED"
+                    otherEmployer: "RECORD_UNAVAILABLE"
                 }
             changed == ""
             lines == [state.MGR + " true", state.PEER + " open"]
@@ -448,6 +439,44 @@ feature(
             treeB == [orgB + " true"]
             directoryB == [""]
             filteredB == 0
+        }
+    }
+)
+
+feature(
+    "a manager change at one employer of a person employed by two is that employment's (P6: its assignment's): the line at the other employer is not changed",
+    {
+        when() {
+            const nodeOf = partyId =>
+                (run(state.hr, O + "get#ReportingTree", {organizationPartyId: orgA, partyId}).nodes || []).find(
+                    row => row.partyId == partyId
+                )
+            const change = (partyId, managerPartyId) =>
+                run(state.hr, O + "change#Manager", {
+                    organizationPartyId: orgA,
+                    partyId,
+                    managerPartyId,
+                    expectedRevision: nodeOf(partyId).lineRevision
+                }).error
+            // A's HR gives DUAL a manager employed by A and B (BOTH), and moves SHARED from BOTH (a line at A and B) to MGR, at A
+            const errors = [change(state.DUAL, state.BOTH), change(state.SHARED, state.MGR)]
+            const managers = (organizationPartyId, partyId) =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/humanres/People.js")
+                    .linesOf({reportPartyIds: [partyId]}, null)
+                    .filter(line => line.organizationPartyIds.includes(organizationPartyId))
+                    .map(line => line.managerPartyId)
+                    .join()
+            return {
+                errors,
+                dual: [managers(orgA, state.DUAL), managers(orgB, state.DUAL)],
+                shared: [managers(orgA, state.SHARED), managers(orgB, state.SHARED)]
+            }
+        },
+        then({errors, dual, shared}) {
+            errors == ["", ""]
+            dual == [state.BOTH, ""]
+            shared == [state.MGR, state.BOTH]
         }
     }
 )

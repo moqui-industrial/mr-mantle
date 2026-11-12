@@ -17,6 +17,8 @@
 // Pay, review, case and leave data is never part of any answer. Missing and unauthorized people are refused alike
 // (RECORD_UNAVAILABLE, from partyAccess).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
+// P6: the dated assignments of a hire and an employment change (the employment history's)
+const employmentChanges = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Employment.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, denied, call, dateText, hash} = lib
 
@@ -196,8 +198,9 @@ function stateOf(row, asOf) {
     if (from != null && from > asOf) return {state: "future", stateText: "Starts " + dateText(row.fromDate)}
     return {state: "current", stateText: "Current"}
 }
-// Employments as the answer shows them: the employer's name, the job title, the state, and the dates for the rows withDates
-// names (true, false, or a test of the row: an HR reader's own employers' employments).
+// Employments as the answer shows them: the employer's name, the job title, the department (of the assignment in effect on the
+// date, P6: part of the public work identity), the state, and the dates and the assignment's state (on leave) for the rows
+// withDates names (true, false, or a test of the row: an HR reader's own employers' employments).
 function employmentRows(rows, asOf, withDates) {
     const datesOf = typeof withDates === "function" ? withDates : () => !!withDates
     const titles = titlesOf(
@@ -206,14 +209,29 @@ function employmentRows(rows, asOf, withDates) {
     )
     const organizations = people.organizationNames(people.unique(rows.map(row => row.organizationPartyId)))
     const reasons = rows.some(datesOf) ? enumNames(Object.values(titles).map(row => row.terminationReasonEnumId)) : {}
+    const assigned = people.assignmentsAt(people.unique(rows.map(row => row.partyId).filter(Boolean)), asOf)
+    const assignmentOf = row => {
+        const assignment = assigned[row.organizationPartyId + "/" + row.partyId]
+        return assignment && assignment.partyRelationshipId === row.partyRelationshipId ? assignment : null
+    }
+    const departments = people.organizationNames(
+        people.unique(
+            rows
+                .map(assignmentOf)
+                .map(row => row?.departmentPartyId)
+                .filter(Boolean)
+        )
+    )
     return rows.map(row => {
         const title = titles[row.partyRelationshipId] || {}
+        const assignment = assignmentOf(row)
         const out = Object.assign(
             {
                 partyRelationshipId: row.partyRelationshipId,
                 organizationPartyId: row.organizationPartyId,
                 organizationName: organizations[row.organizationPartyId] || row.organizationPartyId,
-                jobTitle: title.jobTitle || ""
+                jobTitle: title.jobTitle || "",
+                departmentName: assignment?.departmentPartyId ? departments[assignment.departmentPartyId] || "" : ""
             },
             stateOf(row, asOf)
         )
@@ -223,7 +241,8 @@ function employmentRows(rows, asOf, withDates) {
                 thruDate: row.thruDate || null,
                 fromDateText: dateText(row.fromDate),
                 thruDateText: dateText(row.thruDate),
-                terminationReason: reasons[title.terminationReasonEnumId] || ""
+                terminationReason: reasons[title.terminationReasonEnumId] || "",
+                onLeave: assignment?.stateEnumId === "EasLeave"
             })
         return out
     })
@@ -465,14 +484,16 @@ function employee360(p) {
         editPersonal: access.self || access.hrEdit,
         editHr: access.hrEdit,
         selfFields: access.hrEdit ? selfFields.concat(hrFields) : access.self ? selfFields : [],
-        files: !!hostId
+        files: !!hostId,
+        // P6: an HR editor of the opened employment's employer changes it (apply#EmploymentChange checks again)
+        changeEmployment: !!hostId && access.hrEdit
     }
     return out
 }
 
 // ===== get#EmploymentHistory =====
-// The person's employments, newest first (P6 adds their assignments): an HR reader's of the employers in scope, any dates; the
-// person's own, all of them. Refused for anyone else (PERMISSION_DENIED), who reads the Overview only.
+// The person's employments, newest first, and their dated assignments (P6): an HR reader's of the employers in scope, any dates;
+// the person's own, all of them. Refused for anyone else (PERMISSION_DENIED), who reads the Overview only.
 function employmentHistory(p) {
     const asOf = people.asOfMillis(null)
     const access = personAccess(p.partyId, asOf)
@@ -483,11 +504,17 @@ function employmentHistory(p) {
     if (!access.self) query = query.condition("toPartyId", "in", access.userScope.organizationPartyIds)
     const found = Array.from(query.orderBy("-fromDate").list()).map(row => ({
         partyRelationshipId: row.partyRelationshipId,
+        partyId: row.fromPartyId,
         organizationPartyId: row.toPartyId,
         fromDate: row.fromDate,
         thruDate: row.thruDate
     }))
-    return {history: employmentRows(found, asOf, true)}
+    const history = employmentRows(found, asOf, true)
+    const employers = Object.fromEntries(history.map(row => [row.partyRelationshipId, row.organizationName]))
+    const assignments = employmentChanges()
+        .assignmentHistory(found.map(row => row.partyRelationshipId))
+        .map(row => Object.assign({organizationName: employers[row.partyRelationshipId] || ""}, row))
+    return {history, assignments}
 }
 
 // ===== store#PersonalInfo =====

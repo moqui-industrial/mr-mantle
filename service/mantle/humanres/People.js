@@ -148,8 +148,11 @@ function employeeIdsOf(organizationPartyIds, asOf) {
 // so a line's employers are read from the employments on the date: the employers of the report that employ the manager too
 // (the line manages the report's employment there and no other); a manager employed by no one is a line at every employer of
 // the report (a line written before People, such as a project lead who is an agent). change#Manager writes a line only between
-// two employees of one employer. Two people both employed by the same two employers share one line at both: P6's assignments
-// carry the manager per employment.
+// two employees of one employer. An employment with an assignment (EmploymentAssignment, P6) has the assignment's manager: a line
+// is at that employer only when the assignment in effect names its manager, and a line an assignment names is that employment's
+// alone, never also the line at an employer with no assignment, so two people both employed by the same two employers no longer
+// share one line at both (F81, F86, F91); the PrtManager rows are the assignments' projection, kept by Employment.js, and every
+// manager change through People is an assignment's (change#Manager too).
 // The current employers of the people on the date: {partyId: [organizationPartyId]}, a person employed by no one absent.
 function employersOfParties(partyIds, asOf) {
     const found = {}
@@ -159,8 +162,33 @@ function employersOfParties(partyIds, asOf) {
             found[row.fromPartyId].push(row.toPartyId)
     return found
 }
+// The primary assignments of the people in effect on the date (P6): {"organizationPartyId/partyId": row}, the newest when two
+// overlap. An employment with none (written before People, or by Mantle's other callers) keeps its PrtManager lines.
+const ASSIGNMENT = "mantle.humanres.employment.EmploymentAssignment"
+function assignmentsAt(partyIds, asOf) {
+    const found = {}
+    if (!partyIds.length) return found
+    const query = find(ASSIGNMENT).condition("partyId", "in", unique(partyIds)).condition("isPrimary", "Y")
+    for (const row of Array.from(current(query, asOf).orderBy("-fromDate").list())) {
+        const key = row.organizationPartyId + "/" + row.partyId
+        if (!found[key]) found[key] = row
+    }
+    return found
+}
+// An employment's revision: the later change of its relationship, its Employment row and its assignments, what an employment
+// change names (a change of any of them since supersedes it).
+function employmentRevision(partyRelationshipId) {
+    if (!partyRelationshipId) return "0"
+    const stampOf = row => lib.ms(row?.lastUpdatedStamp) ?? 0
+    const stamps = [
+        stampOf(find("mantle.party.PartyRelationship", {partyRelationshipId}).one()),
+        stampOf(find("mantle.humanres.employment.Employment", {partyRelationshipId}).one())
+    ].concat(Array.from(find(ASSIGNMENT, {partyRelationshipId}).list()).map(stampOf))
+    return String(Math.max(...stamps))
+}
 // The lines live on the date of the reports or of the managers asked for, each with the employers it is a line at
-// (organizationPartyIds); a line at no employer (the report or the manager employed elsewhere only) is left out.
+// (organizationPartyIds); a line at no employer (the report or the manager employed elsewhere only) is left out. At an employer
+// where the report's employment has an assignment, the line is there only when the assignment names its manager.
 function linesOf({reportPartyIds, managerPartyIds}, asOf) {
     let query = find("mantle.party.PartyRelationship").condition("relationshipTypeEnumId", "PrtManager")
     if (reportPartyIds) {
@@ -174,6 +202,19 @@ function linesOf({reportPartyIds, managerPartyIds}, asOf) {
     const found = Array.from(current(query, asOf).orderBy("-fromDate").list())
     if (!found.length) return []
     const employed = employersOfParties(unique(found.flatMap(row => [row.fromPartyId, row.toPartyId])), asOf)
+    const assigned = assignmentsAt(unique(found.map(row => row.toPartyId)), asOf)
+    // the lines an assignment names (manager/report): an assignment's line is its own employment's
+    const claimed = new Set(
+        Object.values(assigned)
+            .filter(assignment => assignment.managerPartyId)
+            .map(assignment => assignment.managerPartyId + "/" + assignment.partyId)
+    )
+    // at an employer whose employment of the report has an assignment, the assignment's manager alone; at one with none, a line no
+    // assignment of the report names (one written before People, kept by the employment's records)
+    const assignedTo = (organizationPartyId, row) => {
+        const assignment = assigned[organizationPartyId + "/" + row.toPartyId]
+        return assignment ? assignment.managerPartyId === row.fromPartyId : !claimed.has(row.fromPartyId + "/" + row.toPartyId)
+    }
     return found
         .map(row => {
             const reportEmployers = employed[row.toPartyId] || []
@@ -182,9 +223,10 @@ function linesOf({reportPartyIds, managerPartyIds}, asOf) {
                 partyRelationshipId: row.partyRelationshipId,
                 managerPartyId: row.fromPartyId,
                 partyId: row.toPartyId,
-                organizationPartyIds: managerEmployers
+                organizationPartyIds: (managerEmployers
                     ? reportEmployers.filter(organizationPartyId => managerEmployers.includes(organizationPartyId))
-                    : reportEmployers,
+                    : reportEmployers
+                ).filter(organizationPartyId => assignedTo(organizationPartyId, row)),
                 fromDate: row.fromDate,
                 thruDate: row.thruDate,
                 lastUpdatedStamp: row.lastUpdatedStamp
@@ -504,5 +546,8 @@ function run(op, p) {
     employersOfParties,
     linesOf,
     managersByEmployment,
-    unitsUnder
+    unitsUnder,
+    // P6: the assignments in effect and an employment's revision (Employment.js, Approvals.js, Organization.js, Employees.js)
+    assignmentsAt,
+    employmentRevision
 })

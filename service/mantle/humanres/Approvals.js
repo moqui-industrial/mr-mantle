@@ -33,6 +33,7 @@ const APPROVAL = "mantle.humanres.approval.PeopleApproval"
 const DECISION = "mantle.humanres.approval.PeopleApprovalDecision"
 const RELATIONSHIP = "mantle.party.PartyRelationship"
 const POSITION = "mantle.humanres.position.EmplPosition"
+const CHANGE = "mantle.humanres.employment.EmploymentChange"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -79,6 +80,41 @@ const kinds = {
                 }
             }
         }
+    },
+    // P6: a transfer or a separation (PeopleServices.apply#EmploymentChange and decide#EmploymentChange). The request is bound to
+    // the change row and the employment's revision (People.js employmentRevision), so a change of the employment meanwhile (another
+    // change applied, a manager changed on the chart) supersedes it.
+    PakEmploymentChange: {
+        topic: "PeopleEmploymentChangeApproval",
+        sourceEntityName: CHANGE,
+        sourceField: "employmentChangeId",
+        revision(sourceId) {
+            const change = one(CHANGE, {employmentChangeId: sourceId})
+            if (!change) return "0"
+            return String(ms(change.lastUpdatedStamp) ?? 0) + ":" + people.employmentRevision(change.partyRelationshipId)
+        },
+        // what the notice says: the kind of change and the person (a separation's title names no one), employer and department
+        describe(sourceId) {
+            const change = one(CHANGE, {employmentChangeId: sourceId})
+            if (!change) return {label: "employment change " + sourceId}
+            const kindText = (enumTexts([change.changeKindEnumId])[change.changeKindEnumId] || "change").toLowerCase()
+            const personName = people.personNames([change.partyId])[change.partyId] || change.partyId
+            const names = people.organizationNames([change.organizationPartyId, change.departmentPartyId].filter(Boolean))
+            const organizationName = names[change.organizationPartyId] || change.organizationPartyId || ""
+            const separation = change.changeKindEnumId === "EckSeparation"
+            return {
+                label: kindText + " of " + personName,
+                message: {
+                    employmentChangeId: sourceId,
+                    partyId: change.partyId,
+                    changeText: kindText,
+                    personName,
+                    subjectText: separation ? "an employment's end" : "the " + kindText + " of " + personName,
+                    organizationName,
+                    departmentName: change.departmentPartyId ? names[change.departmentPartyId] || "" : ""
+                }
+            }
+        }
     }
 }
 function kindOf(approvalKindEnumId) {
@@ -88,6 +124,7 @@ function kindOf(approvalKindEnumId) {
 }
 // a source's revision: its last change, what a request names
 function revisionOf(kind, sourceId) {
+    if (kind.revision) return kind.revision(sourceId)
     const row = one(kind.sourceEntityName, {[kind.sourceField]: sourceId})
     return String(ms(row?.lastUpdatedStamp) ?? 0)
 }

@@ -71,6 +71,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="People Approval Kind" enumTypeId="PeopleApprovalKind"/>
             <moqui.basic.Enumeration enumId="PakPosition" description="Position activation" sequenceNum="1"
                     enumTypeId="PeopleApprovalKind"/>
+            <!-- P6: a transfer or a separation (PeopleServices.decide#EmploymentChange) -->
+            <moqui.basic.Enumeration enumId="PakEmploymentChange" description="Employment change" sequenceNum="2"
+                    enumTypeId="PeopleApprovalKind"/>
             <moqui.basic.EnumerationType description="People Approver Role" enumTypeId="PeopleApproverRole"/>
             <moqui.basic.Enumeration enumId="ParDepartmentHead" description="Department head" sequenceNum="1"
                     enumTypeId="PeopleApproverRole"/>

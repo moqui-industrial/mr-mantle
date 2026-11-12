@@ -10,13 +10,18 @@
 //   the internal organizations themselves (Mantle's demo departments ORG_ZIZI_HR and ORG_ZIZI_SALES among them, §5 Q6) are
 //   legal organizations, shown in the tree under their parent and kept by Admin's Organizations;
 // - a membership is a dated PrtMember relationship from the person to the unit, from role Assignee for a member (as Mantle's
-//   demo) and Manager for its lead, which BusinessTime's hours access reads (F63); never an employment;
+//   demo) and Manager for its lead, which BusinessTime's hours access reads (F63); never an employment. A department's members are
+//   its employees' assignments' (P6, the user's call: Employment.js writes the Assignee row with the assignment), so store#Membership
+//   changes a team's members and leads only, and a department's lead through store#Unit; a department is closed with its employees
+//   reassigned to another (store#Unit's close);
 // - a reporting line is a dated PrtManager relationship from the manager to the report (F50), at the employers that employ both
-//   (People.js linesOf): change#Manager writes one only between two employees of one employer.
+//   (People.js linesOf): change#Manager writes one only between two employees of one employer; for an employment with an
+//   assignment (P6) the change is the assignment's manager change (Employment.js), the line its projection.
 // Ended rows are kept; nothing is deleted. A change reason is the ended row's audit (thruDate_changeReason) and the new row's
 // comments. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const employees = ec.resource.script("component://mr-mantle/service/mantle/humanres/Employees.js")
+const employmentChanges = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Employment.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -346,6 +351,8 @@ function getUnit(p) {
                     a.personName.localeCompare(b.personName)
             )
     }
+    // a department's members are its assignments' (P6): changed with the employment, its lead with the unit
+    unit.membersEditable = found.kind === "team" && unit.canEdit
     return {unit, parents, members, asOfDate: at}
 }
 
@@ -407,6 +414,7 @@ function storeUnit(p) {
     const revision = unitRevision(unit.partyId)
     if (text(p.expectedRevision) !== revision)
         denied("REVISION_CHANGED", "This unit changed since you read it; open it again (revision " + revision + ")")
+    if (p.close === true || p.close === "true" || p.close === "Y") return closeUnit(userScope, unit, p, reason)
     if (name && name !== (one("mantle.party.Organization", {partyId: unit.partyId})?.organizationName || ""))
         call("update#mantle.party.Organization", {partyId: unit.partyId, organizationName: name})
     const parentPartyId = text(p.parentPartyId)
@@ -435,6 +443,54 @@ function storeUnit(p) {
     return {partyId: unit.partyId, revision: unitRevision(unit.partyId)}
 }
 
+// A unit closed from a date (P6; design §4 OrgStructure: a closure reassigns its employees): no earlier than now; refused while a
+// unit is under it (UNIT_HAS_CHILDREN), a position is in the department (UNIT_HAS_POSITIONS) or a membership starts later
+// (MEMBERSHIP_SCHEDULED); a department's employees (the assignments naming it) move to another department of the employer
+// (reassignPartyId; REASSIGNMENT_REQUIRED without one, REASSIGNMENT_INVALID for the unit itself, a team or another employer's),
+// each a reorganization from the date (Employment.js). The remaining memberships (its lead, a team's members) and its rollup end
+// on the date, with the reason; nothing is deleted.
+function closeUnit(userScope, unit, p, reason) {
+    const at = Math.max(effective(p.thruDate), nowMs())
+    const name = people.organizationNames([unit.partyId])[unit.partyId] || unit.partyId
+    const current = parentAt(unit.partyId, at)
+    if (!current) denied("DATE_STALE", name + " has no parent on that date; it is closed already")
+    if (relationships(ROLLUP, {toPartyId: unit.partyId}).some(row => (ms(row.thruDate) ?? Infinity) > at))
+        denied("UNIT_HAS_CHILDREN", "Units belong to " + name + " then; move or close them first")
+    if (
+        unit.kind === "department" &&
+        rows("mantle.humanres.position.EmplPosition", {departmentPartyId: unit.partyId}).some(
+            row => (ms(row.thruDate) ?? Infinity) > at
+        )
+    )
+        denied("UNIT_HAS_POSITIONS", "Positions belong to " + name + " then; move or end them first")
+    const memberships = relationships(MEMBER, {toPartyId: unit.partyId}).filter(row => (ms(row.thruDate) ?? Infinity) > at)
+    let moved = 0
+    if (unit.kind === "department") {
+        const assigned = rows("mantle.humanres.employment.EmploymentAssignment", {departmentPartyId: unit.partyId}).filter(
+            row => (ms(row.thruDate) ?? Infinity) > at
+        )
+        if (assigned.length) {
+            const reassignPartyId = text(p.reassignPartyId)
+            if (!reassignPartyId)
+                denied("REASSIGNMENT_REQUIRED", "People work in " + name + "; choose the department they move to")
+            const target = visibleUnit(userScope, reassignPartyId, at)
+            if (
+                target.kind !== "department" ||
+                target.partyId === unit.partyId ||
+                target.employerPartyId !== unit.employerPartyId
+            )
+                denied("REASSIGNMENT_INVALID", "Choose another department of the same employer")
+            moved = employmentChanges().reassignDepartment(unit.partyId, target.partyId, at, reason || "Department closed")
+        }
+    }
+    const remaining = relationships(MEMBER, {toPartyId: unit.partyId}).filter(row => (ms(row.thruDate) ?? Infinity) > at)
+    if (remaining.some(row => (ms(row.fromDate) ?? -Infinity) > at))
+        denied("MEMBERSHIP_SCHEDULED", "Someone joins " + name + " after that date; change that membership first")
+    for (const row of remaining) endRow(row, at, reason || "Unit closed")
+    endRow(current, at, reason || "Unit closed")
+    return {partyId: unit.partyId, revision: unitRevision(unit.partyId), moved, endedMemberships: memberships.length}
+}
+
 // ===== store#Membership =====
 // A person joins a unit as a member or its lead from a date, or a membership ends (design §4 TeamMembers): a dated PrtMember row
 // from the person to the unit, never an employment. A person who is a member already in another role changes role from the
@@ -458,14 +514,15 @@ function addMembership(unit, partyId, memberRole, fromMs, reason) {
                 " on that date"
         )
     const open = relationships(MEMBER, {fromPartyId: partyId, toPartyId: unit.partyId}).filter(
-        row => (ms(row.thruDate) ?? Infinity) > fromMs
+        row => (ms(row.thruDate) ?? Infinity) > fromMs && (unit.kind !== "department" || row.fromRoleTypeId === roleTypeId)
     )
     if (open.some(row => (ms(row.fromDate) ?? 0) > fromMs))
         denied("MEMBERSHIP_SCHEDULED", (names[partyId] || partyId) + " already has a later membership of this unit")
     if (open.some(row => row.fromRoleTypeId === roleTypeId))
         denied("ALREADY_MEMBER", (names[partyId] || partyId) + " is already its " + roleTexts[roleTypeId].toLowerCase())
-    // a role change: the membership in the other role ends on the date
-    for (const row of open) endRow(row, fromMs, reason || "Role changed")
+    // a role change: the membership in the other role ends on the date (a department's Assignee row is its assignment's, P6:
+    // its lead keeps it)
+    for (const row of open) if (unit.kind !== "department") endRow(row, fromMs, reason || "Role changed")
     const join = (memberPartyId, memberRoleTypeId) => {
         call("mantle.party.PartyServices.ensure#PartyRole", {partyId: memberPartyId, roleTypeId: memberRoleTypeId})
         return call("create#" + RELATIONSHIP, {
@@ -479,18 +536,24 @@ function addMembership(unit, partyId, memberRole, fromMs, reason) {
         }).partyRelationshipId
     }
     if (roleTypeId === "Manager")
-        // one lead at a time: the lead before stays a member from the date
+        // one lead at a time: the lead before stays a member of a team from the date (a department's members are its
+        // assignments')
         for (const lead of relationships(MEMBER, {toPartyId: unit.partyId, fromRoleTypeId: "Manager"}).filter(
             row => openAt(row, fromMs) && row.fromPartyId !== partyId
         )) {
             endRow(lead, fromMs, reason || "New lead")
-            join(lead.fromPartyId, "Assignee")
+            if (unit.kind !== "department") join(lead.fromPartyId, "Assignee")
         }
     return join(partyId, roleTypeId)
 }
 function storeMembership(p) {
     const userScope = editorScope()
     const unit = visibleUnit(userScope, p.unitPartyId, nowMs())
+    if (unit.kind === "department")
+        denied(
+            "DEPARTMENT_MEMBERSHIP",
+            "A department's members come from their employment; change the employment, or the department's lead on the unit"
+        )
     const reason = text(p.changeReason)
     if (text(p.partyRelationshipId)) {
         const row = one(RELATIONSHIP, {partyRelationshipId: text(p.partyRelationshipId)})
@@ -620,6 +683,7 @@ function reportingTree(p) {
     const managerNames = people.personNames(managerIds)
     const organizations = people.organizationNames(unique(shown.map(row => row.organizationPartyId)))
     const canEdit = !!userScope.capabilities.hrView && !!userScope.capabilities.hrEdit
+    const assignments = canEdit ? people.assignmentsAt(unique(shown.map(row => row.partyId)), at) : {}
     const nodes = shown.map(row => {
         const key = nodeId(row.organizationPartyId, row.partyId)
         const line = lineOf[key] || null
@@ -642,7 +706,9 @@ function reportingTree(p) {
             reportCount: reportCounts[key] || 0
         }
         if (canEdit) {
-            out.lineRevision = revisionOf(line)
+            // the manager of an employment with an assignment is the assignment's (P6): its revision is the employment's
+            const assignment = assignments[key]
+            out.lineRevision = assignment ? assignmentRevision(assignment.partyRelationshipId) : revisionOf(line)
             out.lineSinceText = line ? dateText(line.fromDate) : ""
         }
         return out
@@ -700,6 +766,9 @@ function changeManager(p) {
     if (managerPartyId === partyId) denied("SELF_REPORTING", "A person cannot report to themselves")
     if (managerPartyId && !employedOn(managerPartyId, organizationPartyId, fromMs))
         denied("MANAGER_NOT_EMPLOYED", "The manager is not employed by " + employerName + " on that date")
+    // an employment with an assignment (P6): the manager is the assignment's, changed as an employment change from the date
+    const assignment = people.assignmentsAt([partyId], fromMs)[organizationPartyId + "/" + partyId]
+    if (assignment) return changeAssignedManager(assignment, managerPartyId, fromMs, reason, p, names[partyId] || partyId)
     // the person's lines at the employer: a line at the employer is one whose manager it employs, or who has no employer
     const atEmployer = (row, at) => {
         const theirs = people.employersOfParties([row.fromPartyId], at)[row.fromPartyId]
@@ -708,35 +777,35 @@ function changeManager(p) {
     const lines = relationships(MANAGER, {toPartyId: partyId}).filter(row => (ms(row.thruDate) ?? Infinity) > fromMs)
     if (lines.some(row => (ms(row.fromDate) ?? 0) > fromMs && atEmployer(row, ms(row.fromDate))))
         denied("MANAGER_SCHEDULED", (names[partyId] || partyId) + " already has a later manager change; change that one")
-    // newest first, as linesOf orders them, so the revision is of the line the tree shows
-    const open = lines
-        .filter(row => (ms(row.fromDate) ?? -Infinity) <= fromMs && atEmployer(row, fromMs))
-        .sort((a, b) => (ms(b.fromDate) ?? -Infinity) - (ms(a.fromDate) ?? -Infinity))
+    // the lines at the employer on the date as the tree reads them (People.js linesOf, newest first), so the revision is of the
+    // line the tree shows
+    const open = people
+        .linesOf({reportPartyIds: [partyId]}, fromMs)
+        .filter(line => line.organizationPartyIds.includes(organizationPartyId) && (ms(line.fromDate) ?? -Infinity) <= fromMs)
     const revision = revisionOf(open[0] || null)
     if (text(p.expectedRevision) !== revision)
         denied(
             "REVISION_CHANGED",
             "This reporting line changed since you read it; open it again (revision " + (revision || "none") + ")"
         )
-    if (managerPartyId ? open.some(row => row.fromPartyId === managerPartyId) : !open.length)
+    if (managerPartyId ? open.some(line => line.managerPartyId === managerPartyId) : !open.length)
         denied(
             "MANAGER_UNCHANGED",
             managerPartyId ? "That is the manager already" : (names[partyId] || partyId) + " has no manager"
         )
-    // the new manager and every manager above them at the employer on the date: the person must not be among them
-    if (managerPartyId) {
-        let above = managerPartyId
-        for (let depth = 0; above && depth < maxDepth; depth++) {
-            if (above === partyId)
-                denied(
-                    "REPORTING_CYCLE",
-                    "The manager reports to " + (names[partyId] || partyId) + "; a reporting line cannot loop"
-                )
-            above =
-                people
-                    .linesOf({reportPartyIds: [above]}, fromMs)
-                    .find(line => line.organizationPartyIds.includes(organizationPartyId))?.managerPartyId || null
-        }
+    checkCycle(partyId, managerPartyId, organizationPartyId, fromMs, names[partyId] || partyId)
+    // the change is the employment's (P6): its first assignment from the date, with the manager, the line its projection
+    // (Employment.js), so the line at another employer of the person is never changed (F91); an orphan relationship (no
+    // Employment row) keeps the line write below
+    const employment = Array.from(
+        people.current(people.employmentFind().condition({fromPartyId: partyId, toPartyId: organizationPartyId}), fromMs).list()
+    ).find(row => one("mantle.humanres.employment.Employment", {partyRelationshipId: row.partyRelationshipId}))
+    if (employment) {
+        employmentChanges().changeManagerOfAssignment(employment.partyRelationshipId, managerPartyId, fromMs, reason)
+        const line = managerPartyId
+            ? relationships(MANAGER, {fromPartyId: managerPartyId, toPartyId: partyId}).find(row => openAt(row, fromMs))
+            : null
+        return {partyRelationshipId: line?.partyRelationshipId || null, organizationPartyId}
     }
     // a line is at every employer of the report that employs the manager too (People.js linesOf): the line ended and the one
     // started must be at employers the caller reads, so a change at one employer never changes another employer's line
@@ -772,6 +841,46 @@ function changeManager(p) {
         }).partyRelationshipId
     }
     return {partyRelationshipId, organizationPartyId}
+}
+
+// The new manager and every manager above them at the employer on the date: the person must not be among them.
+function checkCycle(partyId, managerPartyId, organizationPartyId, fromMs, personName) {
+    if (!managerPartyId) return
+    let above = managerPartyId
+    for (let depth = 0; above && depth < maxDepth; depth++) {
+        if (above === partyId)
+            denied("REPORTING_CYCLE", "The manager reports to " + personName + "; a reporting line cannot loop")
+        above =
+            people
+                .linesOf({reportPartyIds: [above]}, fromMs)
+                .find(line => line.organizationPartyIds.includes(organizationPartyId))?.managerPartyId || null
+    }
+}
+// The revision of a manager kept by an employment's assignment (P6): the employment's, what the tree gives as the line's.
+const assignmentRevision = partyRelationshipId => "A:" + people.employmentRevision(partyRelationshipId)
+// change#Manager of an employment with an assignment: the employment's revision read, the manager unchanged or a later change set
+// refused, the cycle checked, then the assignment's manager change from the date (Employment.js: the line follows, ended only where
+// no other employment uses it; a line an assignment names is that employment's alone, so no other employer's line changes).
+function changeAssignedManager(assignment, managerPartyId, fromMs, reason, p, personName) {
+    const partyId = assignment.partyId
+    const organizationPartyId = assignment.organizationPartyId
+    const revision = assignmentRevision(assignment.partyRelationshipId)
+    if (text(p.expectedRevision) !== revision)
+        denied("REVISION_CHANGED", "This reporting line changed since you read it; open it again (revision " + revision + ")")
+    if ((assignment.managerPartyId || null) === managerPartyId)
+        denied("MANAGER_UNCHANGED", managerPartyId ? "That is the manager already" : personName + " has no manager")
+    if (
+        rows("mantle.humanres.employment.EmploymentAssignment", {partyRelationshipId: assignment.partyRelationshipId}).some(
+            row => (ms(row.fromDate) ?? -Infinity) >= fromMs
+        )
+    )
+        denied("MANAGER_SCHEDULED", personName + " already has a later change; change that one")
+    checkCycle(partyId, managerPartyId, organizationPartyId, fromMs, personName)
+    employmentChanges().changeManagerOfAssignment(assignment.partyRelationshipId, managerPartyId, fromMs, reason)
+    const line = managerPartyId
+        ? relationships(MANAGER, {fromPartyId: managerPartyId, toPartyId: partyId}).find(row => openAt(row, fromMs))
+        : null
+    return {partyRelationshipId: line?.partyRelationshipId || null, organizationPartyId}
 }
 
 const operations = {findUnits, getUnit, storeUnit, storeMembership, reportingTree, changeManager}
