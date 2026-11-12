@@ -9,7 +9,9 @@
 // Manufacturing's offline time of a work center, recorded with its center locked, refuses a booking of the center under it; and a request
 // withdrawn (its booking or its event cancelled) leaves the approvers' inboxes. F356–F358: People's interview (an event People keeps)
 // is booked by its organizer and by no attendee; People's change rechecks the booking as the system (a clash refused and named Busy,
-// F358; a free time asks the approved booking again) and its cancel withdraws the booking and its notices.
+// F358; a free time asks the approved booking again) and its cancel withdraws the booking and its notices. F356 review: of a kept event
+// a calendar editor, a calendar viewer, a user of another organization and a no-user caller book nothing, while an editor of a
+// calendar holding an event no app keeps books for it; and a request's notice reaches its approvers, not a catch-all subscriber (F359).
 // Standalone: spec-local organization, building, rooms, equipment, a plant with a work center, groups and users; the services
 // called as each user with the artifact check aside.
 // Run: ./moq test mr-mantle --spec ResourceBookingDecisions
@@ -52,7 +54,7 @@ function as(username, service, parameters = {}) {
     }
 }
 const code = answer => (/([A-Z][A-Z0-9_]+):/.exec(answer.error || "") || [])[1] || answer.error
-function user(kind, permissions) {
+function user(kind, permissions, organization = org) {
     const id = prefix + "_U_" + kind
     call("create#moqui.security.UserGroup", {userGroupId: id, description: "Booking decisions " + kind})
     for (const permission of permissions)
@@ -63,7 +65,7 @@ function user(kind, permissions) {
     call("create#mantle.party.PartyRelationship", {
         relationshipTypeEnumId: "PrtAgent",
         fromPartyId: partyId,
-        toPartyId: org,
+        toPartyId: organization,
         toRoleTypeId: "OrgInternal",
         fromDate: since
     })
@@ -619,3 +621,107 @@ feature("an interview's organizer books the managed room; People's change rechec
         r.left == [null, null]
     }
 })
+
+feature(
+    "of a kept event only its organizer books: a calendar editor or viewer, another organization and no user are refused; an approval notice skips a catch-all subscriber",
+    {
+        when() {
+            // the recruiter's second interview (People keeps it) and a plain meeting of the recruiter's, both in a calendar the recruiter
+            // shares: Carl edits it, Vera views it; Olga works for another organization
+            const kept = event(state.recruiter, "Interview: second round", at(1, 9), at(2, 9))
+            call("create#mantle.humanres.recruitment.ApplicationInterview", {
+                workEffortId: kept,
+                employmentApplicationId: prefix + "_APP",
+                organizationPartyId: org
+            })
+            const plain = event(state.recruiter, "Recruiting sync", at(3, 9), at(4, 9))
+            const other = prefix + "_OTHER_ORG"
+            call("create#mantle.party.Party", {partyId: other, partyTypeEnumId: "PtyOrganization", ownerPartyId: other})
+            call("create#mantle.party.Organization", {partyId: other, organizationName: other})
+            const carl = user("CARL", [])
+            const vera = user("VERA", [])
+            const olga = user("OLGA", [], other)
+            const calendarId = prefix + "_CAL"
+            call("create#mantle.work.calendar.Calendar", {
+                calendarId,
+                ownerPartyId: state.RECRUITER_PARTY,
+                calendarName: "Recruiting"
+            })
+            for (const [userId, permissionEnumId] of [
+                [carl, "CalpEdit"],
+                [vera, "CalpView"]
+            ])
+                call("create#mantle.work.calendar.CalendarShare", {
+                    calendarShareId: calendarId + "_" + userId,
+                    calendarId,
+                    userId,
+                    permissionEnumId,
+                    fromDate: since
+                })
+            for (const workEffortId of [kept, plain])
+                call("create#mantle.work.calendar.CalendarWorkEffort", {calendarId, workEffortId, viewOnly: "N"})
+            const access = username => as(username, E + "check#EventAccess", {workEffortId: kept, permission: "check"})
+            const books = (username, workEffortId) => as(username, E + "book#Resource", {workEffortId, facilityId: room})
+            // no user, authorization on: neither the system scope nor anyone's
+            logout()
+            ec.artifactExecution.enableAuthz()
+            ec.message.pushErrors()
+            let noUser = ""
+            try {
+                ec.service
+                    .sync()
+                    .name(E + "check#EventAccess")
+                    .parameters({workEffortId: kept, permission: "book"})
+                    .requireNewTransaction(true)
+                    .call()
+                noUser = ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                noUser = String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                login("john.doe")
+                ec.artifactExecution.disableAuthz()
+            }
+            // an instance administrator subscribed to every ResourceBooking message, as Tools offers
+            const subscription = {topic: "ResourceBooking", userId: "EX_JOHN_DOE"}
+            ec.entity
+                .makeValue("moqui.security.user.NotificationTopicUser")
+                .setAll(subscription)
+                .set("allNotifications", "Y")
+                .create()
+            const carlPlain = books(carl, plain)
+            const told = [noticeFor(state.first, plain) != null, noticeFor(state.second, plain) != null]
+            const subscriberTold = noticeFor("EX_JOHN_DOE", plain) != null
+            ec.entity.find("moqui.security.user.NotificationTopicUser").condition(subscription).deleteAll()
+            return {
+                carlAccess: access(carl),
+                veraAccess: access(vera),
+                carlKept: books(carl, kept),
+                veraKept: books(vera, kept),
+                olgaKept: books(olga, kept),
+                noUser,
+                carlPlain,
+                told,
+                subscriberTold,
+                keptRoom: roomBooking(kept)
+            }
+        },
+        then(r) {
+            r.carlAccess.canView == true
+            r.carlAccess.canEdit == false
+            r.carlAccess.canBook == false
+            r.veraAccess.canView == true
+            r.veraAccess.canBook == false
+            r.carlKept.error.includes("Only the organizer of Interview: second round books its rooms and equipment")
+            r.veraKept.error.includes("Only the organizer of Interview: second round books its rooms and equipment")
+            r.olgaKept.error.includes("not found")
+            r.noUser != ""
+            r.keptRoom == null
+            r.carlPlain.error == ""
+            r.carlPlain.statusId == "WefRequested"
+            r.told == [true, true]
+            r.subscriberTold == false
+        }
+    }
+)
