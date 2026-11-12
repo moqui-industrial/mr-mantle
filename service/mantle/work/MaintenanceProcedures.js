@@ -1304,6 +1304,26 @@ function approveProcess(p) {
     if (findings.length) denied("PUBLICATION_INVALID", findings.map(row => row.message).join("; "))
     const effectiveMs = blank(p.effectiveDate) ? nowMs() : ms(p.effectiveDate)
     if (effectiveMs < nowMs() - minuteMs) denied("DATE_PAST", "A procedure takes effect now or later")
+    // Manufacturing's rule keeps a published instruction's start and an ended one's end (F68), so an approval cannot take effect
+    // before an instruction an earlier approval published for later: that one would take over at its start (review R2)
+    const latestStart = Math.max(
+        -Infinity,
+        ...Array.from(
+            find(CONTENT)
+                .condition("workEffortId", "in", Array.from(treeIdSet(root)))
+                .condition("contentTypeEnumId", INSTRUCTION)
+                .list()
+        ).map(row => ms(row.fromDate) ?? -Infinity)
+    )
+    if (latestStart > effectiveMs)
+        denied(
+            "DATE_INVALID",
+            "Procedure " +
+                id +
+                " has instructions in effect from " +
+                dateText(stamp(latestStart)) +
+                "; it takes effect then or later"
+        )
     call("update#" + WORK, {workEffortId: id, statusId: "WeApproved"})
     call("update#" + APPROVAL, {
         workEffortApprovalId: request.workEffortApprovalId,

@@ -551,3 +551,43 @@ feature(
         }
     }
 )
+
+// Review R2: an approval taking effect before an instruction an earlier approval published for later would leave that older
+// instruction to take over at its start (Manufacturing's rule keeps a published start and an ended row's end); it is refused
+// (DATE_INVALID), and a later date ends the earlier one there
+feature("an approval takes effect no earlier than an instruction published for later", {
+    when() {
+        const made = as(state.author, W + "store#WorkProcess", {workEffortName: "Valve check", organizationPartyId: orgA})
+        const valve = step(made.workEffortId, {workEffortName: "Turn the valve", responseKindEnumId: "WsrCheckOff"})
+        instruction(made.workEffortId, valve.workEffortId, "A quarter turn.")
+        const later = new Date(Date.now() + 48 * hour)
+        const first = publish(made.workEffortId, later).approved
+        instruction(made.workEffortId, valve.workEffortId, "Half a turn.")
+        as(state.author, W + "request#WorkProcessApproval", {workEffortId: made.workEffortId})
+        const early = as(state.approver, W + "approve#WorkProcess", {workEffortId: made.workEffortId})
+        const draft = work(made.workEffortId).statusId
+        const after = as(state.approver, W + "approve#WorkProcess", {
+            workEffortId: made.workEffortId,
+            effectiveDate: new Date(Date.now() + 72 * hour)
+        })
+        const rows = find("mantle.work.effort.WorkEffortContent", {
+            workEffortId: valve.workEffortId,
+            contentTypeEnumId: "WectInstruction"
+        })
+        return {first, early, draft, after, rows}
+    },
+    then({first, early, draft, after, rows}) {
+        first.statusId == "WeApproved"
+        early == "DATE_INVALID"
+        draft == "WeInPlanning"
+        after.statusId == "WeApproved"
+        rows.length == 2
+        rows.filter(row => row.thruDate == null).length == 1
+        // the earlier approval's instruction ends where the later one starts
+        rows.some(
+            ended =>
+                ended.thruDate != null &&
+                rows.some(open => open.thruDate == null && String(open.fromDate) == String(ended.thruDate))
+        )
+    }
+})
