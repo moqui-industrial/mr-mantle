@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P14 (design-people §6 ShiftRoster): a worker is told when their shifts are published, and when a published
+        shift of theirs is changed or removed. The message holds datesText, firstDay, outcomeText and shiftCount, never who rostered
+        it or why. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleShiftChange" inboxEnumId="NinNotifications"
+            description="Your shifts published or changed" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your shifts ${datesText}: ${outcomeText}"/>
+    <!-- impl-people P14 (CX-SYNC, PE-24): My shifts, a projected CalDAV collection (mantle.work.CalendarDavServices: collectionId
+        projected-PeopleMyShifts, read only) on the kind P12 built, answered by ScheduleServices.get#ShiftProjection: the user's own
+        published shifts, on their phone's calendar -->
+    <mantle.work.calendar.CalendarProjection projectionId="PeopleMyShifts" title="My shifts"
+            description="Your published shifts" sequenceNum="20"
+            ownerServiceName="mantle.humanres.ScheduleServices.get#ShiftProjection"/>
+</entity-facade-xml>

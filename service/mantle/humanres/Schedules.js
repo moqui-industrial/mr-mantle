@@ -32,6 +32,8 @@
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
+// P14: the shift roster (Shifts.js), whose published shifts take their days' planned hours
+const shifts = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Shifts.js")
 
 const SCHEDULE = "mantle.humanres.schedule.WorkingSchedule"
 const LINE = "mantle.humanres.schedule.WorkingScheduleLine"
@@ -807,10 +809,11 @@ function holidaysOf(holidayCategoryIds, days) {
 }
 
 // ===== planned hours (get#PartyCapacity) =====
-// The days of people followed by a schedule: {partyId: {day: {hours, workingScheduleId, holidayCategoryIds}}}, each day planned
-// by the schedule in effect at its noon in the schedule's zone, its hours the actual length of the intervals starting that day
-// less their breaks (one employment's intervals overlapping another's count once). People with no schedule then are left out.
-function scheduledDays(partyIds, days) {
+// The days of people followed by a schedule and their working intervals: {partyId: {planned: {day: {hours, workingScheduleId,
+// holidayCategoryIds}}, intervals: [{day, startMs, endMs, breakMs}]}}, each day planned by the schedule in effect at its noon in the
+// schedule's zone, its hours the actual length of the intervals starting that day less their breaks (one employment's intervals
+// overlapping another's count once, merged). People with no schedule then are left out. The shift roster draws the intervals (P14).
+function plannedIntervals(partyIds, days) {
     const out = {}
     const parties = unique((partyIds || []).filter(Boolean))
     if (!parties.length || !days.length) return out
@@ -887,7 +890,34 @@ function scheduledDays(partyIds, days) {
         for (const interval of merged)
             planned[interval.day].hours += Math.max(0, interval.endMs - interval.startMs - interval.breakMs) / hourMs
         for (const entry of Object.values(planned)) entry.hours = round(entry.hours)
-        if (Object.keys(planned).length) out[partyId] = planned
+        if (Object.keys(planned).length) out[partyId] = {planned, intervals: merged}
+    }
+    return out
+}
+// The planned days of people for capacity: {partyId: {day: {hours, workingScheduleId, holidayCategoryIds, shift}}}: their schedule's
+// days (plannedIntervals), and in place of a day's planned hours the hours of their published shifts that day (P14, design §6: a
+// shift is the roster's explicit override of the schedule; shift true, so the day's holiday does not take it). A person with
+// neither is left out. A failure to read the shifts is logged and the schedule's days stay.
+function scheduledDays(partyIds, days) {
+    const out = {}
+    for (const [partyId, found] of Object.entries(plannedIntervals(partyIds, days))) out[partyId] = found.planned
+    let shiftHours = {}
+    try {
+        shiftHours = shifts().shiftDays(partyIds, days)
+    } catch (error) {
+        ec.logger.error("Capacity: the published shifts were not read, the schedules' days stay: " + error.message)
+    }
+    for (const [partyId, byDay] of Object.entries(shiftHours)) {
+        const planned = out[partyId] || (out[partyId] = {})
+        for (const [day, hours] of Object.entries(byDay)) {
+            const entry = planned[day]
+            planned[day] = {
+                hours,
+                workingScheduleId: entry?.workingScheduleId || null,
+                holidayCategoryIds: entry?.holidayCategoryIds || [],
+                shift: true
+            }
+        }
     }
     return out
 }
@@ -975,5 +1005,8 @@ function run(op, p) {
     scheduleNames,
     // for mantle.work.ResourceServices.get#PartyCapacity
     scheduledDays,
-    holidaysOf
+    holidaysOf,
+    // P14: for the shift roster (Shifts.js): the schedule's working intervals and a schedule's revision
+    plannedIntervals,
+    validZone
 })
