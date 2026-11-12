@@ -168,6 +168,14 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="issuedDate" type="date-time"/>
         <field name="issuedByUserId" type="id"/>
         <field name="employmentLetterId" type="id"><description>The letter stored when it was issued</description></field>
+        <!-- P17 review (the user's call of Nov 12, 2026): the issued letter emailed to the applicant, as an attachment, once
+            (RecruitingServices.send#OfferLetter, after the issue commits); the outcome without the letter's content -->
+        <field name="letterSendStatus" type="text-short"><description>The issued letter's email to the applicant: sent, queued (the
+            mail queue sends it) or failed (sent again with send#OfferLetter); empty before the issue</description></field>
+        <field name="letterSendDate" type="date-time"><description>The last attempt</description></field>
+        <field name="letterSentTo" type="text-medium"><description>The applicant's address it went to</description></field>
+        <field name="letterEmailMessageId" type="id"/>
+        <field name="letterSendError" type="text-medium"><description>Why the last attempt failed (no letter content)</description></field>
         <field name="responseDate" type="date-time"><description>When the candidate accepted or declined</description></field>
         <field name="responseNote" type="text-long"/>
         <field name="responseByUserId" type="id"><description>Who recorded the candidate's answer</description></field>
@@ -219,7 +227,9 @@ along with this software (see the LICENSE.md file). If not, see
             (Letters.js) when issued and stored (contentLocation: its PDF, or its html-print page where the server has no PDF
             engine), then read from storage and never rendered again. includesPay Y: it holds pay terms, read only with
             PAYROLL_VIEW. One letter per offer or change; read by the services of its record (RecruitingServices.get#OfferLetter,
-            PeopleServices.get#EmploymentLetter), never a public link.</description>
+            PeopleServices.get#EmploymentLetter), never a public link. An issued offer's letter is emailed to the applicant
+            (send#OfferLetter); the person a lifecycle letter is addressed to reads it whole in their self-service
+            (PeopleServices find#MyLetters and get#MyLetter: the user's call of Nov 12, 2026, P17 review).</description>
         <field name="employmentLetterId" type="id" is-pk="true"/>
         <field name="employmentOfferId" type="id"/>
         <field name="employmentChangeId" type="id"/>

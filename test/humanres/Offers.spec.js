@@ -5,7 +5,10 @@
 // for the employer's HR officers, never its recruiter, and changed terms make it a draft again and supersede its approval; the
 // letter of an issued offer is stored once and read from storage, never rendered again; an accepted offer is hired from once by
 // HR (a second hire from it refused, a retry answering the first) and grants no account or pay record; the lifecycle letter of an
-// applied change is issued once by HR on the same template.
+// applied change is issued once by HR on the same template. P17 review (the user's calls of Nov 12, 2026): the issued letter is
+// emailed to the applicant once the issue commits, a failure recorded on the offer and sent again, never undoing the issue; who
+// drafted an offer decides it no more than who submitted it; the signed copy of a letter holding pay is payroll's; the person reads
+// their own lifecycle letters in self-service and no one else's.
 // Standalone: spec-local organizations, people, employments, seats, an opening, groups and users, artifact authorization disabled
 // (the rules are the services' own checks). The approval routing is PeopleApprovals', the hire's PeopleEmployment.
 // Run: ./moq test mr-mantle --spec Offers
@@ -239,7 +242,7 @@ feature("a recruiter drafts an offer and sets no pay; payroll alone sets and rea
 })
 
 feature(
-    "an offer waits for the employer's HR, never its recruiter; changed terms make it a draft again and supersede the approval",
+    "an offer waits for the employer's HR, never its recruiter or who drafted it; changed terms make it a draft again and supersede the approval",
     {
         when() {
             const move = (who, action, extra = {}) =>
@@ -268,6 +271,25 @@ feature(
             })
             const afterRefusal = read(OFFER, {employmentOfferId: state.offerId})
             run(state.recruiter.userId, R + "store#Offer", {employmentOfferId: state.offerId, fromDate: day(28)})
+            // P17 review: an offer HR drafted and the recruiter submitted is not HR's own to approve
+            const other = run(state.recruiter.userId, R + "create#Application", {
+                jobOpeningId: state.openingId,
+                firstName: "Hugo",
+                lastName: "Drafted"
+            })
+            for (const statusId of ["EaScreening", "EaInterview"])
+                call("update#mantle.humanres.employment.EmploymentApplication", {
+                    employmentApplicationId: other.employmentApplicationId,
+                    statusId
+                })
+            const hrDrafted = run(state.hr.userId, R + "store#Offer", {
+                employmentApplicationId: other.employmentApplicationId,
+                emplPositionId: state.seat,
+                fromDate: day(30)
+            }).employmentOfferId
+            run(state.recruiter.userId, R + "change#OfferState", {employmentOfferId: hrDrafted, action: "submit"})
+            const creator = code(run(state.hr.userId, R + "change#OfferState", {employmentOfferId: hrDrafted, action: "approve"}))
+            run(state.recruiter.userId, R + "change#OfferState", {employmentOfferId: hrDrafted, action: "withdraw"})
             move(state.recruiter, "submit")
             const third = notice(state.offerId)
             const approved = run(state.hr.userId, R + "approve#Offer", {
@@ -276,7 +298,21 @@ feature(
                 message: third.message
             })
             const view = run(state.hr.userId, R + "get#Offer", {employmentOfferId: state.offerId})
-            return {byPayroll, submitted, again, first, own, changed, stale, refused, afterRefusal, third, approved, view}
+            return {
+                byPayroll,
+                submitted,
+                again,
+                first,
+                own,
+                changed,
+                stale,
+                refused,
+                afterRefusal,
+                creator,
+                third,
+                approved,
+                view
+            }
         },
         then(r) {
             r.byPayroll == "PERMISSION_DENIED"
@@ -290,6 +326,7 @@ feature(
             r.stale == "NOT_PENDING" || r.stale == "SOURCE_CHANGED" || r.stale == "REVISION_CHANGED"
             r.refused.statusId == "OfrDraft"
             r.afterRefusal.decisionReason == "Start a week later"
+            r.creator == "SELF_APPROVAL"
             r.approved.statusId == "OfrApproved"
             r.view.offer.approval.statusId == "PapApproved"
             r.view.offer.canIssue == true
@@ -298,7 +335,7 @@ feature(
 )
 
 feature(
-    "an issued offer's letter is stored once and read from storage, its pay payroll's; accepted, HR hires from it once and it grants no account or pay",
+    "an issued offer's letter is stored once, read from storage and emailed to the applicant once, its pay payroll's; accepted, HR hires from it once and it grants no account or pay",
     {
         when() {
             const move = (who, action, extra = {}) =>
@@ -306,6 +343,23 @@ feature(
             const early = code(move(state.recruiter, "accept"))
             const issued = move(state.recruiter, "issue")
             const reissued = move(state.recruiter, "issue")
+            // P17 review: the letter is emailed once the issue commits; the employer has no address to send from yet, so the send
+            // fails, is recorded and the offer stays issued; with an address the recruiter sends it again, once
+            ec.factory.waitWorkerPoolEmpty(50)
+            const unsent = read(OFFER, {employmentOfferId: state.offerId})
+            call("mantle.party.ContactServices.create#EmailAddress", {
+                partyId: orgA,
+                emailAddress: "people.offer.spec@example.test",
+                contactMechPurposeId: "EmailPrimary"
+            })
+            const readerSend = code(run(state.reader.userId, R + "send#OfferLetter", {employmentOfferId: state.offerId}))
+            const resent = run(state.recruiter.userId, R + "send#OfferLetter", {employmentOfferId: state.offerId})
+            const sentAgain = run(state.recruiter.userId, R + "send#OfferLetter", {employmentOfferId: state.offerId})
+            const sentOffer = read(OFFER, {employmentOfferId: state.offerId})
+            const email = sentOffer.letterEmailMessageId
+                ? read("moqui.basic.email.EmailMessage", {emailMessageId: sentOffer.letterEmailMessageId})
+                : null
+            const sendView = run(state.recruiter.userId, R + "get#Offer", {employmentOfferId: state.offerId}).offer
             const recruiterLetter = code(run(state.recruiter.userId, R + "get#OfferLetter", {employmentOfferId: state.offerId}))
             const payrollLetter = run(state.payroll.userId, R + "get#OfferLetter", {employmentOfferId: state.offerId})
             // the stored file's bytes (a digest) and its text (a PDF's, or the html-print page where there is no PDF engine)
@@ -319,6 +373,13 @@ feature(
             const later = run(state.payroll.userId, R + "get#OfferLetter", {employmentOfferId: state.offerId})
             const locked = code(run(state.recruiter.userId, R + "store#Offer", {employmentOfferId: state.offerId, thruDate: ""}))
             const accepted = move(state.recruiter, "accept", {responseNote: "Signed and returned"})
+            // P17 review: the candidate's signed copy of a letter holding pay is payroll's, as the letter
+            const evidenceLocation = "dbresource://mantle/content/employmentOffer/" + state.offerId + "/acceptance/signed.txt"
+            ec.resource.getLocationReference(evidenceLocation).putText("Signed: 52,000.00 USD a year")
+            call("update#" + OFFER, {employmentOfferId: state.offerId, evidenceLocation})
+            const evidence = who => run(who.userId, R + "get#OfferEvidence", {employmentOfferId: state.offerId})
+            const recruiterEvidence = code(evidence(state.recruiter))
+            const payrollEvidence = evidence(state.payroll)
             const hire = (who, key, extra = {}) =>
                 run(who.userId, P + "hire#Employee", Object.assign({employmentOfferId: state.offerId, operationKey: key}, extra))
             const byRecruiter = code(hire(state.recruiter, "OFFER-SPEC-0"))
@@ -332,6 +393,15 @@ feature(
                 early,
                 issued,
                 reissued,
+                unsent,
+                readerSend,
+                resent,
+                sentAgain,
+                sentOffer,
+                email,
+                sendView,
+                recruiterEvidence,
+                payrollEvidence,
                 recruiterLetter,
                 payrollLetter,
                 before,
@@ -369,6 +439,21 @@ feature(
             r.early == "NOT_ISSUED"
             r.issued.statusId == "OfrIssued"
             r.reissued.repeated == true
+            r.unsent.statusId == "OfrIssued"
+            r.unsent.letterSendStatus == "failed"
+            r.unsent.letterSendError.includes("no email address to send from")
+            r.readerSend == "RECORD_UNAVAILABLE"
+            r.resent.letterSendStatus == "sent" || r.resent.letterSendStatus == "queued"
+            r.sentAgain.repeated == true
+            r.sentOffer.letterSentTo == "olivia.offer.spec@example.test"
+            r.email.toAddresses.includes("olivia.offer.spec@example.test")
+            r.email.subject == "Offer of employment from Offers Spec A"
+            noPay(r.email.body)
+            r.sendView.letterSendText != ""
+            r.sendView.letterSentTo == "olivia.offer.spec@example.test"
+            r.sendView.canSendLetter == false
+            r.recruiterEvidence == "PERMISSION_DENIED"
+            r.payrollEvidence.location != null
             r.recruiterLetter == "PERMISSION_DENIED"
             r.payrollLetter.issued == true
             r.payrollLetter.letter.includesPay == true
@@ -403,32 +488,74 @@ feature(
     }
 )
 
-feature("a lifecycle letter of an applied change is issued once by HR on the offer letter's template and read from storage", {
-    when() {
-        const get = who => run(who.userId, P + "get#EmploymentLetter", {employmentChangeId: state.hireChangeId})
-        const preview = get(state.hr)
-        const byRecruiter = code(get(state.recruiter))
-        const issued = run(state.hr.userId, P + "issue#EmploymentLetter", {employmentChangeId: state.hireChangeId})
-        const again = run(state.hr.userId, P + "issue#EmploymentLetter", {employmentChangeId: state.hireChangeId})
-        const stored = get(state.hr)
-        const changes = run(state.hr.userId, P + "find#EmploymentChanges", {partyId: state.applicantPartyId, includeDone: true})
-        return {preview, byRecruiter, issued, again, stored, changes}
-    },
-    then(r) {
-        r.preview.offered == true
-        r.preview.canIssue == true
-        r.preview.letterHtml.includes("Confirmation of employment")
-        r.preview.letterHtml.includes("Seat ASSOC")
-        r.preview.letterHtml.includes("Draft")
-        r.byRecruiter == "PERMISSION_DENIED"
-        r.issued.error == ""
-        r.issued.repeated == false
-        r.again.repeated == true
-        r.again.employmentLetterId == r.issued.employmentLetterId
-        r.stored.issued == true
-        r.stored.letterHtml == ""
-        r.stored.letter.location == r.issued.location
-        ec.resource.extractText(r.issued.location, prefix + "-hire").includes("Confirmation of employment")
-        r.changes.changes.find(row => row.employmentChangeId == state.hireChangeId).letterIssued == true
+feature(
+    "a lifecycle letter of an applied change is issued once by HR on the offer letter's template and read from storage; the person reads their own in self-service, no one else's",
+    {
+        when() {
+            const get = who => run(who.userId, P + "get#EmploymentLetter", {employmentChangeId: state.hireChangeId})
+            const preview = get(state.hr)
+            const byRecruiter = code(get(state.recruiter))
+            const issued = run(state.hr.userId, P + "issue#EmploymentLetter", {employmentChangeId: state.hireChangeId})
+            const again = run(state.hr.userId, P + "issue#EmploymentLetter", {employmentChangeId: state.hireChangeId})
+            const stored = get(state.hr)
+            const changes = run(state.hr.userId, P + "find#EmploymentChanges", {
+                partyId: state.applicantPartyId,
+                includeDone: true
+            })
+            // P17 review (the user's call of Nov 12, 2026): the new employee reads their own letter in self-service; another employee
+            // reads none of it with the same parameters
+            const self = (userId, partyId) => {
+                call("create#moqui.security.UserGroup", {userGroupId: userId, description: "Offers self"})
+                call("create#moqui.security.UserGroupPermission", {
+                    userGroupId: userId,
+                    userPermissionId: "PEOPLE_SELF_SERVICE",
+                    fromDate: since
+                })
+                call("create#moqui.security.UserAccount", {
+                    userId,
+                    username: userId,
+                    partyId,
+                    currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+                    passwordHashType: "SHA"
+                })
+                call("create#moqui.security.UserGroupMember", {userId, userGroupId: userId, fromDate: since})
+                return userId
+            }
+            const hiredUser = self(prefix + "_U_HIRED", state.applicantPartyId)
+            const otherUser = self(prefix + "_U_OTHER", state.reader.partyId)
+            const mine = run(hiredUser, P + "find#MyLetters")
+            const myLetter = run(hiredUser, P + "get#MyLetter", {employmentLetterId: issued.employmentLetterId})
+            const othersList = run(otherUser, P + "find#MyLetters")
+            const othersLetter = code(run(otherUser, P + "get#MyLetter", {employmentLetterId: issued.employmentLetterId}))
+            const offerLetter = code(
+                run(hiredUser, P + "get#MyLetter", {
+                    employmentLetterId: read(OFFER, {employmentOfferId: state.offerId}).employmentLetterId
+                })
+            )
+            return {preview, byRecruiter, issued, again, stored, changes, mine, myLetter, othersList, othersLetter, offerLetter}
+        },
+        then(r) {
+            r.preview.offered == true
+            r.preview.canIssue == true
+            r.preview.letterHtml.includes("Confirmation of employment")
+            r.preview.letterHtml.includes("Seat ASSOC")
+            r.preview.letterHtml.includes("Draft")
+            r.byRecruiter == "PERMISSION_DENIED"
+            r.issued.error == ""
+            r.issued.repeated == false
+            r.again.repeated == true
+            r.again.employmentLetterId == r.issued.employmentLetterId
+            r.stored.issued == true
+            r.stored.letterHtml == ""
+            r.stored.letter.location == r.issued.location
+            ec.resource.extractText(r.issued.location, prefix + "-hire").includes("Confirmation of employment")
+            r.changes.changes.find(row => row.employmentChangeId == state.hireChangeId).letterIssued == true
+            r.mine.letters.length == 1
+            r.mine.letters[0].title == "Confirmation of employment"
+            r.myLetter.letter.location == r.issued.location
+            r.othersList.letters.length == 0
+            r.othersLetter == "RECORD_UNAVAILABLE"
+            r.offerLetter == "RECORD_UNAVAILABLE"
+        }
     }
-})
+)

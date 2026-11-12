@@ -256,6 +256,12 @@ const kinds = {
         sourceEntityName: EMPLOYMENT_OFFER,
         sourceField: "employmentOfferId",
         defaultRole: "ParHr",
+        // P17 review: who drafted the offer decides it no more than who submitted it or the applicant
+        selfPartyIds(sourceId) {
+            const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
+            const creator = offer?.createdByUserId ? one("moqui.security.UserAccount", {userId: offer.createdByUserId}) : null
+            return creator?.partyId ? [creator.partyId] : []
+        },
         describe(sourceId) {
             const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
             if (!offer) return {label: "offer " + sourceId}
@@ -514,6 +520,12 @@ function roleCandidates(row, request, at) {
     }
     return {partyIds: []}
 }
+// The parties a kind keeps from deciding a request about its source beside the requester and the person it is about (P17: who
+// drafted an offer); none for a kind without its own rule or a request not yet made.
+function selfOfSource(request) {
+    const kind = kinds[request.approvalKindEnumId]
+    return kind?.selfPartyIds && request.sourceId ? kind.selfPartyIds(request.sourceId) : []
+}
 // The route of a request on the date: the basis of its rules and each step with who may decide it and how it was found (route,
 // alternate, fallback; none when unresolved). excludedByStep: the parties who decided each step (sequenceNum: [partyId]), so a
 // person decides one step of a request at most.
@@ -523,7 +535,7 @@ function resolve(request, at, excludedByStep = {}) {
     const fallbackPartyIds = rules
         .filter(row => row.approverRoleEnumId === "ParHrFallback" && row.approverPartyId)
         .map(row => row.approverPartyId)
-    const self = [request.requesterPartyId, request.subjectPartyId].filter(Boolean)
+    const self = [request.requesterPartyId, request.subjectPartyId].concat(selfOfSource(request)).filter(Boolean)
     const steps = chosen.rows.map((row, index) => {
         const sequenceNum = Number(row.sequenceNum || index + 1)
         const others = Object.entries(excludedByStep)
@@ -619,6 +631,7 @@ function explain(route, request) {
 const requestOf = approval => ({
     organizationPartyId: approval.organizationPartyId,
     approvalKindEnumId: approval.approvalKindEnumId,
+    sourceId: approval.sourceId,
     departmentPartyId: approval.departmentPartyId,
     subjectPartyId: approval.subjectPartyId,
     requesterPartyId: approval.requestedByPartyId
@@ -933,7 +946,10 @@ function recordDecision(p) {
         denied("REVISION_CHANGED", "This notice is of an earlier version; open the request again")
     const reason = text(p.reason) || null
     if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing")
-    if (partyId && [approval.requestedByPartyId, approval.subjectPartyId].includes(partyId))
+    if (
+        partyId &&
+        [approval.requestedByPartyId, approval.subjectPartyId].concat(selfOfSource(requestOf(approval))).includes(partyId)
+    )
         denied("SELF_APPROVAL", "You may not decide your own request; another approver decides it")
     const state = stateOf(approval, decisions)
     const step = state.current

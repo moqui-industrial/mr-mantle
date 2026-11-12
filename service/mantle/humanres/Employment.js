@@ -1591,6 +1591,9 @@ function previewHire(p) {
 function hireEmployee(p) {
     const userScope = editorScope("Hiring")
     const operationKey = text(p.operationKey) || null
+    // P17: the accepted offer the hire is made from, locked first, so it is consumed once (a second hire from it is OFFER_USED) and
+    // a hire sent twice at once answers the first (P17 review: the second waits on the offer, then finds the first by its key)
+    const lockedOffer = text(p.employmentOfferId) ? offers().offerForHire(p.employmentOfferId, userScope, true) : null
     if (operationKey) {
         const first = rows(CHANGE, {operationKey, requestedByUserId: ec.user.userId, changeKindEnumId: "EckHire"})[0]
         if (first) {
@@ -1607,8 +1610,6 @@ function hireEmployee(p) {
                 }
         }
     }
-    // P17: the accepted offer the hire is made from, locked, so it is consumed once (a second hire from it is OFFER_USED)
-    const lockedOffer = text(p.employmentOfferId) ? offers().offerForHire(p.employmentOfferId, userScope, true) : null
     const plan = planHire(p, userScope, lockedOffer)
     if (!plan.person) denied("PERSON_REQUIRED", "Choose or name the person")
     refuseErrors(plan.findings)

@@ -1346,7 +1346,7 @@ along with this software (see the LICENSE.md file). If not, see
         employment change, on the template of the offer letter, stored when issued -->
     <service verb="get" noun="EmploymentLetter" allow-remote="false">
         <description>The letter of an employment change for an HR reader of its employer (PEOPLE_HR_VIEW; RECORD_UNAVAILABLE
-            outside, as a missing one): once issued the stored letter (letter: its location, file name and type, who issued it and
+            outside, as a missing one; a letter holding pay terms with PAYROLL_VIEW too): once issued the stored letter (letter: its location, file name and type, who issued it and
             when; never rendered again), before the preview (letterHtml, People's letter template marked as a draft) and whether
             the caller issues it (canIssue). A change applied and not withdrawn has one when it is a hire, a transfer, a manager
             change, a leave of absence, a return or a separation (offered, else problem says why).</description>
@@ -1391,6 +1391,26 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('issueEmploymentLetter', context)"/>
             <script>for (const key of ['employmentLetterId', 'location', 'fileName', 'contentType', 'issuedDateText']) context[key] = out[key]</script>
             <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <!-- impl-people P17 review (the user's call of Nov 12, 2026): an employee's own issued lifecycle letters, in their self-service -->
+    <service verb="find" noun="MyLetters" allow-remote="false">
+        <description>The issued lifecycle letters addressed to the caller (a hire's confirmation, a transfer, a manager change, a
+            leave of absence, a return, a separation), newest first, with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): the caller's own
+            party alone (no party is taken). Each its title, employer, issue date and file name.</description>
+        <out-parameters><parameter name="letters" type="List"/></out-parameters>
+        <actions>
+            <set field="letters" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('findMyLetters', context).letters"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyLetter" allow-remote="false">
+        <description>One of the caller's own issued lifecycle letters as it was stored, whole (pay included: the letter is theirs),
+            with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): its location, file name and type. Another person's letter, an offer's or a
+            missing one is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="employmentLetterId" required="true"/></in-parameters>
+        <out-parameters><parameter name="letter" type="Map"/></out-parameters>
+        <actions>
+            <set field="letter" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getMyLetter', context).letter"/>
         </actions>
     </service>
 </services>

@@ -96,4 +96,10 @@ along with this software (see the LICENSE.md file). If not, see
             approveServiceName="mantle.humanres.RecruitingServices.approve#Offer"
             refuseServiceName="mantle.humanres.RecruitingServices.refuse#Offer" refuseReasonRequired="Y"
             titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P17 review (the user's call of Nov 12, 2026): an issued offer's letter emailed to the applicant
+        (RecruitingServices.send#OfferLetter), the letter attached as it was stored; the service passes subject, fromAddress (the
+        employer's address) and fromName in bodyParameters, and the body, which names the position and the expiry, never pay -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="PEOPLE_OFFER_LETTER" description="Offer of employment to the applicant"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
 </entity-facade-xml>

@@ -555,7 +555,8 @@ along with this software (see the LICENSE.md file). If not, see
             (a reason): the step waiting, through PeopleApprovalServices.record#Decision at the offer's revision (sourceRevision from a
             notice); the last approval approves it, a refusal makes it a draft again with the reason. withdraw: an open offer (its
             approval superseded). issue: an approved offer with an expiry to come (EXPIRY_REQUIRED, EXPIRY_PAST), its terms checked
-            again; its letter is rendered and stored once (EmploymentLetter, never rendered again). accept and decline: the
+            again; its letter is rendered and stored once (EmploymentLetter, never rendered again) and, once the issue commits, emailed to
+            the applicant (send#OfferLetter, P17 review). accept and decline: the
             candidate's answer to an issued offer before its expiry (OFFER_EXPIRED), dated today or earlier (DATE_FUTURE), with a
             note and, for an acceptance, the signed letter (evidenceFile) kept. Each but approve and refuse needs PEOPLE_RECRUIT_EDIT
             or PEOPLE_HR_EDIT of the employer (PERMISSION_DENIED). An action already done answers as it is (repeated). Refuses
@@ -639,13 +640,35 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="OfferEvidence" allow-remote="false">
         <description>The candidate's signed acceptance of an offer kept with it, for a reader of the offer: its location and file
-            name (RECORD_UNAVAILABLE otherwise, as for none).</description>
+            name (RECORD_UNAVAILABLE otherwise, as for none). The signed copy of a letter holding pay terms is read only with
+            PAYROLL_VIEW, as the letter (PERMISSION_DENIED; P17 review).</description>
         <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
         <out-parameters><parameter name="location"/><parameter name="fileName"/></out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('offerEvidence', context)"/>
             <set field="location" from="out.location"/>
             <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+    <service verb="send" noun="OfferLetter" allow-remote="false">
+        <description>The stored letter of an issued offer emailed to the applicant's address as an attachment, as it was stored (the
+            user's call of Nov 12, 2026, P17 review): from the employer's address by the template PEOPLE_OFFER_LETTER, its message
+            naming the position and the expiry, never pay. Run by the issue's tx-commit rule (PeopleRecruiting.secas.xml) as the
+            issuer, who need not read the letter; or by a recruiter with PEOPLE_RECRUIT_EDIT or an HR editor of the employer again
+            after a failure (PERMISSION_DENIED; RECORD_UNAVAILABLE outside; NOT_ISSUED). Once: a letter sent or waiting in the mail
+            queue answers repeated. The outcome is recorded on the offer (letterSendStatus sent, queued or failed, the date, the
+            address and why it failed: no address, no sender, a failed send) and never undoes the issue.</description>
+        <in-parameters><parameter name="employmentOfferId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentOfferId"/>
+            <parameter name="letterSendStatus"/>
+            <parameter name="letterSendText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Offers.js').execute('sendOfferLetter', context)"/>
+            <script>for (const key of ['employmentOfferId', 'letterSendStatus', 'letterSendText']) context[key] = out[key]</script>
+            <set field="repeated" from="!!out.repeated"/>
         </actions>
     </service>
 </services>

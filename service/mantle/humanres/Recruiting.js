@@ -1687,4 +1687,8 @@ function run(op, p) {
         if (!wasDisabled) ec.artifactExecution.enableAuthz()
     }
 }
-;({execute: run})
+;({
+    execute: run,
+    // P17 review: the applicant's address an issued offer's letter is emailed to (Offers.js)
+    applicantEmails
+})

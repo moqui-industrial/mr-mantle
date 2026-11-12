@@ -6,8 +6,10 @@
 //   proposed pay; one open offer per application; drafting one moves the application to Offer;
 // - its states: Draft; Waiting for approval (submit asks a People approval of kind PakOffer: the employer's HR officers unless a
 //   rule says otherwise, never who submitted it or the applicant; it is bound to the offer's revision, so changed terms supersede it
-//   and the offer is a draft again, as they make an approved offer a draft again); Approved; Issued (its letter rendered and stored
-//   once, Letters.js; an issued offer past its expiry reads expired and takes no answer); Accepted or Declined (the candidate's
+//   and the offer is a draft again, as they make an approved offer a draft again; who drafted it decides it no more than who
+//   submitted it or the applicant, P17 review); Approved; Issued (its letter rendered and stored once, Letters.js, and emailed to the
+//   applicant once the issue commits, send#OfferLetter: the user's call of Nov 12, 2026, P17 review; an issued offer past its expiry
+//   reads expired and takes no answer); Accepted or Declined (the candidate's
 //   answer, with a signed acceptance kept when given); Hired (PeopleServices.hire#Employee consumes an accepted offer exactly once:
 //   consumeOffer, under the offer's lock); Withdrawn. Accepted is not hired;
 // - who: a recruiter (PEOPLE_RECRUIT_VIEW), an HR reader (PEOPLE_HR_VIEW) and a payroll reader (PAYROLL_VIEW) of the employer, in
@@ -73,6 +75,7 @@ const termFields = [
 const dateFields = ["fromDate", "thruDate", "expireDate"]
 const payFields = ["payAmount", "currencyUomId", "timePeriodTypeId"]
 const actions = ["submit", "approve", "refuse", "withdraw", "issue", "accept", "decline"]
+const sendTexts = {sent: "Emailed to the applicant", queued: "Waiting in the mail queue", failed: "Not emailed"}
 const listCap = 500
 
 const text = value => String(value ?? "").trim()
@@ -103,6 +106,8 @@ const changesTerms = (userScope, kinds) =>
     (kinds.includes("recruiter") && !!userScope.capabilities.recruitEdit) ||
     (kinds.includes("hr") && !!userScope.capabilities.hrEdit)
 const seesPay = kinds => kinds.includes("payroll")
+// Whether the offer's letter, and so the candidate's signed copy of it, holds the pay terms (P17 review)
+const holdsPay = (offer, letter) => letter?.includesPay === "Y" || (offer.payAmount != null && offer.payAmount !== "")
 const changesPay = (userScope, kinds) => kinds.includes("payroll") && !!userScope.capabilities.payrollEdit
 const hires = (userScope, kinds) => kinds.includes("hr") && !!userScope.capabilities.hrEdit
 // The latest approval of an offer as its record shows it (Approvals.js: state, steps, decisions, canDecide); null when none.
@@ -189,6 +194,8 @@ function offerRow(userScope, offer, kinds) {
             responseDateText: dateText(offer.responseDate),
             responseNote: offer.responseNote || "",
             hasEvidence: !!offer.evidenceLocation,
+            // P17 review: the signed copy of a letter holding pay is payroll's, as the letter is
+            evidenceRestricted: !!offer.evidenceLocation && holdsPay(offer, letter) && !pay,
             hiredDateText: dateText(offer.hiredDate),
             hiredPartyRelationshipId: kinds.includes("hr") ? offer.partyRelationshipId || null : null,
             hasPayTerms: offer.payAmount != null && offer.payAmount !== "",
@@ -207,6 +214,18 @@ function offerRow(userScope, offer, kinds) {
             canHire: hires(userScope, kinds) && offer.statusId === "OfrAccepted",
             letterIssued: !!letter,
             letterRestricted: !!letter && letter.includesPay === "Y" && !pay,
+            // P17 review (the user's call of Nov 12, 2026): the issued letter emailed to the applicant, its outcome without its
+            // content; the address for the offer's recruiters and HR
+            letterSendStatus: offer.letterSendStatus || "",
+            letterSendText: sendTexts[offer.letterSendStatus] || "",
+            letterSendDateText: dateText(offer.letterSendDate),
+            letterSentTo: kinds.includes("recruiter") || kinds.includes("hr") ? offer.letterSentTo || "" : "",
+            letterSendError: offer.letterSendError || "",
+            canSendLetter:
+                editsTerms &&
+                !!letter &&
+                ["OfrIssued", "OfrAccepted"].includes(offer.statusId) &&
+                !["sent", "queued"].includes(offer.letterSendStatus),
             revision: String(stampOf(offer))
         },
         names
@@ -614,7 +633,10 @@ function changeOfferState(p) {
         responseByUserId: ec.user.userId
     }
     if (action === "accept" && p.evidenceFile != null && p.evidenceFile.size > 0) {
-        const name = String(p.evidenceFile.getName() || "acceptance").replace(/[\/\\?#%:]/g, "_")
+        const name =
+            String(p.evidenceFile.getName() || "")
+                .replace(/[\/\\?#%:]/g, "_")
+                .replace(/^\.+/, "") || "acceptance"
         const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
         const location = root + "/employmentOffer/" + id + "/acceptance/" + name
         const stream = p.evidenceFile.getInputStream()
@@ -645,11 +667,161 @@ function decideOfferNotice(p, action) {
         reason: p.reason
     })
 }
-// get#OfferEvidence: the candidate's signed acceptance of an offer, for a reader of the offer.
+// get#OfferEvidence: the candidate's signed acceptance of an offer, for a reader of the offer; the signed copy of a letter holding
+// pay terms only for a payroll reader, as the letter (P17 review).
 function offerEvidence(p) {
-    const {offer} = readableOffer(people.scopeOf(), p.employmentOfferId)
+    const {offer, kinds} = readableOffer(people.scopeOf(), p.employmentOfferId)
     if (!offer.evidenceLocation) unavailable(offer.employmentOfferId)
+    const letter = offer.employmentLetterId ? one(LETTER, {employmentLetterId: offer.employmentLetterId}) : null
+    if (holdsPay(offer, letter) && !seesPay(kinds))
+        denied("PERMISSION_DENIED", "The signed letter holds the offer's pay terms: it is read with PAYROLL_VIEW")
     return {location: offer.evidenceLocation, fileName: String(offer.evidenceLocation).split("/").pop()}
+}
+
+// ===== the issued letter emailed to the applicant (P17 review, the user's call of Nov 12, 2026) =====
+// The current address of a purpose of a party, or "".
+function emailOf(partyId, purposes) {
+    if (!partyId) return ""
+    for (const purpose of purposes) {
+        const row = Array.from(
+            people
+                .current(
+                    find("mantle.party.contact.PartyContactMechInfo").condition({
+                        partyId,
+                        contactMechPurposeId: purpose,
+                        contactMechTypeEnumId: "CmtEmailAddress"
+                    }),
+                    null
+                )
+                .orderBy("-fromDate")
+                .limit(1)
+                .list()
+        )[0]
+        if (row?.infoString) return String(row.infoString).trim()
+    }
+    return ""
+}
+const escapeHtml = value =>
+    String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+// send#OfferLetter: the stored letter of an issued offer emailed to the applicant's address, attached as it was stored (the issuer
+// need not read it: a letter holding pay is the candidate's to read), from the employer's address, by the template
+// PEOPLE_OFFER_LETTER; the message names the position and the expiry, never pay. Once: a letter sent or waiting in the mail queue
+// answers repeated (the issue's tx-commit rule runs at least once). Failure tolerant: no address, no sender or a failed send is
+// recorded on the offer (letterSendStatus failed, letterSendError) and the issue stands; an offer editor sends it again. Who:
+// the issue's own rule, as the issuer, or a recruiter with PEOPLE_RECRUIT_EDIT or an HR editor of the employer (PERMISSION_DENIED).
+function sendOfferLetter(p) {
+    const userScope = people.scopeOf()
+    const found = readableOffer(userScope, p.employmentOfferId)
+    if (!changesTerms(userScope, found.kinds))
+        denied("PERMISSION_DENIED", "Sending an offer's letter needs PEOPLE_RECRUIT_EDIT or PEOPLE_HR_EDIT of its employer")
+    const id = found.offer.employmentOfferId
+    // the offer locked while it is sent, so two runs send it once
+    const offer = find(OFFER, {employmentOfferId: id}).forUpdate(true).one()
+    const letter = offer.employmentLetterId ? one(LETTER, {employmentLetterId: offer.employmentLetterId}) : null
+    if (!letter || !["OfrIssued", "OfrAccepted", "OfrHired"].includes(offer.statusId))
+        denied("NOT_ISSUED", "An offer's letter is sent once the offer is issued")
+    const answer = (status, repeated) => ({
+        employmentOfferId: id,
+        letterSendStatus: status,
+        letterSendText: sendTexts[status] || "",
+        repeated
+    })
+    if (["sent", "queued"].includes(offer.letterSendStatus) && offer.letterEmailMessageId) {
+        const message = one("moqui.basic.email.EmailMessage", {emailMessageId: offer.letterEmailMessageId})
+        if (["ES_SENT", "ES_READY", "ES_SCHEDULED"].includes(message?.statusId)) return answer(offer.letterSendStatus, true)
+    }
+    const record = (status, values) => {
+        call(
+            "update#" + OFFER,
+            Object.assign(
+                {
+                    employmentOfferId: id,
+                    letterSendStatus: status,
+                    letterSendDate: ec.user.nowTimestamp,
+                    letterSendError: null
+                },
+                values
+            )
+        )
+        if (status === "failed")
+            ec.logger.warn("Offer " + id + ": its letter was not emailed to the applicant: " + (values.letterSendError || ""))
+        return answer(status, false)
+    }
+    const toAddress = ec.resource
+        .script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
+        .applicantEmails([offer.partyId])[offer.partyId]
+    if (!toAddress) return record("failed", {letterSentTo: null, letterSendError: "The applicant has no email address"})
+    const organizationName = people.organizationNames([offer.organizationPartyId])[offer.organizationPartyId] || ""
+    const fromAddress = emailOf(offer.organizationPartyId, ["EmailPrimary", "EmailWork"])
+    if (!fromAddress)
+        return record("failed", {letterSentTo: toAddress, letterSendError: "The employer has no email address to send from"})
+    const names = employment().termTexts(offer)
+    const position = names.positionName || openingTitleOf(offer) || "the position"
+    const applicantName = people.personNames([offer.partyId])[offer.partyId] || ""
+    const expires = letters().longDate(offer.expireDate)
+    const lines = [
+        "Dear " + (applicantName || "candidate") + ",",
+        "Please find attached our offer of employment for " + position + " at " + organizationName + ".",
+        expires ? "It is open until " + expires + ": to accept it, sign the letter and return it to us by then." : "",
+        "Yours sincerely,\n" + organizationName
+    ].filter(Boolean)
+    const body =
+        "<html><body>" + lines.map(line => "<p>" + escapeHtml(line).replace(/\n/g, "<br/>") + "</p>").join("") + "</body></html>"
+    let emailMessageId = null
+    let error = ""
+    ec.message.pushErrors()
+    try {
+        const stream = ec.resource.getLocationStream(letter.contentLocation)
+        if (!stream) throw new Error("The stored letter is not there")
+        let bytes
+        try {
+            bytes = stream.readAllBytes()
+        } finally {
+            stream.close()
+        }
+        const out =
+            ec.service
+                .sync()
+                .name("org.moqui.mail.EmailServices.send#EmailTemplate")
+                .parameters({
+                    emailTemplateId: "PEOPLE_OFFER_LETTER",
+                    toAddresses: toAddress,
+                    bodyParameters: {
+                        subject: "Offer of employment from " + organizationName,
+                        fromAddress,
+                        fromName: organizationName
+                    },
+                    body,
+                    bodyText: lines.join("\n\n"),
+                    attachments: [{fileName: letter.fileName, contentType: letter.contentType, contentBytes: bytes}]
+                })
+                .requireNewTransaction(true)
+                .disableAuthz()
+                .call() || {}
+        if (ec.message.hasError()) error = ec.message.getErrorsString()
+        emailMessageId = out.emailMessageId || null
+    } catch (thrown) {
+        error = String(thrown?.message || thrown)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+    const message = emailMessageId ? one("moqui.basic.email.EmailMessage", {emailMessageId}) : null
+    const status =
+        !error && message?.statusId === "ES_SENT"
+            ? "sent"
+            : !error && ["ES_READY", "ES_SCHEDULED"].includes(message?.statusId)
+              ? "queued"
+              : "failed"
+    return record(status, {
+        letterSentTo: toAddress,
+        letterEmailMessageId: emailMessageId,
+        letterSendError: status === "failed" ? String(error || "The message was not sent").substring(0, 255) : null
+    })
 }
 
 // ===== the hire from an accepted offer (Employment.js hire#Employee and preview#Hire) =====
@@ -710,7 +882,8 @@ const operations = {
     approveNotice: p => decideOfferNotice(p, "approve"),
     refuseNotice: p => decideOfferNotice(p, "refuse"),
     getOfferLetter,
-    offerEvidence
+    offerEvidence,
+    sendOfferLetter
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown offer operation " + op)

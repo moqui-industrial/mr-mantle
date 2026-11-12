@@ -9,7 +9,10 @@
 // - Every value of the record is escaped; a letter names the person, the employer and the terms, never a private address, the HR
 //   officer's working note or (for an offer) pay unless the letter is issued, when the stored letter holding pay terms is read only
 //   with PAYROLL_VIEW (Offers.js).
-// A lifecycle letter is HR's: an HR reader of the employer reads it (PEOPLE_HR_VIEW) and an HR editor issues it (PEOPLE_HR_EDIT).
+// A lifecycle letter is HR's: an HR reader of the employer reads it (PEOPLE_HR_VIEW) and an HR editor issues it (PEOPLE_HR_EDIT);
+// one holding pay terms is read with PAYROLL_VIEW too. P17 review (the user's call of Nov 12, 2026): the person it is addressed to
+// reads their own issued lifecycle letters whole, pay included, in their self-service (find#MyLetters, get#MyLetter: the caller's
+// own party alone, PEOPLE_SELF_SERVICE; another person's letter is refused as a missing one).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const employment = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Employment.js")
@@ -275,6 +278,8 @@ function getEmploymentLetter(p) {
     const {change, caps} = hrChange(p, false)
     const problem = letterProblem(change)
     const issued = letterOf({employmentChangeId: change.employmentChangeId})
+    if (issued?.includesPay === "Y" && !caps.payrollView)
+        denied("PERMISSION_DENIED", "This letter holds pay terms: it is read with PAYROLL_VIEW")
     return {
         employmentChangeId: change.employmentChangeId,
         partyId: change.partyId,
@@ -323,7 +328,51 @@ function issuedFor(employmentChangeIds) {
     )
 }
 
-const operations = {getEmploymentLetter, issueEmploymentLetter}
+// ===== the person's own letters (self-service) =====
+// The caller's own party with PEOPLE_SELF_SERVICE (PERMISSION_DENIED otherwise).
+function ownParty() {
+    const partyId = ec.user.userAccount?.partyId
+    if (!partyId || !ec.user.hasPermission("PEOPLE_SELF_SERVICE"))
+        denied("PERMISSION_DENIED", "Your letters need PEOPLE_SELF_SERVICE and a person")
+    return partyId
+}
+// find#MyLetters: the issued lifecycle letters addressed to the caller (no party is taken), newest first: the title, the
+// employer, when it was issued, its file's name and type.
+function findMyLetters() {
+    const partyId = ownParty()
+    const found = Array.from(
+        find(LETTER)
+            .condition("partyId", partyId)
+            .condition("employmentChangeId", "is-not-null", null)
+            .orderBy("-issuedDate")
+            .limit(200)
+            .list()
+    )
+    const organizations = people.organizationNames(people.unique(found.map(row => row.organizationPartyId).filter(Boolean)))
+    return {
+        letters: found.map(row => ({
+            employmentLetterId: row.employmentLetterId,
+            title: row.title || "",
+            organizationPartyId: row.organizationPartyId || null,
+            organizationName: organizations[row.organizationPartyId] || "",
+            issuedDateText: lib.dateText(row.issuedDate),
+            fileName: row.fileName || "",
+            contentType: row.contentType || ""
+        }))
+    }
+}
+// get#MyLetter: one of the caller's own issued lifecycle letters as it was stored (its location, name and type); another
+// person's, an offer's or a missing one is refused alike (RECORD_UNAVAILABLE).
+function getMyLetter(p) {
+    const partyId = ownParty()
+    const id = text(p.employmentLetterId)
+    const row = id ? one(LETTER, {employmentLetterId: id}) : null
+    if (!row || row.partyId !== partyId || !row.employmentChangeId || !row.contentLocation)
+        denied("RECORD_UNAVAILABLE", "Letter " + id + " is not available")
+    return {letter: fileOf(row)}
+}
+
+const operations = {getEmploymentLetter, issueEmploymentLetter, findMyLetters, getMyLetter}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown letter operation " + op)
     const wasDisabled = ec.artifactExecution.disableAuthz()
