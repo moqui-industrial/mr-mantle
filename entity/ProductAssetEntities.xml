@@ -68,6 +68,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="capacity" type="number-decimal"/>
         <field name="capacityUomId" type="id"/>
         <field name="bookable" type="text-indicator"><description>Y when this asset can be booked on a calendar (equipment). Type AstTpEquipment alone does not make it bookable.</description></field>
+        <!-- the supplier warranty on the company's own equipment (IronStone Maintenance design §6 Equipment; impl-maintenance P2,
+            F20): the day it runs through and who gives it. Customer Service's warranty on a product sold (PftWarranty) is another fact,
+            and full warranty terms, when needed, are an Agreement linked to the asset. -->
+        <field name="warrantyThruDate" type="date" enable-audit-log="update"/>
+        <field name="warrantyPartyId" type="id" enable-audit-log="update"/>
 
         <field name="facilityId" type="id" enable-audit-log="true">
             <description>Current Facility, where stored.</description></field>
@@ -108,6 +113,8 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="Asset" related="moqui.basic.StatusItem" short-alias="status"/>
         <relationship type="one" title="Owner" related="mantle.party.Party" short-alias="owner">
             <key-map field-name="ownerPartyId"/></relationship>
+        <relationship type="one" title="Warranty" related="mantle.party.Party" short-alias="warrantyParty">
+            <key-map field-name="warrantyPartyId"/></relationship>
         <relationship type="one" related="mantle.product.asset.AssetPool" short-alias="pool"/>
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
         <relationship type="one" title="OriginalQuantity" related="moqui.basic.Uom" short-alias="originalQuantityUom">
@@ -824,7 +831,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="readingDate" type="date-time" is-pk="true"/>
         <field name="productMeterTypeId" type="id"/>
         <field name="productMeterId" type="id"/>
-        <field name="meterValue" type="number-decimal" enable-audit-log="update"/>
+        <!-- audit-logged on create too, so a reset's reason is kept with its value (record#MaintenanceMeter, impl-maintenance P2) -->
+        <field name="meterValue" type="number-decimal" enable-audit-log="true"/>
         <field name="readingReasonEnumId" type="id"/>
         <field name="assetMaintenanceId" type="id"/>
         <field name="workEffortId" type="id"/>
@@ -833,6 +841,17 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.product.maintenance.AssetMaintenance"/>
         <relationship type="one" related="mantle.product.maintenance.ProductMeterType"/>
         <relationship type="one" related="moqui.security.UserAccount"/>
+        <!-- why the reading was taken (impl-maintenance P2, F70): a reading, in work, a reset or a correction; written by
+            MaintenanceResourceServices.record#MaintenanceMeter -->
+        <relationship type="one" title="ReadingReason" related="moqui.basic.Enumeration">
+            <key-map field-name="readingReasonEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Asset Meter Reading Reason" enumTypeId="AssetMeterReadingReason"/>
+            <moqui.basic.Enumeration description="Reading" enumId="AmrReading" enumTypeId="AssetMeterReadingReason" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Taken in work" enumId="AmrWork" enumTypeId="AssetMeterReadingReason" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Meter reset" enumId="AmrReset" enumTypeId="AssetMeterReadingReason" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Correction" enumId="AmrCorrection" enumTypeId="AssetMeterReadingReason" sequenceNum="4"/>
+        </seed-data>
     </entity>
     <entity entity-name="AssetRegistration" package="mantle.product.maintenance" cache="never">
         <field name="assetId" type="id" is-pk="true"/>
@@ -854,6 +873,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="productMeterTypeId" type="id"/>
         <field name="meterUomId" type="id"/>
         <field name="meterName" type="text-medium"/>
+        <field name="isCumulative" type="text-indicator"><description>Y when the meter only counts up (hours, distance, cycles): a
+            lower reading is refused unless it is recorded as a reset or a correction (impl-maintenance P2, F70).</description></field>
         <relationship type="one" related="mantle.product.Product"/>
         <relationship type="one" related="mantle.product.maintenance.ProductMeterType"/>
         <relationship type="one" title="Meter" related="moqui.basic.Uom">

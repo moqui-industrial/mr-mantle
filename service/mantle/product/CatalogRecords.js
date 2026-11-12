@@ -1,6 +1,8 @@
 // Catalog record writers enforce native permissions and owner scope for every caller.
 const P = "mantle.product.",
     policy = () => ec.resource.script("component://mr-mantle/service/mantle/product/CatalogPolicy.js")
+// the associations the catalog row writer keeps: substitutes, and the spare parts of an equipment model
+const substituteAndPartTypes = ["PatEquivalent", "PatReplacement", "PatSparePart"]
 const find = (n, p = {}) => policy().find(n, p),
     one = (n, p) => policy().one(n, p),
     list = (n, p = {}) => policy().rows(n, p),
@@ -236,7 +238,8 @@ function storeRow(p) {
             throw new Error("Distinguishing feature identity is fixed on a used or active variant")
     }
     if (p.kind === "association") {
-        if (!["PatEquivalent", "PatReplacement"].includes(data.productAssocTypeEnumId))
+        // a substitute, or a spare part an equipment model uses in its maintenance (PatSparePart, impl-maintenance P2)
+        if (!substituteAndPartTypes.includes(data.productAssocTypeEnumId))
             throw new Error("Use the dedicated kit, variant, BOM or packaging editor for this association")
         record(data.toProductId)
         if (data.toProductId === p.productId) throw new Error("A product cannot substitute for itself")
@@ -335,7 +338,8 @@ function prepareRow(p) {
             throw new Error("Distinguishing feature identity is fixed on a used or active variant")
     }
     if (p.kind === "association") {
-        if (!["PatEquivalent", "PatReplacement"].includes(data.productAssocTypeEnumId))
+        // a substitute, or a spare part an equipment model uses in its maintenance (PatSparePart, impl-maintenance P2)
+        if (!substituteAndPartTypes.includes(data.productAssocTypeEnumId))
             throw new Error("Use the dedicated kit, variant, BOM or packaging editor for this association")
         record(data.toProductId)
         if (data.toProductId === p.productId) throw new Error("A product cannot substitute for itself")
