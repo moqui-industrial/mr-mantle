@@ -20,7 +20,12 @@ along with this software (see the LICENSE.md file). If not, see
     vocabularies over Lookups.js (find#Lookups, store#Lookup). P6 adds the hire and the employment change over Employment.js
     (preview#Hire, hire#Employee, preview#EmploymentChange, apply#EmploymentChange, decide#EmploymentChange and the
     PeopleEmploymentChangeApproval topic's approve and refuse services, find#EmploymentChanges): the dated assignment of an
-    employment and its projections (department membership, position occupancy, reporting line). -->
+    employment and its projections (department membership, position occupancy, reporting line). P7 adds the withdrawal of a change
+    set for a later date (withdraw#EmploymentChange; a separation and an early return supersede what they overtake), the lifecycle
+    checklists over mantle.work.ProcessServices (find#, store#Checklist, store#ChecklistStep, start#Checklists after commit,
+    get#ChecklistTask; Checklists.js), the equipment held and its return (get#AssignedEquipment, get#EquipmentCustody,
+    return#Equipment, complete#ReturnTasks on a holding's end), the access request's failure note and the employees import's row
+    services (PeopleImport.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="Scope" allow-remote="false">
@@ -477,6 +482,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="reason"/>
             <parameter name="operationKey"/>
+            <parameter name="requestAccount" type="Boolean" default="false"><description>HR asks for the person's account (P7):
+                recorded on the hire's change, the provisioning an app requests after commit (IronStone: the mr-boss tx-commit
+                rule, ironstone.admin.LifecycleServices.request#Provisioning); nobody gets a login merely to be paid</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="partyId"/>
@@ -484,6 +492,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="employmentChangeId"/>
             <parameter name="employmentAssignmentId"/>
             <parameter name="plan"/>
+            <parameter name="accessRequested" type="Boolean"/>
             <parameter name="repeated" type="Boolean"/>
         </out-parameters>
         <actions>
@@ -493,6 +502,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="employmentChangeId" from="hired.employmentChangeId"/>
             <set field="employmentAssignmentId" from="hired.employmentAssignmentId"/>
             <set field="plan" from="hired.plan"/>
+            <set field="accessRequested" from="!!hired.accessRequested"/>
             <set field="repeated" from="!!hired.repeated"/>
         </actions>
     </service>
@@ -664,10 +674,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="message" type="Map"/>
             <parameter name="notificationMessageId"/>
         </in-parameters>
-        <out-parameters><parameter name="statusId"/><parameter name="applied" type="Boolean"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="applied" type="Boolean"/><parameter name="repeated" type="Boolean"/>
+            <parameter name="employmentChangeId"/></out-parameters>
         <actions>
             <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('approveNotice', context)"/>
             <set field="statusId" from="decided.statusId"/>
+            <set field="employmentChangeId" from="decided.employmentChangeId"/>
             <set field="applied" from="decided.applied"/>
             <set field="repeated" from="decided.repeated"/>
         </actions>
@@ -769,20 +781,337 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The apply_EmploymentDueAssignments job (daily): Employment.emplPositionId holds the seat in effect, so each
             employment whose primary assignment in effect now names another seat (a change dated later, now come) gets it, each in
             its own transaction, a failing one logged by its employment and the rest going on. A rerun changes nothing; an
-            employment with no assignment in effect is left as it is.</description>
+            employment with no assignment in effect is left as it is. P7 (F134): each employer with a separation, transfer,
+            manager change or reorganization applied for a date now come and not yet routed from it (EmploymentChange
+            reroutedDate) routes its waiting People decisions again, each employer in its own transaction, so a leaver's
+            decisions move on the date.</description>
         <in-parameters>
             <parameter name="partyRelationshipIds" type="List"><description>Only these employments</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="applied" type="Integer"/>
+            <parameter name="rerouted" type="Integer"><description>Employers whose waiting People decisions were routed again</description></parameter>
             <parameter name="failed" type="Integer"/>
             <parameter name="failedList" type="List"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('applyDueAssignments', context)"/>
             <set field="applied" from="out.applied"/>
+            <set field="rerouted" from="out.rerouted"/>
             <set field="failed" from="out.failed"/>
             <set field="failedList" from="out.failedList"/>
         </actions>
+    </service>
+    <!-- ===== P7: a scheduled change withdrawn (F131); checklists, equipment return and the employees import (design §4, §12
+        ChecklistTemplates and EmployeeImport, §13 WorkItemDetail and EquipmentDetail, Employee360's AssignedEquipment, PE-02,
+        PE-19; Employment.js, Checklists.js, PeopleImport.js) ===== -->
+    <service verb="withdraw" noun="EmploymentChange" allow-remote="false">
+        <description>An applied change of an employment in the caller's scope whose date is still to come (a transfer, a manager
+            change, a leave of absence, a return, a reorganization) withdrawn with a reason (F131): its assignments set for that
+            date never take effect (ended on their own start), the assignment before continues, and the department membership,
+            seat and reporting line it would have moved stay as they were; the change is Withdrawn (when, by whom, why). A leave
+            of absence already begun loses only its return date. The employment's waiting changes are superseded. Refuses a
+            caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a change outside the scope (RECORD_UNAVAILABLE),
+            a hire, a separation or a change not applied (NOT_WITHDRAWABLE), one in effect (CHANGE_IN_EFFECT), one a later change
+            follows (LATER_CHANGE_SCHEDULED), no reason (REASON_REQUIRED), a revision other than the one read (REVISION_CHANGED)
+            and a seat another holds by then (POSITION_OCCUPIED). A separation dated before scheduled changes withdraws them
+            itself, and a return the leave's scheduled return.</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="whole" type="Boolean"><description>false when only a begun leave's return was withdrawn</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('withdrawEmploymentChange', context)"/>
+            <set field="employmentChangeId" from="out.employmentChangeId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="statusText" from="out.statusText"/>
+            <set field="whole" from="!!out.whole"/>
+        </actions>
+    </service>
+
+    <service verb="note" noun="AccessRequestFailure" allow-remote="false">
+        <description>Why an app's provisioning or access end request for an applied hire or separation failed, kept on its change
+            (EmploymentChange accessRequestFailure, with the date) and logged by employment: the hire or change stands, and the
+            request is made again by its key (a success clears it). For the change's requester, an HR editor of its employer or the
+            one whose decision applied it; anyone else, and another change, is refused alike (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="failure"/>
+        </in-parameters>
+        <out-parameters><parameter name="noted" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="noted" from="!!ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('noteAccessRequestFailure', context).noted"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Checklists" allow-remote="false">
+        <description>The lifecycle checklist templates of the employers in the caller's scope (organizationPartyId narrows, refused
+            outside the scope, ORGANIZATION_DENIED; lifecycleKindEnumId: onboarding, transfer or offboarding; ended ones with
+            includeEnded): name, employer, kind, dates and state, and their steps (name, required, who does it, due offset,
+            source link, visibility, protected flag, named person; ended steps marked when asked). An HR reader's
+            (PEOPLE_HR_VIEW, PERMISSION_DENIED otherwise); canEdit for an HR editor.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="lifecycleKindEnumId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checklists" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('findChecklists', context)"/>
+            <set field="checklists" from="out.checklists"/>
+            <set field="canEdit" from="!!out.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Checklist" allow-remote="false">
+        <description>A lifecycle checklist template (design §12 ChecklistTemplates): new (an employer in the caller's scope, its
+            lifecycle kind and name: an isTemplate root WorkEffort with purpose WepPrOrgMgmt, People's process policy, which
+            guards nothing, and its ChecklistTemplate row), changed (name and description, at the revision read when given) or
+            ended (end: from now, never deleted; the checklists it started stay). An HR editor's (PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT, PERMISSION_DENIED otherwise); refuses an employer outside the scope (ORGANIZATION_DENIED), a template
+            outside it (RECORD_UNAVAILABLE), no name (NAME_REQUIRED), a kind not onboarding, transfer or offboarding (KIND_INVALID)
+            and a stale revision (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="lifecycleKindEnumId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="end" type="Boolean" default="false"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('storeChecklist', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ChecklistStep" allow-remote="false">
+        <description>A step of a checklist template in the caller's scope, over mantle.work.ProcessServices.store#ProcessStep: new
+            (workEffortName) or changed (workEffortId), with who does it (roleTypeId: Employee, Manager, HumanResourcesManager, or
+            any other role for the named person, assigneePartyId, employed by the template's employer now), its due offset in days
+            from the change's date (dueOffsetDays), whether it is required, and People's facts: what it links to
+            (sourceLinkEnumId: IT access, equipment return, exit interview), who sees it (visibilityEnumId) and whether it is
+            protected (isProtected: left out of a phone's Tasks); or ended (end). An HR editor's. Refuses as store#Checklist, a
+            step of another template (RECORD_UNAVAILABLE), a value not of its list (VALUE_INVALID), a role with no named person
+            (ASSIGNEE_REQUIRED) or one not employed by the employer (ASSIGNEE_OUTSIDE).</description>
+        <in-parameters>
+            <parameter name="templateWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="isRequired"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueOffsetDays"/>
+            <parameter name="sourceLinkEnumId"/>
+            <parameter name="visibilityEnumId"/>
+            <parameter name="isProtected"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('storeChecklistStep', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Checklists" allow-remote="false">
+        <description>The checklists of an applied hire, transfer or separation (employmentChangeId), run by Mantle's tx-commit rules
+            on hire#Employee, apply#, decide# and approve#EmploymentChange (PeopleChecklists.secas.xml): each template of the
+            employer and kind in use now in its own transaction (start#Checklist), and for a separation its equipment return
+            (start#EquipmentReturn); a failure is logged by employment and template, the rest go on and the change stands. The
+            change's own record decides (a manager whose approval applied a transfer starts its checklist); a change not applied
+            starts nothing; a retry answers what was made.</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="started" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startChecklists', context)"/>
+            <set field="started" from="out.started"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Checklist" allow-remote="false">
+        <description>One template's checklist for an applied change (start#Checklists', in its own transaction): the template
+            (of the change's employer and kind) instantiated by instantiate#WorkProcess under the key of the change and template
+            (a retry answers it), its root named for the person, from the change's date (the due offsets), each task assigned by
+            its step's role (the employee, their manager, the HR officer who asked for the change, else the step's named person),
+            People's step facts copied (offboarding tasks protected), the IT access task linked to the change's access request,
+            and the EmploymentChecklist recorded. Refuses a change not applied or a template of another employer
+            (RECORD_UNAVAILABLE) or kind (KIND_INVALID).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="templateWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startChecklist', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="start" noun="EquipmentReturn" allow-remote="false">
+        <description>An applied separation's equipment return (start#Checklists', in its own transaction): one task per
+            AssetPartyAssignment the person holds on its date, under a root of People's policy, protected, due on the date and
+            assigned to the HR officer who asked for the separation, each naming its assignment by a WorkEffortAssetAssign of the
+            asset and a WorkEffortParty of the holder in the assignment's role (F60). An assignment with an open return task is
+            left (a retry makes none again).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="taskCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startEquipmentReturn', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="taskCount" from="out.taskCount"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="ReturnTasks" allow-remote="false">
+        <description>Mantle's rule on the end of an AssetPartyAssignment (PeopleChecklist.eecas.xml; F45, F52): the open equipment
+            return tasks of the asset, holder and role completed through mantle.work.TaskServices.set#TaskStatus, whoever ends the
+            holding (People's return#Equipment, Warehouse's or Maintenance's custody change). Never refuses: a failure is logged
+            and the custody change stands.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="completed" type="Integer"/></out-parameters>
+        <actions>
+            <set field="completed" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('completeReturnTasks', context).completed"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ChecklistTask" allow-remote="false">
+        <description>People's context of a checklist or equipment return task (WorkItemDetail's People mount, design §13): for one of
+            its current parties, an HR reader of the employment's employer, or the employee when the step is visible to them, the
+            person, employer, checklist and kind by name, what it links to (the equipment; the Admin outcome of the IT access
+            request, as its state and its steps' states), whether it is protected and the checklist's other tasks; the employee's
+            partyId only for HR. Anyone else, and a task of no checklist, is refused alike (RECORD_UNAVAILABLE). Never pay or a
+            case's text.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="statusText"/>
+            <parameter name="dueText"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="organizationName"/>
+            <parameter name="checklistName"/>
+            <parameter name="kindText"/>
+            <parameter name="sourceLinkEnumId"/>
+            <parameter name="sourceLinkText"/>
+            <parameter name="isProtected" type="Boolean"/>
+            <parameter name="canReadEmployee" type="Boolean"/>
+            <parameter name="equipment" type="Map"/>
+            <parameter name="access" type="Map"/>
+            <parameter name="siblings" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getChecklistTask', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="AssignedEquipment" allow-remote="false">
+        <description>Employee360's AssignedEquipment: the equipment a person holds now (current AssetPartyAssignment rows: asset,
+            product, serial, role, from date, the open return task), for the person themselves (PEOPLE_SELF_SERVICE) or an HR
+            reader of an employer of theirs; refused alike when missing or outside (RECORD_UNAVAILABLE). No cost. canReturn for
+            an HR editor.</description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="equipmentList" type="List"/>
+            <parameter name="canReturn" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getAssignedEquipment', context)"/>
+            <set field="equipmentList" from="out.equipmentList"/>
+            <set field="canReturn" from="!!out.canReturn"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EquipmentCustody" allow-remote="false">
+        <description>People's EquipmentDetail (design §13): an asset a person the caller reads as HR holds or held (or the caller
+            themselves): its identity (product, serial, status, location; never cost) and its custody history with each open
+            return task and whether the caller may end a holding (an HR editor of the holder's employer). Refused alike when
+            missing or outside (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="assetId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="asset" type="Map"/>
+            <parameter name="custodyList" type="List"/>
+            <parameter name="canReturn" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getEquipmentCustody', context)"/>
+            <set field="asset" from="out.asset"/>
+            <set field="custodyList" from="out.custodyList"/>
+            <set field="canReturn" from="!!out.canReturn"/>
+        </actions>
+    </service>
+    <service verb="return" noun="Equipment" allow-remote="false">
+        <description>A holding ended by the equipment's return (EquipmentDetail's End assignment): the current AssetPartyAssignment
+            of the asset, holder and role replaced by one of the receiving custodian (newPartyId: a person employed now by one of
+            the caller's employers, not the holder) through mantle.product.AssetServices.replace#AssetPartyAssignment, which ends
+            every other holder of the role (F52); Mantle's rule on the end completes the return task. An HR editor of the holder's
+            employer (PERMISSION_DENIED; RECORD_UNAVAILABLE for a holding outside the scope); refuses no or a wrong custodian
+            (CUSTODIAN_INVALID).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+            <parameter name="newPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="completed" type="Boolean"><description>No open return task of the holding is left</description></parameter></out-parameters>
+        <actions>
+            <set field="completed" from="!!ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('returnEquipment', context).completed"/>
+        </actions>
+    </service>
+
+    <!-- The employees import target (data/PeopleLifecycleSetupData.xml; design §12 EmployeeImport, Admin §11, F16): the row services
+        of the framework's org.moqui.admin.DataTransferServices, called for each row of a staged file as the importer -->
+    <service verb="validate" noun="EmployeeImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row would hire one employee into the batch's employer (scopeKey) by preview#Hire's own checks,
+            changing nothing: the person (an existing one by partyId, admitted as the hire wizard admits one, or a new one by first
+            and last name and work email, a person matching refused unless the row confirms a new one), the start and optional end,
+            and the first assignment (department, position, manager, work location by id). An HR editor's who also holds
+            PEOPLE_IMPORT; refuses an employer outside the scope.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('validateRow', context))</script></actions>
+    </service>
+    <service verb="apply" noun="EmployeeImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One hire#Employee for a validated row, with the row's operation key, so a repeat answers the hire it made
+            (resultRef: the employment). No account is requested (provisioning follows a hire only when HR asks for it). An HR
+            editor's who also holds PEOPLE_IMPORT.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('applyRow', context))</script></actions>
+    </service>
+    <service verb="find" noun="EmployeeImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The employers an import of employees may be for and whose imports the caller may read: those in the caller's
+            People scope, for an HR reader (PEOPLE_HR_VIEW). None otherwise.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('findScopes', context))</script></actions>
     </service>
 </services>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's lifecycle checklists start after the hire or change commits (IronStone People design §4, §12 ChecklistTemplates;
+    impl-people P7): a hire, and a transfer or separation once applied (at once, or by the last approval: apply#, decide# and
+    approve#EmploymentChange), start the employer's templates of their kind and a separation's equipment return
+    (PeopleServices.start#Checklists: each template in its own transaction, a failure logged by its employment and never undoing
+    the change; a retry answers what was made). The rules run as the caller, on a service worker, once the transaction commits. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="PeopleHireChecklists" service="mantle.humanres.PeopleServices.hire#Employee" when="tx-commit">
+        <condition><expression>employmentChangeId &amp;&amp; !repeated</expression></condition>
+        <actions><service-call name="mantle.humanres.PeopleServices.start#Checklists" in-map="{employmentChangeId:employmentChangeId}"/></actions>
+    </seca>
+    <seca id="PeopleChangeChecklists" service="mantle.humanres.PeopleServices.apply#EmploymentChange" when="tx-commit">
+        <condition><expression>employmentChangeId &amp;&amp; applied &amp;&amp; !repeated</expression></condition>
+        <actions><service-call name="mantle.humanres.PeopleServices.start#Checklists" in-map="{employmentChangeId:employmentChangeId}"/></actions>
+    </seca>
+    <seca id="PeopleDecisionChecklists" service="mantle.humanres.PeopleServices.decide#EmploymentChange" when="tx-commit">
+        <condition><expression>employmentChangeId &amp;&amp; applied &amp;&amp; !repeated</expression></condition>
+        <actions><service-call name="mantle.humanres.PeopleServices.start#Checklists" in-map="{employmentChangeId:employmentChangeId}"/></actions>
+    </seca>
+    <seca id="PeopleNoticeChecklists" service="mantle.humanres.PeopleServices.approve#EmploymentChange" when="tx-commit">
+        <condition><expression>employmentChangeId &amp;&amp; applied &amp;&amp; !repeated</expression></condition>
+        <actions><service-call name="mantle.humanres.PeopleServices.start#Checklists" in-map="{employmentChangeId:employmentChangeId}"/></actions>
+    </seca>
+</secas>

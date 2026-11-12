@@ -61,8 +61,12 @@ const statusTexts = {
     EchRequested: "Waiting for approval",
     EchApplied: "Applied",
     EchRefused: "Refused",
-    EchSuperseded: "Superseded"
+    EchSuperseded: "Superseded",
+    EchWithdrawn: "Withdrawn"
 }
+// the kinds of applied change HR may withdraw while their date is still to come (P7, F131): not a hire; a separation set for a
+// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation)
+const withdrawableKinds = ["EckTransfer", "EckManager", "EckLeave", "EckReturn", "EckReorganization", "EckSeparation"]
 const stateTexts = {EasActive: "Working", EasLeave: "On leave of absence"}
 const termFields = ["departmentPartyId", "emplPositionId", "managerPartyId", "facilityId"]
 // the most people a match search answers, and the shortest name it searches by
@@ -179,8 +183,12 @@ function termTexts(terms) {
 }
 
 // ===== the terms in effect =====
+// an assignment of a withdrawn change never took effect: it ends on its own start (P7, F131) and is no assignment
+const voided = row => row.thruDate != null && ms(row.thruDate) <= (ms(row.fromDate) ?? -Infinity)
 const assignmentsOf = partyRelationshipId =>
-    rows(ASSIGNMENT, {partyRelationshipId, isPrimary: "Y"}).sort((a, b) => (ms(a.fromDate) ?? 0) - (ms(b.fromDate) ?? 0))
+    rows(ASSIGNMENT, {partyRelationshipId, isPrimary: "Y"})
+        .filter(row => !voided(row))
+        .sort((a, b) => (ms(a.fromDate) ?? 0) - (ms(b.fromDate) ?? 0))
 const termsOfRow = row => Object.fromEntries(termFields.map(field => [field, row?.[field] || null]))
 // The terms of an employment on the date: its assignment's, else (an employment written before People's assignments, or a hire's
 // first assignment of an orphan relationship) the ones its records give: a department membership (Assignee) under the employer, a
@@ -293,15 +301,42 @@ function checkTerms(employment, terms, at, findings) {
         })
     return out
 }
-// The date of a change inside the employment and after the assignment in effect began, with no later assignment set.
-function checkDate(employment, at, findings) {
+// The date of a change inside the employment and after the assignment in effect began, with no later assignment set but those
+// the change supersedes (allow: a separation's and an early return's, P7, F131).
+function checkDate(employment, at, findings, allow = null) {
     attempt(findings, () => {
         if ((employment.fromMs ?? -Infinity) > at || (employment.thruMs ?? Infinity) <= at)
             denied("DATE_OUTSIDE", "The date is outside the employment")
-        const assignments = assignmentsOf(employment.partyRelationshipId)
-        if (assignments.some(row => (ms(row.fromDate) ?? -Infinity) >= at))
-            denied("ASSIGNMENT_SCHEDULED", "A change from that date or later is set already; choose a later date")
+        const later = assignmentsOf(employment.partyRelationshipId).filter(row => (ms(row.fromDate) ?? -Infinity) >= at)
+        const blocking = allow ? later.filter(row => !allow(row)) : later
+        if (blocking.length)
+            denied(
+                "ASSIGNMENT_SCHEDULED",
+                "A change from " + dateText(blocking[0].fromDate) + " is in effect or cannot be withdrawn; choose a later date"
+            )
     })
+}
+// The later assignments a change of the kind supersedes (P7, F131), else null: a separation every assignment set for a date
+// still to come but a hire's; a return the scheduled return of the leave of absence in effect (so it can come early).
+function supersedesFor(kindEnumId) {
+    const scheduled = row => (ms(row.fromDate) ?? -Infinity) > nowMs()
+    if (kindEnumId === "EckSeparation")
+        return row =>
+            scheduled(row) && !!row.employmentChangeId && changeOf(row.employmentChangeId)?.changeKindEnumId !== "EckHire"
+    if (kindEnumId === "EckReturn")
+        return row =>
+            scheduled(row) &&
+            (row.stateEnumId || "EasActive") === "EasActive" &&
+            !!row.employmentChangeId &&
+            changeOf(row.employmentChangeId)?.changeKindEnumId === "EckLeave"
+    return null
+}
+// The scheduled changes a change from the date supersedes, withdrawn latest first (each recorded with the superseding change).
+function supersedeScheduled(employment, at, allow, byChangeId, reason) {
+    const later = assignmentsOf(employment.partyRelationshipId).filter(row => (ms(row.fromDate) ?? -Infinity) >= at && allow(row))
+    const changeIds = unique(later.sort((a, b) => ms(b.fromDate) - ms(a.fromDate)).map(row => row.employmentChangeId))
+    for (const employmentChangeId of changeIds) withdrawScheduled(changeOf(employmentChangeId), reason, byChangeId)
+    return changeIds
 }
 
 // ===== the projections of an assignment =====
@@ -497,7 +532,48 @@ function applyDueAssignments(p) {
             }
         }
     }
-    return {applied, failed: failedList.length, failedList}
+    // F134: the employers whose separation or manager change has come since it was applied (dated later) route their waiting
+    // People decisions again on its date, each employer in its own transaction (a leaver decides nothing from then)
+    const rerouted = rerouteDueChanges(failedList)
+    return {applied, rerouted, failed: failedList.length, failedList}
+}
+const rerouteKinds = ["EckSeparation", "EckManager", "EckTransfer", "EckReorganization"]
+function rerouteDueChanges(failedList) {
+    const due = Array.from(
+        find(CHANGE)
+            .condition("changeKindEnumId", "in", rerouteKinds)
+            .condition("statusId", "EchApplied")
+            .condition("reroutedDate", "is-null", null)
+            .condition("effectiveDate", "less-equals", ec.user.nowTimestamp)
+            .selectField("employmentChangeId,organizationPartyId")
+            .list()
+    )
+    const byOrganization = new Map()
+    for (const row of due)
+        (
+            byOrganization.get(row.organizationPartyId) ||
+            byOrganization.set(row.organizationPartyId, []).get(row.organizationPartyId)
+        ).push(row.employmentChangeId)
+    let rerouted = 0
+    for (const [organizationPartyId, changeIds] of byOrganization) {
+        ec.message.pushErrors()
+        try {
+            ec.transaction.runRequireNew(null, "Error routing the People decisions of " + organizationPartyId + " again", () => {
+                approvals().reroute(organizationPartyId)
+                for (const employmentChangeId of changeIds)
+                    call("update#" + CHANGE, {employmentChangeId, reroutedDate: ec.user.nowTimestamp})
+            })
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            rerouted++
+        } catch (error) {
+            ec.logger.error("The waiting People decisions of " + organizationPartyId + " were not routed again: " + error.message)
+            failedList.push({organizationPartyId, message: String(error.message)})
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+    return rerouted
 }
 // A new assignment of the employment from the date with the terms (and state): the one in effect ends on the date (audited with
 // the reason) and the projections follow, from the terms before (the caller's, else those in effect) to the new ones.
@@ -563,6 +639,288 @@ function supersedeWaiting(partyRelationshipId, exceptId = null) {
     }
     return superseded
 }
+// ===== a scheduled change withdrawn (P7, F131) =====
+// The part of an applied change set for a date still to come withdrawn: its scheduled assignments end on their own start (they
+// never take effect; dated rows are ended, never deleted), the assignment before continues to where they ended, and the
+// projections go back: the department membership, the seat and the reporting line the change would have moved start never, and
+// those it ended on its date continue (the seat refused when another holds it then, POSITION_OCCUPIED). A change wholly
+// scheduled is Withdrawn (when, by whom, why, and the separation that superseded it); a leave of absence already begun keeps it
+// and loses only its return (returnDate cleared). Refuses a change in effect (CHANGE_IN_EFFECT) and one a later change follows
+// (LATER_CHANGE_SCHEDULED: that one first).
+function withdrawScheduled(change, reason, supersededById = null) {
+    const employment = employmentOf(one(RELATIONSHIP, {partyRelationshipId: change.partyRelationshipId}))
+    const now = nowMs()
+    const all = assignmentsOf(employment.partyRelationshipId)
+    const own = all.filter(row => row.employmentChangeId === change.employmentChangeId)
+    const scheduled = own.filter(row => (ms(row.fromDate) ?? -Infinity) > now)
+    if (!scheduled.length) denied("CHANGE_IN_EFFECT", "This change is in effect already; make a new change instead")
+    const fromMs = ms(scheduled[0].fromDate)
+    const following = all.filter(
+        row => (ms(row.fromDate) ?? -Infinity) > fromMs && row.employmentChangeId !== change.employmentChangeId
+    )
+    if (following.length)
+        denied(
+            "LATER_CHANGE_SCHEDULED",
+            "A change from " + dateText(following[0].fromDate) + " follows it; withdraw that one first"
+        )
+    const endMs = ms(scheduled[scheduled.length - 1].thruDate)
+    const prior = all.find(row => !scheduled.includes(row) && ms(row.thruDate) === fromMs) || null
+    const before = prior ? termsOfRow(prior) : termsOfRow(termsAt(employment, fromMs - 1))
+    const withdrawn = termsOfRow(scheduled[0])
+    if (before.emplPositionId && before.emplPositionId !== withdrawn.emplPositionId) {
+        const findings = []
+        checkTerms(employment, {emplPositionId: before.emplPositionId}, fromMs, findings)
+        refuseErrors(findings.filter(finding => finding.code === "POSITION_OCCUPIED"))
+    }
+    const why = text(reason) || "Withdrawn"
+    for (const row of scheduled)
+        call("update#" + ASSIGNMENT, {
+            employmentAssignmentId: row.employmentAssignmentId,
+            thruDate: row.fromDate,
+            thruDate_changeReason: "Withdrawn: " + why
+        })
+    if (prior)
+        call("update#" + ASSIGNMENT, {
+            employmentAssignmentId: prior.employmentAssignmentId,
+            thruDate: stamp(endMs),
+            thruDate_changeReason: "Continues: " + why
+        })
+    restoreProjections(employment, withdrawn, before, fromMs, endMs, why)
+    const whole = scheduled.length === own.length
+    call(
+        "update#" + CHANGE,
+        whole
+            ? {
+                  employmentChangeId: change.employmentChangeId,
+                  statusId: "EchWithdrawn",
+                  withdrawnDate: ec.user.nowTimestamp,
+                  withdrawnByUserId: ec.user.userId || null,
+                  withdrawReason: why,
+                  supersededByChangeId: supersededById
+              }
+            : {
+                  employmentChangeId: change.employmentChangeId,
+                  returnDate: null,
+                  withdrawReason: "The return of " + dateText(fromMs) + " was withdrawn: " + why,
+                  supersededByChangeId: supersededById
+              }
+    )
+    return {employmentChangeId: change.employmentChangeId, whole}
+}
+// The projections of withdrawn terms back to the terms before, from the date: a row the withdrawn terms started then ends on its
+// own start; a row of the terms before that ended then continues to endMs (the line has no end), else one starts.
+function restoreProjections(employment, withdrawn, before, at, endMs, reason) {
+    const partyId = employment.partyId
+    const startedThen = list => list.filter(row => ms(row.fromDate) === at && (ms(row.thruDate) ?? Infinity) > at)
+    const endedThen = list => list.filter(row => ms(row.thruDate) === at)
+    if (withdrawn.departmentPartyId !== before.departmentPartyId) {
+        const members = toPartyId =>
+            rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtMember", fromPartyId: partyId, toPartyId, fromRoleTypeId: "Assignee"})
+        if (withdrawn.departmentPartyId)
+            for (const row of startedThen(members(withdrawn.departmentPartyId))) endRow(row, at, reason)
+        if (before.departmentPartyId) {
+            const ended = endedThen(members(before.departmentPartyId))
+            if (ended.length)
+                for (const row of ended)
+                    call("update#" + RELATIONSHIP, {
+                        partyRelationshipId: row.partyRelationshipId,
+                        thruDate: stamp(endMs),
+                        thruDate_changeReason: reason
+                    })
+            else moveMembership(partyId, null, before.departmentPartyId, at, endMs, reason)
+        }
+    }
+    if (withdrawn.emplPositionId !== before.emplPositionId) {
+        const holdings = emplPositionId => rows(HOLDER, {emplPositionId, partyId, roleTypeId: "Employee"})
+        const setThru = (row, thru) =>
+            call("update#" + HOLDER, {
+                emplPositionId: row.emplPositionId,
+                partyId: row.partyId,
+                roleTypeId: row.roleTypeId,
+                fromDate: row.fromDate,
+                thruDate: thru,
+                comments: [row.comments, reason].filter(Boolean).join("; ") || null
+            })
+        if (withdrawn.emplPositionId)
+            for (const row of startedThen(holdings(withdrawn.emplPositionId))) setThru(row, row.fromDate)
+        if (before.emplPositionId) {
+            const ended = endedThen(holdings(before.emplPositionId))
+            if (ended.length) for (const row of ended) setThru(row, stamp(endMs))
+            else positions().holdSeat(one(POSITION, {emplPositionId: before.emplPositionId}), partyId, at, endMs, reason)
+        }
+    }
+    if (withdrawn.managerPartyId !== before.managerPartyId) {
+        const lines = fromPartyId => rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtManager", fromPartyId, toPartyId: partyId})
+        if (withdrawn.managerPartyId) for (const row of startedThen(lines(withdrawn.managerPartyId))) endRow(row, at, reason)
+        if (before.managerPartyId)
+            for (const row of endedThen(lines(before.managerPartyId)))
+                call("update#" + RELATIONSHIP, {
+                    partyRelationshipId: row.partyRelationshipId,
+                    thruDate: null,
+                    thruDate_changeReason: reason
+                })
+    }
+}
+// ===== a separation set for a later date withdrawn (the user's call, Nov 11) =====
+// Before its date, as the other scheduled changes: the employment's end goes back to what it was (priorThruDate), its termination
+// reason and type are cleared, the assignment it ended continues, and so do the department membership, the seat and the line it
+// ended on its date, and the person's memberships of the employer's units ended then; each report's manager change it made
+// (causedByChangeId) is withdrawn, so their assignments keep the manager, and a line it ended goes on. Nothing of the access end
+// is done (Admin's operation is Withdrawn: its waiting steps skipped, what it ended at the date continued) and its checklists' and
+// equipment return's work is cancelled. The scheduled changes it withdrew when applied stay withdrawn (made again if wanted).
+// Refuses one in effect (CHANGE_IN_EFFECT) and one whose employment changed its end since (NOT_WITHDRAWABLE).
+function withdrawSeparation(change, employment, reason) {
+    const now = nowMs()
+    const at = ms(change.effectiveDate)
+    if (at == null || at <= now) denied("CHANGE_IN_EFFECT", "This separation is in effect already; hire the person again instead")
+    if (employment.thruMs !== at)
+        denied("NOT_WITHDRAWABLE", "The employment's end changed since the separation; change it from the employment")
+    const why = "Withdrawn: " + reason
+    const priorMs = ms(change.priorThruDate) ?? null
+    const ended = assignmentsOf(employment.partyRelationshipId)
+        .filter(row => ms(row.thruDate) === at)
+        .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0]
+    const before = ended ? termsOfRow(ended) : termsOfRow(termsAt(employment, at - 1))
+    call("update#" + RELATIONSHIP, {
+        partyRelationshipId: employment.partyRelationshipId,
+        thruDate: stamp(priorMs),
+        thruDate_changeReason: why
+    })
+    call("update#" + EMPLOYMENT, {
+        partyRelationshipId: employment.partyRelationshipId,
+        terminationReasonEnumId: null,
+        terminationTypeEnumId: null,
+        terminationReasonEnumId_changeReason: why,
+        terminationTypeEnumId_changeReason: why
+    })
+    if (ended)
+        call("update#" + ASSIGNMENT, {
+            employmentAssignmentId: ended.employmentAssignmentId,
+            thruDate: stamp(priorMs),
+            thruDate_changeReason: why
+        })
+    restoreProjections(
+        Object.assign({}, employment, {thruMs: priorMs}),
+        {departmentPartyId: null, emplPositionId: null, managerPartyId: null},
+        before,
+        at,
+        priorMs,
+        why
+    )
+    // the person's memberships of the employer's units it ended on its date go on
+    const org = employment.organizationPartyId
+    const units = people.unitsUnder([org])
+    if (units.length)
+        for (const row of Array.from(
+            find(RELATIONSHIP)
+                .condition({relationshipTypeEnumId: "PrtMember", fromPartyId: employment.partyId})
+                .condition("toPartyId", "in", units)
+                .list()
+        ).filter(row => ms(row.thruDate) === at && (ms(row.fromDate) ?? -Infinity) < at))
+            call("update#" + RELATIONSHIP, {
+                partyRelationshipId: row.partyRelationshipId,
+                thruDate: null,
+                thruDate_changeReason: why
+            })
+    // the reports: their manager changes made by the separation withdrawn, and a line it ended (a report with no assignment) on
+    for (const report of rows(CHANGE, {causedByChangeId: change.employmentChangeId, statusId: "EchApplied"}))
+        withdrawScheduled(report, reason)
+    for (const line of rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtManager", fromPartyId: employment.partyId}).filter(
+        row => ms(row.thruDate) === at && (ms(row.fromDate) ?? -Infinity) < at
+    ))
+        call("update#" + RELATIONSHIP, {
+            partyRelationshipId: line.partyRelationshipId,
+            thruDate: null,
+            thruDate_changeReason: why
+        })
+    call("update#" + CHANGE, {
+        employmentChangeId: change.employmentChangeId,
+        statusId: "EchWithdrawn",
+        withdrawnDate: ec.user.nowTimestamp,
+        withdrawnByUserId: ec.user.userId || null,
+        withdrawReason: reason
+    })
+    // no access end and no offboarding work: Admin's operation withdrawn, the checklists' and return's tasks cancelled
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/Lifecycle.js")
+        .withdrawAccessEnd(change.employmentChangeId, reason)
+    ec.resource.script("component://mr-mantle/service/mantle/humanres/Checklists.js").cancelChecklists(change.employmentChangeId)
+    return {employmentChangeId: change.employmentChangeId, whole: true}
+}
+// withdraw#EmploymentChange: an applied change of an employment in the caller's scope whose date is still to come (a transfer, a
+// manager change, a leave of absence or its return date, a return, a reorganization) withdrawn by an HR editor with a reason, at
+// the employment's revision read when given; the employment's waiting changes superseded (asked at the revision before).
+function withdrawEmploymentChange(p) {
+    const userScope = editorScope("Withdrawing a change")
+    const change = changeOf(text(p.employmentChangeId))
+    if (!change) denied("RECORD_UNAVAILABLE", "Employment change " + text(p.employmentChangeId) + " is not available")
+    const employment = employmentIn(userScope, change.partyRelationshipId)
+    if (change.statusId !== "EchApplied" || !withdrawableKinds.includes(change.changeKindEnumId) || change.causedByChangeId)
+        denied(
+            "NOT_WITHDRAWABLE",
+            "Only a transfer, manager change, leave, return or separation set for a later date is withdrawn"
+        )
+    if (text(p.expectedRevision) && text(p.expectedRevision) !== people.employmentRevision(employment.partyRelationshipId))
+        denied("REVISION_CHANGED", "This employment changed since you read it; open it again")
+    if (!text(p.reason)) denied("REASON_REQUIRED", "Say why")
+    const done =
+        change.changeKindEnumId === "EckSeparation"
+            ? withdrawSeparation(change, employment, text(p.reason))
+            : withdrawScheduled(change, text(p.reason))
+    supersedeWaiting(employment.partyRelationshipId)
+    const after = changeOf(change.employmentChangeId)
+    return {
+        employmentChangeId: after.employmentChangeId,
+        statusId: after.statusId,
+        statusText: statusTexts[after.statusId],
+        whole: done.whole
+    }
+}
+
+// note#AccessRequestFailure: why an app's provisioning or access end request for an applied hire or separation failed, on the
+// change (P7: logged against the employment and retried by key; the hire or change stands), for the change's requester, an HR
+// editor of its employer or the one whose decision applied it; anyone else is refused alike (RECORD_UNAVAILABLE).
+function noteAccessRequestFailure(p) {
+    const change = changeOf(text(p.employmentChangeId))
+    const unavailable = () =>
+        denied("RECORD_UNAVAILABLE", "Employment change " + text(p.employmentChangeId) + " is not available")
+    if (!change || change.statusId !== "EchApplied" || !["EckHire", "EckSeparation"].includes(change.changeKindEnumId))
+        unavailable()
+    const userScope = people.scopeOf()
+    const decided = () => {
+        const approvalIds = rows("mantle.humanres.approval.PeopleApproval", {
+            approvalKindEnumId: approvalKind,
+            sourceId: change.employmentChangeId
+        }).map(row => row.peopleApprovalId)
+        return (
+            approvalIds.length > 0 &&
+            find("mantle.humanres.approval.PeopleApprovalDecision")
+                .condition("peopleApprovalId", "in", approvalIds)
+                .condition("decidedByUserId", ec.user.userId)
+                .count() > 0
+        )
+    }
+    const allowed =
+        (!!ec.user.userId && change.requestedByUserId === ec.user.userId) ||
+        (userScope.capabilities.hrEdit && userScope.organizationPartyIds.includes(change.organizationPartyId)) ||
+        decided()
+    if (!allowed) unavailable()
+    call("update#" + CHANGE, {
+        employmentChangeId: change.employmentChangeId,
+        accessRequestFailure: text(p.failure).slice(0, 2000) || "The request failed",
+        accessRequestDate: ec.user.nowTimestamp
+    })
+    ec.logger.error(
+        "The access request of employment " +
+            change.partyRelationshipId +
+            " (change " +
+            change.employmentChangeId +
+            ") failed: " +
+            text(p.failure)
+    )
+    return {noted: true}
+}
+
 // A change applied: its terms written from its date (the checks again, as of now, refusing what changed since it was asked), its
 // row Applied with the assignment it started, the employment's other waiting changes superseded and, when a manager or the
 // employment ended, the employer's waiting People decisions routed again.
@@ -573,11 +931,16 @@ function applyChange(change) {
     const kind = change.changeKindEnumId
     const reason = change.reason || kindTexts[kind]
     const findings = []
-    checkDate(employment, at, findings)
+    // a separation supersedes the changes set for its date or later, a return the leave's scheduled return (P7, F131)
+    const allow = supersedesFor(kind)
+    checkDate(employment, at, findings, allow)
+    if (allow && !firstError(findings)) supersedeScheduled(employment, at, allow, change.employmentChangeId, reason)
     const before = termsAt(employment, at)
     let assignmentId = null
     if (kind === "EckSeparation") {
         refuseErrors(findings)
+        // the employment's end before it, given back if a separation set for later is withdrawn (the user's call, Nov 11)
+        call("update#" + CHANGE, {employmentChangeId: change.employmentChangeId, priorThruDate: stamp(employment.thruMs ?? null)})
         separate(employment, change, before, at, reason)
     } else if (kind === "EckLeave" || kind === "EckReturn") {
         if (kind === "EckLeave" && before.stateEnumId === "EasLeave")
@@ -617,6 +980,9 @@ function applyChange(change) {
     supersedeWaiting(change.partyRelationshipId, change.employmentChangeId)
     if (kind === "EckSeparation" || before.managerPartyId !== (change.managerPartyId || null))
         approvals().reroute(employment.organizationPartyId)
+    // routed again from its date: now for a change in effect, else by the daily job on the date (F134)
+    if (at <= nowMs())
+        call("update#" + CHANGE, {employmentChangeId: change.employmentChangeId, reroutedDate: ec.user.nowTimestamp})
     return {employmentAssignmentId: assignmentId}
 }
 // A separation from the date: the assignment and its projections end, the employment ends with its termination reason and type,
@@ -674,7 +1040,9 @@ function separate(employment, change, before, at, reason) {
             managerPartyId: null,
             facilityId: row.facilityId,
             reason: "The manager left",
-            appliedDate: ec.user.nowTimestamp
+            appliedDate: ec.user.nowTimestamp,
+            // withdrawn with the separation (the user's call, Nov 11)
+            causedByChangeId: change.employmentChangeId
         })
         const assignmentId = startAssignment(
             reportEmployment,
@@ -1033,6 +1401,30 @@ function planHire(p, userScope) {
         severity: "info",
         message: "Pay terms are payroll's: the hire records no salary, currency or pay group"
     })
+    // P7: the employer's onboarding checklists, which start once the hire is made
+    const onboarding = rows("mantle.humanres.checklist.ChecklistTemplate", {
+        organizationPartyId,
+        lifecycleKindEnumId: "ClkOnboarding"
+    }).filter(row => openAt(row, nowMs()))
+    if (onboarding.length) {
+        const names = Object.fromEntries(
+            Array.from(
+                find("mantle.work.effort.WorkEffort")
+                    .condition(
+                        "workEffortId",
+                        "in",
+                        onboarding.map(row => row.workEffortId)
+                    )
+                    .list()
+            ).map(row => [row.workEffortId, row.workEffortName])
+        )
+        findings.push({
+            code: "CHECKLISTS",
+            severity: "info",
+            message:
+                "Onboarding starts once hired: " + onboarding.map(row => names[row.workEffortId] || row.workEffortId).join(", ")
+        })
+    }
     return {organizationPartyId, fromMs, thruMs, assignmentFromMs, person, matches, relationships, plan, orphan, terms, findings}
 }
 const planTexts = {
@@ -1083,6 +1475,7 @@ function hireEmployee(p) {
                     employmentChangeId: first.employmentChangeId,
                     employmentAssignmentId: first.employmentAssignmentId,
                     plan: null,
+                    accessRequested: first.accessRequested === "Y",
                     repeated: true
                 }
         }
@@ -1124,7 +1517,10 @@ function hireEmployee(p) {
         facilityId: plan.terms.facilityId,
         reason,
         operationKey,
-        appliedDate: ec.user.nowTimestamp
+        appliedDate: ec.user.nowTimestamp,
+        // P7: HR asked for the person's account (the provisioning request after commit); none merely to be paid
+        accessRequested: truthy(p.requestAccount) ? "Y" : "N",
+        reroutedDate: ec.user.nowTimestamp
     })
     const employmentAssignmentId = startAssignment(employment, plan.terms, plan.assignmentFromMs, null, {
         before,
@@ -1132,7 +1528,15 @@ function hireEmployee(p) {
         employmentChangeId
     })
     call("update#" + CHANGE, {employmentChangeId, employmentAssignmentId})
-    return {partyId, partyRelationshipId, employmentChangeId, employmentAssignmentId, plan: plan.plan, repeated: false}
+    return {
+        partyId,
+        partyRelationshipId,
+        employmentChangeId,
+        employmentAssignmentId,
+        plan: plan.plan,
+        accessRequested: truthy(p.requestAccount),
+        repeated: false
+    }
 }
 // A new hire's work email and phone (EmailWork, PhoneWork: the directory's work identity), each unless the person has it already.
 function addWorkContacts(partyId, p) {
@@ -1179,7 +1583,7 @@ function planChange(p, userScope) {
     const impact = []
     if (!kindEnumId) findings.push({code: "KIND_INVALID", severity: "error", message: "Choose what changes"})
     else {
-        checkDate(employment, at, findings)
+        checkDate(employment, at, findings, supersedesFor(kindEnumId))
         if (kindEnumId === "EckTransfer" || kindEnumId === "EckManager") {
             const asked = Object.assign({}, terms)
             for (const field of kindEnumId === "EckManager" ? ["managerPartyId"] : termFields)
@@ -1242,6 +1646,19 @@ function impactOf(employment, kindEnumId, before, terms, at) {
                   ? "Joins " + units[after.departmentPartyId]
                   : "Leaves " + units[before.departmentPartyId]
         )
+    if (kindEnumId === "EckTransfer") {
+        const transfer = rows("mantle.humanres.checklist.ChecklistTemplate", {
+            organizationPartyId: employment.organizationPartyId,
+            lifecycleKindEnumId: "ClkTransfer"
+        }).filter(row => openAt(row, nowMs()))
+        if (transfer.length)
+            add(
+                "checklists",
+                transfer.length +
+                    (transfer.length === 1 ? " transfer checklist starts" : " transfer checklists start") +
+                    " when it is applied"
+            )
+    }
     if (before.managerPartyId !== after.managerPartyId)
         add(
             "manager",
@@ -1253,6 +1670,22 @@ function impactOf(employment, kindEnumId, before, terms, at) {
         )
     if (kindEnumId === "EckLeave") add("state", "On leave of absence from " + dateText(at))
     if (kindEnumId === "EckReturn") add("state", "Working again from " + dateText(at))
+    // the scheduled changes it withdraws (P7, F131)
+    const allow = supersedesFor(kindEnumId)
+    if (allow)
+        for (const row of assignmentsOf(employment.partyRelationshipId).filter(
+            row => (ms(row.fromDate) ?? -Infinity) >= at && allow(row)
+        )) {
+            const scheduledChange = changeOf(row.employmentChangeId)
+            add(
+                "withdrawn",
+                (scheduledChange?.changeKindEnumId === "EckLeave"
+                    ? "The return set for "
+                    : "The " + (kindTexts[scheduledChange?.changeKindEnumId] || "change").toLowerCase() + " set for ") +
+                    dateText(row.fromDate) +
+                    " is withdrawn"
+            )
+        }
     if (separation) {
         const org = employment.organizationPartyId
         add("employment", "The employment ends from " + dateText(at))
@@ -1286,6 +1719,34 @@ function impactOf(employment, kindEnumId, before, terms, at) {
         )
         if (elsewhere.length) add("otherEmployment", "Their employment at another employer continues and is not changed")
         add("approvals", "Approvals waiting on them go to the step's alternate or the HR fallback")
+        // P7: the equipment they hold, the offboarding checklists and their account's access
+        const held = rows("mantle.product.asset.AssetPartyAssignment", {partyId: employment.partyId}).filter(
+            row => (ms(row.thruDate) ?? Infinity) > at
+        )
+        if (held.length)
+            add(
+                "equipment",
+                held.length +
+                    (held.length === 1 ? " piece of equipment is" : " pieces of equipment are") +
+                    " to be returned: a return task each"
+            )
+        const offboarding = rows("mantle.humanres.checklist.ChecklistTemplate", {
+            organizationPartyId: org,
+            lifecycleKindEnumId: "ClkOffboarding"
+        }).filter(row => openAt(row, nowMs()))
+        if (offboarding.length)
+            add(
+                "checklists",
+                offboarding.length +
+                    (offboarding.length === 1 ? " offboarding checklist starts" : " offboarding checklists start")
+            )
+        if (one("moqui.security.UserAccount", {partyId: employment.partyId}))
+            add(
+                "access",
+                elsewhere.length
+                    ? "Their account keeps its access for the other employer"
+                    : "Their account's access ends from " + dateText(at) + " (Admin's lifecycle)"
+            )
     }
     return items
 }
@@ -1473,13 +1934,25 @@ function findEmploymentChanges(p) {
         if (!waiting && !(includeDone && hrOf(row))) continue
         const approval = waiting || row.statusId === "EchRefused" ? approvalOf(row) : null
         if (!hrOf(row) && !approval?.canDecide) continue
-        changes.push(changeRow(row, approval))
+        changes.push(changeRow(row, approval, hrOf(row) && !!caps.hrEdit))
     }
     return {changes}
 }
-function changeRow(row, approval) {
+function changeRow(row, approval, hrEdit = false) {
     const texts = termTexts(row)
     const reasons = enumNames([row.terminationReasonEnumId, row.terminationTypeEnumId])
+    // P7: a change applied for a date still to come (a leave's return too) is withdrawn by HR (F131); the access request's state
+    const scheduled =
+        row.statusId === "EchApplied" &&
+        withdrawableKinds.includes(row.changeKindEnumId) &&
+        !row.causedByChangeId &&
+        (row.changeKindEnumId === "EckSeparation"
+            ? (ms(row.effectiveDate) ?? -Infinity) > nowMs()
+            : assignmentsOf(row.partyRelationshipId).some(
+                  assignment =>
+                      assignment.employmentChangeId === row.employmentChangeId && (ms(assignment.fromDate) ?? -Infinity) > nowMs()
+              ))
+    const partial = scheduled && row.changeKindEnumId === "EckLeave" && (ms(row.effectiveDate) ?? Infinity) <= nowMs()
     return Object.assign(
         {
             employmentChangeId: row.employmentChangeId,
@@ -1499,7 +1972,20 @@ function changeRow(row, approval) {
             requestedDateText: dateText(row.requestedDate),
             appliedDateText: dateText(row.appliedDate),
             approval: approval || null,
-            canDecide: !!approval?.canDecide
+            canDecide: !!approval?.canDecide,
+            scheduled,
+            canWithdraw: scheduled && hrEdit,
+            withdrawText: partial ? "Withdraw the return" : "Withdraw",
+            withdrawnDateText: dateText(row.withdrawnDate),
+            withdrawReason: row.withdrawReason || "",
+            accessRequested: row.accessRequested === "Y",
+            accessOperationId: hrEdit ? row.accessOperationId || null : null,
+            accessFailure: hrEdit ? row.accessRequestFailure || "" : "",
+            canRequestAccess:
+                hrEdit &&
+                row.statusId === "EchApplied" &&
+                !!row.accessRequestFailure &&
+                ((row.changeKindEnumId === "EckHire" && row.accessRequested === "Y") || row.changeKindEnumId === "EckSeparation")
         },
         row.changeKindEnumId === "EckSeparation" ? {} : texts
     )
@@ -1538,7 +2024,7 @@ function changeManagerOfAssignment(partyRelationshipId, managerPartyId, at, reas
 // naming it starts later (ASSIGNMENT_SCHEDULED). Returns how many moved.
 function reassignDepartment(departmentPartyId, toDepartmentPartyId, at, reason) {
     const naming = Array.from(find(ASSIGNMENT).condition({departmentPartyId, isPrimary: "Y"}).list()).filter(
-        row => (ms(row.thruDate) ?? Infinity) > at
+        row => !voided(row) && (ms(row.thruDate) ?? Infinity) > at
     )
     if (naming.some(row => (ms(row.fromDate) ?? -Infinity) >= at))
         denied("ASSIGNMENT_SCHEDULED", "Someone joins this department on or after that date; change their employment first")
@@ -1697,7 +2183,9 @@ function deleteEmploymentDraft(p) {
 // the change that started each.
 function assignmentHistory(employmentIds) {
     if (!employmentIds.length) return []
-    const found = Array.from(find(ASSIGNMENT).condition("partyRelationshipId", "in", employmentIds).orderBy("-fromDate").list())
+    const found = Array.from(
+        find(ASSIGNMENT).condition("partyRelationshipId", "in", employmentIds).orderBy("-fromDate").list()
+    ).filter(row => !voided(row))
     if (!found.length) return []
     const departments = people.organizationNames(unique(found.map(row => row.departmentPartyId).filter(Boolean)))
     const seats = positionNames(found.map(row => row.emplPositionId))
@@ -1742,7 +2230,9 @@ const operations = {
     getEmploymentDraft,
     storeEmploymentDraft,
     deleteEmploymentDraft,
-    applyDueAssignments
+    applyDueAssignments,
+    withdrawEmploymentChange,
+    noteAccessRequestFailure
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employment operation " + op)

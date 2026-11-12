@@ -464,6 +464,25 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="requestedDate" type="date-time"/>
         <field name="appliedDate" type="date-time"/>
         <field name="employmentAssignmentId" type="id"><description>The assignment the applied change started</description></field>
+        <field name="withdrawnDate" type="date-time"><description>An applied change dated later withdrawn before its date (by HR,
+            or by a separation dated before it): its assignment never took effect (impl-people P7, F131)</description></field>
+        <field name="withdrawnByUserId" type="id"/>
+        <field name="withdrawReason" type="text-long"/>
+        <field name="supersededByChangeId" type="id"><description>The separation that withdrew it</description></field>
+        <field name="priorThruDate" type="date-time"><description>A separation's: the employment's end before it (empty: open),
+            which a separation set for a later date and withdrawn before it gives back (the user's call, Nov 11)</description></field>
+        <field name="causedByChangeId" type="id"><description>A report's manager change made by its manager's separation, withdrawn
+            with it</description></field>
+        <field name="reroutedDate" type="date-time"><description>A separation's or manager change's: when the employer's waiting
+            People decisions were routed again on or after its date (at once for one in effect, else by the daily job,
+            F134)</description></field>
+        <field name="accessRequested" type="text-indicator"><description>A hire's: Y when HR asked for the person's account (the
+            provisioning request after commit; nobody gets a login merely to be paid)</description></field>
+        <field name="accessOperationId" type="id"><description>The Admin lifecycle operation of the hire's provisioning or the
+            separation's access end (UserLifecycleOperation)</description></field>
+        <field name="accessRequestFailure" type="text-long"><description>Why the last provisioning or access end request failed,
+            empty once one is made; the hire or change stands and the request is retried by its key</description></field>
+        <field name="accessRequestDate" type="date-time"/>
         <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
         <relationship type="one" title="EmploymentChangeKind" related="moqui.basic.Enumeration" short-alias="kind">
             <key-map field-name="changeKindEnumId" related="enumId"/></relationship>
@@ -473,6 +492,7 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="requestedByUserId" related="userId"/></relationship>
         <index name="EMPL_CHG_EMPL"><index-field name="partyRelationshipId"/></index>
         <index name="EMPL_CHG_OPKEY"><index-field name="operationKey"/></index>
+        <index name="EMPL_CHG_KIND"><index-field name="changeKindEnumId"/><index-field name="statusId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Employment Change Kind" enumTypeId="EmploymentChangeKind"/>
             <moqui.basic.Enumeration enumId="EckHire" description="Hire" sequenceNum="1" enumTypeId="EmploymentChangeKind"/>
@@ -488,9 +508,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.StatusItem statusId="EchApplied" description="Applied" sequenceNum="2" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchRefused" description="Refused" sequenceNum="3" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchSuperseded" description="Superseded" sequenceNum="4" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchWithdrawn" description="Withdrawn" sequenceNum="5" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchApplied" transitionName="Apply"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchRefused" transitionName="Refuse"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchSuperseded" transitionName="Supersede"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchApplied" toStatusId="EchWithdrawn" transitionName="Withdraw"/>
         </seed-data>
     </entity>
     <entity entity-name="EmploymentDraft" package="mantle.humanres.employment" cache="never">

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A reusable WorkEffort process (IronStone Maintenance design §4.1 and §4.2, MT-03; WorkProcesses.js): the first, minimal part
+    built by impl-people P7 for People's lifecycle checklists (store#ProcessStep, instantiate#WorkProcess and the managed-work
+    rule's check#ManagedWork); impl-maintenance P6 extends these services (publication, approval and effectivity, the checked path
+    of a process whose policy guards execution) and leaves People's path as it is. clone#WorkEffort and clone#Project are not
+    changed. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="store" noun="ProcessStep" allow-remote="false">
+        <description>A step of a template tree (rootWorkEffortId, a WorkEffort with isTemplate Y and a process policy in effect):
+            new (workEffortName; under parentWorkEffortId, a node of the same tree, else the root) or changed (workEffortId), with
+            its step policy from now (isRequired, roleTypeId, dueOffsetDays; a change ends the policy in effect and starts the
+            next), and the steps of the same tree it waits for (dependsOnIds; a cycle or another tree's step is refused,
+            DEPENDENCY_INVALID). With end, the step's policy ends now: the step is left out of new executions. Needs the
+            permission of the policy using the process (PERMISSION_DENIED; PROCESS_UNAVAILABLE for a template with no policy in
+            effect).</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="parentWorkEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="purposeEnumId"><description>A new step's purpose; the root's when empty</description></parameter>
+            <parameter name="description"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="estimatedWorkTime"/>
+            <parameter name="isRequired"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="dueOffsetDays"/>
+            <parameter name="dependsOnIds" type="List"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('storeProcessStep', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="instantiate" noun="WorkProcess" allow-remote="false">
+        <description>A template (templateWorkEffortId: isTemplate Y, its process policy in effect) made into fresh work by the
+            two-pass copy of design-maintenance §4.2: the root and each step whose policy is in effect (an ended step left out
+            with its sub-steps) copied with their definition fields only (the template flag, status, resolution, actual dates,
+            effort and recurrence reset; due dates from each step's offset after startDate, now when empty), the WeatDependsOn
+            edges inside the tree remapped, one WeatBasedOn association from each new node to its template node, the step and
+            process policies copied, and each step assigned (Assignee) to the party roleParties names for its role (a role named
+            for no one stays a requirement). rootFields override the root's workEffortName, description and ownerPartyId. One tree
+            in the caller's transaction; a retry with operationKey answers the first root (repeated). Needs the permission of
+            the policy using the process.</description>
+        <in-parameters>
+            <parameter name="templateWorkEffortId" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="roleParties" type="Map"/>
+            <parameter name="rootFields" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="idMap" type="Map"><description>Each template node's id to its new node's</description></parameter>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('instantiateWorkProcess', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="idMap" from="out.idMap"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="check" noun="ManagedWork" allow-remote="false">
+        <description>The managed-work rule (impl-people §4, impl-maintenance §4, in the same words): the generic task and
+            work-effort services refuse a root that has a MaintenanceWorkOrder row and its steps, and work whose process policy
+            guards execution (MANAGED_WORK): its own policy, its root's or its parent's. People's checklist tasks stay ordinary
+            tasks (People's policy does not guard). A data check, for any caller; reads nothing else.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortIdList" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="managed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="managed" from="!!ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('checkManagedWork', context).managed"/>
+        </actions>
+    </service>
+</services>

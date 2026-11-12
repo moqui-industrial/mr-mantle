@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The end of a holding completes its equipment return (IronStone People design §4, review Y6; impl-people P7, F45, F52, F60): an
+    AssetPartyAssignment is ended by setting its thruDate (mantle.product.AssetServices.replace#AssetPartyAssignment ends a row so
+    and never deletes), whoever ends it (People's return#Equipment, Warehouse's custody change, Maintenance's later), so the rule is
+    on the record: the open return tasks of that asset, holder and role are completed (PeopleServices.complete#ReturnTasks, which
+    never refuses: a failure is logged and the custody change stands). Narrow: only an update that sets an empty thruDate. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="AssetPartyAssignmentReturnTask" entity="mantle.product.asset.AssetPartyAssignment" on-update="true"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>thruDate &amp;&amp; (originalValue == null || originalValue.thruDate == null)</expression></condition>
+        <actions><script>ec.service.sync().name('mantle.humanres.PeopleServices.complete#ReturnTasks')
+            .parameters({assetId: assetId, partyId: partyId, roleTypeId: roleTypeId}).disableAuthz().call()</script></actions>
+    </eeca>
+</eecas>
