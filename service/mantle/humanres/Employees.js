@@ -456,7 +456,13 @@ function employee360(p) {
     // HR's dates and ids are of the employments by an employer in their scope; the person sees their own ids; a directory or
     // team reader sees the employment's work identity, not its id
     const hrRow = row => access.hrEmployments.some(held => held.partyRelationshipId === row.partyRelationshipId)
-    const idShown = row => access.self || hrRow(row)
+    // P23: a payroll reader of the employment's employer (PAYROLL_VIEW) reads its compensation, so its id too
+    const caps = access.userScope.capabilities
+    const payRow = row =>
+        !!caps.payrollView &&
+        access.kinds.includes("staff") &&
+        access.userScope.organizationPartyIds.includes(row.organizationPartyId)
+    const idShown = row => access.self || hrRow(row) || payRow(row)
     const rows = employmentRows(employments, asOf, hrRow)
     const overview = {
         personName: nameOf(person) || p.partyId,
@@ -480,8 +486,10 @@ function employee360(p) {
     // the employment host's files and activity: an HR reader of its employer
     const hostId = access.hrEmployments.some(row => row.partyRelationshipId === selectedId) ? selectedId : null
     if (hostId) regions.push("filesAndActivity")
-    out.regions = regions
     const selected = employments.find(row => row.partyRelationshipId === selectedId)
+    // P23: Compensation, a payroll reader's of the opened employment's employer (get#Compensation answers it); absent otherwise
+    if (selected && payRow(selected)) regions.push("compensation")
+    out.regions = regions
     out.partyRelationshipId = selected && idShown(selected) ? selectedId : null
     out.hostEmploymentId = hostId
     out.capabilities = {
@@ -490,7 +498,9 @@ function employee360(p) {
         selfFields: access.hrEdit ? selfFields.concat(hrFields) : access.self ? selfFields : [],
         files: !!hostId,
         // P6: an HR editor of the opened employment's employer changes it (apply#EmploymentChange checks again)
-        changeEmployment: !!hostId && access.hrEdit
+        changeEmployment: !!hostId && access.hrEdit,
+        // P23: a payroll editor of the opened employment's employer changes its pay (apply#EmploymentChange's pay change)
+        changePay: !!selected && payRow(selected) && !!caps.payrollEdit
     }
     return out
 }

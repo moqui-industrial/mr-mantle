@@ -14,7 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- People's payroll setup (IronStone People design §5 PayGrades, §8, PE-08; impl-people P4, F4; PayrollSetup.js): pay grades and
     their dated bands (PayGradeSalary: minimum, reference amount and maximum, with a currency and a pay frequency). P22 adds the pay
-    components, structures and groups (PayrollConfiguration.js); P23 assignments. A band's amounts are answered only to a holder of PAYROLL_VIEW; any other staff
+    components, structures and groups (PayrollConfiguration.js); P23 an employment's pay assignments, tax profile and benefits and
+    the compensation Employee360 shows (PayrollAssignments.js), read with PAYROLL_VIEW and changed with PAYROLL_VIEW and PAYROLL_EDIT. A band's amounts are answered only to a holder of PAYROLL_VIEW; any other staff
     reader gets a grade's name alone. A grade is owned by an employer (organizationPartyId), read by that employer's readers and
     changed by its payroll editors, or shared by every employer (no owner), read by every staff reader and changed only by a payroll
     editor who also holds PEOPLE_ALL_ORGANIZATIONS (impl-people §4, Nov 11, 2026). Each service checks the People and payroll permissions itself, then reads and writes with
@@ -394,9 +395,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="Structures" allow-remote="false">
         <description>The pay structures of the employers the caller reads (or organizationPartyId, an employer in scope), searched
             by name ignoring case, in a state (draft, current, future or ended; ended ones only when asked), paged: each its employer,
-            currency, pay basis, state, dates and the count of its components on asOfDate. With payrollStructureId, the structure
-            (its revision) and its lines in payslip order (component, kind, dates, state, parameter values, the term it calculates
-            with), with the calculation order of its components on that date and the findings that block one (a dependency the
+            currency, pay basis, state, dates, the count of its components on asOfDate and of the pay assignments in effect then
+            (assignmentCount, P23). With payrollStructureId, the structure
+            (its revision) and its lines in payslip order (component, kind, dates, state, parameter values, eligibility, the term it
+            calculates with), with the calculation order of its components on that date and the findings that block one (a dependency the
             structure lacks, a cycle, no term). Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the
             scope (ORGANIZATION_DENIED) and another employer's structure (RECORD_UNAVAILABLE).</description>
         <in-parameters>
@@ -449,8 +451,8 @@ along with this software (see the LICENSE.md file). If not, see
             (end, thruDate, reason), at the revision read. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE
             (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED, ORGANIZATION_REQUIRED), another employer's
             structure (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), NAME_REQUIRED, CURRENCY_REQUIRED, CURRENCY_INVALID,
-            CURRENCY_LOCKED (a published structure's), BASIS_INVALID, EMPLOYER_CHANGE (a copy for another employer) and
-            STRUCTURE_ENDED.</description>
+            CURRENCY_LOCKED (a published structure's), BASIS_INVALID, EMPLOYER_CHANGE (a copy for another employer),
+            STRUCTURE_ENDED and STILL_ASSIGNED (an end while pay assignments use it then, P23).</description>
         <in-parameters>
             <parameter name="payrollStructureId"/>
             <parameter name="expectedRevision"/>
@@ -478,7 +480,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="StructureComponent" allow-remote="false">
         <description>A component added to a structure as a draft line (payrollComponentId: one of the employer's in use; one draft
             line of a component at a time), a draft line's dates, payslip order (sequenceNum) or parameter values (the structure's
-            values of the component's declared inputs, "name = value" pairs) changed, a draft line removed (remove), or a published
+            values of the component's declared inputs, "name = value" pairs) or eligibility (eligibilityEnumId, P23: PleAll, every
+            assignment, or PleElected, an assignment that elects it) changed, a draft line removed (remove), or a published
             line ended (end, thruDate, reason: its only change), at the structure's revision. Refuses a caller without PAYROLL_VIEW,
             PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), another employer's structure or line (RECORD_UNAVAILABLE), a stale
             revision (REVISION_CHANGED), STRUCTURE_ENDED, COMPONENT_REQUIRED, COMPONENT_UNAVAILABLE, LINE_EXISTS, LINE_PUBLISHED,
@@ -492,6 +495,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="sequenceNum"/>
             <parameter name="parameterValues"/>
+            <parameter name="eligibilityEnumId"/>
             <parameter name="remove" type="Boolean"/>
             <parameter name="end" type="Boolean"/>
             <parameter name="reason"/>
@@ -639,8 +643,8 @@ along with this software (see the LICENSE.md file). If not, see
             ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live
             finalization (LIVE_NOT_AVAILABLE: no group can be live in this build), GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
-            PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID and
-            POLICY_LOCKED.</description>
+            PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID,
+            POLICY_LOCKED and STILL_ASSIGNED (an end while pay assignments use it then, P23).</description>
         <in-parameters>
             <parameter name="payrollGroupId"/>
             <parameter name="expectedRevision"/>
@@ -693,6 +697,208 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="prepared" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('preparePeriods', context)"/>
             <set field="periods" from="prepared.periods"/>
             <set field="createdCount" from="prepared.createdCount"/>
+        </actions>
+    </service>
+
+    <!-- ===== P23: pay assignments, tax profiles and benefits, and compensation (PayrollAssignments.js) ===== -->
+    <service verb="find" noun="Assignments" allow-remote="false">
+        <description>The pay assignments of the employments current on asOfDate (now when empty) at the employers the caller reads
+            (or organizationPartyId, an employer in scope), found by the person's name ignoring case (term), filtered by pay group,
+            structure or readiness (ready, attention or unassigned), paged: each employment with its primary assignment in effect
+            (else the next one), its structure, pay basis, group and dates, its salary and pay rate references, and its readiness
+            (NO_ASSIGNMENT, STRUCTURE_NOT_IN_EFFECT, GROUP_ENDED, SALARY_MISSING, RATE_MISSING, CURRENCY_MISMATCH, PROFILE_MISSING,
+            PROFILE_INCOMPLETE, else ready for a preview run). With partyRelationshipId, that employment (any dates) and every
+            assignment it has had (history: structure, group, kind, dates, inputs, elected lines, state, revision, canEnd). Refuses a
+            caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED), another employer's
+            employment (RECORD_UNAVAILABLE) and an unknown filter (FILTER_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="payrollStructureId"/>
+            <parameter name="readiness"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assignments" type="List"/>
+            <parameter name="employment" type="Map"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="assignmentsCount" type="Integer"/>
+            <parameter name="assignmentsPageIndex" type="Integer"/>
+            <parameter name="assignmentsPageSize" type="Integer"/>
+            <parameter name="assignmentsPageMaxIndex" type="Integer"/>
+            <parameter name="assignmentsPageRangeLow" type="Integer"/>
+            <parameter name="assignmentsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('findAssignments', context)"/>
+            <set field="assignments" from="found.assignments"/>
+            <set field="employment" from="found.employment"/>
+            <set field="history" from="found.history"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="assignmentsCount" from="found.assignmentsCount"/>
+            <set field="assignmentsPageIndex" from="found.assignmentsPageIndex"/>
+            <set field="assignmentsPageSize" from="found.assignmentsPageSize"/>
+            <set field="assignmentsPageMaxIndex" from="found.assignmentsPageMaxIndex"/>
+            <set field="assignmentsPageRangeLow" from="found.assignmentsPageRangeLow"/>
+            <set field="assignmentsPageRangeHigh" from="found.assignmentsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="assign" noun="PayStructure" allow-remote="false">
+        <description>Employments put on a pay structure and a pay group from fromDate (today when empty) through thruDate (open when
+            empty): those named (partyRelationshipIds, or one partyRelationshipId; at most 500), each in its own transaction under
+            the employment's lock, a refusal named by its code and the rest going on: EMPLOYMENT_OUTSIDE (not the structure's
+            employer's, or outside the scope), DATE_OUTSIDE (not employed then), PRIMARY_OVERLAP (another primary assignment then:
+            one per employment and date across every group; with replaceCurrent and a reason, the one in effect on the date is
+            ended there instead), STRUCTURE_ASSIGNED (a secondary assignment, isPrimary false, beside the same structure).
+            inputValues are the employment's values of inputs the structure's components declare ("name = value" pairs;
+            INPUT_UNKNOWN, and INPUT_INVALID for a name that is one of the employer's component codes); electedComponentIds the
+            components of the structure's elective lines it takes (ELECTION_INVALID). Assigning changes no salary or rate. With
+            operationKey, a retry answers the rows assigned already as repeated; with preview, the rows and their outcome, nothing
+            written. Or with end, the assignment payrollAssignmentId ended from thruDate (today when empty, never in the past) at
+            its revision (expectedRevision), with reason. Needs PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED); another
+            employer's structure, group or assignment is RECORD_UNAVAILABLE. Refuses: EMPLOYER_CHANGE (the group and structure of
+            two employers), CURRENCY_MISMATCH, DATES_INVALID, STRUCTURE_NOT_PUBLISHED (not published and in effect on the date),
+            GROUP_ENDED, VALUE_INVALID, REASON_REQUIRED, EMPLOYMENT_REQUIRED, TOO_MANY, REVISION_CHANGED, ASSIGNMENT_ENDED and
+            EFFECTIVE_DATE_PAST.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipIds"><description>A list, or ids separated by commas</description></parameter>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="payrollStructureId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="isPrimary"/>
+            <parameter name="inputValues"/>
+            <parameter name="electedComponentIds"/>
+            <parameter name="replaceCurrent" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="payrollAssignmentId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"><description>partyRelationshipId, partyId, personName, outcome (ready, done, repeated,
+                refused), outcomeText, reasonCode, message, payrollAssignmentId</description></parameter>
+            <parameter name="assignedCount" type="Integer"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="repeatedCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('assignPayStructure', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="assignedCount" from="found.assignedCount || 0"/>
+            <set field="readyCount" from="found.readyCount || 0"/>
+            <set field="repeatedCount" from="found.repeatedCount || 0"/>
+            <set field="refusedCount" from="found.refusedCount || 0"/>
+            <set field="ended" from="!!found.ended"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PayrollProfile" allow-remote="false">
+        <description>An employment's restricted payroll setup (design §8 PayAssignments' TaxAndBenefits): its tax profile for a
+            registered localization (payrollLocalizationId) from fromDate (today when empty), the values of the fields that
+            localization declares alone (profileValues: a map, a JSON object or "name = value" pairs; FIELD_UNKNOWN for any other,
+            FIELD_REQUIRED for a required one missing, VALUE_INVALID for a value of the wrong kind), at the profile's revision
+            (expectedRevision): the profile in effect ends on the date (audited with the reason); a later one set already is
+            PROFILE_SCHEDULED. Or, with benefitTypeId, a benefit (Mantle's EmploymentBenefit) from fromDate with its cost and the
+            employer's share in percent (BENEFIT_EXISTS when it overlaps one of the type, PERCENT_INVALID, AMOUNT_INVALID), or with
+            endBenefit the benefit from benefitFromDate ended from thruDate (BENEFIT_ENDED). Bank details are not here: they change
+            through Accounting's payment-method services. Employment's and Employee's historical tax fields are neither read nor
+            written. Needs PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED); another employer's employment is RECORD_UNAVAILABLE.
+            Refuses also LOCALIZATION_INVALID, NO_FIELDS, REVISION_CHANGED, DATES_INVALID and DATE_OUTSIDE.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="payrollLocalizationId"/>
+            <parameter name="profileValues"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="benefitTypeId"/>
+            <parameter name="benefitFromDate"><description>The benefit's start: a date and time, or its milliseconds</description></parameter>
+            <parameter name="cost"/>
+            <parameter name="employerPaidPercent"/>
+            <parameter name="endBenefit" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollTaxProfileId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('storePayrollProfile', context)"/>
+            <set field="payrollTaxProfileId" from="stored.payrollTaxProfileId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Compensation" allow-remote="false">
+        <description>A person's compensation as a payroll reader of their employer reads it (design §4 Employee360's Compensation),
+            for one employment (partyRelationshipId, else the current one at an employer in scope, then the newest): the salaries,
+            newest first, the one in effect apart (amount, currency, frequency, grade, dates, state), the pay rates in effect, the
+            pay assignments and the primary one in effect (or next), the benefits, the tax profile of the primary group's
+            localization (or payrollLocalizationId's) with its declared fields and values, the bank account references masked, the
+            pay changes waiting for approval, the readiness, canEdit (PAYROLL_EDIT) and payRevision (the salary revision a pay
+            change names). Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED) and a person with no employment at an employer
+            in scope, or an employment not theirs there (RECORD_UNAVAILABLE), alike.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="payrollLocalizationId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="employments" type="List"/>
+            <parameter name="currentSalary" type="Map"/>
+            <parameter name="salaries" type="List"/>
+            <parameter name="rates" type="List"/>
+            <parameter name="assignments" type="List"/>
+            <parameter name="primary" type="Map"/>
+            <parameter name="benefits" type="List"/>
+            <parameter name="benefitRevision"/>
+            <parameter name="profile" type="Map"/>
+            <parameter name="paymentMethods" type="List"/>
+            <parameter name="payChanges" type="List"/>
+            <parameter name="readiness" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="payRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('getCompensation', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="personName" from="found.personName"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="organizationName" from="found.organizationName"/>
+            <set field="employments" from="found.employments"/>
+            <set field="currentSalary" from="found.currentSalary"/>
+            <set field="salaries" from="found.salaries"/>
+            <set field="rates" from="found.rates"/>
+            <set field="assignments" from="found.assignments"/>
+            <set field="primary" from="found.primary"/>
+            <set field="benefits" from="found.benefits"/>
+            <set field="benefitRevision" from="found.benefitRevision"/>
+            <set field="profile" from="found.profile"/>
+            <set field="paymentMethods" from="found.paymentMethods"/>
+            <set field="payChanges" from="found.payChanges"/>
+            <set field="readiness" from="found.readiness"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="payRevision" from="found.payRevision"/>
         </actions>
     </service>
 </services>

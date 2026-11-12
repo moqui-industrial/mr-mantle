@@ -49,6 +49,8 @@ const kinds = {
 const bases = {PcbAmount: "Fixed amount", PcbFormula: "Formula"}
 const roundings = {PrdNearest: ["round", "nearest"], PrdDown: ["floor", "down"], PrdUp: ["ceil", "up"]}
 const payBases = {PpbSalaried: "Salaried", PpbHourly: "Hourly", PpbMixed: "Salaried and hourly"}
+// P23: a line's eligibility: every assignment of the structure, or one that elects it
+const eligibilities = {PleAll: "Every assignment", PleElected: "When elected"}
 const prorations = {PprCalendarDays: "Calendar days", PprWorkingDays: "Working days", PprHours: "Hours"}
 const timeBases = {PtbTimesheets: "Approved timesheets", PtbAttendance: "Attendance", PtbSchedule: "Working schedule"}
 const frequencies = ["PayrollMonth", "PayrollSemiMonth", "PayrollBiWeek", "PayrollWeek"]
@@ -92,6 +94,22 @@ function editorScope() {
 // A dated row is ended from today on, never in the past, so what was in effect stays as it was (P22 review)
 function checkEnd(endMs) {
     if (endMs < nowMs() - day) denied("EFFECTIVE_DATE_PAST", "A configuration in effect is ended from today on, not in the past")
+}
+// P23: a structure or a group still paying an employment from a date is not ended then (STILL_ASSIGNED): its assignments are
+// ended or replaced first, so no employment is left on a structure or group that has ended
+function checkUnassigned(field, id, endMs, label) {
+    const paid = rows("mantle.humanres.payroll.PayrollAssignment", {[field]: id}).filter(
+        row => (ms(row.thruDate) ?? Infinity) > endMs && (ms(row.thruDate) ?? Infinity) > (ms(row.fromDate) ?? -Infinity)
+    ).length
+    if (paid)
+        denied(
+            "STILL_ASSIGNED",
+            paid +
+                (paid === 1 ? " pay assignment uses" : " pay assignments use") +
+                " this " +
+                label +
+                " then; end or replace them first"
+        )
 }
 // The users who drafted a term or a structure, the caller added: none of them decides its publishing (P22 review)
 function withDrafter(draftedByUserIds) {
@@ -1039,7 +1057,18 @@ const lineAt = (line, at) =>
     line.statusId === "PtsPublished"
         ? openAt(line, at)
         : (ms(line.fromDate) ?? -Infinity) <= at && (ms(line.thruDate) ?? Infinity) > at
-function structureRow(structure, at, userScope, names, lines, waiting) {
+// P23: the pay assignments in effect on the date of each structure ({payrollStructureId: count}), in one query
+function assignmentCounts(payrollStructureIds, at) {
+    const counts = {}
+    if (!payrollStructureIds.length) return counts
+    const query = find("mantle.humanres.payroll.PayrollAssignment")
+        .condition("payrollStructureId", "in", payrollStructureIds)
+        .conditionDate("fromDate", "thruDate", stamp(at))
+        .selectField(["payrollAssignmentId", "payrollStructureId"])
+    for (const row of Array.from(query.list())) counts[row.payrollStructureId] = (counts[row.payrollStructureId] || 0) + 1
+    return counts
+}
+function structureRow(structure, at, userScope, names, lines, waiting, counts) {
     return Object.assign(
         {
             payrollStructureId: structure.payrollStructureId,
@@ -1057,6 +1086,7 @@ function structureRow(structure, at, userScope, names, lines, waiting) {
             publishedByName: userName(structure.publishedByUserId),
             componentCount: (lines || []).filter(line => lineAt(line, at)).length,
             draftCount: (lines || []).filter(line => line.statusId !== "PtsPublished").length,
+            assignmentCount: (counts || assignmentCounts([structure.payrollStructureId], at))[structure.payrollStructureId] || 0,
             waitingApproval: !!waiting?.has(structure.payrollStructureId),
             canEdit: edits(userScope) && (ms(structure.thruDate) ?? Infinity) > nowMs()
         },
@@ -1086,6 +1116,8 @@ function lineRow(line, component, at) {
             fromDateText: dateText(line.fromDate),
             thruDateText: dateText(line.thruDate),
             sequenceNum: line.sequenceNum ?? null,
+            eligibilityEnumId: line.eligibilityEnumId || "PleAll",
+            eligibilityText: eligibilities[line.eligibilityEnumId || "PleAll"],
             parameterValues: values,
             parameterValuesText: valuesText(values),
             termText: term ? calculationText(term) : draft ? calculationText(draft) + " (draft)" : "",
@@ -1161,7 +1193,13 @@ function findStructures(p) {
         STRUCTURE,
         structures.map(row => row.payrollStructureId)
     )
-    let list = structures.map(row => structureRow(row, at, userScope, names, linesOf[row.payrollStructureId] || [], waiting))
+    const counts = assignmentCounts(
+        structures.map(row => row.payrollStructureId),
+        at
+    )
+    let list = structures.map(row =>
+        structureRow(row, at, userScope, names, linesOf[row.payrollStructureId] || [], waiting, counts)
+    )
     if (text(p.state)) list = list.filter(row => row.state === text(p.state))
     else list = list.filter(row => row.state !== "ended")
     return Object.assign(out, lib.pageList(list, p, "structures", {noLimitCap: listCap}))
@@ -1289,6 +1327,7 @@ function storeStructure(p) {
                     payrollComponentId: line.payrollComponentId,
                     sequenceNum: line.sequenceNum,
                     parameterValues: line.parameterValues,
+                    eligibilityEnumId: line.eligibilityEnumId || null,
                     statusId: "PtsDraft"
                 })
         }
@@ -1315,6 +1354,7 @@ function storeStructure(p) {
     if (flag(p.end)) {
         const endMs = when(p.thruDate) ?? nowMs()
         checkEnd(endMs)
+        checkUnassigned("payrollStructureId", structure.payrollStructureId, endMs, "structure")
         changes.thruDate = new Date(endMs)
         if (text(p.reason)) changes.thruDate_changeReason = text(p.reason)
     }
@@ -1406,6 +1446,12 @@ function storeStructureComponent(p) {
                 ...rows(LINE, {payrollStructureId: structure.payrollStructureId}).map(row => Number(row.sequenceNum) || 0)
             ) + 10
     if (given(p.parameterValues)) fields.parameterValues = JSON.stringify(valuesOf(p.parameterValues, "parameter values"))
+    // P23: who the line applies to: every assignment, or one that elects it
+    if (given(p.eligibilityEnumId)) {
+        const eligibilityEnumId = text(p.eligibilityEnumId) || "PleAll"
+        if (!eligibilities[eligibilityEnumId]) denied("VALUE_INVALID", "Choose who the line applies to")
+        fields.eligibilityEnumId = eligibilityEnumId
+    }
     if (line) {
         call("update#" + LINE, Object.assign({payrollStructureComponentId: line.payrollStructureComponentId}, fields))
         structureChanged(structure)
@@ -1919,6 +1965,7 @@ function storeGroup(p) {
     if (flag(p.end)) {
         const endMs = when(p.thruDate) ?? nowMs()
         checkEnd(endMs)
+        checkUnassigned("payrollGroupId", existing.payrollGroupId, endMs, "pay group")
         changes.thruDate = new Date(endMs)
     }
     if (text(p.reason))
@@ -2034,4 +2081,9 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown payroll configuration operation " + op)
     return operations[op](p || {})
 }
-;({execute: run, groupReadiness})
+;({
+    execute: run,
+    groupReadiness,
+    // P23 (PayrollAssignments.js): an assignment's input values are read as a structure's parameter values are
+    valuesOf
+})

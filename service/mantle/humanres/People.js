@@ -513,6 +513,42 @@ const readinessChecks = [
                   }
                 : {state: "ready", message: "Every employee has a manager"}
         }
+    },
+    // P23: payroll setup, in counts alone (never an amount): a pay group of the employer, and every current employment on a primary
+    // pay assignment; PayAssignments shows which and why (its readiness per employment), PayGroups each group's own readiness
+    {
+        checkKey: "people.payroll",
+        title: "Payroll setup",
+        run(organizationPartyId, asOf) {
+            const groups = find("mantle.humanres.payroll.PayrollGroup")
+                .condition("organizationPartyId", organizationPartyId)
+                .condition(
+                    ec.entity.conditionFactory.makeCondition(
+                        ec.entity.conditionFactory.makeCondition("thruDate", "is-null", null),
+                        "or",
+                        ec.entity.conditionFactory.makeCondition("thruDate", "greater", stamp(asOf))
+                    )
+                )
+                .count()
+            if (!groups)
+                return {
+                    state: "warning",
+                    reasonCode: "NO_PAY_GROUP",
+                    message: "No pay group is set up, so no pay run can be previewed",
+                    fixRoute: "peoplePayGroups"
+                }
+            const missing = ec.resource
+                .script("component://mr-mantle/service/mantle/humanres/PayrollAssignments.js")
+                .unassignedCount([organizationPartyId], asOf)
+            return missing
+                ? {
+                      state: "warning",
+                      reasonCode: "PAY_ASSIGNMENT_MISSING",
+                      message: missing + (missing === 1 ? " employee has" : " employees have") + " no pay assignment",
+                      fixRoute: "peoplePayAssignments"
+                  }
+                : {state: "ready", message: "Every employee has a pay assignment", fixRoute: "peoplePayAssignments"}
+        }
     }
 ]
 function readiness(p) {
@@ -549,7 +585,7 @@ function readiness(p) {
                 state: found.state,
                 reasonCode: found.reasonCode || null,
                 message: found.message,
-                fixRoute: settingsRoute,
+                fixRoute: found.fixRoute || settingsRoute,
                 subject: names[organizationPartyId] || organizationPartyId,
                 scope: {organizationPartyId},
                 organizationPartyId,

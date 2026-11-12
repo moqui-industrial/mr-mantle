@@ -20,7 +20,11 @@ along with this software (see the LICENSE.md file). If not, see
     (PayrollStructure, in one currency) and their dated components (PayrollStructureComponent); pay groups (PayrollGroup: the
     employer's currency, frequency, explicit annual divisor, pay-date and proration policy and localization binding) and their pay
     periods (PayrollGroupPeriod over Mantle's TimePeriod); and the localization registration (PayrollLocalization), seeded with the
-    one synthetic, non-statutory demonstration localization, which can never be live. Written only by
+    one synthetic, non-statutory demonstration localization, which can never be live, with the profile fields it declares
+    (PayrollLocalizationField). P23 adds an employment's pay assignments (PayrollAssignment: a structure and a pay group from a
+    date, one primary per employment and date) and its payroll tax profiles (PayrollTaxProfile: the values of a localization's
+    declared fields from a date), written by PayrollSetupServices (PayrollAssignments.js), which checks PAYROLL_VIEW and
+    PAYROLL_EDIT and the employer first. Configuration is written only by
     mantle.humanres.PayrollSetupServices (PayrollConfiguration.js), which checks PAYROLL_EDIT and PAYROLL_CONFIGURE and the
     employer first, and publishes a term or a structure's lines only on a People approval of kind PakPayrollConfig (the user's
     calls of Nov 12, 2026, impl-people §4); the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
@@ -179,11 +183,20 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="statusId" type="id" enable-audit-log="update"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="parameterValues" type="text-long"/>
+        <field name="eligibilityEnumId" type="id"><description>PayrollLineEligibility: every assignment of the structure (empty
+            or PleAll), or only an assignment that elects the component (PleElected, such as a voluntary pension); impl-people
+            P23</description></field>
         <relationship type="one" related="mantle.humanres.payroll.PayrollStructure" short-alias="structure"/>
         <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
         <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
         <index name="PAY_STRUCT_LINE"><index-field name="payrollStructureId"/></index>
         <index name="PAY_STRUCT_LINE_COMP"><index-field name="payrollComponentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Line Eligibility" enumTypeId="PayrollLineEligibility"/>
+            <moqui.basic.Enumeration enumId="PleAll" description="Every assignment" sequenceNum="1" enumTypeId="PayrollLineEligibility"/>
+            <moqui.basic.Enumeration enumId="PleElected" description="Only when the assignment elects it" sequenceNum="2"
+                    enumTypeId="PayrollLineEligibility"/>
+        </seed-data>
     </entity>
 
     <entity entity-name="PayrollGroup" package="mantle.humanres.payroll" cache="never">
@@ -270,5 +283,96 @@ along with this software (see the LICENSE.md file). If not, see
                     requiredSetup="None" supportedOutputs="Preview explanations only"
                     description="A flat demonstration levy on earnings (2% from the employee, 1% from the employer) to show where a localization's amounts enter gross to net. It is no country's law, previews only, and can never make a pay group live."/>
         </seed-data>
+    </entity>
+    <entity entity-name="PayrollLocalizationField" package="mantle.humanres.payroll" use="configuration" cache="never">
+        <description>A field a localization declares for an employment's payroll tax profile (design §8.1 PayrollTaxProfile, §8
+            PayAssignments' TaxAndBenefits; impl-people P23): its name, its label, its kind (an indicator, a choice of listed values,
+            a decimal or a short text), the values a choice offers ("value = label" pairs, one a line), and whether it is required
+            before the localization can calculate for the employment. A profile holds values of these fields alone: the fields of
+            the localizations installed, never a country's columns in the neutral core. Seed data beside its localization.</description>
+        <field name="payrollLocalizationId" type="id" is-pk="true"/>
+        <field name="fieldName" type="text-short" is-pk="true"><description>A name a localization's calculation reads: a letter or
+            underscore, then letters, digits and underscores</description></field>
+        <field name="fieldLabel" type="text-medium"/>
+        <field name="fieldKindEnumId" type="id"><description>PayrollProfileFieldKind</description></field>
+        <field name="optionValues" type="text-long"><description>A choice's values, "value = label", one a line</description></field>
+        <field name="isRequired" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <relationship type="one" title="PayrollProfileFieldKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="fieldKindEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Profile Field Kind" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfIndicator" description="Yes or no" sequenceNum="1" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfChoice" description="A choice of listed values" sequenceNum="2"
+                    enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfDecimal" description="A decimal" sequenceNum="3" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfText" description="A short text" sequenceNum="4" enumTypeId="PayrollProfileFieldKind"/>
+            <!-- the demonstration localization's profile: synthetic, like its levy; no country's election -->
+            <mantle.humanres.payroll.PayrollLocalizationField payrollLocalizationId="PlzDemonstration" fieldName="levyRegion"
+                    fieldLabel="Demonstration levy region" fieldKindEnumId="PpfChoice" isRequired="Y" sequenceNum="1"
+                    optionValues="NORTH = North (synthetic)&#10;SOUTH = South (synthetic)"
+                    description="A synthetic region, to show a required election; it changes no amount"/>
+            <mantle.humanres.payroll.PayrollLocalizationField payrollLocalizationId="PlzDemonstration" fieldName="levyExempt"
+                    fieldLabel="Exempt from the demonstration levy" fieldKindEnumId="PpfIndicator" isRequired="N" sequenceNum="2"
+                    description="A synthetic exemption, to show an optional election; it changes no amount"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PayrollAssignment" package="mantle.humanres.payroll" cache="never">
+        <description>An employment's dated pay terms (design §8.1 PayrollAssignment, §8 PayAssignments; PE-08; impl-people P23): the
+            structure it is calculated with and the pay group it is paid in (both its employer's, in one currency), from fromDate
+            until thruDate, the values of its structure's declared inputs that are the employment's own (inputValues, a JSON object
+            of decimal texts), and the components of elective lines it takes (electedComponentIds). EmploymentSalary stays the
+            salary and RateAmount the hourly rate: an assignment refers to them and keeps no salary of its own, and assigning a
+            structure changes no salary. One primary assignment (isPrimary Y) applies per employment and date across every group;
+            another earning source is a component or an input, or a secondary assignment of another structure. Ended (thruDate,
+            audited with its reason), never deleted.</description>
+        <field name="payrollAssignmentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollStructureId" type="id"/>
+        <field name="payrollGroupId" type="id"/>
+        <field name="isPrimary" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="inputValues" type="text-long"/>
+        <field name="electedComponentIds" type="text-medium"><description>The components of elective lines (PleElected) the
+            assignment takes, comma separated</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="operationKey" type="text-short"><description>The assigner's key: a retry with it answers the first</description></field>
+        <field name="assignedByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollStructure" short-alias="structure"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <index name="PAY_ASGN_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="PAY_ASGN_ORG"><index-field name="organizationPartyId"/></index>
+        <index name="PAY_ASGN_STRUCT"><index-field name="payrollStructureId"/></index>
+        <index name="PAY_ASGN_GROUP"><index-field name="payrollGroupId"/></index>
+    </entity>
+    <entity entity-name="PayrollTaxProfile" package="mantle.humanres.payroll" cache="never">
+        <description>An employment's payroll tax profile for a localization from fromDate until thruDate (design §8.1
+            PayrollTaxProfile, §8 PayAssignments' TaxAndBenefits; PE-12; impl-people P23): the values of the fields the localization
+            declares (profileValues, a JSON object; PayrollLocalizationField), so the neutral core holds no country's columns. A
+            change starts a new profile and ends the one in effect (thruDate audited with its reason); never deleted. Employment's and
+            Employee's historical US tax fields are neither read nor written (impl-people F33). Bank details are not here: they are
+            the person's payment methods, changed through Accounting's payment-method services.</description>
+        <field name="payrollTaxProfileId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="payrollLocalizationId" type="id"/>
+        <field name="profileValues" type="text-long"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="reason" type="text-long"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <index name="PAY_TAXPROF_EMPL"><index-field name="partyRelationshipId"/></index>
     </entity>
 </entities>

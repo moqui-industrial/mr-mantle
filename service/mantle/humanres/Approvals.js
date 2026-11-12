@@ -103,7 +103,9 @@ const kinds = {
     },
     // P6: a transfer or a separation (PeopleServices.apply#EmploymentChange and decide#EmploymentChange). The request is bound to
     // the change row and the employment's revision (People.js employmentRevision), so a change of the employment meanwhile (another
-    // change applied, a manager changed on the chart) supersedes it.
+    // change applied, a manager changed on the chart) supersedes it. P23: a pay change too, bound to the change row and the
+    // employment's salary rows instead (a transfer meanwhile leaves it as it is, another salary written supersedes it); its notice
+    // names no one and no amount (a lock-screen-safe title, design §1.4).
     PakEmploymentChange: {
         topic: "PeopleEmploymentChangeApproval",
         sourceEntityName: CHANGE,
@@ -111,6 +113,19 @@ const kinds = {
         revision(sourceId) {
             const change = one(CHANGE, {employmentChangeId: sourceId})
             if (!change) return "0"
+            if (change.changeKindEnumId === "EckPayChange")
+                return (
+                    String(ms(change.lastUpdatedStamp) ?? 0) +
+                    ":pay:" +
+                    String(
+                        Math.max(
+                            0,
+                            ...rows("mantle.humanres.employment.EmploymentSalary", {
+                                partyRelationshipId: change.partyRelationshipId
+                            }).map(stampOf)
+                        )
+                    )
+                )
             return String(ms(change.lastUpdatedStamp) ?? 0) + ":" + people.employmentRevision(change.partyRelationshipId)
         },
         // what the notice says: the kind of change and the person (a separation's title names no one), employer and department
@@ -122,6 +137,7 @@ const kinds = {
             const names = people.organizationNames([change.organizationPartyId, change.departmentPartyId].filter(Boolean))
             const organizationName = names[change.organizationPartyId] || change.organizationPartyId || ""
             const separation = change.changeKindEnumId === "EckSeparation"
+            const pay = change.changeKindEnumId === "EckPayChange"
             return {
                 label: kindText + " of " + personName,
                 message: {
@@ -129,7 +145,11 @@ const kinds = {
                     partyId: change.partyId,
                     changeText: kindText,
                     personName,
-                    subjectText: separation ? "an employment's end" : "the " + kindText + " of " + personName,
+                    subjectText: separation
+                        ? "an employment's end"
+                        : pay
+                          ? "a pay change"
+                          : "the " + kindText + " of " + personName,
                     organizationName,
                     departmentName: change.departmentPartyId ? names[change.departmentPartyId] || "" : ""
                 }
