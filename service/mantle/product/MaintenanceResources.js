@@ -68,6 +68,15 @@ function scopeWith(capability) {
     maintenanceAccess.requireCapability(userScope, capability)
     return userScope
 }
+// The scope of a list (impl-maintenance F83, People's rule): a holder of every organization who has chosen an active organization
+// lists that organization's records; anyone else's scope is as it is, and a record check still admits every organization.
+function listScope(userScope) {
+    if (userScope.organizationPartyIds != null) return userScope
+    const info = ec.service.sync().name("mantle.party.PartyServices.get#PartyOrganizationInfo").disableAuthz().call() || {}
+    const activeId = info.activeOrgId || null
+    if (!activeId || !internalOrganizationIds().includes(activeId)) return userScope
+    return Object.assign({}, userScope, {organizationPartyIds: [activeId]})
+}
 // The internal organizations (an asset owned by one of them belongs to it, wherever it is held).
 function internalOrganizationIds() {
     return Array.from(find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).selectField("partyId").list()).map(r => r.partyId)
@@ -179,7 +188,7 @@ function requireRevision(row, expectedRevision) {
 // warrantyNoticeDays, or expired). Each row carries its names and texts, its custodian and its warranty state; no cost or book
 // value.
 function findEquipment(p) {
-    const userScope = scopeWith("resourceRead")
+    const userScope = listScope(scopeWith("resourceRead"))
     const facilities = scopedFacilities(userScope)
     const build = () => {
         let query = equipmentFind(userScope, facilities)
@@ -313,7 +322,7 @@ function equipmentRows(userScope, assets, facilities) {
 // parent shown once as an unnamed node (hiddenAncestor, its key hidden-<n>) with the facilities under it, so a name or id the
 // caller may not see is not given. With parentFacilityId, a level of the tree (hidden-<n> names an unnamed node's).
 function findFacilities(p) {
-    const userScope = scopeWith("resourceRead")
+    const userScope = listScope(scopeWith("resourceRead"))
     const facilities = scopedFacilities(userScope)
     const scoped = query => (facilities == null ? query : query.condition("facilityId", "in", facilities.size ? Array.from(facilities) : ["_NA_"]))
     let hiddenRows = []

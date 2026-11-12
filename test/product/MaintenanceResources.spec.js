@@ -3,7 +3,8 @@
 // audit log, two readings at one time refused and the first kept, a correction of a reading taken), the equipment writer (a
 // parent cycle refused; another organization's equipment refused with the parameters that change the caller's own; a write
 // permission alone refused), the custody change (dated, the earlier holder ended at that date, a later date refused, F61) and the
-// facility's new fields and room features (store#Facility, store#FacilityFeature) with the inherited time zone.
+// facility's new fields and room features (store#Facility, store#FacilityFeature) with the inherited time zone, and an
+// every-organization reader's list narrowed to the active organization (F83).
 // Standalone: spec-local organizations, facilities, a model with an hour meter, equipment, groups and users, with artifact
 // authorization disabled (the rules are the services' own permission and scope checks).
 // Run: ./moq test mr-mantle --spec MaintenanceResources
@@ -128,6 +129,15 @@ spec({
         })
         state.resources = user("RESOURCES", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_RESOURCE_EDIT", "FACILITY_EDIT"], orgA)
         state.editOnly = user("EDITONLY", ["MAINTENANCE_RESOURCE_EDIT"], orgA)
+        // every organization's reader, an agent of A and B, for the list's narrowing to the active organization (F83)
+        state.every = user("EVERY", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_ALL_ORGANIZATIONS"], orgA)
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtAgent",
+            fromPartyId: prefix + "_USER_EVERY",
+            toPartyId: orgB,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
     },
     cleanupSpec() {
         ec.message.clearErrors()
@@ -190,8 +200,20 @@ feature("the equipment writer refuses a parent cycle, another organization's equ
         const compressor = ec.entity.find("mantle.product.asset.Asset").condition("assetId", state.compressor).one()
         const madeAsset = created.assetId ? ec.entity.find("mantle.product.asset.Asset").condition("assetId", created.assetId).one() : null
         const listed = attempt(state.resources, services + "find#MaintenanceEquipment", {text: "Maintenance resources"})
+        // every organization's reader lists both organizations' equipment, and the active one's alone once chosen (F83)
+        const everyIds = () =>
+            attempt(state.every, services + "find#MaintenanceEquipment", {text: "Maintenance resources"}).equipmentList.map(row => row.assetId)
+        const everyAll = everyIds()
+        login(state.every)
+        ec.user.setPreference("ACTIVE_ORGANIZATION", orgA)
+        login("john.doe")
+        const everyActive = everyIds()
+        login(state.every)
+        ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
         const warrantyThru = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js").calendarDateText(compressor.warrantyThruDate)
-        return {cycle, renamed, otherRenamed, editOnly, created, otherOwner, compressor, warrantyThru, madeAsset, listed}
+        return {cycle, renamed, otherRenamed, editOnly, created, otherOwner, compressor, warrantyThru, madeAsset, listed, everyAll, everyActive}
     },
     then(r) {
         r.cycle.refused.includes("PARENT_CYCLE")
@@ -205,6 +227,8 @@ feature("the equipment writer refuses a parent cycle, another organization's equ
         r.otherOwner.refused.includes("OWNER_UNAVAILABLE")
         r.listed.equipmentList.some(row => row.assetId == state.motor)
         !r.listed.equipmentList.some(row => row.assetId == state.otherPump)
+        r.everyAll.includes(state.otherPump) && r.everyAll.includes(state.motor)
+        !r.everyActive.includes(state.otherPump) && r.everyActive.includes(state.motor)
     }
 })
 
