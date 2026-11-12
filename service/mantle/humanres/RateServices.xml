@@ -17,7 +17,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="RateAmount">
         <description>Creates a RateAmount, its time period unit defaulted (each for a piece rate, else hour). A worker pay rate
             (RaprVendor) of a person who is an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) is the
-            employee's pay: only with PAYROLL_EDIT, refused without it.</description>
+            employee's pay: only with PAYROLL_EDIT, refused without it. A labor costing rate (RaprCost) only for finance
+            administration of its organization, or of every organization for a shared one (store#CostingRate's scope); a rate of
+            another purpose carries no organization (organizationPartyId is cleared).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.humanres.rate.RateAmount" include="nonpk">
                 <exclude field-name="rateTypeEnumId"/>
@@ -40,9 +42,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
             </if>
-            <!-- a labor costing rate (RaprCost) is finance administration's (store#CostingRate, impl-people P10) -->
-            <if condition="ratePurposeEnumId == 'RaprCost' &amp;&amp; !ec.user.hasPermission('ACCOUNTING_ADMIN')">
-                <return error="true" message="PERMISSION_DENIED: Only finance administration (ACCOUNTING_ADMIN) sets labor costing rates"/></if>
+            <!-- a labor costing rate (RaprCost) is finance administration's, of an organization in its scope or shared (store#CostingRate,
+                impl-people P10: PERMISSION_DENIED, ORGANIZATION_DENIED); the rates of the other purposes carry no organization -->
+            <if condition="ratePurposeEnumId == 'RaprCost'">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('checkWrite', {organizationPartyId: organizationPartyId || null})</script>
+                <else><set field="organizationPartyId" from="null"/></else>
+            </if>
             <service-call name="create#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
         </actions>
     </service>
@@ -65,8 +70,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
             </if>
-            <if condition="rate?.ratePurposeEnumId == 'RaprCost' &amp;&amp; !ec.user.hasPermission('ACCOUNTING_ADMIN')">
-                <return error="true" message="PERMISSION_DENIED: Only finance administration (ACCOUNTING_ADMIN) sets labor costing rates"/></if>
+            <if condition="rate?.ratePurposeEnumId == 'RaprCost'">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('checkWrite', {organizationPartyId: rate.organizationPartyId || null})</script></if>
             <service-call name="update#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
         </actions>
     </service>
@@ -78,14 +83,17 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="CostingRate" allow-remote="false">
         <description>The labor costing rate of a position class and work type at a date: the RaprCost RateAmount in effect then with
             no party and no work effort whose work type and class match or are empty, the most specific first, then the newest
-            (Manufacturing's lookup rules before People P10, unchanged: no organization, currency or rate type narrows it). A class
-            not given is the person's (partyId: the class of their position in effect at the date). Never a person's pay rate. No
-            row answers priced false (the hours are unpriced). Reads no pay and checks no permission: a cost reader needs no pay
-            grant.</description>
+            (Manufacturing's lookup rules before People P10, unchanged: no currency or rate type narrows it); the employer's rows
+            first (organizationPartyId, else the person's employers at the date), then the shared ones (no organization; the user's
+            call of Nov 11, 2026). A class not given is the person's (partyId: the class of their position in effect at the date).
+            Never a person's pay rate. No row answers priced false (the hours are unpriced). Reads no pay and checks no permission:
+            a cost reader needs no pay grant.</description>
         <in-parameters>
             <parameter name="emplPositionClassId"/>
             <parameter name="workTypeEnumId"/>
-            <parameter name="partyId"><description>The person whose position class is used when no class is given</description></parameter>
+            <parameter name="partyId"><description>The person whose position class is used when no class is given, and whose
+                employers' rows are preferred when no organization is given</description></parameter>
+            <parameter name="organizationPartyId"><description>The employer whose rows are preferred</description></parameter>
             <parameter name="onDate" type="Timestamp"><description>Now when empty</description></parameter>
         </in-parameters>
         <out-parameters>
@@ -95,6 +103,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="rateCurrencyUomId"/>
             <parameter name="timePeriodUomId"/>
             <parameter name="emplPositionClassId"/>
+            <parameter name="organizationPartyId"><description>The row's organization, empty for a shared row</description></parameter>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('costingRate', context)"/>
@@ -104,36 +113,49 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="rateCurrencyUomId" from="found.rateCurrencyUomId"/>
             <set field="timePeriodUomId" from="found.timePeriodUomId"/>
             <set field="emplPositionClassId" from="found.emplPositionClassId"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
         </actions>
     </service>
     <service verb="find" noun="CostingRates" allow-remote="false">
-        <description>The labor costing rates (Accounting's LaborCostingRates; the read-only Labor costing rows of Rates), current and
-            coming, or with showEnded every one: position class, work type, rate type, from, thru, the amount an hour with its
-            currency, its state, and canChange for finance administration. Requires ACCOUNTING_ADMIN, ACCOUNTING_VIEW,
-            PAYROLL_VIEW or TIME_ENTRY_RATE (PERMISSION_DENIED).</description>
+        <description>The labor costing rates (Accounting's LaborCostingRates; the read-only Labor costing rows of Rates) the reader
+            sees: the shared ones and those of their organizations (every organization for ACCOUNTING_ADMIN or
+            PEOPLE_ALL_ORGANIZATIONS, else their own), or with organizationPartyId that organization's and the shared ones (another
+            refused, ORGANIZATION_DENIED); current and coming, or with showEnded every one: organization, position class, work type,
+            rate type, from, thru, the amount an hour with its currency, its state, and canChange for one who may change the row's
+            organization (store#CostingRate's scope). Requires ACCOUNTING_ADMIN, ACCOUNTING_VIEW, PAYROLL_VIEW or TIME_ENTRY_RATE
+            (PERMISSION_DENIED).</description>
         <in-parameters>
+            <parameter name="organizationPartyId"/>
             <parameter name="emplPositionClassId"/>
             <parameter name="workTypeEnumId"/>
             <parameter name="showEnded" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
             <parameter name="rateList" type="List"/>
-            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"><description>Whether the user changes any costing rate</description></parameter>
+            <parameter name="canEditShared" type="Boolean"><description>Whether the user changes the shared rows</description></parameter>
+            <parameter name="canEditOrganization" type="Boolean"><description>Whether the user changes the rows of
+                organizationPartyId (of an organization, without one)</description></parameter>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('findRates', context)"/>
             <set field="rateList" from="found.rateList"/>
             <set field="canEdit" from="found.canEdit"/>
+            <set field="canEditShared" from="found.canEditShared"/>
+            <set field="canEditOrganization" from="found.canEditOrganization"/>
         </actions>
     </service>
     <service verb="store" noun="CostingRate" allow-remote="false">
-        <description>Starts a labor costing rate (LaborCostingRates, finance administration): a RaprCost row of a position class and
-            work type (either empty for any), the rate type (Standard when empty), the amount an hour and its currency, from fromDate
-            (now when empty), ending the row of the same scope in effect then. Requires ACCOUNTING_ADMIN (PERMISSION_DENIED);
+        <description>Starts a labor costing rate (LaborCostingRates, finance administration): a RaprCost row of an organization
+            (organizationPartyId; empty for a row shared by every organization), a position class and work type (either empty for
+            any), the rate type (Standard when empty), the amount an hour and its currency, from fromDate (now when empty), ending
+            the row of the same scope in effect then. Requires ACCOUNTING_ADMIN (PERMISSION_DENIED) with the organization in its
+            Accounting scope, and for a shared row every organization in it, no active organization (ORGANIZATION_DENIED);
             refuses a start before now, an unknown class, work type or rate type, an amount that is not 0 or more, no currency
             (RATE_INVALID), a later row of the same scope already coming (RATE_COMING), and, with expectedRateAmountId, a row in
             effect other than the one the form read (REVISION_CHANGED).</description>
         <in-parameters>
+            <parameter name="organizationPartyId"/>
             <parameter name="emplPositionClassId"/>
             <parameter name="workTypeEnumId"/>
             <parameter name="rateTypeEnumId"/>
@@ -154,7 +176,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="end" noun="CostingRate" allow-remote="false">
         <description>Ends a labor costing rate now (a coming one at its start, so it never applies). Requires ACCOUNTING_ADMIN
-            (PERMISSION_DENIED); refuses a row that is not a costing rate (RECORD_UNAVAILABLE) or has ended (RATE_ENDED).</description>
+            (PERMISSION_DENIED) with the row's organization in its scope (another's answers RECORD_UNAVAILABLE; a shared row needs
+            every organization, ORGANIZATION_DENIED); refuses a row that is not a costing rate (RECORD_UNAVAILABLE) or has ended
+            (RATE_ENDED).</description>
         <in-parameters><parameter name="rateAmountId" required="true"/></in-parameters>
         <out-parameters><parameter name="rateAmountId"/></out-parameters>
         <actions>

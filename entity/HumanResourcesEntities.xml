@@ -1140,6 +1140,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="workTypeEnumId" type="id"/>
         <field name="payGradeId" type="id"/>
         <field name="emplPositionClassId" type="id"/>
+        <!-- the organization a labor costing rate (RaprCost) is of, empty for a rate shared by every organization (People P10, the
+            user's call of Nov 11, 2026: RateServices.get#CostingRate prefers the employer's row, then a shared one); the rates of
+            the other purposes (Projects' client billing and worker pay) leave it empty and their lookup reads none -->
+        <field name="organizationPartyId" type="id"/>
         <!-- what we're looking for -->
         <field name="rateAmount" type="number-decimal"/>
 
@@ -1154,6 +1158,8 @@ along with this software (see the LICENSE.md file). If not, see
 
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
 
         <relationship type="one" related="mantle.humanres.rate.PayGrade" short-alias="payGrade"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass" short-alias="positionClass"/>

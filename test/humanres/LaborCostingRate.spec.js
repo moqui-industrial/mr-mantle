@@ -4,7 +4,9 @@
 // unpriced, and a person's own pay rate (RaprVendor) is never read; finance administration starts a rate (ending the one in
 // effect), a stale form and a coming rate refused, others refused by reason code; payroll reads them; Manufacturing's production
 // costing rows of before moved to RaprCost by the data update. A production labor event priced from a RaprCost row is
-// test/work/ProductionShopFloor's labor features (their rates are RaprCost rows since P10).
+// test/work/ProductionShopFloor's labor features (their rates are RaprCost rows since P10). An organization's rows (the user's
+// call of Nov 11, 2026): the employer's row before a shared one, changed and read within Accounting's organization scope, a
+// shared row only by finance administration working for every organization.
 // Standalone: spec-local classes, work types, a person and users, with artifact authorization disabled (the rules are the
 // services' own permission checks).
 // Run: ./moq test mr-mantle --spec LaborCostingRate
@@ -19,6 +21,8 @@ const classA = prefix + "_CLASS_A",
     setupType = prefix + "_SETUP",
     idleType = prefix + "_IDLE"
 const state = {}
+const orgA = prefix + "_ORG_A",
+    orgB = prefix + "_ORG_B"
 
 // a call as a user: its result with its error text ("" when it succeeds), in its own transaction
 function run(username, service, parameters = {}) {
@@ -112,6 +116,22 @@ spec({
         rate(prefix + "_BOTH", {emplPositionClassId: classA, workTypeEnumId: runType, rateAmount: 30, fromDate: now - 30 * day})
         rate(prefix + "_ENDED", {emplPositionClassId: classB, workTypeEnumId: setupType, rateAmount: 50, thruDate: now - day})
         rate(prefix + "_PARTY", {emplPositionClassId: classB, workTypeEnumId: setupType, partyId: state.person, rateAmount: 60})
+        // two internal organizations; the person is employed by the first
+        for (const [partyId, organizationName] of [
+            [orgA, "Costing spec A"],
+            [orgB, "Costing spec B"]
+        ]) {
+            call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization"})
+            call("create#mantle.party.Organization", {partyId, organizationName})
+            call("create#mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
+        }
+        call("create#mantle.party.PartyRelationship", {
+            partyRelationshipId: prefix + "_EMPL",
+            relationshipTypeEnumId: "PrtEmployee",
+            fromPartyId: state.person,
+            toPartyId: orgA,
+            fromDate: since
+        })
         state.finance = user("FINANCE", ["ACCOUNTING_ADMIN"])
         state.payroll = user("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT"])
         state.nobody = user("NOBODY", ["PEOPLE_HR_VIEW"])
@@ -292,3 +312,112 @@ feature("migrate#ProductionCostRates moves Manufacturing's production costing ro
         found.rateAmountId == prefix + "_OLD"
     }
 })
+
+// a call as the finance administrator working for one organization (Accounting's active organization), else for every one
+function asFinance(activeOrganizationPartyId, service, parameters) {
+    login(state.finance)
+    ec.user.setPreference("ACTIVE_ORGANIZATION", activeOrganizationPartyId)
+    login("john.doe")
+    ec.artifactExecution.disableAuthz()
+    try {
+        return run(state.finance, service, parameters)
+    } finally {
+        login(state.finance)
+        ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+    }
+}
+
+feature(
+    "an organization's costing rate: the employer's row before a shared one; changed and read within the organization's scope",
+    {
+        given() {
+            rate(prefix + "_ORG_A_BOTH", {
+                organizationPartyId: orgA,
+                emplPositionClassId: classA,
+                workTypeEnumId: runType,
+                rateAmount: 35
+            })
+            rate(prefix + "_ORG_B_BOTH", {
+                organizationPartyId: orgB,
+                emplPositionClassId: classA,
+                workTypeEnumId: runType,
+                rateAmount: 38
+            })
+            // a reader (ACCOUNTING_VIEW) of organization A alone
+            state.viewer = user("VIEWER", ["ACCOUNTING_VIEW"])
+            call("create#mantle.party.PartyRelationship", {
+                partyRelationshipId: prefix + "_VIEWER_A",
+                relationshipTypeEnumId: "PrtAgent",
+                fromPartyId: state.viewer,
+                toPartyId: orgA,
+                fromDate: since
+            })
+        },
+        when() {
+            const lookups = {
+                // the person's employer (A) first; another organization's (B) when asked; the shared row with no organization
+                employer: costing({partyId: state.person, workTypeEnumId: runType}),
+                asked: costing({emplPositionClassId: classA, workTypeEnumId: runType, organizationPartyId: orgB}),
+                shared: costing({emplPositionClassId: classA, workTypeEnumId: runType}),
+                // the employer has no row for the setup work: the shared class row
+                fallback: costing({partyId: state.person, workTypeEnumId: setupType})
+            }
+            const store = (organizationPartyId, amount) => ({
+                organizationPartyId,
+                emplPositionClassId: classB,
+                workTypeEnumId: runType,
+                rateAmount: amount,
+                rateCurrencyUomId: "USD"
+            })
+            const writes = {
+                // working for A: A's rows, not B's, not the shared ones
+                ownA: asFinance(orgA, S + "store#CostingRate", store(orgA, "21")),
+                otherB: asFinance(orgA, S + "store#CostingRate", store(orgB, "22")),
+                sharedFromA: asFinance(orgA, S + "store#CostingRate", store(null, "23")),
+                createB: asFinance(orgA, S + "create#RateAmount", {
+                    ratePurposeEnumId: "RaprCost",
+                    organizationPartyId: orgB,
+                    rateAmount: "24"
+                }),
+                endB: asFinance(orgA, S + "end#CostingRate", {rateAmountId: prefix + "_ORG_B_BOTH"}),
+                readFromA: asFinance(orgA, S + "find#CostingRates", {organizationPartyId: orgA, emplPositionClassId: classA}),
+                // working for every organization: a shared row too
+                shared: asFinance(null, S + "store#CostingRate", store(null, "25"))
+            }
+            const reads = {
+                viewer: run(state.viewer, S + "find#CostingRates", {emplPositionClassId: classA}),
+                viewerB: run(state.viewer, S + "find#CostingRates", {organizationPartyId: orgB, emplPositionClassId: classA})
+            }
+            return {lookups, writes, reads}
+        },
+        then({lookups, writes, reads}) {
+            lookups.employer.rateAmountId == prefix + "_ORG_A_BOTH"
+            lookups.employer.organizationPartyId == orgA
+            lookups.asked.rateAmountId == prefix + "_ORG_B_BOTH"
+            lookups.shared.rateAmountId == prefix + "_BOTH"
+            lookups.shared.organizationPartyId == null
+            lookups.fallback.rateAmountId == prefix + "_CLASS"
+            writes.ownA.error == ""
+            writes.otherB.error.includes("ORGANIZATION_DENIED")
+            writes.sharedFromA.error.includes("ORGANIZATION_DENIED")
+            writes.createB.error.includes("ORGANIZATION_DENIED")
+            writes.endB.error.includes("RECORD_UNAVAILABLE")
+            writes.readFromA.error == ""
+            writes.readFromA.rateList.some(row => row.rateAmountId == prefix + "_ORG_A_BOTH" && row.canChange)
+            writes.readFromA.rateList.some(row => row.rateAmountId == prefix + "_BOTH" && !row.canChange)
+            !writes.readFromA.rateList.some(row => row.rateAmountId == prefix + "_ORG_B_BOTH")
+            writes.shared.error == ""
+            // the reader of A sees A's rows and the shared ones, never B's, and is refused B's
+            reads.viewer.error == ""
+            reads.viewer.rateList.some(
+                row => row.rateAmountId == prefix + "_ORG_A_BOTH" && row.organizationText == "Costing spec A"
+            )
+            reads.viewer.rateList.some(row => row.rateAmountId == prefix + "_BOTH")
+            !reads.viewer.rateList.some(row => row.rateAmountId == prefix + "_ORG_B_BOTH")
+            reads.viewer.canEdit == false
+            reads.viewerB.error.includes("ORGANIZATION_DENIED")
+        }
+    }
+)
