@@ -1975,10 +1975,13 @@ function compliance(p) {
             (capped ? "; the first 500 plans" : "")
     }
     const wanted = text(p.outcome)
-    return Object.assign(lib.pageList(wanted ? out.filter(row => row.outcome === wanted) : out, p, "complianceList"), {
-        summary,
-        capped
-    })
+    return Object.assign(
+        lib.pageList(wanted ? out.filter(row => row.outcome === wanted) : out, p, "complianceList", {noLimitCap: 5000}),
+        {
+            summary,
+            capped
+        }
+    )
 }
 const outcomeTexts = {
     onTime: "On time",
