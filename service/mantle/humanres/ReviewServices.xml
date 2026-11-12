@@ -156,14 +156,17 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="Reviews" allow-remote="false">
         <description>The reviews the caller reads, by what they do: show todo (the default: their own step waiting, a decision of
             the review's approval, a release, an acknowledgment), mine (their own reviews), team (the reviews they are the reviewer
-            of, while they work for the employer), all (a development reader's employers', never their own); reviewCycleId and term
-            (the person's name) narrow them. Paged, earliest due first; each with the person, the cycle and period, the employer,
-            the reviewer, the self and reviewer assessments' states, the feedback given of asked (not to the person reviewed), the
-            earliest due date, the state and what the caller has to do; never a rating, an answer or a note. Refuses a show that is
-            not one (SHOW_INVALID).</description>
+            of, while they work for the employer), all (a development reader's employers', never their own), or a person's
+            (partyId, for Employee360: the reviews the caller reads as the person, its reviewer or a development reader of the
+            employer, never as a feedback giver or an approver; each with its released result, resultText and releasedText);
+            reviewCycleId and term (the person's name) narrow them. Paged, earliest due first; each with the person, the cycle and
+            period, the employer, the reviewer, the self and reviewer assessments' states, the feedback given of asked (not to the
+            person reviewed), the earliest due date, the state and what the caller has to do; never a rating (but a person's
+            released result), an answer or a note. Refuses a show that is not one (SHOW_INVALID).</description>
         <in-parameters>
             <parameter name="show"/>
             <parameter name="reviewCycleId"/>
+            <parameter name="partyId"><description>A person's reviews (Employee360), as the caller reads them</description></parameter>
             <parameter name="term"/>
             <parameter name="pageIndex" type="Integer"/>
             <parameter name="pageSize" type="Integer"/>
@@ -171,7 +174,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="reviews" type="List"><description>performanceReviewId, reviewCycleId, cycleName, periodText, partyId,
                 personName, organizationName, reviewerName, selfStateText, managerStateText, feedbackText, dueText, statusEnumId,
-                statusText, todoText, isOwn</description></parameter>
+                statusText, todoText, isOwn; with partyId, resultText (the overall rating once released) and
+                releasedText</description></parameter>
             <parameter name="reviewsCount" type="Integer"/>
             <parameter name="reviewsPageIndex" type="Integer"/>
             <parameter name="reviewsPageSize" type="Integer"/>
@@ -190,9 +194,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A review as the caller reads it: the person, the cycle and period, the employer, the reviewer and the state;
             the overall rating to the reviewer, development, an approver and, once released, the person; the steps the caller sees,
             each with the content they read (the person their own self assessment and, once released, the reviewer's assessment and
-            the feedback the template shares; the reviewer every step but feedback an earlier reviewer asked for; a feedback giver
-            their own; development and an approver every step); the caller's own private notes, never another's; the approval while
-            it waits; the release and acknowledgment; and what the caller may do (assess, give feedback, ask for and withdraw
+            the feedback the template shares; the reviewer, development and an approver every step, the feedback an earlier
+            reviewer asked for included, which belongs to the review; a feedback giver their own); a step's return reason to the full
+            readers and its assignee; the caller's own private notes, never another's (a new reviewer reads none of an earlier
+            one's); the approval (its decisions and reasons) to the full readers alone; the release and acknowledgment; and what the caller may do (assess, give feedback, ask for and withdraw
             feedback, return, finalize, decide, release, acknowledge, reassign, exclude, note). Refuses a review not in reach
             (RECORD_UNAVAILABLE).</description>
         <in-parameters><parameter name="performanceReviewId" required="true"/></in-parameters>
@@ -277,15 +282,16 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="change" noun="ReviewState" allow-remote="false">
         <description>A review's state changed by one who may, under the review's lock and at the revision read (expectedRevision):
             requestFeedback (the reviewer, the template allowing it: a colleague working for the employer, partyId, due dueDate,
-            told); cancelFeedback (who asked for it or a development editor, with the reason); return (a submitted step,
+            told); cancelFeedback (the reviewer, whoever asked for it, or a development editor, with the reason); return (a submitted step,
             performanceReviewStepId, waits again with the reason: the self assessment by the reviewer or a development editor, the
             reviewer's assessment by a development editor); finalize (the reviewer, their assessment submitted and nothing waiting:
             a People approval of kind PakReview when the template asks, PeopleReviewStep, else finalized); approve and refuse (an
-            approver of the step waiting, through PeopleApprovalServices.record#Decision at the review's revision, peopleApprovalId
-            and sourceRevision from the notice; the last approval finalizes it, a refusal with its reason returns the reviewer's
+            approver of the step waiting, never the review's reviewer (SELF_APPROVAL), through PeopleApprovalServices.record#Decision
+            at the review's revision, peopleApprovalId and sourceRevision from the notice; the last approval finalizes it, a refusal with its reason returns the reviewer's
             assessment); release (the reviewer or a development editor of a finalized review: the employee-visible review rendered
             once and stored as its page and PDF, without a private note, the person told); acknowledge (the person, with an optional
-            comment); reassign (a development editor: the reviewer changed to partyId with the reason, audit-logged); exclude (a
+            comment); reassign (a development editor: the reviewer changed to partyId with the reason, audit-logged; the new reviewer
+            reads the feedback on the review, never an earlier reviewer's private notes); exclude (a
             development editor, with the reason). One who reads nothing of the review is answered as for a missing one
             (RECORD_UNAVAILABLE). Refuses PERMISSION_DENIED, ACTION_INVALID, REVIEW_CLOSED, REASON_REQUIRED, FEEDBACK_NOT_ALLOWED,
             PARTY_INVALID, NOT_EMPLOYED, ALREADY_ASKED, STEP_INVALID, NOT_WAITING, NOT_SUBMITTED, SELF_WAITING, FEEDBACK_WAITING,

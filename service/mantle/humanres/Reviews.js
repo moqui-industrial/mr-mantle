@@ -23,8 +23,9 @@
 // Who reads and does what of a review:
 // - the person reads their review's state and their own self assessment; once released, the reviewer's assessment, the rating and
 //   (when the template says so) the feedback, and acknowledges it;
-// - its reviewer (while they work for its employer) reads its steps (the feedback they asked for, not an earlier reviewer's),
-//   assesses, asks for and withdraws feedback, returns the self assessment, finalizes and releases;
+// - its reviewer (while they work for its employer) reads its steps, the feedback given on the review included, whoever asked for
+//   it (it belongs to the review: the user's call of Nov 12, 2026), assesses, asks for and withdraws feedback, returns the self
+//   assessment, finalizes and releases; an earlier reviewer's private notes never pass to them;
 // - a feedback giver reads and answers their own feedback alone;
 // - an approver of its PakReview step reads its steps (never a note) and decides;
 // - a development reader (PEOPLE_DEVELOP_VIEW) of its employer reads every step; a development editor (PEOPLE_DEVELOP_EDIT) also
@@ -204,14 +205,13 @@ function readableReview(userScope, performanceReviewId) {
     if (!review || !access.reads) denied("RECORD_UNAVAILABLE", "Review " + text(performanceReviewId) + " is not available")
     return {review, steps, access}
 }
-// Which steps the caller reads the content of: the full readers every one (the reviewer the feedback they asked for, not an earlier
-// reviewer's), the person their own self assessment and, once released, the reviewer's assessment and (by the template) the
-// feedback; a giver their own feedback.
+// Which steps the caller reads the content of: the full readers every one (the reviewer every feedback on the review, an earlier
+// reviewer's asking included: it belongs to the review, the user's call of Nov 12, 2026), the person their own self assessment
+// and, once released, the reviewer's assessment and (by the template) the feedback; a giver their own feedback.
 function readsStep(access, step, review, template) {
     if (step.stepKindEnumId === SELF) return access.full || access.self
     if (step.stepKindEnumId === MANAGER) return access.full || (access.self && access.released)
-    if (access.develop || access.approver) return true
-    if (access.reviewer) return step.requestedByPartyId === review.managerPartyId
+    if (access.full) return true
     if (access.self) return access.released && template?.feedbackReleased === "Y" && step.statusEnumId === SUBMITTED
     return access.feedbackSteps.some(own => own.performanceReviewStepId === step.performanceReviewStepId)
 }
@@ -731,7 +731,8 @@ function userIdsOf(partyIds) {
             .map(row => row.userId)
     )
 }
-// A review notice (PeopleReviewUpdate) to the parties' accounts but the caller's: the sentence alone, naming the cycle and a date,
+// A review notice (PeopleReviewUpdate) to the parties' accounts but the caller's, and to them alone (directOnly: a subscription to
+// every message of the topic, set in Tools, receives none; People follow-up 1): the sentence alone, naming the cycle and a date,
 // never the person reviewed (a lock-screen-safe title, design §1.4), a rating, an answer or a note. A failure is logged and the
 // change stays.
 function tell(partyIds, performanceReviewId, noticeText) {
@@ -743,6 +744,7 @@ function tell(partyIds, performanceReviewId, noticeText) {
             .message({performanceReviewId, noticeText})
             .record(REVIEW, performanceReviewId)
             .userIds(userIds)
+            .directOnly()
             .send()
     } catch (error) {
         ec.logger.error("Review notice of " + performanceReviewId + " was not sent: " + error.message)
@@ -836,14 +838,17 @@ function todoOf(userScope) {
     return todo
 }
 // find#Reviews: the reviews the caller reads, by what they do: todo (the default: their step waiting, a decision, a release or an
-// acknowledgment), mine (their own reviews), team (those they review), all (a development reader's employers'); reviewCycleId and
-// term (the person's name) narrow them. Paged; each with the person, the cycle and period, the reviewer, the steps' states (the
-// person sees nobody asked for feedback), the earliest due date and the state, never a rating. Refused: a show that is not one
-// (SHOW_INVALID).
+// acknowledgment), mine (their own reviews), team (those they review), all (a development reader's employers'), or a person's
+// (partyId, for Employee360: their own, those they review and a development reader's of the employer, never a giver's or an
+// approver's); reviewCycleId and term (the person's name) narrow them. Paged; each with the person, the cycle and period, the
+// reviewer, the steps' states (the person sees nobody asked for feedback), the earliest due date and the state, never a rating but
+// a person's released result (resultText: the overall rating once released, to the person, its reviewer and development). Refused:
+// a show that is not one (SHOW_INVALID).
 function findReviews(p) {
     const userScope = reviewScope()
-    const show = text(p.show) || "todo"
-    if (!["todo", "mine", "team", "all"].includes(show)) denied("SHOW_INVALID", "Show one of todo, mine, team or all")
+    const partyIdWanted = text(p.partyId)
+    const show = partyIdWanted ? "person" : text(p.show) || "todo"
+    if (!["todo", "mine", "team", "all", "person"].includes(show)) denied("SHOW_INVALID", "Show one of todo, mine, team or all")
     const todo = todoOf(userScope)
     let reviews = []
     const partyId = userScope.partyId
@@ -855,6 +860,12 @@ function findReviews(p) {
         reviews = partyId
             ? rows(REVIEW, {managerPartyId: partyId}).filter(row => userScope.workEmployers.includes(row.organizationPartyId))
             : []
+    else if (show === "person")
+        // a person's reviews as the caller reads them in their own right (the person, the reviewer, development), each checked
+        reviews = rows(REVIEW, {partyId: partyIdWanted}).filter(review => {
+            const access = accessOf(userScope, review)
+            return access.self || access.reviewer || access.develop
+        })
     else if (userScope.developEmployers.length) {
         let query = find(REVIEW).condition("organizationPartyId", "in", userScope.developEmployers)
         if (partyId) query = query.condition("partyId", "not-equals", partyId)
@@ -862,6 +873,19 @@ function findReviews(p) {
     }
     if (text(p.reviewCycleId)) reviews = reviews.filter(row => row.reviewCycleId === text(p.reviewCycleId))
     let lines = reviewLines(userScope, reviews, todo)
+    if (show === "person") {
+        // the released result alone (every reader here reads the rating once released)
+        const ratings = enumNames(reviews.map(row => row.ratingEnumId))
+        const byId = new Map(reviews.map(row => [row.performanceReviewId, row]))
+        lines = lines.map(line => {
+            const review = byId.get(line.performanceReviewId)
+            const released = releasedStates.includes(review.statusEnumId)
+            return Object.assign(line, {
+                resultText: released && review.ratingEnumId ? ratings[review.ratingEnumId] || "" : "",
+                releasedText: released ? dateText(review.releasedDate) : ""
+            })
+        })
+    }
     if (text(p.term)) {
         const term = text(p.term).toLowerCase()
         lines = lines.filter(line => line.personName.toLowerCase().includes(term))
@@ -901,7 +925,9 @@ function stepLine(step, review, access, template, names, ratings, userScope) {
         ratingText: reads && step.ratingEnumId ? ratings[step.ratingEnumId] || step.ratingEnumId : "",
         answers: reads ? answers : [],
         answersText: reads ? answers.map(answer => answer.title + ": " + answer.displayText).join("; ") : "",
-        returnReason: reads || own ? step.returnReason || "" : "",
+        // why a step was returned (by the reviewer, development or an approver's refusal) is the full readers' and its assignee's;
+        // the person reading the released assessment is not shown the discussion that led to it
+        returnReason: access.full || own ? step.returnReason || "" : "",
         cancelReason: access.full ? step.cancelReason || "" : "",
         formId: step.formId || null,
         isOwn: own,
@@ -950,7 +976,8 @@ function getReview(p) {
                   revision: stampOf(row)
               }))
         : []
-    const summary = access.full || access.self ? access.summary : null
+    // the approval (its approvers, decisions and reasons) is the full readers'; the person sees the review's state alone
+    const summary = access.full ? access.summary : null
     const waitingOwn = steps.find(
         step =>
             !!userScope.partyId &&
@@ -1018,7 +1045,7 @@ function getReview(p) {
             managerStep?.statusEnumId === SUBMITTED &&
             selfStep?.statusEnumId !== WAITING &&
             !waitingFeedback.length,
-        canDecide: !!summary?.canDecide,
+        canDecide: !!summary?.canDecide && !access.reviewer,
         canRelease: (access.reviewer || access.developEdit) && review.statusEnumId === FINALIZED,
         canAcknowledge: access.self && review.statusEnumId === RELEASED,
         canExclude: access.developEdit && openStates.includes(review.statusEnumId),
@@ -1116,7 +1143,7 @@ function submitFeedback(p) {
 // A review's state changed by one who may, under the review's lock and at the revision read (expectedRevision):
 // - requestFeedback (the reviewer, the template allowing it): a colleague working for the employer (partyId; never the person, the
 //   reviewer or one already asked) is asked for feedback, due dueDate, and told;
-// - cancelFeedback (the reviewer who asked or a development editor): a waiting feedback step withdrawn, with the reason;
+// - cancelFeedback (the reviewer or a development editor): a waiting feedback step withdrawn, with the reason;
 // - return (the reviewer or a development editor the self assessment; a development editor the reviewer's): a submitted step waits
 //   again, with the reason, its assignee told;
 // - finalize (the reviewer): the reviewer's assessment submitted, the self assessment not waiting and no feedback waiting; when the
@@ -1127,7 +1154,8 @@ function submitFeedback(p) {
 //   page and PDF), the person told;
 // - acknowledge (the person, of a released review, with an optional comment);
 // - reassign (a development editor): the reviewer changed to a person working for the employer (partyId), never the person, with
-//   the reason, audit-logged; their waiting assessment goes with it, an earlier reviewer's notes and feedback stay theirs;
+//   the reason, audit-logged; their waiting assessment goes with it and the new reviewer reads the feedback on the review (it
+//   belongs to the review); an earlier reviewer's private notes stay theirs;
 // - exclude (a development editor, with the reason): an open review closed, its waiting steps cancelled, its approval superseded.
 // One who reads nothing of the review is answered as for a missing one (RECORD_UNAVAILABLE). Refused: PERMISSION_DENIED (not theirs
 // to do), SELF_APPROVAL (an action on their own review the person may not take), ACTION_INVALID, REVIEW_CLOSED (not in the state
@@ -1216,8 +1244,9 @@ function stepOfReview(review, p, kind) {
 }
 function cancelFeedback({userScope, review, access, p, reason}) {
     const step = stepOfReview(review, p, FEEDBACK)
-    if (!(access.developEdit || (access.reviewer && step.requestedByPartyId === userScope.partyId)))
-        denied("PERMISSION_DENIED", "Who asked for the feedback, or a development administrator, withdraws it")
+    // the review's reviewer withdraws any feedback waiting on it, an earlier reviewer's asking included (it belongs to the review)
+    if (!(access.developEdit || access.reviewer))
+        denied("PERMISSION_DENIED", "The reviewer, or a development administrator, withdraws feedback")
     if (step.statusEnumId !== WAITING) denied("NOT_WAITING", "Only feedback still waiting is withdrawn")
     if (!reason) denied("REASON_REQUIRED", "Say why the feedback is withdrawn")
     cancelStep(step, reason)
@@ -1299,7 +1328,10 @@ function finalize({review, access}) {
     return {approvalAsked: false}
 }
 function decide(context, decision) {
-    const {review, p, reason} = context
+    const {review, p, reason, access} = context
+    // the review's reviewer never decides its approval, though they became the reviewer after asking (record#Decision refuses the
+    // one who asked and the person)
+    if (access.reviewer) denied("SELF_APPROVAL", "You give this review; another approver decides it")
     const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
         approvalKindEnumId: approvalKind,
         peopleApprovalId: text(p.peopleApprovalId) || null,
@@ -1395,7 +1427,8 @@ function reassign({review, access, p, reason}) {
     return {}
 }
 // The reviewer changed (audit-logged with the reason): their waiting assessment goes with it (an approval waiting is kept at the
-// review's new revision), the new reviewer told. An earlier reviewer's notes and the feedback they asked for stay theirs.
+// review's new revision), the new reviewer told. The feedback given or waiting on the review passes to the new reviewer (it belongs
+// to the review; the user's call of Nov 12, 2026); an earlier reviewer's private notes stay theirs alone.
 function setReviewer(review, partyId, reason) {
     const change = () => {
         call("update#" + REVIEW, {

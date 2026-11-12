@@ -151,6 +151,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="PrfRtFulfill" sequenceNum="3" description="Fulfills expectations" enumTypeId="PerformanceReviewRating"/>
             <moqui.basic.Enumeration enumId="PrfRtFreqExceed" sequenceNum="4" description="Frequently exceeds" enumTypeId="PerformanceReviewRating"/>
             <moqui.basic.Enumeration enumId="PrfRtConsExceed" sequenceNum="5" description="Consistently exceeds" enumTypeId="PerformanceReviewRating"/>
+            <!-- the review is People's content host (its files and notes): their mention and follower notices go to their named
+                recipients alone (the user's call of Nov 12, 2026, People follow-up 1; impl-people P20 review) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.ability.PerformanceReview" ownerText="IronStone People: a performance review"/>
         </seed-data>
     </entity>
 

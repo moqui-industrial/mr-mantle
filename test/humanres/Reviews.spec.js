@@ -349,6 +349,35 @@ feature(
                         .disableAuthz()
                         .list()
                 ).map(row => JSON.parse(String(row.messageJson || "{}")))[0]
+            // P20 review: the review's reviewer never decides its approval, though they became the reviewer after it was asked
+            const reassign = (partyId, reason) =>
+                run(state.dev.userId, R + "change#ReviewState", Object.assign({action: "reassign", partyId, reason}, id))
+            out.toHr = reassign(state.hr.partyId, "HR covers")
+            out.reviewerDecides = code(
+                run(state.hr.userId, R + "approve#ReviewStep", {
+                    recordEntityName: REVIEW,
+                    recordId: state.anaReview,
+                    message: notice()
+                })
+            )
+            out.toMax = reassign(state.max.partyId, "Max is back")
+            // P20 review: no note is filed on a review before release (it would reach the person then)
+            const event = () =>
+                call("create#mantle.party.communication.CommunicationEvent", {
+                    communicationEventTypeId: "Comment",
+                    statusId: "CeSent",
+                    fromPartyId: state.max.partyId,
+                    subject: "Between us",
+                    body: "Ana's numbers look soft",
+                    entryDate: ec.user.nowTimestamp
+                }).communicationEventId
+            const fileNote = () =>
+                run(state.max.userId, "mantle.party.CommunicationServices.link#CommunicationEventRecord", {
+                    communicationEventId: event(),
+                    recordEntityName: REVIEW,
+                    recordId: state.anaReview
+                })
+            out.noteBefore = code(fileNote())
             const first = notice()
             out.noticeTitle = first?.subjectText || ""
             out.refused = run(state.hr.userId, R + "refuse#ReviewStep", {
@@ -379,6 +408,10 @@ feature(
             out.release = run(state.ana.userId, R + "get#ReviewRelease", id)
             out.boRelease = code(run(state.bo.userId, R + "get#ReviewRelease", id))
             out.afterRelease = run(state.ana.userId, R + "get#Review", id)
+            out.noteAfterRelease = fileNote()
+            out.confidential = run("john.doe", "mantle.party.CommunicationServices.check#ConfidentialRecordType", {
+                recordEntityName: REVIEW
+            }).confidential
             out.noteAfter = code(run(state.max.userId, R + "store#ReviewNote", Object.assign({noteText: "Too late"}, id)))
             out.files = run(state.ana.userId, R + "check#ReviewAccess", id)
             out.boFiles = run(state.bo.userId, R + "check#ReviewAccess", id)
@@ -393,6 +426,8 @@ feature(
         then(out) {
             out.earlyRelease == "REVIEW_CLOSED" && out.finalize.statusEnumId == "PrvApproval"
             out.selfDecides == "SELF_APPROVAL" && out.anaDecides == "PERMISSION_DENIED"
+            out.toHr.error == "" && out.reviewerDecides == "SELF_APPROVAL" && out.toMax.error == ""
+            out.noteBefore == "REVIEW_NOT_RELEASED"
             !out.noticeTitle.includes("Rev ANA") &&
                 out.noticeTitle.includes("Review spec 2026") &&
                 out.refused.statusEnumId == "PrvInProgress"
@@ -411,6 +446,11 @@ feature(
             out.afterRelease.review.ratingText == "Frequently exceeds" && out.afterRelease.steps.length == 2
             out.afterRelease.steps[1].summary.includes("ran clean") && out.afterRelease.notes.length == 0
             !JSON.stringify(out.afterRelease).includes(anaNote) && !JSON.stringify(out.afterRelease).includes("new starters")
+            // nor the approval's decisions or the refusal's reason, which were the reviewer's and HR's
+            out.afterRelease.approval == null && out.afterRelease.steps.every(row => row.returnReason == "")
+            !JSON.stringify(out.afterRelease).includes("Say more about the stocktakes")
+            // once released a note is filed, and its notices are their named recipients' alone (ConfidentialRecordType)
+            out.noteAfterRelease.error == "" && out.confidential == true
             out.noteAfter == "REVIEW_CLOSED" && out.files.recordVisible && !out.files.canEdit && !out.boFiles.recordVisible
             out.recordLink.recordVisible && out.acknowledged.statusEnumId == "PrvAcknowledged"
             // no notice holds a note, a summary or a rating
@@ -426,6 +466,19 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
     when() {
         const id = {performanceReviewId: state.boReview}
         const out = {note: code(run(state.max.userId, R + "store#ReviewNote", Object.assign({noteText: boNote}, id)))}
+        // Max asks Cy and Ana for feedback on Bo's review; Cy gives it, Ana's waits
+        const ask = partyId =>
+            run(state.max.userId, R + "change#ReviewState", Object.assign({action: "requestFeedback", partyId}, id))
+        ask(state.cy.partyId)
+        ask(state.ana.partyId)
+        out.cyFeedback = run(state.cy.userId, R + "submit#Feedback", Object.assign({summary: "Bo keeps the stockroom tidy"}, id))
+        // the instance administrator subscribed to every review notice, as Tools offers: a review notice is its recipients' alone
+        const subscription = {topic: "PeopleReviewUpdate", userId: "EX_JOHN_DOE"}
+        ec.entity
+            .makeValue("moqui.security.user.NotificationTopicUser")
+            .setAll(subscription)
+            .set("allNotifications", "Y")
+            .create()
         out.reassignByMax = code(
             run(
                 state.max.userId,
@@ -438,7 +491,26 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
             R + "change#ReviewState",
             Object.assign({action: "reassign", partyId: state.nia.partyId, reason: "Max is away"}, id)
         )
+        ec.entity.find("moqui.security.user.NotificationTopicUser").condition(subscription).deleteAll()
+        out.subscriberTold = read("moqui.security.user.NotificationMessageByUser", {
+            userId: "EX_JOHN_DOE",
+            topic: "PeopleReviewUpdate"
+        }).length
+        out.niaTold = read("moqui.security.user.NotificationMessageByUser", {
+            userId: state.nia.userId,
+            topic: "PeopleReviewUpdate"
+        }).length
         out.niaView = run(state.nia.userId, R + "get#Review", id)
+        // the feedback Max asked for is the review's: Nia withdraws the one still waiting
+        const anaStep = out.niaView.steps.find(row => row.stepKindEnumId == "RskFeedback" && row.partyId == state.ana.partyId)
+        out.niaWithdraws = run(
+            state.nia.userId,
+            R + "change#ReviewState",
+            Object.assign(
+                {action: "cancelFeedback", performanceReviewStepId: anaStep?.performanceReviewStepId, reason: "Not needed"},
+                id
+            )
+        )
         out.maxView = code(run(state.max.userId, R + "get#Review", id))
         out.niaOwned = run(state.nia.userId, "mantle.humanres.PeopleApprovalServices.find#OwnedApprovals", {
             userId: state.nia.userId
@@ -497,6 +569,8 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
             recordId: out.own.workEffortId
         })
         out.work = read("mantle.work.effort.WorkEffort", {workEffortId: out.own.workEffortId})[0]
+        // P20 review: the id lookup (the record-link pickers' source) answers no goal, not even to its person
+        out.lookup = run(state.ana.userId, "mantle.GeneralServices.lookup#ById", {lookupId: out.own.workEffortId})
         out.myTasks = run(state.ana.userId, "mantle.work.TaskServices.get#MyTasks", {})
         out.dav = run(state.ana.userId, "mantle.work.CalendarDavServices.get#TaskObjectTags", {})
         out.dueWork = run(state.ana.userId, "mantle.humanres.PeopleServices.find#DueWork", {kinds: "myTask"})
@@ -516,6 +590,13 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
             !JSON.stringify(out.niaView).includes(boNote) &&
             out.niaView.canAssess
         out.maxView == "RECORD_UNAVAILABLE"
+        // the user's call of Nov 12, 2026: the feedback submitted on the review passes to the new reviewer (it belongs to the
+        // review), and they withdraw the feedback still waiting that Max asked for
+        out.cyFeedback.statusEnumId == "RssSubmitted"
+        out.niaView.steps.some(row => row.stepKindEnumId == "RskFeedback" && row.summary == "Bo keeps the stockroom tidy")
+        out.niaWithdraws.error == ""
+        // the reassignment told Nia, and the subscriber to every review notice nothing (directOnly)
+        out.niaTold > 0 && out.subscriberTold == 0
         out.niaOwned.resourceList.some(row => row.resourceId == "review:" + state.boReview && !row.transferable)
         // after Nia left: Bo's review goes back to the manager of his line (Max), Max's own waits with no reviewer
         out.boAfter.managerPartyId == state.max.partyId && out.boManagerStep.partyId == state.max.partyId
@@ -535,6 +616,7 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
         )
         !Array.from(out.dav.objectList || []).some(row => [out.own.workEffortId, out.set.workEffortId].includes(row.workEffortId))
         !JSON.stringify(out.dueWork).includes(out.own.workEffortId)
+        out.lookup.error == "" && out.lookup.workEffort == null && out.lookup.workEffortId == null
         out.closed.statusId == "WeComplete" && out.changeClosed == "GOAL_CLOSED"
     }
 })
