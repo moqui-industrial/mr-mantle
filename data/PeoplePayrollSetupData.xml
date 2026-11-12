@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P22 review (the user's calls of Nov 12, 2026; design-people §8 PayComponentDetail, PayStructureDetail, §12
+        ApprovalPolicies): publishing a pay component's term or a pay structure's draft lines takes effect only on a People approval
+        of kind PakPayrollConfig (PayrollSetupServices publish#Component and publish#Structure ask for it), sent to the approvers of
+        the step waiting: the employer's payroll approvers (PAYROLL_APPROVE) and HR editors who read payroll configuration
+        (PAYROLL_VIEW) unless a rule says otherwise; never one who drafted it or asked to publish it; with none it waits.
+        approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse services as the user, which
+        decide it at the revision in the message (PayrollSetupServices decide#Publication over PeopleApprovalServices.record#Decision):
+        the last approval publishes the draft, a refusal (its reason required) leaves it a draft. The message holds peopleApprovalId,
+        sourceRevision, payrollComponentId and payrollComponentTermId or payrollStructureId, sourceText, subjectText,
+        organizationName and stepText: never an amount, a formula or a rate. The app that shows them sets the link (IronStone
+        People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayrollConfig" description="Payroll configuration" sequenceNum="10" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeoplePayrollConfigApproval" inboxEnumId="NinNotifications"
+            description="Payroll configuration to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollSetupServices.approve#Publication"
+            refuseServiceName="mantle.humanres.PayrollSetupServices.refuse#Publication" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+</entity-facade-xml>

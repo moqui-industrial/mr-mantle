@@ -45,6 +45,12 @@ const EMPLOYMENT_OFFER = "mantle.humanres.recruitment.EmploymentOffer"
 const PERSON_TRAINING = "mantle.humanres.ability.PersonTraining"
 const PERFORMANCE_REVIEW = "mantle.humanres.ability.PerformanceReview"
 const reviews = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Reviews.js")
+// P22 review: publishing a pay component's term or a pay structure's draft lines
+const PAY_TERM = "mantle.humanres.payroll.PayrollComponentTerm"
+const PAY_EXAMPLE = "mantle.humanres.payroll.PayrollComponentExample"
+const PAY_COMPONENT = "mantle.humanres.payroll.PayrollComponent"
+const PAY_STRUCTURE = "mantle.humanres.payroll.PayrollStructure"
+const PAY_LINE = "mantle.humanres.payroll.PayrollStructureComponent"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -59,6 +65,9 @@ const decisionTexts = {PpdApproved: "Approved", PpdRefused: "Refused"}
 // the permission that lets a person decide a step, of every role, HR-routed steps included (an HR editor without it decides
 // none: the user's call, impl-people §4, Nov 11, 2026)
 const approvePermissions = ["PEOPLE_REQUEST_APPROVE"]
+// P22 review: a payroll configuration approval is decided by a payroll approver too (its kind's decidePermissions); a decision
+// service asks the caller for one of these before the step's own check
+const decidePermissionsOfAnyKind = ["PEOPLE_REQUEST_APPROVE", "PAYROLL_APPROVE"]
 // a parent chain longer than this is taken to be a cycle
 const maxDepth = 50
 // the most rows a policy list, a re-route and an owner lookup read
@@ -348,6 +357,91 @@ const kinds = {
                 }
             }
         }
+    },
+    // P22 review (the user's call of Nov 12, 2026): publishing payroll configuration (PayrollSetupServices publish#Component and
+    // publish#Structure ask; decide#Publication and the topic's services decide), which takes effect on approval. Two sources,
+    // each its own record: a pay component's draft term and a pay structure (its draft lines). Bound to the draft as drafted (the
+    // term and its examples; the structure and its lines), so a changed draft supersedes the request. With no rule the
+    // employer's payroll approvers (PAYROLL_APPROVE) and HR editors are the candidates, and whoever decides reads payroll
+    // configuration (PAYROLL_VIEW) and holds PAYROLL_APPROVE or PEOPLE_REQUEST_APPROVE; never who drafted it (selfPartyIds: each
+    // user who changed the draft) or asked to publish it. What the notice says: the component's code and name or the
+    // structure's name, and the employer; never an amount, a formula or a rate.
+    PakPayrollConfig: {
+        topic: "PeoplePayrollConfigApproval",
+        sourceEntityName: PAY_TERM,
+        sourceField: "payrollComponentTermId",
+        otherSources: {[PAY_STRUCTURE]: "payrollStructureId"},
+        defaultRole: "ParHr",
+        defaultBasis: "defaultPayroll",
+        defaultRoleText: "Payroll approver or HR officer",
+        defaultCandidates: (request, at) =>
+            unique(
+                holdersOf("PAYROLL_APPROVE", request.organizationPartyId, at).concat(hrEditorsOf(request.organizationPartyId, at))
+            ),
+        decidePermissions: ["PAYROLL_APPROVE", "PEOPLE_REQUEST_APPROVE"],
+        requiredPermissions: ["PAYROLL_VIEW"],
+        revision(sourceId, sourceEntityName) {
+            const stampOf = row => ms(row?.lastUpdatedStamp) ?? 0
+            const max = list => String(Math.max(0, ...list.map(stampOf)))
+            if (sourceEntityName === PAY_STRUCTURE)
+                return max(
+                    [one(PAY_STRUCTURE, {payrollStructureId: sourceId})].concat(rows(PAY_LINE, {payrollStructureId: sourceId}))
+                )
+            return max(
+                [one(PAY_TERM, {payrollComponentTermId: sourceId})].concat(rows(PAY_EXAMPLE, {payrollComponentTermId: sourceId}))
+            )
+        },
+        selfPartyIds(sourceId, sourceEntityName) {
+            const row =
+                sourceEntityName === PAY_STRUCTURE
+                    ? one(PAY_STRUCTURE, {payrollStructureId: sourceId})
+                    : one(PAY_TERM, {payrollComponentTermId: sourceId})
+            const userIds = String(row?.draftedByUserIds || "")
+                .split(",")
+                .map(value => value.trim())
+                .filter(Boolean)
+            if (!userIds.length) return []
+            return unique(
+                Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
+                    .map(account => account.partyId)
+                    .filter(Boolean)
+            )
+        },
+        describe(sourceId, sourceEntityName) {
+            if (sourceEntityName === PAY_STRUCTURE) {
+                const structure = one(PAY_STRUCTURE, {payrollStructureId: sourceId})
+                if (!structure) return {label: "pay structure " + sourceId}
+                const structureName = structure.structureName || sourceId
+                const names = people.organizationNames([structure.organizationPartyId])
+                return {
+                    label: "pay structure " + structureName,
+                    message: {
+                        // both keys, so the app's link template reads either (the other null)
+                        payrollStructureId: sourceId,
+                        payrollComponentId: null,
+                        sourceText: "the pay structure " + structureName,
+                        subjectText: "publishing the pay structure " + structureName,
+                        organizationName: names[structure.organizationPartyId] || structure.organizationPartyId || ""
+                    }
+                }
+            }
+            const term = one(PAY_TERM, {payrollComponentTermId: sourceId})
+            const component = term ? one(PAY_COMPONENT, {payrollComponentId: term.payrollComponentId}) : null
+            if (!component) return {label: "pay component term " + sourceId}
+            const componentText = component.componentCode + " (" + (component.componentName || component.componentCode) + ")"
+            const names = people.organizationNames([component.organizationPartyId])
+            return {
+                label: "pay component " + componentText,
+                message: {
+                    payrollStructureId: null,
+                    payrollComponentId: component.payrollComponentId,
+                    payrollComponentTermId: sourceId,
+                    sourceText: "the pay component " + componentText,
+                    subjectText: "publishing the pay component " + componentText,
+                    organizationName: names[component.organizationPartyId] || component.organizationPartyId || ""
+                }
+            }
+        }
     }
 }
 function kindOf(approvalKindEnumId) {
@@ -355,10 +449,19 @@ function kindOf(approvalKindEnumId) {
     if (!kind) denied("KIND_INVALID", "Choose a kind of approval")
     return kind
 }
+// A kind's source entity and its key: the kind's own, or (P22 review) one of its otherSources.
+function sourceOf(kind, sourceEntityName) {
+    if (!sourceEntityName || sourceEntityName === kind.sourceEntityName)
+        return {entityName: kind.sourceEntityName, field: kind.sourceField}
+    const field = kind.otherSources?.[sourceEntityName]
+    if (!field) denied("SOURCE_INVALID", sourceEntityName + " is not a source of this kind of approval")
+    return {entityName: sourceEntityName, field}
+}
 // a source's revision: its last change, what a request names
-function revisionOf(kind, sourceId) {
-    if (kind.revision) return kind.revision(sourceId)
-    const row = one(kind.sourceEntityName, {[kind.sourceField]: sourceId})
+function revisionOf(kind, sourceId, sourceEntityName = null) {
+    const source = sourceOf(kind, sourceEntityName)
+    if (kind.revision) return kind.revision(sourceId, source.entityName)
+    const row = one(source.entityName, {[source.field]: sourceId})
     return String(ms(row?.lastUpdatedStamp) ?? 0)
 }
 
@@ -435,6 +538,20 @@ function deciders(partyIds, permissions) {
     }
     return found
 }
+// The parties among partyIds who may decide a kind's step: an account holding one of its decide permissions (PEOPLE_REQUEST_APPROVE
+// unless the kind names its own) and every permission it requires (P22 review: a payroll configuration's decider reads it).
+function decidersOf(kind, partyIds) {
+    const found = deciders(partyIds, kind?.decidePermissions || approvePermissions)
+    const required = kind?.requiredPermissions || []
+    if (!required.length || !found.length) return found
+    const holding = required.map(permission =>
+        usersHolding(
+            found.map(row => row.userId),
+            [permission]
+        )
+    )
+    return found.filter(row => holding.every(users => users.has(row.userId)))
+}
 // The departments at and above a department, up to its employer (department rows only), on the date.
 function departmentChain(departmentPartyId, organizationPartyId, at) {
     const chain = []
@@ -487,9 +604,11 @@ function staffOf(partyIds, organizationPartyId, at) {
     )
 }
 // The employer's HR editors: the staff of the employer whose account holds PEOPLE_HR_EDIT.
-function hrEditorsOf(organizationPartyId, at) {
+const hrEditorsOf = (organizationPartyId, at) => holdersOf("PEOPLE_HR_EDIT", organizationPartyId, at)
+// The staff of the employer whose account holds a permission (P22 review: the payroll approvers, PAYROLL_APPROVE).
+function holdersOf(permission, organizationPartyId, at) {
     const groupIds = unique(
-        rows("moqui.security.UserGroupPermission", {userPermissionId: "PEOPLE_HR_EDIT"})
+        rows("moqui.security.UserGroupPermission", {userPermissionId: permission})
             .filter(row => lib.active(row))
             .map(row => row.userGroupId)
     )
@@ -534,10 +653,12 @@ function chooseRules(rules, request, at) {
     if (typeRows.length) return {basis: "type", rows: typeRows}
     // no rule: the kind's own default (P17: an offer's, HR), else the person's manager, or for a request about no one (a
     // position) the head of its department
-    const role = kinds[request.approvalKindEnumId]?.defaultRole || (request.subjectPartyId ? "ParManager" : "ParDepartmentHead")
+    const kind = kinds[request.approvalKindEnumId]
+    const role = kind?.defaultRole || (request.subjectPartyId ? "ParManager" : "ParDepartmentHead")
     return {
-        basis: role === "ParHr" ? "defaultHr" : "default",
-        rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null}]
+        basis: kind?.defaultBasis || (role === "ParHr" ? "defaultHr" : "default"),
+        // P22 review: a kind's own default candidates (a payroll configuration's: payroll approvers and HR editors)
+        rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null, kindDefault: !!kind?.defaultCandidates}]
     }
 }
 const basisTexts = {
@@ -546,6 +667,7 @@ const basisTexts = {
     type: "The employer's rule",
     default: "No rule: the manager decides",
     defaultHr: "No rule: HR decides",
+    defaultPayroll: "No rule: a payroll approver or HR officer who reads payroll decides",
     defaultHead: "No rule: the head of the department decides"
 }
 // The candidates of a step's role, before who may decide: the department head (the lead of the nearest department with one), the
@@ -563,6 +685,7 @@ function roleCandidates(row, request, at) {
         }
         return {partyIds: [], of: row.departmentPartyId || request.departmentPartyId || null}
     }
+    if (row.kindDefault) return {partyIds: kinds[request.approvalKindEnumId].defaultCandidates(request, at)}
     switch (row.approverRoleEnumId) {
         case "ParDepartmentHead":
             return headOf()
@@ -588,7 +711,7 @@ function roleCandidates(row, request, at) {
 // drafted an offer); none for a kind without its own rule or a request not yet made.
 function selfOfSource(request) {
     const kind = kinds[request.approvalKindEnumId]
-    return kind?.selfPartyIds && request.sourceId ? kind.selfPartyIds(request.sourceId) : []
+    return kind?.selfPartyIds && request.sourceId ? kind.selfPartyIds(request.sourceId, request.sourceEntityName || null) : []
 }
 // The route of a request on the date: the basis of its rules and each step with who may decide it and how it was found (route,
 // alternate, fallback; none when unresolved). excludedByStep: the parties who decided each step (sequenceNum: [partyId]), so a
@@ -600,6 +723,7 @@ function resolve(request, at, excludedByStep = {}) {
         .filter(row => row.approverRoleEnumId === "ParHrFallback" && row.approverPartyId)
         .map(row => row.approverPartyId)
     const self = [request.requesterPartyId, request.subjectPartyId].concat(selfOfSource(request)).filter(Boolean)
+    const kind = kinds[request.approvalKindEnumId]
     const steps = chosen.rows.map((row, index) => {
         const sequenceNum = Number(row.sequenceNum || index + 1)
         const others = Object.entries(excludedByStep)
@@ -611,9 +735,9 @@ function resolve(request, at, excludedByStep = {}) {
         const pick = partyIds => {
             const open = partyIds.filter(partyId => !excluded.has(partyId))
             const staff = new Set(staffOf(unique(open), request.organizationPartyId, at))
-            return deciders(
-                open.filter(partyId => staff.has(partyId)),
-                approvePermissions
+            return decidersOf(
+                kind,
+                open.filter(partyId => staff.has(partyId))
             )
         }
         let approvers = pick(candidates.partyIds)
@@ -630,6 +754,7 @@ function resolve(request, at, excludedByStep = {}) {
             sequenceNum,
             peopleApprovalPolicyId: row.peopleApprovalPolicyId || null,
             approverRoleEnumId: row.approverRoleEnumId,
+            roleText: row.kindDefault ? kind.defaultRoleText || null : null,
             candidatePartyIds: candidates.partyIds,
             candidateOf: candidates.of || null,
             alternatePartyId: row.alternatePartyId || null,
@@ -657,7 +782,7 @@ function explain(route, request) {
     const roleTexts = enumTexts(route.steps.map(step => step.approverRoleEnumId))
     const nameOf = partyId => names[partyId] || partyId
     return route.steps.map((step, index) => {
-        const roleText = roleTexts[step.approverRoleEnumId] || step.approverRoleEnumId
+        const roleText = step.roleText || roleTexts[step.approverRoleEnumId] || step.approverRoleEnumId
         const of = step.candidateOf ? " of " + nameOf(step.candidateOf) : ""
         const approverNames = step.approvers.map(row => nameOf(row.partyId))
         const found = step.candidatePartyIds.map(nameOf)
@@ -695,6 +820,7 @@ function explain(route, request) {
 const requestOf = approval => ({
     organizationPartyId: approval.organizationPartyId,
     approvalKindEnumId: approval.approvalKindEnumId,
+    sourceEntityName: approval.sourceEntityName,
     sourceId: approval.sourceId,
     departmentPartyId: approval.departmentPartyId,
     subjectPartyId: approval.subjectPartyId,
@@ -706,7 +832,9 @@ const decisionsOf = approval =>
 function statusOf(approval) {
     if (approval.statusId !== "PapPending") return approval.statusId
     const kind = kinds[approval.approvalKindEnumId]
-    return kind && revisionOf(kind, approval.sourceId) !== approval.sourceRevision ? "PapSuperseded" : "PapPending"
+    return kind && revisionOf(kind, approval.sourceId, approval.sourceEntityName) !== approval.sourceRevision
+        ? "PapSuperseded"
+        : "PapPending"
 }
 // A request's route now, with its decisions: each step approved or not, the current step (the first not approved).
 function stateOf(approval, decisions = decisionsOf(approval)) {
@@ -724,7 +852,11 @@ const stepLabel = (steps, step) =>
 // ===== notices =====
 function noticeQuery(approval) {
     const kind = kinds[approval.approvalKindEnumId]
-    return find(MESSAGE).condition({topic: kind.topic, recordEntityName: kind.sourceEntityName, recordId: approval.sourceId})
+    return find(MESSAGE).condition({
+        topic: kind.topic,
+        recordEntityName: approval.sourceEntityName || kind.sourceEntityName,
+        recordId: approval.sourceId
+    })
 }
 // The unread copies of a source's notices, marked read so the request leaves every approver's list.
 function clearNotices(approval) {
@@ -771,7 +903,7 @@ function notify(approval, state = null) {
         clearNotices(approval)
         if (!userIds.length) return {notifiedCount: 0}
         const kind = kinds[approval.approvalKindEnumId]
-        const described = kind.describe(approval.sourceId)
+        const described = kind.describe(approval.sourceId, approval.sourceEntityName)
         ec.makeNotificationMessage()
             .topic(kind.topic)
             .reason("approval")
@@ -782,7 +914,7 @@ function notify(approval, state = null) {
                     stepText: stepLabel(state.steps, step)
                 })
             )
-            .record(kind.sourceEntityName, approval.sourceId)
+            .record(approval.sourceEntityName || kind.sourceEntityName, approval.sourceId)
             .actorUserId(approval.requestedByUserId || ec.user.userId)
             .userIds(userIds)
             .directOnly()
@@ -800,6 +932,15 @@ function notify(approval, state = null) {
 // on.
 function reroute(organizationPartyId, approvalKindEnumId = null) {
     let notified = 0
+    // P20: the employer's open reviews first (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
+    // feedback withdrawn, the review of one who left excluded), each review in a transaction of its own (follow-up 2), before this
+    // transaction touches a review's approval below, so neither waits on the other's lock
+    if (!approvalKindEnumId)
+        try {
+            reviews().rerouteSteps(organizationPartyId)
+        } catch (error) {
+            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
+        }
     const conditions = {organizationPartyId, statusId: "PapPending"}
     if (approvalKindEnumId) conditions.approvalKindEnumId = approvalKindEnumId
     const pending = Array.from(find(APPROVAL).condition(conditions).limit(pendingCap).list())
@@ -810,14 +951,6 @@ function reroute(organizationPartyId, approvalKindEnumId = null) {
             ec.logger.error("Approval request " + approval.peopleApprovalId + " was not routed again: " + error.message)
         }
     }
-    // P20: the employer's open reviews too (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
-    // feedback withdrawn, the review of one who left excluded), in the caller's transaction, each review on its own
-    if (!approvalKindEnumId)
-        try {
-            reviews().rerouteSteps(organizationPartyId)
-        } catch (error) {
-            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
-        }
     return notified
 }
 
@@ -827,24 +960,28 @@ function reroute(organizationPartyId, approvalKindEnumId = null) {
 // with none it waits.
 function request(p) {
     const kind = kindOf(p.approvalKindEnumId)
+    const source = sourceOf(kind, p.sourceEntityName)
     const sourceId = text(p.sourceId)
     const operationKey = text(p.operationKey) || null
     const requesterPartyId = ec.user.userAccount?.partyId || null
-    const existing = rows(APPROVAL, {sourceEntityName: kind.sourceEntityName, sourceId})
+    const existing = rows(APPROVAL, {sourceEntityName: source.entityName, sourceId})
     if (operationKey) {
         const first = existing.find(row => row.operationKey === operationKey && row.requestedByUserId === ec.user.userId)
         if (first) return Object.assign(summaryOf(first), {repeated: true})
     }
-    const revision = revisionOf(kind, sourceId)
+    const revision = revisionOf(kind, sourceId, source.entityName)
     for (const row of existing.filter(row => row.statusId === "PapPending")) {
         if (row.sourceRevision === revision)
-            denied("APPROVAL_PENDING", "This " + kind.describe(sourceId).label + " is already waiting for approval")
+            denied(
+                "APPROVAL_PENDING",
+                "This " + kind.describe(sourceId, source.entityName).label + " is already waiting for approval"
+            )
         // a request at an earlier revision is superseded (its source changed outside the domain's change)
         supersede(row)
     }
     const created = call("create#" + APPROVAL, {
         approvalKindEnumId: p.approvalKindEnumId,
-        sourceEntityName: kind.sourceEntityName,
+        sourceEntityName: source.entityName,
         sourceId,
         sourceRevision: revision,
         organizationPartyId: p.organizationPartyId,
@@ -894,13 +1031,14 @@ function keepWaiting(approvalKindEnumId, sourceIds, work) {
     return result
 }
 // A source changed (new terms): its requests waiting at an earlier revision are superseded and their notices read; the change
-// is asked for again.
-function sourceChanged(approvalKindEnumId, sourceId) {
+// is asked for again. With always (P22 review: a pay component or structure ended), every request of it waiting is.
+function sourceChanged(approvalKindEnumId, sourceId, sourceEntityName = null, always = false) {
     const kind = kindOf(approvalKindEnumId)
-    const revision = revisionOf(kind, sourceId)
+    const source = sourceOf(kind, sourceEntityName)
+    const revision = revisionOf(kind, sourceId, source.entityName)
     let superseded = 0
-    for (const approval of rows(APPROVAL, {sourceEntityName: kind.sourceEntityName, sourceId, statusId: "PapPending"}))
-        if (approval.sourceRevision !== revision) {
+    for (const approval of rows(APPROVAL, {sourceEntityName: source.entityName, sourceId, statusId: "PapPending"}))
+        if (always || approval.sourceRevision !== revision) {
             supersede(approval)
             superseded++
         }
@@ -908,10 +1046,11 @@ function sourceChanged(approvalKindEnumId, sourceId) {
 }
 // The latest request of a source as its record shows it: state, requester, dates, justification, each step with who decides it,
 // the decisions, and whether the caller may decide the step waiting. Null when it has none.
-function sourceSummary(approvalKindEnumId, sourceId) {
+function sourceSummary(approvalKindEnumId, sourceId, sourceEntityName = null) {
     const kind = kindOf(approvalKindEnumId)
+    const source = sourceOf(kind, sourceEntityName)
     const latest = Array.from(
-        find(APPROVAL).condition({sourceEntityName: kind.sourceEntityName, sourceId}).orderBy("-requestedDate").limit(1).list()
+        find(APPROVAL).condition({sourceEntityName: source.entityName, sourceId}).orderBy("-requestedDate").limit(1).list()
     )[0]
     return latest ? summaryOf(latest) : null
 }
@@ -984,16 +1123,16 @@ function summaryOf(approval) {
 // (SOURCE_CHANGED); a refusal with no reason (REASON_REQUIRED); the requester or the person it is about (SELF_APPROVAL); anyone
 // not an approver of the step waiting (NOT_APPROVER).
 function recordDecision(p) {
-    requireAny(approvePermissions, "Deciding an approval")
+    requireAny(decidePermissionsOfAnyKind, "Deciding an approval")
     const decision = text(p.decision) || "approve"
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse")
     const decisionEnumId = decision === "approve" ? "PpdApproved" : "PpdRefused"
     let approval = text(p.peopleApprovalId) ? one(APPROVAL, {peopleApprovalId: text(p.peopleApprovalId)}) : null
     if (!approval && text(p.sourceId) && kinds[p.approvalKindEnumId]) {
-        const kind = kinds[p.approvalKindEnumId]
+        const source = sourceOf(kinds[p.approvalKindEnumId], text(p.sourceEntityName) || null)
         approval = Array.from(
             find(APPROVAL)
-                .condition({sourceEntityName: kind.sourceEntityName, sourceId: text(p.sourceId)})
+                .condition({sourceEntityName: source.entityName, sourceId: text(p.sourceId)})
                 .orderBy("-requestedDate")
                 .limit(1)
                 .list()
@@ -1481,7 +1620,7 @@ function findOwnedApprovals(p) {
                 resourceName:
                     (enumTexts([approval.approvalKindEnumId])[approval.approvalKindEnumId] || "Approval") +
                     ": " +
-                    kinds[approval.approvalKindEnumId].describe(approval.sourceId).label,
+                    kinds[approval.approvalKindEnumId].describe(approval.sourceId, approval.sourceEntityName).label,
                 resourceKind: "approval",
                 transferable: false,
                 note: "Waiting for their decision; routed to the new approver once the rule or reporting line naming them changes"
@@ -1584,7 +1723,7 @@ const ownCap = 200
 // requester, the dates and the state.
 function lineOf(approval, statusId = statusOf(approval)) {
     const kind = kinds[approval.approvalKindEnumId]
-    const described = kind ? kind.describe(approval.sourceId) : {label: approval.sourceId}
+    const described = kind ? kind.describe(approval.sourceId, approval.sourceEntityName) : {label: approval.sourceId}
     return {
         peopleApprovalId: approval.peopleApprovalId,
         approvalKindEnumId: approval.approvalKindEnumId,
@@ -1643,7 +1782,7 @@ function openRequestCount() {
 function waitingFor(limit = 50) {
     const userId = ec.user.userId
     const partyId = ec.user.userAccount?.partyId || null
-    if (!userId || !partyId || !approvePermissions.some(permission => lib.access.has(permission))) return []
+    if (!userId || !partyId || !decidePermissionsOfAnyKind.some(permission => lib.access.has(permission))) return []
     const topics = Object.values(kinds).map(kind => kind.topic)
     const notices = Array.from(
         find("moqui.security.user.NotificationMessageByUser", {userId})
@@ -1672,6 +1811,7 @@ function waitingFor(limit = 50) {
                 Object.assign(line, {
                     title: "Approve " + (message.subjectText || line.summary.charAt(0).toLowerCase() + line.summary.slice(1)),
                     organizationName: message.organizationName || "",
+                    payrollComponentId: message.payrollComponentId || null,
                     stepText: stepLabel(state.steps, state.current),
                     requestedByName:
                         people.personNames([approval.requestedByPartyId].filter(Boolean))[approval.requestedByPartyId] || ""

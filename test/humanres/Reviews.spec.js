@@ -6,6 +6,8 @@
 // its author's alone: absent from the person's answer before and after release, from the release, the notices and a new
 // reviewer's answer; finalizing waits for HR's approval (a refusal returns the assessment), the release is stored once and the
 // person acknowledges it; a leaver's waiting steps are routed again with People's decisions; a goal is in no task list.
+// Follow-up 2: a goal is no work (Mantle's REST /workEfforts and the work services leave it out; a task's parent is a task), and
+// each review is routed again in its own transaction, so one that fails leaves the separation and the other reviews standing.
 // Standalone: spec-local organizations, people, employments, a review form, groups and users, with artifact authorization disabled
 // (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec Reviews
@@ -618,5 +620,139 @@ feature("a new reviewer reads no earlier reviewer's note; a leaver's steps are r
         !JSON.stringify(out.dueWork).includes(out.own.workEffortId)
         out.lookup.error == "" && out.lookup.workEffort == null && out.lookup.workEffortId == null
         out.closed.statusId == "WeComplete" && out.changeClosed == "GOAL_CLOSED"
+    }
+})
+
+// follow-up 2: Mantle's REST resource, as the instance administrator (the only caller it admits) renders it
+function rest(path, method, parameters = {}) {
+    ec.message.pushErrors()
+    try {
+        const rendered = ec.screen
+            .makeTest()
+            .rootScreen("component://webroot/screen/webroot/rest.xml")
+            .render("s1/mantle/" + path, parameters, method)
+        return {status: rendered.status, output: String(rendered.output || ""), json: rendered.jsonObject}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
+const WORK = "mantle.work.effort.WorkEffort"
+feature("a goal is no work: Mantle's REST lists, reads, changes and copies none, and no task goes under one", {
+    when() {
+        const goal = read(WORK, {ownerPartyId: state.ana.partyId, workEffortTypeEnumId: "WetGoal"})[0]
+        const task = call("mantle.work.TaskServices.create#Task", {workEffortName: "Review spec task"}).workEffortId
+        const event = call("create#" + WORK, {workEffortTypeEnumId: "WetEvent", workEffortName: "Review spec event"}).workEffortId
+        const goalCount = () => read(WORK, {workEffortTypeEnumId: "WetGoal"}).length
+        const before = goalCount()
+        const out = {goalId: goal.workEffortId, goalName: goal.workEffortName}
+        out.listGoals = rest("workEfforts", "get", {workEffortTypeEnumId: "WetGoal"}).json
+        out.listTask = rest("workEfforts", "get", {workEffortId: task}).json
+        out.oneGoal = rest("workEfforts/" + goal.workEffortId, "get")
+        out.oneTask = rest("workEfforts/" + task, "get").json
+        out.patchGoal = rest("workEfforts/" + goal.workEffortId, "patch", {workEffortName: "Renamed goal"})
+        out.patchTask = rest("workEfforts/" + task, "patch", {workEffortName: "Renamed task"})
+        out.makeGoal = rest("workEfforts/" + task, "patch", {workEffortTypeEnumId: "WetGoal"})
+        out.taskPatchGoal = rest("workEfforts/" + goal.workEffortId + "/task", "patch", {workEffortName: "Renamed goal"})
+        out.cloneGoal = rest("workEfforts/" + goal.workEffortId + "/clone", "post")
+        out.startEnd = rest("workEfforts/" + goal.workEffortId + "/startEnd", "get").json
+        out.taskUnderGoal = rest("workEfforts/tasks", "post", {
+            workEffortName: "Under a goal",
+            parentWorkEffortId: goal.workEffortId
+        })
+        // the services the REST resource and the apps call: a task's parent is a task
+        const under = parentWorkEffortId =>
+            code(run("john.doe", "mantle.work.TaskServices.create#Task", {workEffortName: "Sub-task", parentWorkEffortId}))
+        out.underGoal = under(goal.workEffortId)
+        out.underEvent = under(event)
+        out.underTask = under(task)
+        const simpleUnder = parentWorkEffortId =>
+            code(
+                run("john.doe", "mantle.work.TaskServices.create#SimpleTask", {
+                    workEffortName: "Simple sub-task",
+                    parentWorkEffortId
+                })
+            )
+        out.simpleUnderGoal = simpleUnder(goal.workEffortId)
+        out.simpleUnderEvent = simpleUnder(event)
+        const move = parentWorkEffortId =>
+            code(run("john.doe", "mantle.work.TaskServices.update#Task", {workEffortId: task, parentWorkEffortId}))
+        out.moveUnderGoal = move(goal.workEffortId)
+        out.moveUnderEvent = move(event)
+        out.after = read(WORK, {workEffortId: goal.workEffortId})[0]
+        out.task = read(WORK, {workEffortId: task})[0]
+        out.children = read(WORK, {parentWorkEffortId: goal.workEffortId}).filter(
+            row => row.workEffortTypeEnumId != "WetGoal"
+        ).length
+        out.added = goalCount() - before
+        return out
+    },
+    then(out) {
+        Array.isArray(out.listGoals) && out.listGoals.length == 0
+        out.listTask.length == 1 && out.listTask[0].workEffortName == "Review spec task"
+        !out.oneGoal.output.includes(out.goalName)
+        out.oneTask.workEffortName == "Review spec task"
+        out.patchGoal.output.includes("GOAL_NOT_WORK") && out.taskPatchGoal.output.includes("GOAL_NOT_WORK")
+        out.cloneGoal.output.includes("GOAL_NOT_WORK") && out.added == 0
+        out.patchTask.status == 200 && out.task.workEffortName == "Renamed task" && out.task.workEffortTypeEnumId == "WetTask"
+        out.makeGoal.output.includes("GOAL_NOT_WORK")
+        out.after.workEffortName == out.goalName
+        out.startEnd == null || out.startEnd.startDate == null
+        // a goal refused as any work is (check#WorkEffortOpen); another work effort not a task refused as a parent
+        out.taskUnderGoal.output.includes("GOAL_NOT_WORK")
+        out.underGoal == "GOAL_NOT_WORK" && out.underEvent == "PARENT_NOT_TASK" && out.underTask == ""
+        out.simpleUnderGoal == "GOAL_NOT_WORK" && out.simpleUnderEvent == "PARENT_NOT_TASK"
+        out.moveUnderGoal == "GOAL_NOT_WORK" && out.moveUnderEvent == "PARENT_NOT_TASK"
+        out.children == 0
+    }
+})
+
+feature("one review's failed re-route is rolled back alone: the separation and the other reviews stand", {
+    when() {
+        // a database failure on Bo's review alone (a spec-local trigger): Max leaves, so Bo's review loses its reviewer and Max's
+        // own is excluded
+        const fault = "rev_spec_fault"
+        const sql = text => ec.entity.runSqlStatement("transactional", text, 1)
+        sql(
+            `CREATE OR REPLACE FUNCTION ${fault}() RETURNS trigger AS $$ BEGIN IF OLD.performance_review_id = '${state.boReview}' ` +
+                `THEN RAISE EXCEPTION 'review spec fault'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`
+        )
+        sql(`CREATE TRIGGER ${fault} BEFORE UPDATE ON performance_review FOR EACH ROW EXECUTE FUNCTION ${fault}()`)
+        const out = {}
+        const employment = read("mantle.party.PartyRelationship", {
+            fromPartyId: state.max.partyId,
+            toPartyId: orgA,
+            relationshipTypeEnumId: "PrtEmployee"
+        })[0]
+        try {
+            // the separation's own transaction: the employment ends, People's decisions are routed again, and its work goes on
+            ec.transaction.runRequireNew(null, "The spec's separation failed", () => {
+                call("update#mantle.party.PartyRelationship", {
+                    partyRelationshipId: employment.partyRelationshipId,
+                    thruDate: new Date(Date.now() - 60000)
+                })
+                ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js").reroute(orgA)
+                call("update#mantle.party.Person", {partyId: state.max.partyId, lastName: "MAX left"})
+            })
+            out.error = ""
+        } catch (error) {
+            out.error = String(error.message || error)
+        } finally {
+            ec.message.clearErrors()
+            sql(`DROP TRIGGER IF EXISTS ${fault} ON performance_review`)
+            sql(`DROP FUNCTION IF EXISTS ${fault}()`)
+        }
+        out.employment = read("mantle.party.PartyRelationship", {partyRelationshipId: employment.partyRelationshipId})[0]
+        out.person = read("mantle.party.Person", {partyId: state.max.partyId})[0]
+        out.bo = read(REVIEW, {performanceReviewId: state.boReview})[0]
+        out.max = reviewOf(state.max.partyId)
+        return out
+    },
+    then(out) {
+        out.error == ""
+        out.employment.thruDate != null && out.person.lastName == "MAX left"
+        // Max's own review excluded in its own transaction; Bo's, whose update failed, as it was
+        out.max.statusEnumId == "PrvExcluded"
+        out.bo.managerPartyId == state.max.partyId
     }
 })

@@ -1980,13 +1980,15 @@ function ownedSteps(partyId) {
     }
     return found
 }
-// The open reviews of an employer routed again after a separation or a reporting line changed (Approvals.js reroute calls it, in the
-// caller's transaction): a review whose person no longer works there is excluded; a reviewer who left, or whose line no longer
-// manages the person while their assessment waits, is replaced by the manager of the employment's live line (none: the review waits
-// with no reviewer for development to assign); feedback waiting on a colleague who left is withdrawn. Each review on its own: a
-// failure is logged and the rest go on.
+// The open reviews of an employer routed again after a separation or a reporting line changed (Approvals.js reroute calls it): a
+// review whose person no longer works there is excluded; a reviewer who left, or whose line no longer manages the person while
+// their assessment waits, is replaced by the manager of the employment's live line (none: the review waits with no reviewer for
+// development to assign); feedback waiting on a colleague who left is withdrawn. What each review needs is decided in the caller's
+// transaction, which holds the change that asks for it (a separation's end of employment), and done in a transaction of its own
+// (impl-people follow-up 2): one review's failure, a database one included, is logged and rolled back alone, and the rest and the
+// caller's own work go on.
 function rerouteSteps(organizationPartyId) {
-    const counts = {excluded: 0, reassigned: 0, withdrawn: 0}
+    const counts = {excluded: 0, reassigned: 0, withdrawn: 0, failed: 0}
     if (!organizationPartyId) return counts
     const open = Array.from(
         find(REVIEW).condition({organizationPartyId}).condition("statusEnumId", "in", openStates).limit(listCap).list()
@@ -1997,9 +1999,17 @@ function rerouteSteps(organizationPartyId) {
     for (const review of open) {
         ec.message.pushErrors()
         try {
-            rerouteReview(review, organizationPartyId, employed, at, counts)
-            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            const plan = reroutePlan(review, organizationPartyId, employed, at)
+            if (!plan) continue
+            ec.transaction.runRequireNew(null, "Routing review " + review.performanceReviewId + " again failed", () => {
+                applyReroute(review, plan)
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            })
+            if (plan.exclude) counts.excluded++
+            counts.withdrawn += plan.withdraw.length
+            if (plan.reviewer) counts.reassigned++
         } catch (error) {
+            counts.failed++
             ec.logger.error("Review " + review.performanceReviewId + " was not routed again: " + error.message)
         } finally {
             ec.message.clearErrors()
@@ -2008,40 +2018,39 @@ function rerouteSteps(organizationPartyId) {
     }
     return counts
 }
-function rerouteReview(review, organizationPartyId, employed, at, counts) {
-    if (!(employed[review.partyId] || []).includes(organizationPartyId)) {
-        excludeReview(review, "Left the employer")
-        counts.excluded++
+// What a review needs (reads only): {exclude} for a person who left, else the feedback to withdraw and the new reviewer; null for
+// nothing
+function reroutePlan(review, organizationPartyId, employed, at) {
+    if (!(employed[review.partyId] || []).includes(organizationPartyId))
+        return {exclude: "Left the employer", withdraw: [], reviewer: null}
+    const steps = stepsOf(review.performanceReviewId)
+    const withdraw = steps.filter(
+        row =>
+            row.stepKindEnumId === FEEDBACK &&
+            row.statusEnumId === WAITING &&
+            !worksFor(row.partyId).includes(organizationPartyId)
+    )
+    const managers = () => people.managersByEmployment([review.partyId], at)[organizationPartyId + "/" + review.partyId] || []
+    const managerWaiting = steps.some(row => row.stepKindEnumId === MANAGER && row.statusEnumId === WAITING)
+    const reviewerLeft = !!review.managerPartyId && !worksFor(review.managerPartyId).includes(organizationPartyId)
+    const reviewerStays =
+        !!review.managerPartyId && !reviewerLeft && (!managerWaiting || managers().includes(review.managerPartyId))
+    let reviewer = null
+    if (!reviewerStays) {
+        const next =
+            managers().find(partyId => partyId !== review.partyId && worksFor(partyId).includes(organizationPartyId)) || null
+        if (next !== (review.managerPartyId || null))
+            reviewer = {partyId: next, reason: reviewerLeft ? "The reviewer left the employer" : "The reporting line changed"}
+    }
+    return withdraw.length || reviewer ? {exclude: null, withdraw, reviewer} : null
+}
+function applyReroute(review, plan) {
+    if (plan.exclude) {
+        excludeReview(review, plan.exclude)
         return
     }
-    const steps = stepsOf(review.performanceReviewId)
-    for (const step of steps.filter(row => row.stepKindEnumId === FEEDBACK && row.statusEnumId === WAITING))
-        if (!worksFor(step.partyId).includes(organizationPartyId)) {
-            cancelStep(step, "The colleague left the employer")
-            counts.withdrawn++
-        }
-    const managerWaiting = steps.some(row => row.stepKindEnumId === MANAGER && row.statusEnumId === WAITING)
-    const reviewerStays =
-        !!review.managerPartyId &&
-        worksFor(review.managerPartyId).includes(organizationPartyId) &&
-        (!managerWaiting ||
-            (people.managersByEmployment([review.partyId], at)[organizationPartyId + "/" + review.partyId] || []).includes(
-                review.managerPartyId
-            ))
-    if (reviewerStays) return
-    const next =
-        (people.managersByEmployment([review.partyId], at)[organizationPartyId + "/" + review.partyId] || []).find(
-            partyId => partyId !== review.partyId && worksFor(partyId).includes(organizationPartyId)
-        ) || null
-    if (next === (review.managerPartyId || null)) return
-    setReviewer(
-        review,
-        next,
-        review.managerPartyId && !worksFor(review.managerPartyId).includes(organizationPartyId)
-            ? "The reviewer left the employer"
-            : "The reporting line changed"
-    )
-    counts.reassigned++
+    for (const step of plan.withdraw) cancelStep(step, "The colleague left the employer")
+    if (plan.reviewer) setReviewer(review, plan.reviewer.partyId, plan.reviewer.reason)
 }
 
 const operations = {
