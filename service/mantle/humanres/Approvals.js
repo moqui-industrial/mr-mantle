@@ -714,7 +714,9 @@ function clearNotices(approval) {
     return cleared
 }
 // The step waiting, to its approvers: one message for the step, unless the unread notices already go to them. A request no one
-// may decide waits with no notice. A failure is logged and the change stays.
+// may decide waits with no notice. To the approvers alone (directOnly): every kind is of a confidential record (a seat, a person's
+// employment change, leave, attendance, expenses, an advance, an offer, training), so a Tools subscription to every message of a
+// topic receives none (People follow-up 1). A failure is logged and the change stays.
 function notify(approval, state = null) {
     try {
         state = state || stateOf(approval)
@@ -751,6 +753,7 @@ function notify(approval, state = null) {
             .record(kind.sourceEntityName, approval.sourceId)
             .actorUserId(approval.requestedByUserId || ec.user.userId)
             .userIds(userIds)
+            .directOnly()
             .send()
         return {notifiedCount: userIds.length}
     } catch (error) {

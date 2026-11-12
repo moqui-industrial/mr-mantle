@@ -128,6 +128,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="callLinkId" type="id"/>
         <field name="createdDate" type="date-time"/>
         <field name="createdByUserId" type="id"/>
+        <field name="invitationSendStatus" type="text-short"><description>The last send of its invitations once a schedule, change
+            or cancel committed (RecruitingServices.send#InterviewInvitations): failed (an error, or an attendee not told), or
+            sent after a failed one; empty while none has failed</description></field>
+        <field name="invitationSendDate" type="date-time"><description>That send</description></field>
+        <field name="invitationSendError" type="text-long"><description>Why it failed, for the recruiters</description></field>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="event"/>
         <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
         <index name="APP_INTERVIEW_APP"><index-field name="employmentApplicationId"/></index>

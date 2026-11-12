@@ -317,6 +317,31 @@ feature("an attendee who puts an invitation in a calendar of their own sees it t
     },
 })
 
+// People follow-up 1 (Nov 12, 2026; impl-manufacturing F39, which BOSS's get#EventAccessInfo guarded alone): a production run, a
+// WetEvent of purpose WepProductionRun, is kept by Manufacturing (the EventManager ProductionRun): Mantle's event services change it
+// for nobody, its organizer included
+feature("a production run is changed by no user through the event services, its organizer included", {
+    when() {
+        setTime(8.215)
+        const runId = as("Ada", () => event("Run of widgets", { estimatedStartDate: at(24 * 40 + 8), estimatedCompletionDate: at(24 * 40 + 12),
+                assignToPartyId: party.Ada, purposeEnumId: "WepProductionRun" }))
+        const ada = as("Ada", () => ({
+            access: call(`${EV}.check#EventAccess`, { workEffortId: runId, permission: "check" }),
+            moved: errorOf(`${EV}.update#EventOccurrence`, { workEffortId: runId, start: "2027-06-19 09:00", end: "2027-06-19 13:00" }),
+            cancelled: errorOf(`${EV}.cancel#EventOccurrence`, { workEffortId: runId }),
+        }))
+        const run = ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", runId).one()
+        return { ada, run }
+    },
+    then({ ada, run }) {
+        ada.access.canView == true && ada.access.canEdit == false && ada.access.isOrganizer == true
+        ada.access.eventManagerId == "ProductionRun" && ada.access.managedBy == "its production run in Manufacturing"
+        ada.moved.includes("is changed on its production run in Manufacturing")
+        ada.cancelled.includes("is changed on its production run in Manufacturing")
+        millis(run.estimatedStartDate) == millis(at(24 * 40 + 8)) && run.statusId != "WeCancelled"
+    },
+})
+
 // Commons calendar review (Nov 12, 2026): the links made before viewOnly are marked once (migrate#CalendarViewOnlyLinks). Ben's old
 // link to Ada's design review in his own calendar is marked to be seen only, so he and Cy, his calendar's editor, change nothing;
 // Ada's own links, the call Dee (her delegate) made in Ada's calendar, the all-hands Ben edits through the team calendar and an

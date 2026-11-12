@@ -682,6 +682,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const candidates = ids.filter((id) => !managedMap[id] && (!manager.purposeEnumId || purposes.get(id) === manager.purposeEnumId))
                 if (!candidates.length) continue
                 const field = manager.fieldName || 'workEffortId'
+                // a manager of the events of a purpose (Manufacturing's production runs): the purpose read above is the row
+                if (manager.purposeEnumId && manager.entityName === 'mantle.work.effort.WorkEffort' && field === 'workEffortId') {
+                    for (const id of candidates) managedMap[id] = {eventManagerId: manager.eventManagerId, managedBy: manager.managedByText || manager.eventManagerId}
+                    continue
+                }
                 // one manager that cannot be read (a component not loaded) is logged and leaves the others standing
                 try {
                     for (const row of Array.from(ec.entity.find(manager.entityName).condition(cf.makeCondition(field, 'in', candidates))

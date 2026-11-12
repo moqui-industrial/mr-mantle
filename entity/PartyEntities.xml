@@ -1545,6 +1545,17 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="moqui.security.UserAccount" short-alias="user"/>
         <index name="RECORD_FOLLOWER_USER" unique="false"><index-field name="userId"/></index>
     </entity>
+    <entity entity-name="ConfidentialRecordType" package="mantle.party.communication" cache="true">
+        <description>A record type whose note and message notices (CommunicationServices notify#RecordMention, notify#RecordFollowers)
+            go to the users they are sent to alone (directOnly: a subscription to every message of ChatterMention or RecordFollow,
+            set in Tools, receives none), since they name the record and quote the note. Seeded by the owner's component beside
+            its entity (IronStone People's employment, application and qualification; the user's call of Nov 12, 2026, People
+            follow-up 1); a confidential case, which is a Request of its own kind, hands its notices to PeopleCaseUpdate instead.
+            disabled Y leaves it out.</description>
+        <field name="recordEntityName" type="text-medium" is-pk="true"><description>The full entity name</description></field>
+        <field name="ownerText" type="text-medium"><description>Whose record type it is, for a reader</description></field>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
     <entity entity-name="WikiPageCommunicationEvent" package="mantle.party.communication" cache="never">
         <field name="wikiPageId" type="id" is-pk="true"/>
         <field name="communicationEventId" type="id" is-pk="true"/>

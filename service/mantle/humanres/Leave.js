@@ -2436,8 +2436,8 @@ function project(request, days) {
             methodEnumId: "WermNotification"
         })
 }
-// The decision told to the person (and to who asked, when another): PeopleLeaveDecision, with the days and the outcome only. A
-// failure is logged and the decision stays.
+// The decision told to the person (and to who asked, when another): PeopleLeaveDecision, with the days and the outcome only, to
+// them alone (directOnly, People follow-up 1). A failure is logged and the decision stays.
 function tellPerson(request, outcomeText) {
     try {
         const partyUsers = Array.from(find("moqui.security.UserAccount").condition("partyId", request.partyId).list()).map(
@@ -2456,6 +2456,7 @@ function tellPerson(request, outcomeText) {
             })
             .record(REQUEST, request.leaveRequestId)
             .userIds(userIds)
+            .directOnly()
             .send()
     } catch (error) {
         ec.logger.error("Leave decision notice of " + request.leaveRequestId + " was not sent: " + error.message)

@@ -713,7 +713,7 @@ feature("an interview's event changes only through recruiting: the organizer ref
         return out
     },
     then(r) {
-        r.scheduled.error == "" && r.scheduled.invitationsSent == true
+        r.scheduled.error == ""
         r.access.canView && !r.access.canEdit && r.access.isOrganizer
         r.access.managedBy == "its application's interviews in People"
         r.moved.includes("is changed on its application's interviews in People")
@@ -722,15 +722,128 @@ feature("an interview's event changes only through recruiting: the organizer ref
         r.readerChange == "PERMISSION_DENIED"
         r.otherChange == "RECORD_UNAVAILABLE"
         Number(String(r.before.estimatedStartDate)) == r.startMs && r.before.location == "Room 4"
-        r.changed.error == "" && r.changed.invitationsSent == true
+        r.changed.error == ""
         Number(String(r.after.estimatedStartDate)) == r.startMs + 3600000
         Number(String(r.after.estimatedCompletionDate)) == r.startMs + 3600000 + 30 * 60000
         r.after.location == "Room 5"
-        r.cancelled.error == "" && r.cancelled.invitationsSent == true
+        r.cancelled.error == ""
         r.afterCancel.statusId == "WeCancelled"
         r.again == "INTERVIEW_CANCELLED"
     }
 })
+
+// F358 (People follow-up 1, Nov 12, 2026): an interview's invitations go once its schedule, change or cancel commits, as the
+// system, in a transaction of their own (send#InterviewInvitations, by tx-commit rules). Sent inside the change's transaction, a
+// failing send marked it rollback-only, so the change was undone while the screen said it was made. Its review: a send that leaves
+// an attendee untold (here the candidate, emailed from the organizer's address, which the recruiter does not have yet) is recorded
+// on the interview, shown to its recruiters alone, and a recruiter sends again, telling only who was missed
+feature(
+    "an interview's invitations go once its change commits; a failed send is recorded for its recruiters, who send it again",
+    {
+        when() {
+            const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+                employmentApplicationId: state.cara,
+                startDate: nextWeek(),
+                durationMinutes: 45,
+                panelPartyIds: state.ana.partyId,
+                location: "Room 6",
+                inviteCandidate: true
+            })
+            const workEffortId = scheduled.workEffortId
+            const candidateId = application(state.cara).applyingPartyId
+            const partyRow = partyId => () =>
+                ec.entity
+                    .find("mantle.work.effort.WorkEffortParty")
+                    .condition({workEffortId, partyId})
+                    .disableAuthz()
+                    .useCache(false)
+                    .one() || {}
+            const anaRow = partyRow(state.ana.partyId)
+            const caraRow = partyRow(candidateId)
+            const event = () =>
+                ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+            const interview = () =>
+                ec.entity
+                    .find("mantle.humanres.recruitment.ApplicationInterview")
+                    .condition("workEffortId", workEffortId)
+                    .disableAuthz()
+                    .useCache(false)
+                    .one()
+            const row = username =>
+                (run(username, R + "get#Application", {employmentApplicationId: state.cara}).application?.interviews || []).find(
+                    item => item.workEffortId == workEffortId
+                ) || {}
+            ec.factory.waitWorkerPoolEmpty(50)
+            const invited = anaRow()
+            const failed = interview()
+            // the change in a transaction of its own, read before it commits: nothing has been sent yet
+            let inside = null
+            ec.transaction.runRequireNew(null, "Recruit spec change", () => {
+                login(state.recruiter.userId)
+                ec.artifactExecution.disableAuthz()
+                try {
+                    ec.service
+                        .sync()
+                        .name(R + "change#Interview")
+                        .parameters({workEffortId, location: "Room 7"})
+                        .call()
+                    inside = {error: ec.message.hasError() ? ec.message.getErrorsString() : "", digest: anaRow().invitationDigest}
+                } finally {
+                    login("john.doe")
+                    ec.artifactExecution.disableAuthz()
+                }
+            })
+            ec.factory.waitWorkerPoolEmpty(50)
+            const told = anaRow()
+            const changed = event()
+            const recruiterView = row(state.recruiter.userId)
+            const panelView = row(state.ana.userId)
+            // Send again, once the recruiter has an address to send from: the candidate alone is told
+            const account = {userId: state.recruiter.userId}
+            call("update#moqui.security.UserAccount", Object.assign({emailAddress: "recruiter.spec@example.test"}, account))
+            const other = code(run(state.recruiterB.userId, R + "send#InterviewInvitations", {workEffortId}))
+            const again = run(state.recruiter.userId, R + "send#InterviewInvitations", {workEffortId})
+            call("update#moqui.security.UserAccount", Object.assign({emailAddress: null}, account))
+            const notInterview = code(
+                run(state.recruiter.userId, R + "send#InterviewInvitations", {workEffortId: "RECRUIT_SPEC_NONE"})
+            )
+            return {
+                scheduled,
+                invited,
+                failed,
+                inside,
+                told,
+                changed,
+                recruiterView,
+                panelView,
+                other,
+                again,
+                sent: interview(),
+                anaAfter: anaRow(),
+                cara: caraRow(),
+                notInterview
+            }
+        },
+        then(r) {
+            r.scheduled.error == ""
+            r.invited.invitationSentDate != null && r.invited.invitationDigest.length > 0
+            r.failed.invitationSendStatus == "failed" && r.failed.invitationSendError.includes("Cara Candidate")
+            r.failed.invitationSendError.includes("no email address of the organizer to send from")
+            r.inside.error == "" && r.inside.digest == r.invited.invitationDigest
+            r.changed.location == "Room 7"
+            r.told.invitationDigest != r.invited.invitationDigest
+            r.recruiterView.invitationsFailed == true && r.recruiterView.invitationProblemText.includes("Cara Candidate")
+            r.panelView.invitationsFailed == false && r.panelView.invitationProblemText == ""
+            r.other == "RECORD_UNAVAILABLE"
+            r.again.error == "" && r.again.invitationsSent == true && r.again.invitationProblem == null
+            r.sent.invitationSendStatus == "sent" && r.sent.invitationSendError == null
+            r.cara.invitationSentDate != null
+            // Ana, told already, is not told again
+            String(r.anaAfter.invitationSentDate) == String(r.told.invitationSentDate)
+            r.notInterview == "RECORD_UNAVAILABLE"
+        }
+    }
+)
 
 // Commons calendar review (Nov 12, 2026): a cancelled interview's video call link takes no one more. The recruiter who scheduled
 // it revokes it with the framework's revoke#CallLink (its guests removed at once); another recruiter of the employer closes it as

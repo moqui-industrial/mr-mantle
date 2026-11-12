@@ -943,7 +943,8 @@ function decideEnrollment(p) {
     return Object.assign(enrollmentAnswer(current()), {repeated: false})
 }
 // P19 review: the decision told to the person (and to who asked, when another): PeopleTrainingDecision, with the course, the
-// session's day and the outcome only, never the reason. A failure is logged and the decision stays.
+// session's day and the outcome only, never the reason, to them alone (directOnly, People follow-up 1). A failure is logged and the
+// decision stays.
 function tellPerson(enrollment, event, outcomeText) {
     try {
         const userIds = unique(
@@ -964,6 +965,7 @@ function tellPerson(enrollment, event, outcomeText) {
             })
             .record(ENROLLMENT, enrollment.personTrainingId)
             .userIds(userIds)
+            .directOnly()
             .send()
     } catch (error) {
         ec.logger.error("Training decision notice of " + enrollment.personTrainingId + " was not sent: " + error.message)

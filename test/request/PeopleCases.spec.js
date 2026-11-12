@@ -125,7 +125,16 @@ feature(
     "an employee files a case with the employer's intake handler; its people read it, the manager, HR without it, another employer's handler and the administrator are refused its valid id; a retry answers the case filed",
     {
         when() {
+            // the instance administrator subscribed to every message of the topic, as Tools offers: a case notice is its people's
+            // alone (directOnly; the user's call of Nov 12, 2026, People follow-up 1)
+            const subscription = {topic: "PeopleCaseUpdate", userId: "EX_JOHN_DOE"}
+            ec.entity
+                .makeValue("moqui.security.user.NotificationTopicUser")
+                .setAll(subscription)
+                .set("allNotifications", "Y")
+                .create()
             const filed = file(state.filer, {operationKey: prefix + "-1"})
+            ec.entity.find("moqui.security.user.NotificationTopicUser").condition(subscription).deleteAll()
             state.requestId = filed.requestId
             const retry = file(state.filer, {operationKey: prefix + "-1"})
             const get = username => code(run(username, R + "get#PeopleCase", {requestId: state.requestId})) || "read"
@@ -138,11 +147,22 @@ feature(
             const parties = Array.from(
                 ec.entity.find("mantle.request.RequestParty").condition("requestId", state.requestId).orderBy("roleTypeId").list()
             ).map(row => row.roleTypeId + ":" + row.partyId)
-            const notices = Array.from(
+            const noticeRows = Array.from(
                 ec.entity.find("moqui.security.user.NotificationMessage").condition("topic", "PeopleCaseUpdate").list()
-            ).map(row => JSON.parse(row.messageJson || "{}"))
+            )
+            const notices = noticeRows.map(row => JSON.parse(row.messageJson || "{}"))
+            const filedIds = noticeRows
+                .filter(row => JSON.parse(row.messageJson || "{}").requestId === state.requestId)
+                .map(row => row.notificationMessageId)
+            const told = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessageUser")
+                    .condition("notificationMessageId", "in", filedIds)
+                    .list()
+            ).map(row => row.userId)
             const topic = ec.entity.find("moqui.security.user.NotificationTopic").condition("topic", "PeopleCaseUpdate").one()
             return {
+                told,
                 filed,
                 retry,
                 request,
@@ -157,7 +177,7 @@ feature(
                 noHandler: code(file(state.otherHandler))
             }
         },
-        then({filed, retry, request, parties, gets, listed, handlerRow, findOne, notices, topic, noEmployment, noHandler}) {
+        then({filed, retry, request, parties, gets, listed, handlerRow, findOne, notices, told, topic, noEmployment, noHandler}) {
             filed.error == ""
             filed.created == true
             retry.requestId == filed.requestId && retry.created == false
@@ -184,6 +204,8 @@ feature(
                 message => message.requestId == state.requestId && message.noticeText == "A confidential case was filed with you"
             )
             topic.pushNotifications == "N" && topic.titleTemplate == "${noticeText}"
+            // the handler's users alone: the subscriber to every message of the topic is not told
+            told.length > 0 && told.every(userId => userId == state.handler) && !told.includes("EX_JOHN_DOE")
             noEmployment == "NOT_EMPLOYED"
             noHandler == "NO_CASE_HANDLER"
         }

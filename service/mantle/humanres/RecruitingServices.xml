@@ -208,8 +208,8 @@ along with this software (see the LICENSE.md file). If not, see
             employer with an account, PANEL_REQUIRED, PANEL_INVALID) and with inviteCandidate the applicant (CANDIDATE_NO_EMAIL) as
             attendees; each panel member assigned the scorecard (formId, else the opening's, else the employer's only published
             interview scorecard; SCORECARD_REQUIRED, FORM_UNAVAILABLE) with no link. A received or screening application moves to
-            Interview. The invitations follow (mantle.work.EventServices.send#EventInvitations: users notified, the candidate
-            emailed with the .ics); a failure to send is named (invitationsSent false) and the interview stays.</description>
+            Interview. The invitations go once it commits (send#InterviewInvitations, by a tx-commit rule: users notified, the
+            candidate emailed with the .ics); a failure to send is logged and the interview stays.</description>
         <in-parameters>
             <parameter name="employmentApplicationId" required="true"/>
             <parameter name="startDate" type="Timestamp" required="true"/>
@@ -225,12 +225,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffortId"/>
             <parameter name="invitationIds" type="List"/>
             <parameter name="callPath"/>
-            <parameter name="invitationsSent" type="Boolean"/>
-            <parameter name="invitationProblem"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('scheduleInterview', context)"/>
-            <script>for (const key of ['workEffortId', 'invitationIds', 'callPath', 'invitationsSent', 'invitationProblem']) context[key] = out[key]</script>
+            <script>for (const key of ['workEffortId', 'invitationIds', 'callPath']) context[key] = out[key]</script>
         </actions>
     </service>
     <service verb="change" noun="Interview" allow-remote="false">
@@ -240,7 +238,8 @@ along with this software (see the LICENSE.md file). If not, see
             new end) or note; what is not given stays. A cancelled one is not changed (INTERVIEW_CANCELLED). The interview's event
             is People's (the EventManager PeopleInterview): this and cancel#Interview are where it changes, never Commons'
             EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026). The attendees whose invitation changed
-            are told (send#EventInvitations); a failure to send is named (invitationsSent false) and the change stays.</description>
+            are told once it commits (send#InterviewInvitations, by a tx-commit rule); a failure to send is logged and the change
+            stays.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="startDate" type="Timestamp"/>
@@ -248,33 +247,47 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="location"/>
             <parameter name="note"/>
         </in-parameters>
-        <out-parameters>
-            <parameter name="workEffortId"/>
-            <parameter name="invitationsSent" type="Boolean"/>
-            <parameter name="invitationProblem"/>
-        </out-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('changeInterview', context)"/>
-            <script>for (const key of ['workEffortId', 'invitationsSent', 'invitationProblem']) context[key] = out[key]</script>
+            <set field="workEffortId" from="out.workEffortId"/>
         </actions>
     </service>
     <service verb="cancel" noun="Interview" allow-remote="false">
         <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer; RECORD_UNAVAILABLE otherwise) cancels a scheduled interview
             (INTERVIEW_CANCELLED when it already is): its event is cancelled, its scorecards stay as they are, and the attendees are
-            told (send#EventInvitations: the cancel); a failure to send is named (invitationsSent false) and the cancel stays.
+            told once it commits (send#InterviewInvitations, by a tx-commit rule: the cancel); a failure to send is logged and the
+            cancel stays.
             reason is kept as the status change's reason.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="reason"/>
         </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('cancelInterview', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="send" noun="InterviewInvitations" allow-remote="false">
+        <description>The invitations of an interview (an ApplicationInterview's event) to its new or changed attendees, or its cancel
+            (mantle.work.EventServices.send#EventInvitations as the system, the event being People's), run by the tx-commit rules of
+            schedule, change and cancel#Interview (PeopleRecruiting.secas.xml) once they commit (F358, People follow-up 1), and by a
+            recruiter's Send again on ApplicantDetail after a failed one. Who: a recruiter (PEOPLE_RECRUIT_EDIT) of the employer
+            (the rules run as the one who made the change); RECORD_UNAVAILABLE otherwise and for an event that is not an
+            interview. The send runs in a transaction of its own, so a failure, or an attendee not told, is logged, answered
+            (invitationsSent false, invitationProblem), adds no error, never undoes the interview and is recorded on it
+            (invitationSendStatus failed, invitationSendDate, invitationSendError) for its recruiters; a later send that tells
+            everyone marks it sent. An attendee already told is not told again.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters>
-            <parameter name="workEffortId"/>
             <parameter name="invitationsSent" type="Boolean"/>
             <parameter name="invitationProblem"/>
         </out-parameters>
         <actions>
-            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('cancelInterview', context)"/>
-            <script>for (const key of ['workEffortId', 'invitationsSent', 'invitationProblem']) context[key] = out[key]</script>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('sendInterviewInvitations', context)"/>
+            <set field="invitationsSent" from="!!out.invitationsSent"/>
+            <set field="invitationProblem" from="out.invitationProblem"/>
         </actions>
     </service>
     <service verb="submit" noun="Scorecard" allow-remote="false">
