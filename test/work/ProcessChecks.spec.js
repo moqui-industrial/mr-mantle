@@ -135,6 +135,7 @@ spec({
         state.tech2 = user("TECH2", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE"], orgA)
         state.resources = user("RESOURCES", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_RESOURCE_EDIT"], orgA)
         state.otherSupervisor = user("OTHER", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE"], orgB)
+        state.settings = user("SETTINGS", ["MAINTENANCE_VIEW", "MAINTENANCE_SETTINGS_EDIT"], orgA)
         // the procedure: a Prepare group of two check-offs; the oil change waiting for it, with a file required; a pressure reading
         // 7–9 bar with a comment, which a supervisor may waive; a pass or fail inspection that may not be waived; an optional clean
         const root = (state.procedure = as(state.author, W + "store#WorkProcess", {
@@ -407,3 +408,145 @@ feature(
         }
     }
 )
+
+// P7 review (the user's call of Nov 12): an amendment adds a step and removes one not yet started; a started, completed or group
+// step with a started child is not removed; the gate and the checklist follow; a waiver waits for its dependencies (R4)
+feature(
+    "an amendment adds a step and removes one not started, refuses to remove a started or completed one, and the gate follows; a waiver waits for its dependencies",
+    {
+        when() {
+            const wo = (state.wo3 = startedWork("Checklist service, July"))
+            for (const name of ["Prepare", "Isolate", "Drain", "Oil", "Pressure", "Inspect", "Clean"]) state[name + "3"] = stepOf(wo, name)
+            const amend = (username, changeList, extra = {}) =>
+                as(username, W + "amend#ProcessExecution", Object.assign({rootWorkEffortId: wo, changeList, reason: "Spec"}, extra))
+            record(state.tech, state.Isolate3)
+            record(state.tech, state.Drain3, {action: "start"})
+            const removeStarted = amend(state.supervisor, [{action: "remove", workEffortId: state.Drain3}])
+            const removeDone = amend(state.supervisor, [{action: "remove", workEffortId: state.Isolate3}])
+            const removeGroup = amend(state.supervisor, [{action: "remove", workEffortId: state.Prepare3}])
+            record(state.tech, state.Drain3)
+            const prepared = statusOf(state.Prepare3)
+            const add = {action: "add", workEffortName: "Vent", parentWorkEffortId: state.Prepare3, responseKindEnumId: "WsrCheckOff"}
+            const byTech = amend(state.tech, [add])
+            const underLeaf = amend(state.supervisor, [Object.assign({}, add, {parentWorkEffortId: state.Oil3})])
+            const preview = amend(state.supervisor, [add, {action: "remove", workEffortId: state.Inspect3}], {preview: true})
+            const unchanged = [statusOf(state.Prepare3), statusOf(state.Inspect3)]
+            const applied = amend(state.supervisor, [add, {action: "remove", workEffortId: state.Inspect3}], {reason: "Vent the line; no inspection this time"})
+            const vent = stepOf(wo, "Vent")
+            const after = {prepare: statusOf(state.Prepare3), vent: statusOf(vent), inspect: statusOf(state.Inspect3), ventRoot: work(vent).rootWorkEffortId}
+            const detail = as(state.tech, W + "get#ProcessExecution", {workEffortId: wo})
+            // R4: the oil change made waivable waits for its group, now open again
+            amend(state.supervisor, [{workEffortId: state.Oil3, waiverAllowed: "Y"}])
+            const waiveBlocked = as(state.supervisor, W + "waive#ProcessStep", {workEffortId: state.Oil3, reason: "Spec"})
+            const vented = record(state.tech, vent)
+            return {removeStarted, removeDone, removeGroup, prepared, byTech, underLeaf, preview, unchanged, applied, vent, after, detail,
+                waiveBlocked, vented}
+        },
+        then({removeStarted, removeDone, removeGroup, prepared, byTech, underLeaf, preview, unchanged, applied, vent, after, detail, waiveBlocked, vented}) {
+            removeStarted == "STEP_STARTED"
+            removeDone == "STEP_STARTED"
+            removeGroup == "STEP_STARTED"
+            prepared == "WeComplete"
+            byTech == "PERMISSION_DENIED"
+            underLeaf == "GROUP_REQUIRED"
+            // the preview names the group the step reopens and the step removed, and writes nothing
+            preview.invalidatedList.map(row => row.workEffortId).join(",") == state.Prepare3
+            preview.removedList.map(row => row.workEffortId).join(",") == state.Inspect3
+            unchanged.join(",") == "WeComplete,WeInPlanning"
+            applied.executionAmendmentId != null
+            after.prepare == "WeInProgress" && after.vent == "WeInPlanning" && after.inspect == "WeCancelled"
+            after.ventRoot == state.wo3
+            detail.stepList.find(row => row.workEffortId == state.Inspect3).statusText == "Removed"
+            detail.execution.gateList.map(row => row.workEffortId).includes(vent)
+            !detail.execution.gateList.map(row => row.workEffortId).includes(state.Inspect3)
+            detail.amendmentList[0].summary.includes("added Vent") && detail.amendmentList[0].summary.includes("removed Inspect")
+            waiveBlocked == "DEPENDENCY_OPEN"
+            vented.accepted == true
+            statusOf(state.Prepare3) == "WeComplete"
+        }
+    }
+)
+
+// P7 review (the user's call of Nov 12): a voice note is transcribed only when the organization's work policy turns it on; the
+// audio is kept either way
+feature("a voice note is not sent to the speech model unless the organization's work policy turns transcription on; the audio stays", {
+    when() {
+        const checked = record(state.tech, state.Pressure3, {measurementValue: 8, measurementUomId: "PRES_bar", comments: "Steady"})
+        const voice = call("create#mantle.work.effort.WorkEffortContent", {
+            workEffortId: state.wo3,
+            contentTypeEnumId: "WectVoiceNote",
+            contentLocation: "dbresource://mantle/content/workEffort/" + state.wo3 + "/voice/pressure.ogg",
+            description: "Voice note on Pressure"
+        }).workEffortContentId
+        call("create#mantle.work.effort.WorkEffortCheckEvidence", {
+            workEffortCheckId: checked.workEffortCheckId,
+            workEffortContentId: voice,
+            evidenceKindEnumId: "WceVoiceNote",
+            fromDate: ec.user.nowTimestamp
+        })
+        const off = as(state.tech, W + "transcribe#CheckVoiceNote", {workEffortCheckId: checked.workEffortCheckId})
+        const defaults = as(state.settings, "mantle.work.MaintenanceSettingsServices.get#MaintenancePolicy", {organizationPartyId: orgA})
+        as(state.settings, "mantle.work.MaintenanceSettingsServices.store#MaintenancePolicy", {organizationPartyId: orgA, voiceNoteTranscription: "Y"})
+        const turnedOn = as(state.settings, "mantle.work.MaintenanceSettingsServices.get#MaintenancePolicy", {organizationPartyId: orgA})
+        const on = as(state.tech, W + "transcribe#CheckVoiceNote", {workEffortCheckId: checked.workEffortCheckId})
+        as(state.settings, "mantle.work.MaintenanceSettingsServices.store#MaintenancePolicy", {organizationPartyId: orgA, voiceNoteTranscription: "N"})
+        return {off, defaults, turnedOn, on, voice}
+    },
+    then({off, defaults, turnedOn, on, voice}) {
+        off.transcribed == false && off.reasonCode == "TRANSCRIPTION_OFF"
+        defaults.policy.voiceNoteTranscription == false
+        turnedOn.policy.voiceNoteTranscription == true
+        // on, the speech model is asked (none is bound here, so it answers its own reason)
+        on.reasonCode != "TRANSCRIPTION_OFF"
+        one("mantle.work.effort.WorkEffortContent", {workEffortContentId: voice}) != null
+    }
+})
+
+// P7 review (R3): the evidence guard is the entity's, whatever the path: a check's evidence and the stored checklist are not
+// updated or deleted, a check's link to its evidence stays, closed work takes no new file, a completed checklist is stored only by
+// the close; ordinary work's files behave as before
+feature("a check's evidence and the stored checklist cannot be deleted or changed through any path; closed work takes no new file; other work's files as before", {
+    when() {
+        const checklist = find("mantle.work.effort.WorkEffortContent", {workEffortId: state.wo, contentTypeEnumId: "WectCompletedChecklist"})[0]
+        const link = find("mantle.work.effort.WorkEffortCheckEvidence", {workEffortContentId: state.photo})[0]
+        const deleteEvidence = as(state.supervisor, "delete#mantle.work.effort.WorkEffortContent", {workEffortContentId: state.photo})
+        const updateEvidence = as(state.supervisor, "update#mantle.work.effort.WorkEffortContent", {workEffortContentId: state.photo, description: "Other"})
+        const deleteChecklist = as(state.supervisor, "delete#mantle.work.effort.WorkEffortContent", {workEffortContentId: checklist.workEffortContentId})
+        const changeChecklist = as(state.supervisor, "mantle.work.WorkEffortServices.update#WorkEffortContent", {
+            workEffortContentId: checklist.workEffortContentId,
+            description: "Other"
+        })
+        const unlink = as(state.supervisor, "delete#mantle.work.effort.WorkEffortCheckEvidence", {
+            workEffortCheckId: link.workEffortCheckId,
+            workEffortContentId: state.photo
+        })
+        const closedFile = as(state.supervisor, "mantle.work.WorkEffortServices.create#WorkEffortContent", {
+            workEffortId: state.Oil,
+            contentTypeEnumId: "WectSupportingMedia",
+            description: "Late photo"
+        })
+        const forged = as(state.supervisor, "mantle.work.WorkEffortServices.create#WorkEffortContent", {
+            workEffortId: state.wo3,
+            contentTypeEnumId: "WectCompletedChecklist",
+            description: "Not the real one"
+        })
+        // an ordinary task's file is added and removed as before
+        const task = call("create#mantle.work.effort.WorkEffort", {workEffortTypeEnumId: "WetTask", workEffortName: "Checklists spec plain task", statusId: "WeClosed"}).workEffortId
+        const plain = call("create#mantle.work.effort.WorkEffortContent", {workEffortId: task, contentTypeEnumId: "WectSupportingMedia", description: "Plain"}).workEffortContentId
+        const plainDelete = as(state.supervisor, "delete#mantle.work.effort.WorkEffortContent", {workEffortContentId: plain})
+        return {deleteEvidence, updateEvidence, deleteChecklist, changeChecklist, unlink, closedFile, forged, plain, plainDelete}
+    },
+    then({deleteEvidence, updateEvidence, deleteChecklist, changeChecklist, unlink, closedFile, forged, plain, plainDelete}) {
+        deleteEvidence == "EVIDENCE_PROTECTED"
+        updateEvidence == "EVIDENCE_PROTECTED"
+        deleteChecklist == "EVIDENCE_PROTECTED"
+        changeChecklist == "EVIDENCE_PROTECTED"
+        unlink == "EVIDENCE_PROTECTED"
+        closedFile == "WORK_CLOSED"
+        forged == "EVIDENCE_PROTECTED"
+        one("mantle.work.effort.WorkEffortContent", {workEffortContentId: state.photo}) != null
+        find("mantle.work.effort.WorkEffortCheckEvidence", {workEffortContentId: state.photo}).length == 1
+        typeof plainDelete == "object"
+        one("mantle.work.effort.WorkEffortContent", {workEffortContentId: plain}) == null
+    }
+})

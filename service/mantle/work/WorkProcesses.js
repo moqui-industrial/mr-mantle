@@ -493,6 +493,7 @@ const operations = {storeProcessStep, instantiateWorkProcess, checkManagedWork}
     stepPolicyOf,
     managedReason,
     managedIds,
-    // impl-maintenance P7: an owner's call of a guarded generic service on its own managed work
-    asManagedOwner
+    // impl-maintenance P7: an owner's call of a guarded generic service on its own managed work, and the roots it passes now
+    asManagedOwner,
+    passedRoots
 })

@@ -1023,6 +1023,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- a check's evidence and a stored checklist get no new bytes (impl-maintenance P7 review, F69: EVIDENCE_PROTECTED) -->
+            <service-call name="mantle.work.ProcessServices.check#EvidenceChange" in-map="{workEffortContentId:workEffortContentId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>

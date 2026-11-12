@@ -162,7 +162,8 @@ const defaultPolicy = {
     defaultTeamPartyId: null,
     productionRequestsManaged: false,
     warrantyRepairsManaged: false,
-    procedureSelfApproval: false
+    procedureSelfApproval: false,
+    voiceNoteTranscription: false
 }
 // The policy in effect for an organization, or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
@@ -182,6 +183,7 @@ function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
         productionRequestsManaged: flag(row.productionRequestsManaged),
         warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
         procedureSelfApproval: flag(row.procedureSelfApproval),
+        voiceNoteTranscription: flag(row.voiceNoteTranscription),
         comments: row.comments || null
     }
 }
@@ -233,6 +235,7 @@ function storePolicy(p) {
         productionRequestsManaged: flag(p.productionRequestsManaged) ? "Y" : "N",
         warrantyRepairsManaged: flag(p.warrantyRepairsManaged) ? "Y" : "N",
         procedureSelfApproval: flag(p.procedureSelfApproval) ? "Y" : "N",
+        voiceNoteTranscription: flag(p.voiceNoteTranscription) ? "Y" : "N",
         changedByUserId: ec.user.userId,
         comments: text(p.comments)
     })

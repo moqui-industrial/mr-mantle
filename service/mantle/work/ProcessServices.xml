@@ -510,8 +510,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="transcribe" noun="CheckVoiceNote" allow-remote="false">
         <description>The voice note of a check (its recorder or a supervisor) as text, through SpeechServices.transcribe#Audio,
-            added to the check's transcript. A transcription that does not work is an answer (reasonCode); the audio stays the
-            evidence. Called in a transaction of its own after record#ProcessStep.</description>
+            added to the check's transcript, only when the work order's organization turns transcription on (MaintenancePolicy
+            voiceNoteTranscription, off by default; otherwise reasonCode TRANSCRIPTION_OFF and nothing is sent). A transcription
+            that does not work is an answer (reasonCode); the audio stays the evidence either way. Called in a transaction of its
+            own after record#ProcessStep.</description>
         <in-parameters><parameter name="workEffortCheckId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="transcribed" type="Boolean"/>
@@ -547,7 +549,12 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="amend" noun="ProcessExecution" allow-remote="false">
         <description>A supervisor's change of an open work order's execution (MAINTENANCE_SUPERVISE; completed, closed or cancelled
-            work is corrected, not amended, WORK_CLOSED): changeList names steps of it and their new step policy fields
+            work is corrected, not amended, WORK_CLOSED). Each change of changeList has an action (the user's call of Nov 12, P7
+            review): add (workEffortName, parentWorkEffortId the root or a group, GROUP_REQUIRED otherwise, sequenceNum, description,
+            estimatedWorkTime, the policy fields, dependsOnIds: a new step not started; a complete group it joins reopens, named
+            among the invalidations); remove (workEffortId: a step, or a group with its steps, not yet started and with no check,
+            STEP_STARTED otherwise; it is cancelled and named in the amendment, and what waited for it no longer does); or change (the
+            default): it names steps of it and their new step policy fields
             (isRequired, responseKindEnumId, measurementTypeId, measurementUomId, minimumValue, maximumValue, evidenceRequired,
             commentRequired, waiverAllowed) or dependencies (dependsOnIds, steps of the same tree, no loop: DEPENDENCY_INVALID).
             With preview, the changes, the acceptances they invalidate (a complete step whose requirement changed, or that now waits
@@ -568,10 +575,16 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="changeList" type="List"/>
             <parameter name="invalidatedList" type="List"/>
             <parameter name="findingList" type="List"/>
+            <parameter name="addedList" type="List"/>
+            <parameter name="removedList" type="List"/>
+            <parameter name="addedIds" type="List"/>
             <parameter name="repeated" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('amendExecution', context)"/>
+            <set field="addedList" from="answer.addedList || []"/>
+            <set field="removedList" from="answer.removedList || []"/>
+            <set field="addedIds" from="answer.addedIds || []"/>
             <set field="executionAmendmentId" from="answer.executionAmendmentId"/>
             <set field="changeList" from="answer.changeList"/>
             <set field="invalidatedList" from="answer.invalidatedList"/>
