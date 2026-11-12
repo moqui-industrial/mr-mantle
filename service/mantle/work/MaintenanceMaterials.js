@@ -13,7 +13,8 @@
 //   root or step, carrying the cost centre, the project and the primary AssetMaintenance. Only available stock (inventory or
 //   supplies) of the work's organization is issued: supplies post to the maintenance expense as inventory does (AC-24, the
 //   user's call of Nov 12, in place of Mantle's fixed-asset posting, F71), and a customer's or another owner's asset is never
-//   issued as a spare. An organization that posts needs a maintenance expense
+//   issued as a spare. P12: a customer repair's issue rechecks its claim's decision and consent (MaintenanceRepairs.js). An
+//   organization that posts needs a maintenance expense
 //   mapping first (AC-24: MaintenanceCostRouting.js; COST_POLICY_MISSING), so no issue posts to WIP.
 // - A return is a new AssetReceipt naming its issuance (sourceAssetIssuanceId), into the original asset where it is or a
 //   location of the same facility at the original asset's acquireCost, never more than is left of the issuance; its credit goes
@@ -26,6 +27,8 @@ const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mant
 const posting = ec.resource.script("component://mr-mantle/service/mantle/shipment/StockPosting.js")
 const routing = ec.resource.script("component://mr-mantle/service/mantle/ledger/MaintenanceCostRouting.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
+// P12: a customer repair's issue rechecks the claim's decision and consent
+const repairs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceRepairs.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -448,6 +451,8 @@ function issuePlan(p) {
             "WORK_NOT_STARTED",
             "Parts are issued to approved or started work; work order " + root.workEffortId + " is " + root.statusId
         )
+    // P12: a customer repair's parts go on only while its claim allows the repair (Customer Service's decision and consent)
+    repairs().requireStanding(order)
     const quantity = blank(p.quantity) ? zero() : dec(p.quantity)
     if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
     if (order.assetId && order.assetId === text(p.assetId)) denied("NOT_STOCK", "The equipment under repair is not a spare part")

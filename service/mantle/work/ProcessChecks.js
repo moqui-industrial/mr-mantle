@@ -1180,7 +1180,10 @@ function evidencePolicy(p) {
 // A file a check names, or a stored completed checklist: never changed, removed or given a new version.
 function protectedContent(row) {
     if (!row) return false
-    if (row.contentTypeEnumId === "WectCompletedChecklist") return true
+    // P12: a stored intervention report, and the customer's acknowledgment once its file is saved (review R5), are kept as they
+    // were stored, as a completed checklist is
+    if (["WectCompletedChecklist", "WectInterventionReport"].includes(row.contentTypeEnumId)) return true
+    if (row.contentTypeEnumId === "WectAcknowledgment" && row.contentLocation) return true
     return find(EVIDENCE, {workEffortContentId: row.workEffortContentId}).count() > 0
 }
 // check#EvidenceChange: a file a check names, or the stored checklist, is not changed (EVIDENCE_PROTECTED).
@@ -1209,8 +1212,17 @@ function guardEvidence(p) {
     const passed = workProcesses.passedRoots().includes(rootId)
     if (value.contentTypeEnumId === "WectCompletedChecklist" && !passed)
         throw new Error("EVIDENCE_PROTECTED: A completed checklist is stored when its work order is closed")
+    // P12: the intervention report and the customer's acknowledgment are stored by store#InterventionReport alone (its pass), on
+    // completed or closed work
+    const reportFile = ["WectInterventionReport", "WectAcknowledgment"].includes(value.contentTypeEnumId)
+    if (reportFile && !passed)
+        throw new Error("EVIDENCE_PROTECTED: An intervention report is stored from its work order (store#InterventionReport)")
     const root = rootId === node.workEffortId ? node : one(WORK, {workEffortId: rootId})
-    if (["WeClosed", "WeCancelled"].includes(root?.statusId) && workProcesses.managedReason([node.workEffortId]))
+    if (
+        !(reportFile && passed) &&
+        ["WeClosed", "WeCancelled"].includes(root?.statusId) &&
+        workProcesses.managedReason([node.workEffortId])
+    )
         throw new Error("WORK_CLOSED: Work " + rootId + " is " + statusText(root.statusId) + "; it takes no new file")
     return {}
 }
