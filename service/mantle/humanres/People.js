@@ -54,6 +54,8 @@ const capabilityPermissions = {
     payrollView: "PAYROLL_VIEW",
     payrollEdit: "PAYROLL_EDIT",
     payrollApprove: "PAYROLL_APPROVE",
+    // P22 review (the user's call, impl-people §4, Nov 12, 2026): payroll configuration, in place of PEOPLE_CONFIGURE there
+    payrollConfigure: "PAYROLL_CONFIGURE",
     // the scope of a staff read in every internal organization, as COMMERCE_ALL_ORGANIZATIONS and FACILITY_ALL_ORGANIZATIONS
     allOrganizations: "PEOPLE_ALL_ORGANIZATIONS"
 }
@@ -425,9 +427,10 @@ const homeCounts = {
                 pageSize: 1
             }).positionsCount
     },
-    // P8: the People decisions waiting on the caller now (Approvals.js waitingFor), whatever the employer
+    // P8: the People decisions waiting on the caller now (Approvals.js waitingFor), whatever the employer; P22 review: a payroll
+    // approver's too (publishing payroll configuration)
     decisions: {
-        needs: "requestApprove",
+        needs: ["requestApprove", "payrollApprove"],
         count: () => approvals().waitingFor(dueWorkCap).length
     }
 }
@@ -568,7 +571,10 @@ const checklists = () => ec.resource.script("component://mr-mantle/service/mantl
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const dueWorkCap = 200
 const dueKinds = {
-    decision: {text: "Decision", reads: (caps, userScope) => !!caps.requestApprove && !!userScope.partyId},
+    decision: {
+        text: "Decision",
+        reads: (caps, userScope) => !!(caps.requestApprove || caps.payrollApprove) && !!userScope.partyId
+    },
     noManager: {text: "No manager", reads: caps => !!caps.hrView},
     checklistTask: {text: "Lifecycle task", reads: caps => !!caps.hrView},
     myTask: {text: "Your task", reads: (caps, userScope) => !!userScope.partyId}
@@ -639,7 +645,10 @@ function dueWork(p) {
                 assigneeText: row.stepText,
                 peopleApprovalId: row.peopleApprovalId,
                 approvalKindEnumId: row.approvalKindEnumId,
+                sourceEntityName: row.sourceEntityName,
                 sourceId: row.sourceId,
+                // P22 review: a pay component term's component, where its publishing is decided
+                payrollComponentId: row.payrollComponentId || null,
                 requestedDate: lib.ms(row.requestedDate)
             })
     const tasks = []

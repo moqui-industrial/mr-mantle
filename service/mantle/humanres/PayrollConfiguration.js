@@ -4,8 +4,15 @@
 // periods. Pay grades are PayrollSetup.js's (P4).
 //
 // Pay never leaves its lane (design §1.1, §2): every answer here is configuration a holder of PAYROLL_VIEW reads for an employer
-// in their People scope; changing it needs PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (design §1.1: operational payroll
-// preparation alone cannot publish configuration). Another employer's record is a missing one (RECORD_UNAVAILABLE).
+// in their People scope; changing it needs PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (design §1.1; the P22 review's call
+// of Nov 12, 2026 put PAYROLL_CONFIGURE in place of PEOPLE_CONFIGURE). Another employer's record is a missing one
+// (RECORD_UNAVAILABLE).
+//
+// Publishing takes effect on approval (the P22 review's call of Nov 12, 2026): publish#Component and publish#Structure check the
+// draft as it would be published and ask for a People approval of kind PakPayrollConfig (Approvals.js: the employer's payroll
+// approvers and HR editors who read payroll, unless a rule says otherwise; never one who drafted it or asked); decide#Publication
+// and the PeoplePayrollConfigApproval topic's services decide it, and the last approval publishes the draft, checked again. A
+// change of the draft (its term, examples or lines) supersedes the waiting request.
 //
 // A formula is the framework's decimal expression (org.moqui.impl.ExpressionServices, PE-09): named decimal inputs, the codes of
 // other components, comparisons, conditions and an allowlist of functions, checked and computed by the framework's own parser,
@@ -27,6 +34,8 @@ const GROUP = "mantle.humanres.payroll.PayrollGroup"
 const GROUP_PERIOD = "mantle.humanres.payroll.PayrollGroupPeriod"
 const LOCALIZATION = "mantle.humanres.payroll.PayrollLocalization"
 const EXPRESSIONS = "org.moqui.impl.ExpressionServices."
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+const KIND = "PakPayrollConfig"
 const listCap = 2000
 const periodCap = 24
 const day = 24 * 60 * 60 * 1000
@@ -73,12 +82,22 @@ function readerScope() {
 }
 const edits = userScope => {
     const caps = userScope.capabilities
-    return !!(caps.payrollView && caps.payrollEdit && caps.configure)
+    return !!(caps.payrollView && caps.payrollEdit && caps.payrollConfigure)
 }
 function editorScope() {
     const userScope = people.scopeOf()
-    if (!edits(userScope)) denied("PERMISSION_DENIED", "Changing payroll configuration needs PAYROLL_EDIT and PEOPLE_CONFIGURE")
+    if (!edits(userScope)) denied("PERMISSION_DENIED", "Changing payroll configuration needs PAYROLL_EDIT and PAYROLL_CONFIGURE")
     return userScope
+}
+// A dated row is ended from today on, never in the past, so what was in effect stays as it was (P22 review)
+function checkEnd(endMs) {
+    if (endMs < nowMs() - day) denied("EFFECTIVE_DATE_PAST", "A configuration in effect is ended from today on, not in the past")
+}
+// The users who drafted a term or a structure, the caller added: none of them decides its publishing (P22 review)
+function withDrafter(draftedByUserIds) {
+    const userIds = splitNames(draftedByUserIds)
+    if (ec.user.userId && !userIds.includes(ec.user.userId)) userIds.push(ec.user.userId)
+    return userIds.join(",") || null
 }
 function requireEmployer(userScope, organizationPartyId) {
     if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose the employer")
@@ -183,9 +202,13 @@ function componentRevision(payrollComponentId) {
     const examples = termIds.length ? Array.from(find(EXAMPLE).condition("payrollComponentTermId", "in", termIds).list()) : []
     return revisionOf([one(COMPONENT, {payrollComponentId})].concat(terms, examples))
 }
-// A term's state on a date: a draft, in effect, from a later date, or ended
-function termState(term, at) {
-    if (term.statusId !== "PtsPublished") return {state: "draft", stateText: "Draft"}
+// A term's state on a date: a draft (waiting for approval when a request to publish it waits), in effect, from a later date, or
+// ended
+function termState(term, at, waiting) {
+    if (term.statusId !== "PtsPublished")
+        return waiting?.has(term.payrollComponentTermId)
+            ? {state: "waiting", stateText: "Waiting for approval"}
+            : {state: "draft", stateText: "Draft"}
     if ((ms(term.thruDate) ?? Infinity) <= at) return {state: "ended", stateText: "Ended"}
     if ((ms(term.fromDate) ?? -Infinity) > at) return {state: "future", stateText: "From " + dateText(term.fromDate)}
     return {state: "current", stateText: "In effect"}
@@ -209,7 +232,7 @@ function roundingText(term) {
     const places = Number(term.roundingPlaces)
     return "Rounded " + roundings[term.roundingEnumId][1] + " to " + places + (places === 1 ? " place" : " places")
 }
-function termRow(term, at, exampleCounts) {
+function termRow(term, at, exampleCounts, waiting) {
     return Object.assign(
         {
             payrollComponentTermId: term.payrollComponentTermId,
@@ -241,7 +264,7 @@ function termRow(term, at, exampleCounts) {
             publishedByName: userName(term.publishedByUserId),
             exampleCount: exampleCounts?.[term.payrollComponentTermId] || 0
         },
-        termState(term, at)
+        termState(term, at, waiting)
     )
 }
 // the term a list shows: the published one in effect, else the next one, else the draft, else the last one
@@ -255,12 +278,13 @@ function shownTerm(terms, at) {
         null
     )
 }
-function componentState(component, terms, at) {
+function componentState(component, terms, at, waiting) {
     if ((ms(component.thruDate) ?? Infinity) <= at) return {state: "ended", stateText: "Ended"}
     const shown = shownTerm(terms, at)
     if (!shown) return {state: "new", stateText: "No terms"}
-    return termState(shown, at)
+    return termState(shown, at, waiting)
 }
+const draftIdsOf = terms => terms.filter(term => term.statusId === "PtsDraft").map(term => term.payrollComponentTermId)
 
 // ===== find#Components =====
 // The components of the employers the caller reads (or the one asked for), searched by code or name ignoring case, of a kind,
@@ -299,12 +323,17 @@ function findComponents(p) {
             terms.find(term => term.payrollComponentTermId === text(p.payrollComponentTermId)) ||
             terms.find(term => term.statusId === "PtsDraft") ||
             shownTerm(terms, at)
-        out.component = Object.assign(componentRow(component, terms, at, userScope), {
+        const waiting = waitingIds(TERM, draftIdsOf(terms))
+        const draftTermId = terms.find(term => term.statusId === "PtsDraft")?.payrollComponentTermId || null
+        out.component = Object.assign(componentRow(component, terms, at, userScope, null, waiting), {
             revision: componentRevision(component.payrollComponentId),
             openTermId: opened?.payrollComponentTermId || null,
-            draftTermId: terms.find(term => term.statusId === "PtsDraft")?.payrollComponentTermId || null
+            draftTermId,
+            waitingApproval: !!draftTermId && waiting.has(draftTermId),
+            // the request to publish the term opened (its steps, decisions and whether the caller decides it)
+            approval: approvalOf(TERM, opened?.payrollComponentTermId)
         })
-        out.terms = terms.map(term => termRow(term, at, counts))
+        out.terms = terms.map(term => termRow(term, at, counts, waiting))
         out.examples = examples
             .filter(example => example.payrollComponentTermId === opened?.payrollComponentTermId)
             .map(example => exampleRow(example))
@@ -341,13 +370,15 @@ function findComponents(p) {
         ))
             (termsOf[term.payrollComponentId] = termsOf[term.payrollComponentId] || []).push(term)
     const names = people.organizationNames(people.unique(components.map(row => row.organizationPartyId)))
-    let list = components.map(row => componentRow(row, termsOf[row.payrollComponentId] || [], at, userScope, names))
-    // ended components only when asked for
-    if (text(p.state)) list = list.filter(row => row.state === text(p.state))
+    const waiting = waitingIds(TERM, draftIdsOf(Object.values(termsOf).flat()))
+    let list = components.map(row => componentRow(row, termsOf[row.payrollComponentId] || [], at, userScope, names, waiting))
+    // ended components only when asked for; waiting: a request to publish its draft waits (P22 review)
+    if (text(p.state) === "waiting") list = list.filter(row => row.waitingApproval)
+    else if (text(p.state)) list = list.filter(row => row.state === text(p.state))
     else list = list.filter(row => row.state !== "ended")
     return Object.assign(out, lib.pageList(list, p, "components", {noLimitCap: listCap}))
 }
-function componentRow(component, terms, at, userScope, names) {
+function componentRow(component, terms, at, userScope, names, waiting) {
     const shown = shownTerm(terms, at)
     return Object.assign(
         {
@@ -368,9 +399,10 @@ function componentRow(component, terms, at, userScope, names) {
             fromDateText: shown ? dateText(shown.fromDate) : "",
             termThruDateText: shown ? dateText(shown.thruDate) : "",
             hasDraft: terms.some(term => term.statusId === "PtsDraft"),
+            waitingApproval: terms.some(term => term.statusId === "PtsDraft" && waiting?.has(term.payrollComponentTermId)),
             canEdit: edits(userScope) && (ms(component.thruDate) ?? Infinity) > nowMs()
         },
-        componentState(component, terms, at)
+        componentState(component, terms, at, waiting)
     )
 }
 function exampleRow(example) {
@@ -444,11 +476,15 @@ function storeComponent(p) {
             changes.description = text(p.description) || null
         if (flag(p.end)) {
             const endMs = when(p.componentThruDate) ?? nowMs()
+            checkEnd(endMs)
             const inUse = Array.from(find(LINE, {payrollComponentId: component.payrollComponentId}).list()).some(
                 line => (ms(line.thruDate) ?? Infinity) > endMs
             )
             if (inUse) denied("COMPONENT_IN_USE", "A structure uses this component after that date; end its line there first")
             changes.thruDate = new Date(endMs)
+            // an ended component publishes nothing: the request waiting for its draft is superseded
+            const draft = draftTerm(component.payrollComponentId)
+            if (draft) approvals().sourceChanged(KIND, draft.payrollComponentTermId, TERM, true)
         }
         if (Object.keys(changes).length > 1) call("update#" + COMPONENT, changes)
     }
@@ -467,7 +503,7 @@ function storeDraftTerm(component, p) {
     let draft = text(p.payrollComponentTermId)
         ? one(TERM, {payrollComponentTermId: text(p.payrollComponentTermId)})
         : draftTerm(component.payrollComponentId)
-    if (draft && draft.payrollComponentId !== component.payrollComponentId)
+    if (text(p.payrollComponentTermId) && (!draft || draft.payrollComponentId !== component.payrollComponentId))
         denied("RECORD_UNAVAILABLE", "That term is not this component's")
     if (draft && draft.statusId !== "PtsDraft")
         denied("TERM_PUBLISHED", "A published term is not changed; start a draft from a later date and publish it")
@@ -480,8 +516,11 @@ function storeDraftTerm(component, p) {
     for (const field of termFields) if (given(p[field])) merged[field] = p[field] === "" ? null : p[field]
     if (!draft && merged.fromDate == null) merged.fromDate = ec.user.nowTimestamp
     const checked = checkTerm(component, merged)
+    checked.draftedByUserIds = withDrafter(draft?.draftedByUserIds)
     if (draft) {
         call("update#" + TERM, Object.assign({payrollComponentTermId: draft.payrollComponentTermId}, checked))
+        // a changed draft supersedes the request waiting to publish it
+        approvals().sourceChanged(KIND, draft.payrollComponentTermId, TERM)
         return draft.payrollComponentTermId
     }
     return call(
@@ -592,6 +631,7 @@ function storeComponentExample(p) {
             denied("RECORD_UNAVAILABLE", "That example is not this term's")
         if (flag(p.remove)) {
             call("delete#" + EXAMPLE, {payrollComponentExampleId: example.payrollComponentExampleId})
+            exampleChanged(term)
             return {payrollComponentExampleId: null, revision: componentRevision(component.payrollComponentId)}
         }
     }
@@ -612,7 +652,16 @@ function storeComponentExample(p) {
             "create#" + EXAMPLE,
             Object.assign({payrollComponentTermId: term.payrollComponentTermId}, fields)
         ).payrollComponentExampleId
+    exampleChanged(term)
     return {payrollComponentExampleId, revision: componentRevision(component.payrollComponentId)}
+}
+// An example changed is the draft changed: its drafter recorded, the request waiting to publish it superseded
+function exampleChanged(term) {
+    call("update#" + TERM, {
+        payrollComponentTermId: term.payrollComponentTermId,
+        draftedByUserIds: withDrafter(term.draftedByUserIds)
+    })
+    approvals().sourceChanged(KIND, term.payrollComponentTermId, TERM)
 }
 
 // ===== a term computed =====
@@ -747,24 +796,31 @@ function dependencyCheck(organizationPartyId, startCode, at, termsByCode) {
 }
 
 // ===== publish#Component =====
-// The draft term published from its date (or the date given), with a reason, at the revision read: refused without a reason,
-// examples, every example giving its amount, the currency or unit, the account mapping its kind takes, its dependencies
-// published at the date and without a cycle, and with a published term of the component starting on or after the date
-// (TERMS_OVERLAP). A published term in effect at the date ends there; one that would end before today is refused.
-function publishComponent(p) {
-    const userScope = editorScope()
-    const component = readable(userScope, COMPONENT, "payrollComponentId", text(p.payrollComponentId), "Pay component")
-    checkRevision(p.expectedRevision, componentRevision(component.payrollComponentId), "pay component")
-    if ((ms(component.thruDate) ?? Infinity) <= nowMs()) denied("COMPONENT_ENDED", "This component has ended")
-    const term = text(p.payrollComponentTermId)
-        ? one(TERM, {payrollComponentTermId: text(p.payrollComponentTermId)})
-        : draftTerm(component.payrollComponentId)
-    if (!term || term.payrollComponentId !== component.payrollComponentId)
-        denied("NO_DRAFT", "This component has no draft term to publish")
-    if (term.statusId !== "PtsDraft") denied("TERM_PUBLISHED", "This term is published already")
-    const reason = text(p.reason)
-    if (!reason) denied("REASON_REQUIRED", "Give the reason for publishing")
-    const fromMs = when(p.fromDate) ?? ms(term.fromDate) ?? nowMs()
+// The dates at which an employer's published configuration changes from fromMs (exclusive) until thruMs: each published term's
+// start and end and each component's end. The dependency rules are checked at fromMs and at each of these, so a dependency that
+// ends later, or a term of a dependency that starts later and reads this component, is found now (P22 review).
+function changePoints(organizationPartyId, fromMs, thruMs) {
+    const components = rows(COMPONENT, {organizationPartyId})
+    const points = new Set()
+    const add = millis => {
+        if (millis != null && millis > fromMs && (thruMs == null || millis < thruMs)) points.add(millis)
+    }
+    for (const component of components) add(ms(component.thruDate))
+    const ids = components.map(component => component.payrollComponentId)
+    if (ids.length)
+        for (const term of Array.from(
+            find(TERM).condition("payrollComponentId", "in", ids).condition("statusId", "PtsPublished").list()
+        )) {
+            add(ms(term.fromDate))
+            add(ms(term.thruDate))
+        }
+    return Array.from(points).sort((a, b) => a - b)
+}
+// A draft term checked as it would be published from fromMs: refused without examples, with an example not giving its amount,
+// without the account mapping its kind takes, with a dependency missing or in a cycle on that date or on any later date the
+// employer's configuration changes before the term ends, with a published term of the component starting on or after the date
+// (TERMS_OVERLAP), or ending the term in effect then in the past (EFFECTIVE_DATE_PAST). Answers the published terms.
+function componentPublication(component, term, fromMs) {
     const thruMs = ms(term.thruDate)
     if (thruMs != null && thruMs <= fromMs) denied("DATES_INVALID", "A term ends after it starts")
     // the term as it will be published, checked whole again
@@ -785,15 +841,22 @@ function publishComponent(p) {
                 )
                 .join("; ")
         )
-    const checked = dependencyCheck(component.organizationPartyId, component.componentCode, fromMs, {
-        [component.componentCode]: term
-    })
-    if (checked.cycle) denied("CYCLIC_DEPENDENCY", "The components depend on each other: " + checked.cycle.join(" → "))
-    if (checked.missing.length)
-        denied(
-            "MISSING_DEPENDENCY",
-            "The formula reads " + checked.missing.join(", ") + ", with no published component of that code on that date"
-        )
+    for (const at of [fromMs].concat(changePoints(component.organizationPartyId, fromMs, thruMs))) {
+        const checked = dependencyCheck(component.organizationPartyId, component.componentCode, at, {
+            [component.componentCode]: term
+        })
+        const onDate = at === fromMs ? "" : " from " + dateText(stamp(at))
+        if (checked.cycle)
+            denied("CYCLIC_DEPENDENCY", "The components depend on each other" + onDate + ": " + checked.cycle.join(" → "))
+        if (checked.missing.length)
+            denied(
+                "MISSING_DEPENDENCY",
+                "The formula reads " +
+                    checked.missing.join(", ") +
+                    ", with no published component of that code " +
+                    (onDate ? onDate.trim() : "on that date")
+            )
+    }
     const kind = component.componentKindEnumId
     if ((kind === "PckEarning" || kind === "PckContribution") && !term.expenseGlAccountId)
         denied("MAPPING_REQUIRED", "Map the expense account the component posts to")
@@ -803,32 +866,170 @@ function publishComponent(p) {
     const published = publishedTerms(component.payrollComponentId)
     if (published.some(row => (ms(row.fromDate) ?? -Infinity) >= fromMs || (thruMs != null && openAt(row, thruMs - 1))))
         denied("TERMS_OVERLAP", "A published term of this component starts on or after that date; choose a later date")
+    if (fromMs < nowMs() - day && published.some(row => openAt(row, fromMs)))
+        denied("EFFECTIVE_DATE_PAST", "A published term is not ended in the past; publish from today on")
+    return published
+}
+// The draft term asked to be published from its date (or the date given), with a reason, at the revision read: checked as it
+// would be published (componentPublication), its date set, and a People approval of kind PakPayrollConfig asked for it; it is
+// published when that is approved (decide#Publication). Refused without a reason, for an ended component or with no draft, and
+// while a request for the draft as it is waits (APPROVAL_PENDING).
+function publishComponent(p) {
+    const userScope = editorScope()
+    const component = readable(userScope, COMPONENT, "payrollComponentId", text(p.payrollComponentId), "Pay component")
+    checkRevision(p.expectedRevision, componentRevision(component.payrollComponentId), "pay component")
+    if ((ms(component.thruDate) ?? Infinity) <= nowMs()) denied("COMPONENT_ENDED", "This component has ended")
+    let term = text(p.payrollComponentTermId)
+        ? one(TERM, {payrollComponentTermId: text(p.payrollComponentTermId)})
+        : draftTerm(component.payrollComponentId)
+    if (!term || term.payrollComponentId !== component.payrollComponentId)
+        denied("NO_DRAFT", "This component has no draft term to publish")
+    if (term.statusId !== "PtsDraft") denied("TERM_PUBLISHED", "This term is published already")
+    const reason = text(p.reason)
+    if (!reason) denied("REASON_REQUIRED", "Give the reason for publishing")
+    const fromMs = when(p.fromDate) ?? ms(term.fromDate) ?? nowMs()
+    componentPublication(component, term, fromMs)
+    if (ms(term.fromDate) !== fromMs) {
+        call("update#" + TERM, {payrollComponentTermId: term.payrollComponentTermId, fromDate: new Date(fromMs)})
+        term = one(TERM, {payrollComponentTermId: term.payrollComponentTermId})
+    }
+    const approval = approvals().request({
+        approvalKindEnumId: KIND,
+        sourceEntityName: TERM,
+        sourceId: term.payrollComponentTermId,
+        organizationPartyId: component.organizationPartyId,
+        effectiveDate: new Date(fromMs),
+        justification: reason,
+        operationKey: text(p.operationKey) || null
+    })
+    return {
+        payrollComponentTermId: term.payrollComponentTermId,
+        revision: componentRevision(component.payrollComponentId),
+        peopleApprovalId: approval.peopleApprovalId,
+        approvalStatusId: approval.statusId,
+        published: false
+    }
+}
+// The approved term published: from its date, or from now when that date has passed and a published term is in effect then (the
+// past stays as it was), checked again; the term in effect then ends there; the publisher, the approval's reason and time kept.
+function applyComponentPublication(component, term, approval) {
+    let fromMs = ms(term.fromDate) ?? nowMs()
     const now = nowMs()
-    for (const row of published.filter(row => openAt(row, fromMs))) {
-        if (fromMs < now - day) denied("EFFECTIVE_DATE_PAST", "A published term is not ended in the past; publish from today on")
+    if (fromMs < now - day && publishedTerms(component.payrollComponentId).some(row => openAt(row, fromMs))) fromMs = now
+    const published = componentPublication(component, term, fromMs)
+    const reason = approval.justification || "Approved"
+    for (const row of published.filter(row => openAt(row, fromMs)))
         call("update#" + TERM, {
             payrollComponentTermId: row.payrollComponentTermId,
             thruDate: new Date(fromMs),
             thruDate_changeReason: reason
         })
-    }
     call("update#" + TERM, {
         payrollComponentTermId: term.payrollComponentTermId,
         fromDate: new Date(fromMs),
         statusId: "PtsPublished",
         statusId_changeReason: reason,
         publishedDate: ec.user.nowTimestamp,
-        publishedByUserId: ec.user.userId
+        publishedByUserId: approval.requestedByUserId || null
     })
-    return {payrollComponentTermId: term.payrollComponentTermId, revision: componentRevision(component.payrollComponentId)}
+}
+
+// ===== decide#Publication =====
+// A decision of a waiting request to publish a component's draft term (payrollComponentId) or a structure's draft lines
+// (payrollStructureId), by an approver of its step who reads the employer's payroll configuration: approve, or refuse with a
+// reason (PeopleApprovalServices.record#Decision: never one who drafted it or asked, at the revision asked). The last approval
+// publishes the draft, checked again (a check failing then refuses the decision, which is not recorded); a refusal leaves the
+// draft as it is. The topic's approve#Publication and refuse#Publication decide a notice the same way.
+function decidePublication(p) {
+    const userScope = readerScope()
+    const decision = text(p.decision) || "approve"
+    let source
+    if (text(p.payrollStructureId)) {
+        const structure = readable(userScope, STRUCTURE, "payrollStructureId", text(p.payrollStructureId), "Pay structure")
+        source = {entityName: STRUCTURE, sourceId: structure.payrollStructureId, structure}
+    } else {
+        const component = readable(userScope, COMPONENT, "payrollComponentId", text(p.payrollComponentId), "Pay component")
+        const term = text(p.payrollComponentTermId)
+            ? one(TERM, {payrollComponentTermId: text(p.payrollComponentTermId)})
+            : draftTerm(component.payrollComponentId)
+        if (!term || term.payrollComponentId !== component.payrollComponentId)
+            denied("NO_DRAFT", "This component has no draft term waiting to be published")
+        source = {entityName: TERM, sourceId: term.payrollComponentTermId, component, term}
+    }
+    const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
+        approvalKindEnumId: KIND,
+        sourceEntityName: source.entityName,
+        peopleApprovalId: text(p.peopleApprovalId) || null,
+        sourceId: source.sourceId,
+        decision,
+        reason: text(p.reason) || null,
+        sourceRevision: text(p.sourceRevision) || null,
+        operationKey: text(p.operationKey) || null
+    })
+    if (decided.complete && !decided.repeated) {
+        const approval = one("mantle.humanres.approval.PeopleApproval", {peopleApprovalId: decided.peopleApprovalId})
+        if (source.entityName === STRUCTURE) applyStructurePublication(source.structure, approval)
+        else {
+            if (source.term.statusId !== "PtsDraft") denied("TERM_PUBLISHED", "This term is published already")
+            applyComponentPublication(source.component, source.term, approval)
+        }
+    }
+    return {
+        peopleApprovalId: decided.peopleApprovalId,
+        statusId: decided.statusId,
+        published: !!decided.complete,
+        repeated: !!decided.repeated
+    }
+}
+// The PeoplePayrollConfigApproval topic's services: the notice's term or structure at the revision in its message.
+function decideNotice(p, decision) {
+    const message = p.message || {}
+    const recordId = text(p.recordId)
+    const base = {
+        decision,
+        reason: p.reason,
+        peopleApprovalId: message.peopleApprovalId,
+        sourceRevision: message.sourceRevision
+    }
+    if (p.recordEntityName === STRUCTURE) return decidePublication(Object.assign(base, {payrollStructureId: recordId}))
+    if (p.recordEntityName && p.recordEntityName !== TERM) denied("SOURCE_INVALID", "Not a payroll configuration approval")
+    const term = one(TERM, {payrollComponentTermId: recordId})
+    if (!term) denied("RECORD_UNAVAILABLE", "This pay component term is not available")
+    return decidePublication(
+        Object.assign(base, {payrollComponentId: term.payrollComponentId, payrollComponentTermId: term.payrollComponentTermId})
+    )
+}
+// The approval of a draft as its record shows it (Approvals.js sourceSummary): state, requester, steps, decisions and whether
+// the caller decides it; null with none.
+function approvalOf(entityName, sourceId) {
+    try {
+        return sourceId ? approvals().sourceSummary(KIND, sourceId, entityName) : null
+    } catch (error) {
+        ec.logger.error("The approval of " + entityName + " " + sourceId + " could not be read: " + error.message)
+        return null
+    }
+}
+// The drafts among sourceIds with a request waiting to publish them
+function waitingIds(entityName, sourceIds) {
+    if (!sourceIds.length) return new Set()
+    return new Set(
+        Array.from(
+            find("mantle.humanres.approval.PeopleApproval")
+                .condition({approvalKindEnumId: KIND, sourceEntityName: entityName, statusId: "PapPending"})
+                .condition("sourceId", "in", sourceIds)
+                .selectField("sourceId")
+                .list()
+        ).map(row => row.sourceId)
+    )
 }
 
 // ===== structures =====
 function structureRevision(payrollStructureId) {
     return revisionOf([one(STRUCTURE, {payrollStructureId})].concat(rows(LINE, {payrollStructureId})))
 }
-function structureState(structure, at) {
+function structureState(structure, at, waiting) {
     if ((ms(structure.thruDate) ?? Infinity) <= at) return {state: "ended", stateText: "Ended"}
+    if (waiting?.has(structure.payrollStructureId)) return {state: "waiting", stateText: "Waiting for approval"}
     if (structure.statusId !== "PtsPublished") return {state: "draft", stateText: "Draft"}
     if ((ms(structure.fromDate) ?? -Infinity) > at) return {state: "future", stateText: "From " + dateText(structure.fromDate)}
     return {state: "current", stateText: "Published"}
@@ -838,7 +1039,7 @@ const lineAt = (line, at) =>
     line.statusId === "PtsPublished"
         ? openAt(line, at)
         : (ms(line.fromDate) ?? -Infinity) <= at && (ms(line.thruDate) ?? Infinity) > at
-function structureRow(structure, at, userScope, names, lines) {
+function structureRow(structure, at, userScope, names, lines, waiting) {
     return Object.assign(
         {
             payrollStructureId: structure.payrollStructureId,
@@ -856,9 +1057,10 @@ function structureRow(structure, at, userScope, names, lines) {
             publishedByName: userName(structure.publishedByUserId),
             componentCount: (lines || []).filter(line => lineAt(line, at)).length,
             draftCount: (lines || []).filter(line => line.statusId !== "PtsPublished").length,
+            waitingApproval: !!waiting?.has(structure.payrollStructureId),
             canEdit: edits(userScope) && (ms(structure.thruDate) ?? Infinity) > nowMs()
         },
-        structureState(structure, at)
+        structureState(structure, at, waiting)
     )
 }
 function lineRow(line, component, at) {
@@ -917,8 +1119,11 @@ function findStructures(p) {
             find(LINE, {payrollStructureId: structure.payrollStructureId}).orderBy(["sequenceNum", "fromDate"]).list()
         )
         const components = componentsById(lines.map(line => line.payrollComponentId))
-        out.structure = Object.assign(structureRow(structure, at, userScope, null, lines), {
-            revision: structureRevision(structure.payrollStructureId)
+        const waiting = waitingIds(STRUCTURE, [structure.payrollStructureId])
+        out.structure = Object.assign(structureRow(structure, at, userScope, null, lines, waiting), {
+            revision: structureRevision(structure.payrollStructureId),
+            // the latest request to publish its draft lines (its steps, decisions and whether the caller decides it)
+            approval: approvalOf(STRUCTURE, structure.payrollStructureId)
         })
         out.lines = lines.map(line => lineRow(line, components[line.payrollComponentId], at))
         const working = workingLines(structure, lines, components, at)
@@ -952,7 +1157,11 @@ function findStructures(p) {
         ))
             (linesOf[line.payrollStructureId] = linesOf[line.payrollStructureId] || []).push(line)
     const names = people.organizationNames(people.unique(structures.map(row => row.organizationPartyId)))
-    let list = structures.map(row => structureRow(row, at, userScope, names, linesOf[row.payrollStructureId] || []))
+    const waiting = waitingIds(
+        STRUCTURE,
+        structures.map(row => row.payrollStructureId)
+    )
+    let list = structures.map(row => structureRow(row, at, userScope, names, linesOf[row.payrollStructureId] || [], waiting))
     if (text(p.state)) list = list.filter(row => row.state === text(p.state))
     else list = list.filter(row => row.state !== "ended")
     return Object.assign(out, lib.pageList(list, p, "structures", {noLimitCap: listCap}))
@@ -1067,7 +1276,8 @@ function storeStructure(p) {
             description: text(p.description) || source?.description || null,
             statusId: "PtsDraft",
             copiedFromStructureId: source?.payrollStructureId || null,
-            createdDate: ec.user.nowTimestamp
+            createdDate: ec.user.nowTimestamp,
+            draftedByUserIds: withDrafter(null)
         })
         if (source) {
             const now = nowMs()
@@ -1104,11 +1314,25 @@ function storeStructure(p) {
         changes.description = text(p.description) || null
     if (flag(p.end)) {
         const endMs = when(p.thruDate) ?? nowMs()
+        checkEnd(endMs)
         changes.thruDate = new Date(endMs)
         if (text(p.reason)) changes.thruDate_changeReason = text(p.reason)
     }
-    if (Object.keys(changes).length > 1) call("update#" + STRUCTURE, changes)
+    if (Object.keys(changes).length > 1) {
+        changes.draftedByUserIds = withDrafter(structure.draftedByUserIds)
+        call("update#" + STRUCTURE, changes)
+        // a changed structure supersedes the request waiting to publish it; an ended one publishes nothing
+        approvals().sourceChanged(KIND, structure.payrollStructureId, STRUCTURE, flag(p.end))
+    }
     return {payrollStructureId: structure.payrollStructureId, revision: structureRevision(structure.payrollStructureId)}
+}
+// A structure's line changed is its draft changed: its drafter recorded, the request waiting to publish it superseded
+function structureChanged(structure) {
+    call("update#" + STRUCTURE, {
+        payrollStructureId: structure.payrollStructureId,
+        draftedByUserIds: withDrafter(structure.draftedByUserIds)
+    })
+    approvals().sourceChanged(KIND, structure.payrollStructureId, STRUCTURE)
 }
 
 // ===== store#StructureComponent =====
@@ -1132,11 +1356,13 @@ function storeStructureComponent(p) {
             denied("LINE_PUBLISHED", "A published line is only ended; add the component again from a date to change it")
         const endMs = when(p.thruDate) ?? nowMs()
         if (endMs <= (ms(line.fromDate) ?? -Infinity)) denied("DATES_INVALID", "A line ends after it starts")
+        checkEnd(endMs)
         call("update#" + LINE, {
             payrollStructureComponentId: line.payrollStructureComponentId,
             thruDate: new Date(endMs),
             thruDate_changeReason: text(p.reason) || null
         })
+        structureChanged(structure)
         return {
             payrollStructureComponentId: line.payrollStructureComponentId,
             revision: structureRevision(structure.payrollStructureId)
@@ -1144,6 +1370,7 @@ function storeStructureComponent(p) {
     }
     if (line && flag(p.remove)) {
         call("delete#" + LINE, {payrollStructureComponentId: line.payrollStructureComponentId})
+        structureChanged(structure)
         return {payrollStructureComponentId: null, revision: structureRevision(structure.payrollStructureId)}
     }
     const payrollComponentId = line ? line.payrollComponentId : text(p.payrollComponentId)
@@ -1181,6 +1408,7 @@ function storeStructureComponent(p) {
     if (given(p.parameterValues)) fields.parameterValues = JSON.stringify(valuesOf(p.parameterValues, "parameter values"))
     if (line) {
         call("update#" + LINE, Object.assign({payrollStructureComponentId: line.payrollStructureComponentId}, fields))
+        structureChanged(structure)
         return {
             payrollStructureComponentId: line.payrollStructureComponentId,
             revision: structureRevision(structure.payrollStructureId)
@@ -1190,6 +1418,7 @@ function storeStructureComponent(p) {
         "create#" + LINE,
         Object.assign({payrollStructureId: structure.payrollStructureId, payrollComponentId, statusId: "PtsDraft"}, fields)
     )
+    structureChanged(structure)
     return {
         payrollStructureComponentId: created.payrollStructureComponentId,
         revision: structureRevision(structure.payrollStructureId)
@@ -1337,18 +1566,12 @@ function previewStructure(p) {
 }
 
 // ===== publish#Structure =====
-// The structure's draft lines published, each from its own date or the publishing date (fromDate, now when empty), with a
-// reason, at the revision read: refused with no line in effect then, a component without a published term covering its line's
-// start, a money component in another currency, a dependency the structure does not have, a cycle, or two lines of one
-// component overlapping. The first publish starts the structure. Publishing reassigns no employee and rewrites no payslip.
-function publishStructure(p) {
-    const userScope = editorScope()
-    const structure = readable(userScope, STRUCTURE, "payrollStructureId", text(p.payrollStructureId), "Pay structure")
-    checkRevision(p.expectedRevision, structureRevision(structure.payrollStructureId), "pay structure")
-    if ((ms(structure.thruDate) ?? Infinity) <= nowMs()) denied("STRUCTURE_ENDED", "This structure has ended")
-    const reason = text(p.reason)
-    if (!reason) denied("REASON_REQUIRED", "Give the reason for publishing")
-    const effectiveMs = when(p.fromDate) ?? nowMs()
+// The structure's lines checked as they would be published with drafts starting at effectiveMs (each draft from its own date,
+// else effectiveMs): refused with no draft line (once published), two lines of one component overlapping, or no line on that
+// date; then on that date and on every later date a line, or a term of a line's component, starts or ends: a line's component
+// without a published term then (COMPONENT_NOT_PUBLISHED), a money component in another currency, a dependency the structure
+// does not have then (MISSING_DEPENDENCY), or a cycle (CYCLIC_DEPENDENCY). Answers the draft lines.
+function structurePublication(structure, effectiveMs) {
     const lines = rows(LINE, {payrollStructureId: structure.payrollStructureId})
     const drafts = lines.filter(line => line.statusId !== "PtsPublished")
     if (!drafts.length && structure.statusId === "PtsPublished") denied("NO_DRAFT", "The structure has no draft line to publish")
@@ -1360,23 +1583,6 @@ function publishStructure(p) {
         )
     )
     const components = componentsById(lines.map(line => line.payrollComponentId))
-    for (const line of planned.filter(line =>
-        drafts.some(draft => draft.payrollStructureComponentId === line.payrollStructureComponentId)
-    )) {
-        const component = components[line.payrollComponentId]
-        const startMs = ms(line.fromDate)
-        const term = component ? termAt(component.payrollComponentId, startMs) : null
-        if (!term)
-            denied(
-                "COMPONENT_NOT_PUBLISHED",
-                (component?.componentCode || line.payrollComponentId) + " has no published term on " + dateText(line.fromDate)
-            )
-        if (component.componentKindEnumId !== "PckStatistical" && term.currencyUomId !== structure.currencyUomId)
-            denied(
-                "CURRENCY_MISMATCH",
-                component.componentCode + " is in " + term.currencyUomId + ", the structure in " + structure.currencyUomId
-            )
-    }
     // two lines of one component do not overlap
     for (const line of planned)
         for (const other of planned)
@@ -1391,18 +1597,93 @@ function publishStructure(p) {
                     "TERMS_OVERLAP",
                     (components[line.payrollComponentId]?.componentCode || "A component") + " is in the structure twice at once"
                 )
-    const atEffective = planned.filter(line => openAt(line, effectiveMs))
-    if (!atEffective.length) denied("LINES_REQUIRED", "The structure has no component on that date")
-    const working = atEffective.map(line => {
-        const component = components[line.payrollComponentId]
-        return {line, component, term: component ? termAt(component.payrollComponentId, effectiveMs) : null}
+    if (!planned.some(line => openAt(line, effectiveMs))) denied("LINES_REQUIRED", "The structure has no component on that date")
+    // the dates to check: the publishing date, each draft's own start, and every later start or end of a line or of a term of a
+    // line's component
+    const points = new Set([effectiveMs])
+    const add = millis => {
+        if (millis != null && millis > effectiveMs) points.add(millis)
+    }
+    for (const line of planned) {
+        if (drafts.some(draft => draft.payrollStructureComponentId === line.payrollStructureComponentId))
+            points.add(ms(line.fromDate))
+        add(ms(line.fromDate))
+        add(ms(line.thruDate))
+    }
+    const componentIds = Object.keys(components)
+    if (componentIds.length)
+        for (const term of Array.from(
+            find(TERM).condition("payrollComponentId", "in", componentIds).condition("statusId", "PtsPublished").list()
+        )) {
+            add(ms(term.fromDate))
+            add(ms(term.thruDate))
+        }
+    for (const at of Array.from(points).sort((a, b) => a - b)) {
+        const onDate = dateText(stamp(at))
+        const working = planned
+            .filter(line => openAt(line, at))
+            .map(line => {
+                const component = components[line.payrollComponentId]
+                return {line, component, term: component ? termAt(component.payrollComponentId, at) : null}
+            })
+        for (const {line, component, term} of working) {
+            if (!term)
+                denied(
+                    "COMPONENT_NOT_PUBLISHED",
+                    (component?.componentCode || line.payrollComponentId) + " has no published term on " + onDate
+                )
+            if (component.componentKindEnumId !== "PckStatistical" && term.currencyUomId !== structure.currencyUomId)
+                denied(
+                    "CURRENCY_MISMATCH",
+                    component.componentCode + " is in " + term.currencyUomId + ", the structure in " + structure.currencyUomId
+                )
+        }
+        const blocking = calculationOrder(working).findings.filter(finding => finding.blocking)
+        const cycle = blocking.find(finding => finding.code === "CYCLIC_DEPENDENCY")
+        if (cycle) denied("CYCLIC_DEPENDENCY", cycle.message + " (on " + onDate + ")")
+        const missing = blocking.find(finding => finding.code === "MISSING_DEPENDENCY" || finding.code === "NO_TERM")
+        if (missing) denied("MISSING_DEPENDENCY", missing.message + " (on " + onDate + ")")
+    }
+    return drafts
+}
+// The structure's draft lines asked to be published, each from its own date or the publishing date (fromDate, now when empty),
+// with a reason, at the revision read: checked as they would be published (structurePublication), and a People approval of kind
+// PakPayrollConfig asked for them; they are published when that is approved (decide#Publication). Publishing reassigns no
+// employee and rewrites no payslip.
+function publishStructure(p) {
+    const userScope = editorScope()
+    const structure = readable(userScope, STRUCTURE, "payrollStructureId", text(p.payrollStructureId), "Pay structure")
+    checkRevision(p.expectedRevision, structureRevision(structure.payrollStructureId), "pay structure")
+    if ((ms(structure.thruDate) ?? Infinity) <= nowMs()) denied("STRUCTURE_ENDED", "This structure has ended")
+    const reason = text(p.reason)
+    if (!reason) denied("REASON_REQUIRED", "Give the reason for publishing")
+    const effectiveMs = when(p.fromDate) ?? nowMs()
+    structurePublication(structure, effectiveMs)
+    const approval = approvals().request({
+        approvalKindEnumId: KIND,
+        sourceEntityName: STRUCTURE,
+        sourceId: structure.payrollStructureId,
+        organizationPartyId: structure.organizationPartyId,
+        effectiveDate: new Date(effectiveMs),
+        justification: reason,
+        operationKey: text(p.operationKey) || null
     })
-    const ordered = calculationOrder(working)
-    const blocking = ordered.findings.filter(finding => finding.blocking)
-    const cycle = blocking.find(finding => finding.code === "CYCLIC_DEPENDENCY")
-    if (cycle) denied("CYCLIC_DEPENDENCY", cycle.message)
-    const missing = blocking.find(finding => finding.code === "MISSING_DEPENDENCY" || finding.code === "NO_TERM")
-    if (missing) denied("MISSING_DEPENDENCY", missing.message)
+    return {
+        payrollStructureId: structure.payrollStructureId,
+        revision: structureRevision(structure.payrollStructureId),
+        peopleApprovalId: approval.peopleApprovalId,
+        approvalStatusId: approval.statusId,
+        published: false
+    }
+}
+// The approved draft lines published from the date asked (from now when that has passed), checked again; the first publish
+// starts the structure; the publisher, the approval's reason and time kept, and the drafters cleared for the next draft.
+function applyStructurePublication(structure, approval) {
+    const now = nowMs()
+    let effectiveMs = ms(approval.effectiveDate) ?? now
+    if (effectiveMs < now - day) effectiveMs = now
+    const drafts = structurePublication(structure, effectiveMs)
+    const reason = approval.justification || "Approved"
     for (const draft of drafts)
         call("update#" + LINE, {
             payrollStructureComponentId: draft.payrollStructureComponentId,
@@ -1413,12 +1694,12 @@ function publishStructure(p) {
     const changes = {
         payrollStructureId: structure.payrollStructureId,
         publishedDate: ec.user.nowTimestamp,
-        publishedByUserId: ec.user.userId
+        publishedByUserId: approval.requestedByUserId || null,
+        draftedByUserIds: null
     }
     if (structure.statusId !== "PtsPublished")
         Object.assign(changes, {statusId: "PtsPublished", statusId_changeReason: reason, fromDate: new Date(effectiveMs)})
     call("update#" + STRUCTURE, changes)
-    return {payrollStructureId: structure.payrollStructureId, revision: structureRevision(structure.payrollStructureId)}
 }
 
 // ===== groups =====
@@ -1635,7 +1916,11 @@ function storeGroup(p) {
                 : String(value ?? "") === String(before ?? "")
         if (field === "firstPeriodFromDate" ? value !== calendarDateText(before) : !same) changes[field] = value
     }
-    if (flag(p.end)) changes.thruDate = new Date(when(p.thruDate) ?? nowMs())
+    if (flag(p.end)) {
+        const endMs = when(p.thruDate) ?? nowMs()
+        checkEnd(endMs)
+        changes.thruDate = new Date(endMs)
+    }
     if (text(p.reason))
         for (const field of Object.keys(changes))
             if (field !== "payrollGroupId") changes[field + "_changeReason"] = text(p.reason)
@@ -1733,6 +2018,9 @@ const operations = {
     storeComponentExample,
     previewComponent,
     publishComponent,
+    decidePublication,
+    approveNotice: p => decideNotice(p, "approve"),
+    refuseNotice: p => decideNotice(p, "refuse"),
     findStructures,
     storeStructure,
     storeStructureComponent,

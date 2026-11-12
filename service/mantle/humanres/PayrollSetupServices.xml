@@ -110,8 +110,12 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ===== P22: pay components, structures and groups (design §8.1, PayComponents to PayGroups; PayrollConfiguration.js) =====
         Read with PAYROLL_VIEW for the employers in the caller's People scope; changed with PAYROLL_VIEW, PAYROLL_EDIT and
-        PEOPLE_CONFIGURE (design §1.1). Another employer's record is a missing one (RECORD_UNAVAILABLE). Formulas are the
-        framework's decimal expressions (org.moqui.impl.ExpressionServices, PE-09). No currency, divisor or rounding is assumed. -->
+        PAYROLL_CONFIGURE (design §1.1; the P22 review's call of Nov 12, 2026 put it in place of PEOPLE_CONFIGURE). Another
+        employer's record is a missing one (RECORD_UNAVAILABLE). Formulas are the framework's decimal expressions
+        (org.moqui.impl.ExpressionServices, PE-09). No currency, divisor or rounding is assumed. Publishing a term or a structure's
+        lines takes effect on a People approval of kind PakPayrollConfig (the user's call of Nov 12, 2026): publish#Component and
+        publish#Structure ask for it, decide#Publication (and the PeoplePayrollConfigApproval topic's approve#Publication and
+        refuse#Publication) decide it, and a changed draft supersedes it. -->
     <service verb="find" noun="Components" allow-remote="false">
         <description>The pay components of the employers the caller reads (or organizationPartyId, an employer in scope), searched
             by code or name ignoring case (term), of a kind, in a state on asOfDate (draft, current, future or ended; ended ones only
@@ -173,7 +177,7 @@ along with this software (see the LICENSE.md file). If not, see
             become its dependencies), in its currency (required for money: no implicit currency) or a statistical value's unit, with
             an optional rounding stage (places and direction), payslip visibility and its account mapping (an earning's expense
             account, a deduction's liability account, a contribution's both, a statistical value's none). Refuses a caller without
-            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
+            PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
             ORGANIZATION_REQUIRED), another employer's component (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), and
             CODE_REQUIRED, CODE_INVALID, CODE_TAKEN, NAME_REQUIRED, KIND_INVALID, COMPONENT_ENDED, COMPONENT_IN_USE, TERM_PUBLISHED
             (a published term is never changed), BASIS_REQUIRED, BASIS_INVALID, AMOUNT_REQUIRED, AMOUNT_INVALID, FORMULA_REQUIRED,
@@ -222,7 +226,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A named example of a component's draft term (payrollComponentTermId, else the draft): added, changed
             (payrollComponentExampleId) or removed (remove), at the component's revision. inputValues gives each name the formula
             reads a decimal ("name = value" pairs, a JSON object or a map); expectedAmount is what the term must give. Refuses a caller
-            without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's component
+            without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), another employer's component
             (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), no draft (NO_DRAFT), a published term (TERM_PUBLISHED), no name
             (NAME_REQUIRED), a value that is not a name and a decimal (VALUE_INVALID) and no or a bad amount (AMOUNT_REQUIRED,
             AMOUNT_INVALID).</description>
@@ -279,30 +283,111 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="publish" noun="Component" allow-remote="false">
-        <description>A component's draft term published from its date (or fromDate), with a reason (the audit row's), at the
-            revision read; the published term in effect then ends on that date. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT
-            and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's component (RECORD_UNAVAILABLE), a stale revision
+        <description>A component's draft term asked to be published from its date (or fromDate, which the term then takes), with a
+            reason, at the revision read: checked as it would be published, then a People approval of kind PakPayrollConfig asked
+            for it (its approvers notified on PeoplePayrollConfigApproval; never one who drafted it or asks). It is published on
+            approval (decide#Publication), when the published term in effect then ends on that date. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT
+            and PAYROLL_CONFIGURE (PERMISSION_DENIED), another employer's component (RECORD_UNAVAILABLE), a stale revision
             (REVISION_CHANGED), an ended component (COMPONENT_ENDED), no draft (NO_DRAFT, TERM_PUBLISHED), no reason
             (REASON_REQUIRED), the term's own refusals (store#Component's), a mapping its kind needs (MAPPING_REQUIRED), no example
             (EXAMPLES_REQUIRED), an example not giving its amount (EXAMPLE_FAILED, each named), a component it reads with no published
             term on that date (MISSING_DEPENDENCY), components reading each other (CYCLIC_DEPENDENCY, the cycle named), a published
-            term starting on or after that date (TERMS_OVERLAP) and ending a published term in the past
-            (EFFECTIVE_DATE_PAST).</description>
+            term starting on or after that date (TERMS_OVERLAP), ending a published term in the past (EFFECTIVE_DATE_PAST) and
+            a request for the draft as it is waiting already (APPROVAL_PENDING). The dependency rules are checked on that date and
+            on each later date the employer's published terms start or end before the term ends.</description>
         <in-parameters>
             <parameter name="payrollComponentId" required="true"/>
             <parameter name="payrollComponentTermId"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="reason"/>
             <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payrollComponentTermId"/>
             <parameter name="revision"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="approvalStatusId"/>
+            <parameter name="published" type="Boolean"><description>false: the term is published on approval</description></parameter>
         </out-parameters>
         <actions>
             <set field="published" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('publishComponent', context)"/>
             <set field="payrollComponentTermId" from="published.payrollComponentTermId"/>
             <set field="revision" from="published.revision"/>
+            <set field="peopleApprovalId" from="published.peopleApprovalId"/>
+            <set field="approvalStatusId" from="published.approvalStatusId"/>
+            <set field="published" from="published.published"/>
+        </actions>
+    </service>
+
+    <service verb="decide" noun="Publication" allow-remote="false">
+        <description>A decision of the waiting request to publish a component's draft term (payrollComponentId, else
+            payrollComponentTermId's) or a structure's draft lines (payrollStructureId), by an approver of its step who reads the
+            employer's payroll configuration (PAYROLL_VIEW): approve, or refuse with a reason, through
+            PeopleApprovalServices.record#Decision at the revision asked (sourceRevision, from the notice). The last approval
+            publishes the draft, checked again as publish#Component or publish#Structure checks it (a term's date that has passed
+            with a term in effect then, or a structure's, becomes the approval's); a refusal leaves the draft as it is. Refuses a
+            caller without PAYROLL_VIEW (PERMISSION_DENIED), another employer's record (RECORD_UNAVAILABLE), no draft (NO_DRAFT),
+            one who drafted it or asked to publish it (SELF_APPROVAL), anyone else not an approver of the step (NOT_APPROVER), a
+            draft changed since it was asked (SOURCE_CHANGED), a refusal with no reason (REASON_REQUIRED), and the publishing
+            checks' own refusals, when the decision is not recorded.</description>
+        <in-parameters>
+            <parameter name="payrollComponentId"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="payrollStructureId"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="statusId"/>
+            <parameter name="published" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('decidePublication', context)"/>
+            <set field="peopleApprovalId" from="out.peopleApprovalId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="published" from="out.published"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="Publication" allow-remote="false">
+        <description>The PeoplePayrollConfigApproval topic's approve service (approve#NotificationMessage calls it as the user):
+            decide#Publication approve at the term or structure and revision in the message; refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Publication" allow-remote="false">
+        <description>The PeoplePayrollConfigApproval topic's refuse service (refuse#NotificationMessage calls it as the user, with
+            the reason): decide#Publication refuse at the term or structure and revision in the message; refuses a notice of
+            another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="out.repeated"/>
         </actions>
     </service>
 
@@ -361,7 +446,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A new pay structure of an employer in scope (structureName, currencyUomId: required, never assumed,
             payBasisEnumId), a copy of one (copyFromStructureId: a new structure of the same employer with the source's current lines
             as drafts and no assignments), or a structure's new name, pay basis, description or currency (a draft's only) or its end
-            (end, thruDate, reason), at the revision read. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE
+            (end, thruDate, reason), at the revision read. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE
             (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED, ORGANIZATION_REQUIRED), another employer's
             structure (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), NAME_REQUIRED, CURRENCY_REQUIRED, CURRENCY_INVALID,
             CURRENCY_LOCKED (a published structure's), BASIS_INVALID, EMPLOYER_CHANGE (a copy for another employer) and
@@ -395,7 +480,7 @@ along with this software (see the LICENSE.md file). If not, see
             line of a component at a time), a draft line's dates, payslip order (sequenceNum) or parameter values (the structure's
             values of the component's declared inputs, "name = value" pairs) changed, a draft line removed (remove), or a published
             line ended (end, thruDate, reason: its only change), at the structure's revision. Refuses a caller without PAYROLL_VIEW,
-            PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's structure or line (RECORD_UNAVAILABLE), a stale
+            PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), another employer's structure or line (RECORD_UNAVAILABLE), a stale
             revision (REVISION_CHANGED), STRUCTURE_ENDED, COMPONENT_REQUIRED, COMPONENT_UNAVAILABLE, LINE_EXISTS, LINE_PUBLISHED,
             ORDER_INVALID, VALUE_INVALID and DATES_INVALID.</description>
         <in-parameters>
@@ -465,28 +550,38 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="publish" noun="Structure" allow-remote="false">
-        <description>A structure's draft lines published, each from its own date or the publishing date (fromDate, now when
-            empty), with a reason (the audit row's), at the revision read; the first publish starts the structure. Publishing
-            reassigns no employee and rewrites no payslip. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE
+        <description>A structure's draft lines asked to be published, each from its own date or the publishing date (fromDate,
+            now when empty), with a reason, at the revision read: checked as they would be published, then a People approval of
+            kind PakPayrollConfig asked for them; they are published on approval (decide#Publication), the first publish starting
+            the structure. Publishing reassigns no employee and rewrites no payslip. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE
             (PERMISSION_DENIED), another employer's structure (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED),
             STRUCTURE_ENDED, no reason (REASON_REQUIRED), no draft line (NO_DRAFT), a line's component with no published term on its
             start (COMPONENT_NOT_PUBLISHED), a money component in another currency (CURRENCY_MISMATCH), two lines of one component at
-            once (TERMS_OVERLAP), no component on the date (LINES_REQUIRED), a dependency the structure lacks (MISSING_DEPENDENCY) and
-            components reading each other (CYCLIC_DEPENDENCY).</description>
+            once (TERMS_OVERLAP), no component on the date (LINES_REQUIRED), a dependency the structure lacks (MISSING_DEPENDENCY),
+            components reading each other (CYCLIC_DEPENDENCY) and a request for the structure as it is waiting already
+            (APPROVAL_PENDING). The term and dependency rules are checked on that date and on each later date a line, or a term of a
+            line's component, starts or ends.</description>
         <in-parameters>
             <parameter name="payrollStructureId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="reason"/>
             <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payrollStructureId"/>
             <parameter name="revision"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="approvalStatusId"/>
+            <parameter name="published" type="Boolean"><description>false: the lines are published on approval</description></parameter>
         </out-parameters>
         <actions>
             <set field="published" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('publishStructure', context)"/>
             <set field="payrollStructureId" from="published.payrollStructureId"/>
             <set field="revision" from="published.revision"/>
+            <set field="peopleApprovalId" from="published.peopleApprovalId"/>
+            <set field="approvalStatusId" from="published.approvalStatusId"/>
+            <set field="published" from="published.published"/>
         </actions>
     </service>
 
@@ -540,7 +635,7 @@ along with this software (see the LICENSE.md file). If not, see
             bi-week or week), firstPeriodFromDate (yyyy-MM-dd), periodsPerYear (the annual divisor), payDateOffsetDays (days after a
             period's last day, -31 to 62), prorationEnumId and timeBasisEnumId are required; workweekTimeZone and the localization
             binding are optional. Once periods are prepared the currency, frequency and first period stay. Refuses a caller without
-            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
+            PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
             ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live
             finalization (LIVE_NOT_AVAILABLE: no group can be live in this build), GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
@@ -583,7 +678,7 @@ along with this software (see the LICENSE.md file). If not, see
             employer's groups of that frequency) with the group's pay date (the period's last day plus its offset). Idempotent: a
             period prepared already is answered as it is (created false). With preview, the same periods are answered and nothing
             is written, for a payroll reader. No period is closed. Refuses a caller without PAYROLL_VIEW (a preview) or without
-            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's group (RECORD_UNAVAILABLE), an
+            PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), another employer's group (RECORD_UNAVAILABLE), an
             ended group (GROUP_ENDED) and a count outside 1 to 24 (COUNT_INVALID).</description>
         <in-parameters>
             <parameter name="payrollGroupId" required="true"/>

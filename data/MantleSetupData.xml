@@ -231,6 +231,11 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_APPROVAL_OWNER_CHANGE" fromDate="0"/>
     <userPermissions userPermissionId="PAYROLL_APPROVE" description="Payroll Approve (a payroll run another prepared)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_APPROVE" fromDate="0"/>
+    <!-- payroll configuration (impl-people P22 review; the user's call of Nov 12, 2026): pay components, structures, groups and
+        localizations, changed with PAYROLL_VIEW, PAYROLL_EDIT and this (mantle.humanres.PayrollSetupServices), in place of
+        PEOPLE_CONFIGURE, so payroll configures pay and People's administrator its policies -->
+    <userPermissions userPermissionId="PAYROLL_CONFIGURE" description="Payroll Configure (pay components, structures, groups and localizations)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_CONFIGURE" fromDate="0"/>
     <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
     <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>

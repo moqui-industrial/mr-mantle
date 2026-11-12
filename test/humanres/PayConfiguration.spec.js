@@ -3,7 +3,9 @@
 // framework's decimal evaluator, its currency, rounding and account mapping) and published only with examples giving their
 // amounts; a cyclic or missing dependency blocks publish; overlapping published terms are refused; a statistical component enters
 // no total and posts nothing; no currency or annual divisor is assumed; a structure previews gross to net with the demonstration
-// localization; a group is preview only and its periods are prepared once. Configuration needs PAYROLL_EDIT and PEOPLE_CONFIGURE.
+// localization; a group is preview only and its periods are prepared once. Configuration needs PAYROLL_EDIT and PAYROLL_CONFIGURE
+// (the P22 review's call of Nov 12, 2026); publishing takes effect on a People approval of kind PakPayrollConfig, decided by a
+// payroll approver who did not draft or ask for it, and a changed draft supersedes the request (the P22 review's other call).
 // Standalone: spec-local organizations, accounts, groups and users, with artifact authorization disabled (the rules are the
 // services' own checks).
 // Run: ./moq test mr-mantle --spec PayConfiguration
@@ -34,6 +36,13 @@ function run(username, service, parameters = {}) {
 }
 // the reason code of a refusal, or "" when the call succeeds
 const code = out => (out.error ? /[A-Z][A-Z0-9_]{3,}(?=:)/.exec(out.error)?.[0] || out.error : "")
+const parsed = text => {
+    try {
+        return JSON.parse(String(text || "{}"))
+    } catch (_) {
+        return {}
+    }
+}
 const dateOf = millis => ec.l10n.format(new Date(millis), "yyyy-MM-dd")
 function organization(partyId, name) {
     call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization", ownerPartyId: partyId})
@@ -77,7 +86,18 @@ function user(kind, permissions, organizationPartyIds) {
     call("create#moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: since})
     return id
 }
-// a component as the configurer: created with its draft term, its examples added, published; answers the component's id
+// publishing asked by the configurer and approved by the payroll approver: the publish's refusal code, else the decision's ("" when
+// both succeed)
+function publishApproved(service, parameters) {
+    const asked = run(state.config, G + service, Object.assign({reason: "Spec"}, parameters))
+    if (asked.error) return code(asked)
+    const key =
+        service === "publish#Structure"
+            ? {payrollStructureId: parameters.payrollStructureId}
+            : {payrollComponentId: parameters.payrollComponentId}
+    return code(run(state.approver, G + "decide#Publication", Object.assign({decision: "approve"}, key)))
+}
+// a component as the configurer: created with its draft term, its examples added, published on approval; answers its id
 function component(fields, examples = [], publish = true) {
     const created = run(state.config, G + "store#Component", Object.assign({organizationPartyId: orgA}, fields))
     if (created.error) throw new Error(fields.componentCode + ": " + created.error)
@@ -92,12 +112,11 @@ function component(fields, examples = [], publish = true) {
         revision = added.revision
     }
     if (publish) {
-        const published = run(state.config, G + "publish#Component", {
+        const published = publishApproved("publish#Component", {
             payrollComponentId: created.payrollComponentId,
-            expectedRevision: revision,
-            reason: "Spec"
+            expectedRevision: revision
         })
-        if (published.error) throw new Error(fields.componentCode + " publish: " + published.error)
+        if (published) throw new Error(fields.componentCode + " publish: " + published)
     }
     return created.payrollComponentId
 }
@@ -113,10 +132,13 @@ spec({
         account(prefix + "_WAGES", "COMPENSATION", orgA)
         account(prefix + "_WITHHELD", "ACCRUED_EXPENSES", orgA)
         account(prefix + "_WAGES_B", "COMPENSATION", orgB)
-        state.config = user("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_CONFIGURE"], [orgA])
-        state.configB = user("CONFIGB", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_CONFIGURE"], [orgB])
+        state.config = user("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgA])
+        state.config2 = user("CONFIG2", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE", "PAYROLL_APPROVE"], [orgA])
+        state.configB = user("CONFIGB", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgB])
         state.operator = user("OPERATOR", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
-        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_CONFIGURE"], [orgA])
+        // the People administrator's configuration permission no longer configures pay; an HR approver who reads no payroll
+        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_CONFIGURE", "PEOPLE_REQUEST_APPROVE"], [orgA])
+        state.approver = user("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"], [orgA])
         // the salary every later feature reads: a year's salary over the periods a year, both declared inputs
         state.salary = component(
             {
@@ -240,7 +262,10 @@ feature("a component's term is checked whole and published only with examples gi
             payrollComponentId: state.hourly,
             inputValues: "hours = 7.5"
         })
-        state.published = publish()
+        state.published = publishApproved("publish#Component", {
+            payrollComponentId: state.hourly,
+            expectedRevision: revisionOf(state.hourly)
+        })
         state.changePublished = code(
             run(state.config, G + "store#Component", {
                 payrollComponentId: state.hourly,
@@ -298,6 +323,142 @@ feature("a component's term is checked whole and published only with examples gi
     }
 })
 
+// P22 review (the user's call of Nov 12, 2026): publishing asks a People approval and takes effect when it is approved
+feature(
+    "publishing takes effect on approval by a payroll approver who did not draft it, and a changed draft supersedes the request",
+    {
+        when() {
+            const created = run(state.config, G + "store#Component", {
+                organizationPartyId: orgA,
+                componentCode: "APPR",
+                componentName: "Approved allowance",
+                componentKindEnumId: "PckEarning",
+                basisEnumId: "PcbAmount",
+                amount: "12.34",
+                currencyUomId: "USD",
+                expenseGlAccountId: prefix + "_WAGES"
+            })
+            const id = created.payrollComponentId
+            // a second configurer, who also approves pay, drafts its example: a drafter decides nothing of it
+            const example = run(state.config2, G + "store#ComponentExample", {
+                payrollComponentId: id,
+                expectedRevision: revisionOf(id),
+                exampleName: "Fixed",
+                inputValues: "",
+                expectedAmount: "12.34"
+            })
+            const ask = () =>
+                run(state.config, G + "publish#Component", {
+                    payrollComponentId: id,
+                    expectedRevision: revisionOf(id),
+                    reason: "Spec"
+                })
+            const decide = (username, decision = "approve", reason = null) =>
+                code(run(username, G + "decide#Publication", {payrollComponentId: id, decision, reason}))
+            const out = {}
+            const asked = ask()
+            out.asked = [code(asked), asked.published, asked.approvalStatusId].join()
+            out.again = code(ask())
+            const found = run(state.operator, G + "find#Components", {payrollComponentId: id})
+            out.waiting = [found.component.state, found.component.waitingApproval, found.terms[0].statusId].join()
+            out.route = found.component.approval?.steps?.[0]?.approverNames || ""
+            const notices = username =>
+                Array.from(
+                    ec.entity
+                        .find("moqui.security.user.NotificationMessageByUser")
+                        .condition({userId: username, topic: "PeoplePayrollConfigApproval"})
+                        .list()
+                ).filter(row => parsed(row.messageJson).payrollComponentId === id)
+            const approverNotices = notices(state.approver)
+            out.noticed = [approverNotices.length, notices(state.config2).length, notices(state.hr).length].join()
+            out.noticeText = approverNotices.map(row => String(row.titleText || "") + " " + String(row.messageJson || "")).join()
+            out.drafter = decide(state.config2)
+            out.requester = decide(state.config)
+            out.hr = decide(state.hr)
+            // the draft changed: the request is superseded and decides nothing
+            run(state.config, G + "store#ComponentExample", {
+                payrollComponentId: id,
+                expectedRevision: revisionOf(id),
+                payrollComponentExampleId: example.payrollComponentExampleId,
+                exampleName: "Fixed amount"
+            })
+            out.superseded = decide(state.approver)
+            out.afterChange = run(state.operator, G + "find#Components", {payrollComponentId: id}).component.state
+            // asked again: a refusal needs a reason and leaves the draft
+            ask()
+            out.noReason = decide(state.approver, "refuse")
+            out.refused = decide(state.approver, "refuse", "Not this month")
+            out.afterRefusal = run(state.operator, G + "find#Components", {payrollComponentId: id}).terms[0].statusId
+            // asked again and approved: published from its date, by who asked
+            ask()
+            out.approved = decide(state.approver)
+            const term = run(state.operator, G + "find#Components", {payrollComponentId: id}).terms[0]
+            out.published = [term.statusId, term.state].join()
+            out.publishedBy = ec.entity
+                .find("mantle.humanres.payroll.PayrollComponentTerm")
+                .condition({payrollComponentTermId: term.payrollComponentTermId})
+                .one().publishedByUserId
+            // a structure's lines through the topic's approve service, at the notice's revision
+            const structure = run(state.config, G + "store#Structure", {
+                organizationPartyId: orgA,
+                structureName: "Approved",
+                currencyUomId: "USD",
+                payBasisEnumId: "PpbSalaried"
+            }).payrollStructureId
+            const structureRevision = () =>
+                run(state.config, G + "find#Structures", {payrollStructureId: structure}).structure.revision
+            run(state.config, G + "store#StructureComponent", {
+                payrollStructureId: structure,
+                payrollComponentId: id,
+                expectedRevision: structureRevision()
+            })
+            run(state.config, G + "publish#Structure", {
+                payrollStructureId: structure,
+                expectedRevision: structureRevision(),
+                reason: "Spec"
+            })
+            const notice = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessageByUser")
+                    .condition({userId: state.approver, topic: "PeoplePayrollConfigApproval"})
+                    .list()
+            ).find(row => parsed(row.messageJson).payrollStructureId === structure)
+            out.structureNotice = !!notice
+            out.structureApproved = code(
+                run(state.approver, G + "approve#Publication", {
+                    recordEntityName: "mantle.humanres.payroll.PayrollStructure",
+                    recordId: structure,
+                    message: parsed(notice?.messageJson)
+                })
+            )
+            out.structureState = run(state.operator, G + "find#Structures", {payrollStructureId: structure}).structure.state
+            return out
+        },
+        then(out) {
+            out.asked === ",false,PapPending"
+            out.again === "APPROVAL_PENDING"
+            out.waiting === "waiting,true,PtsDraft"
+            out.route.includes("APPROVER") && !out.route.includes("CONFIG2") && !out.route.includes("HR")
+            out.noticed === "1,0,0"
+            !out.noticeText.includes("12.34")
+            out.drafter === "SELF_APPROVAL"
+            out.requester === "PERMISSION_DENIED"
+            out.hr === "PERMISSION_DENIED"
+            out.superseded === "NOT_PENDING"
+            out.afterChange === "draft"
+            out.noReason === "REASON_REQUIRED"
+            out.refused === ""
+            out.afterRefusal === "PtsDraft"
+            out.approved === ""
+            out.published === "PtsPublished,current"
+            out.publishedBy === state.config
+            out.structureNotice === true
+            out.structureApproved === ""
+            out.structureState === "current"
+        }
+    }
+)
+
 feature("a cyclic or missing dependency blocks publish, of a component and of a structure", {
     when() {
         // a pension on salary and hours at the structure's rate: refused while the hourly pay it reads is unpublished
@@ -334,18 +495,11 @@ feature("a cyclic or missing dependency blocks publish, of a component and of a 
             expectedAmount: "250.05"
         })
         const publishPension = () =>
-            code(
-                run(state.config, G + "publish#Component", {
-                    payrollComponentId: state.pension,
-                    expectedRevision: revisionOf(state.pension),
-                    reason: "Spec"
-                })
-            )
+            publishApproved("publish#Component", {payrollComponentId: state.pension, expectedRevision: revisionOf(state.pension)})
         state.missing = publishPension()
-        run(state.config, G + "publish#Component", {
+        publishApproved("publish#Component", {
             payrollComponentId: state.lateHourly,
-            expectedRevision: revisionOf(state.lateHourly),
-            reason: "Spec"
+            expectedRevision: revisionOf(state.lateHourly)
         })
         state.afterDependency = publishPension()
         // X reads nothing, Y reads X; X's next term reading Y is a cycle
@@ -393,6 +547,60 @@ feature("a cyclic or missing dependency blocks publish, of a component and of a 
             reason: "Spec"
         })
         state.nextTermId = next.payrollComponentTermId
+        // P22 review: a cycle that starts later is found now. BB and AA are published; AA's term from day 5 reads BB; BB's term
+        // from day 1 reading AA is no cycle on day 1, and one on day 5
+        const fixed = (componentCode, amount) =>
+            component(
+                {
+                    componentCode,
+                    componentName: componentCode,
+                    componentKindEnumId: "PckEarning",
+                    basisEnumId: "PcbAmount",
+                    amount,
+                    currencyUomId: "USD",
+                    expenseGlAccountId: prefix + "_WAGES"
+                },
+                [{exampleName: "Fixed", inputValues: "", expectedAmount: amount}]
+            )
+        const nextTerm = (id, formula, from, inputValues, expectedAmount) => {
+            run(state.config, G + "store#Component", {
+                payrollComponentId: id,
+                expectedRevision: revisionOf(id),
+                basisEnumId: "PcbFormula",
+                formula,
+                fromDate: new Date(from)
+            })
+            run(state.config, G + "store#ComponentExample", {
+                payrollComponentId: id,
+                expectedRevision: revisionOf(id),
+                exampleName: "Next",
+                inputValues,
+                expectedAmount
+            })
+            return publishApproved("publish#Component", {payrollComponentId: id, expectedRevision: revisionOf(id)})
+        }
+        const bb = fixed("BB", "3")
+        const aa = fixed("AA", "5")
+        state.laterRead = nextTerm(aa, "BB + 1", state.now + 5 * day, "BB = 3", "4")
+        run(state.config, G + "store#Component", {
+            payrollComponentId: bb,
+            expectedRevision: revisionOf(bb),
+            basisEnumId: "PcbFormula",
+            formula: "AA * 2",
+            fromDate: new Date(state.now + day)
+        })
+        run(state.config, G + "store#ComponentExample", {
+            payrollComponentId: bb,
+            expectedRevision: revisionOf(bb),
+            exampleName: "Next",
+            inputValues: "AA = 5",
+            expectedAmount: "10"
+        })
+        state.laterCycle = run(state.config, G + "publish#Component", {
+            payrollComponentId: bb,
+            expectedRevision: revisionOf(bb),
+            reason: "Spec"
+        })
         // a structure with the pension and not the earnings it reads
         const structure = run(state.config, G + "store#Structure", {
             organizationPartyId: orgA,
@@ -458,6 +666,9 @@ feature("a cyclic or missing dependency blocks publish, of a component and of a 
         state.afterDependency === ""
         code(state.cycle) === "CYCLIC_DEPENDENCY"
         state.cycle.error.includes("XC → YC → XC")
+        state.laterRead === ""
+        code(state.laterCycle) === "CYCLIC_DEPENDENCY"
+        state.laterCycle.error.includes("BB → AA → BB")
         state.structureMissing === "MISSING_DEPENDENCY"
         state.loopPreview.complete === false
         state.loopPreview.findings.some(finding => finding.code === "CYCLIC_DEPENDENCY" && finding.blocking)
@@ -494,14 +705,7 @@ feature("published terms do not overlap: a later term ends the one in effect, an
             })
             return stored
         }
-        const publish = () =>
-            code(
-                run(state.config, G + "publish#Component", {
-                    payrollComponentId: id,
-                    expectedRevision: revisionOf(id),
-                    reason: "Spec"
-                })
-            )
+        const publish = () => publishApproved("publish#Component", {payrollComponentId: id, expectedRevision: revisionOf(id)})
         run(state.config, G + "store#ComponentExample", {
             payrollComponentId: id,
             expectedRevision: revisionOf(id),
@@ -549,13 +753,10 @@ feature(
                 inputValues: "hours = 10",
                 expectedAmount: "10"
             })
-            state.hoursPublished = code(
-                run(state.config, G + "publish#Component", {
-                    payrollComponentId: hours.payrollComponentId,
-                    expectedRevision: revisionOf(hours.payrollComponentId),
-                    reason: "Spec"
-                })
-            )
+            state.hoursPublished = publishApproved("publish#Component", {
+                payrollComponentId: hours.payrollComponentId,
+                expectedRevision: revisionOf(hours.payrollComponentId)
+            })
             state.statisticalPreview = run(state.config, G + "preview#Component", {payrollComponentId: hours.payrollComponentId})
             state.noCurrency = code(
                 run(state.config, G + "store#Structure", {
@@ -590,9 +791,10 @@ feature(
                 inputValues: inputs,
                 payrollLocalizationId: "PlzDemonstration"
             })
-            state.publishedStructure = code(
-                run(state.config, G + "publish#Structure", {payrollStructureId: id, expectedRevision: revision(), reason: "Spec"})
-            )
+            state.publishedStructure = publishApproved("publish#Structure", {
+                payrollStructureId: id,
+                expectedRevision: revision()
+            })
             state.lines = run(state.config, G + "find#Structures", {payrollStructureId: id})
             // a second line of the salary at once is refused on publish
             line(state.salary, {sequenceNum: "11"})

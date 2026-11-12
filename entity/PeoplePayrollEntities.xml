@@ -21,8 +21,9 @@ along with this software (see the LICENSE.md file). If not, see
     employer's currency, frequency, explicit annual divisor, pay-date and proration policy and localization binding) and their pay
     periods (PayrollGroupPeriod over Mantle's TimePeriod); and the localization registration (PayrollLocalization), seeded with the
     one synthetic, non-statutory demonstration localization, which can never be live. Written only by
-    mantle.humanres.PayrollSetupServices (PayrollConfiguration.js), which checks PAYROLL_EDIT and PEOPLE_CONFIGURE and the employer
-    first; the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
+    mantle.humanres.PayrollSetupServices (PayrollConfiguration.js), which checks PAYROLL_EDIT and PAYROLL_CONFIGURE and the
+    employer first, and publishes a term or a structure's lines only on a People approval of kind PakPayrollConfig (the user's
+    calls of Nov 12, 2026, impl-people §4); the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
     terms and lines are ended, never changed or deleted. Nothing here is the legacy payroll (PayrollAdjustment and its rows), which
     no People service reads (design §8.4). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
@@ -95,8 +96,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payslipVisible" type="text-indicator"/>
         <field name="expenseGlAccountId" type="id"/>
         <field name="liabilityGlAccountId" type="id"/>
-        <field name="publishedDate" type="date-time"/>
-        <field name="publishedByUserId" type="id"/>
+        <field name="publishedDate" type="date-time"><description>When it was published: its approval's (impl-people P22 review)</description></field>
+        <field name="publishedByUserId" type="id"><description>Who asked to publish it</description></field>
+        <field name="draftedByUserIds" type="text-long"><description>Each user who changed the draft or its examples, comma
+            separated: none of them decides its publishing (impl-people P22 review)</description></field>
         <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
         <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
         <relationship type="one" title="PayrollComponentBasis" related="moqui.basic.Enumeration" short-alias="basis">
@@ -142,8 +145,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="copiedFromStructureId" type="id"/>
         <field name="createdDate" type="date-time"/>
-        <field name="publishedDate" type="date-time"/>
-        <field name="publishedByUserId" type="id"/>
+        <field name="publishedDate" type="date-time"><description>When its draft lines were last published: their approval's</description></field>
+        <field name="publishedByUserId" type="id"><description>Who last asked to publish its draft lines</description></field>
+        <field name="draftedByUserIds" type="text-long"><description>Each user who changed the structure or its lines since it was
+            last published, comma separated: none of them decides its publishing (impl-people P22 review)</description></field>
         <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
             <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
