@@ -367,7 +367,8 @@ along with this software (see the LICENSE.md file). If not, see
             refused with status 409 and nothing changes. A new start or end of an event that holds a meeting room or equipment
             (a current booking) is checked first as a move on the screens is (EventServices.check#ResourceBookings with the
             new time and checkOnly): a clash with another booking of it is refused with 409 and nothing changes; once stored,
-            a booking of a resource with approvers is asked again (check#ResourceBookings). ifMatch and ifNoneMatch are the
+            a booking of a resource with approvers is asked again (check#ResourceBookings), and a series booking a managed resource
+            (impl-maintenance P15) is checked again over its stored range (a rule changed with no new time). ifMatch and ifNoneMatch are the
             client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change, 400 for text that
             holds no event or to-do (or several UIDs). Another refusal of a service it calls is an error: the whole change
             rolls back and the DAV server answers by it (409, 403 for access).</description>
@@ -526,6 +527,19 @@ along with this software (see the LICENSE.md file). If not, see
             for (const workEffortId of moved) {
                 ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: workEffortId, allowConflicts: true}).call()
                 if (ec.message.hasError()) return
+            }
+            // a series of a managed resource (impl-maintenance P15) is checked again over its stored range, whose rule the client may
+            // have changed with no new time: one past the horizon, overlapping itself or clashing is an error, and the change rolls back
+            if (seriesRow != null && !moved.includes(seriesRow.workEffortId)) {
+                const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
+                const managed = Array.from(ec.entity.find('mantle.work.effort.WorkEffortFacility').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId && booking.statusId !== 'WefRequestDenied' && policies.policyAt({facilityId: booking.facilityId}))
+                    || Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssetAssign').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId !== 'WeaaRequestDenied' && booking.thruDate == null && policies.policyAt({assetId: booking.assetId}))
+                if (managed) {
+                    ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: seriesRow.workEffortId, reapprove: false}).call()
+                    if (ec.message.hasError()) return
+                }
             }
             const after = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
             const object = after.find((candidate) => candidate.uid === uid)

@@ -258,6 +258,7 @@ const ids = list => Array.from(new Set(list.filter(Boolean)))
     reads,
     capabilities,
     scope,
+    ownOrganizations,
     requesterOrganizations,
     covers,
     requireCapability,
