@@ -5,7 +5,9 @@
 // Purchasing approves and sources it to a draft purchase order, whose line is the work's (AssetMaintenanceOrderItem, never an
 // OrderItemWorkEffort) and shows on the work without its price; another order line is linked only by a buyer; at completion
 // the supervisor accepts the service with the technician's photo, recorded once under its key, and completing the work
-// completes no order line; a technician without Purchasing's grant cannot accept. Standalone: a spec-local organization with its
+// completes no order line; a technician without Purchasing's grant cannot accept. P10 review: the request names the work order
+// by id only and Purchasing's reader of it sees the work order's name only when Maintenance admits them (R3); a buyer reads the
+// line's price; another organization's order line is not linked; the evidence is attached to the line once. Standalone: a spec-local organization with its
 // accounting configuration, a supplier and its price, a service product, a facility, equipment, groups and users, the services
 // called as each user with the artifact check aside (their own permission and scope checks decide).
 // Run: ./moq test mr-mantle --spec MaintenancePurchases
@@ -150,19 +152,29 @@ feature(
             const tech = as(state.tech, S + "link#MaintenancePurchase", Object.assign({}, ask, {operationKey: prefix + "-tech"}))
             state.requestId = requested.requestId
             const approves = as(state.planner, R + "decide#PurchaseRequestApproval", {requestId: state.requestId})
+            // Purchasing's RequestDetail: the approver reads the work order without its name; the planner, its requester, with it
+            const approverWork = as(state.approver, S + "get#PurchaseRequestWork", {requestId: state.requestId})
+            const plannerWork = as(state.planner, S + "get#PurchaseRequestWork", {requestId: state.requestId})
             const sources = as(state.planner, R + "convert#PurchaseSourcing", {
                 requestItemKeys: [state.requestId + ":" + requested.requestItemSeqId],
                 operationKey: prefix + "-src-planner"
             })
-            return {requested, again, tech, approves, sources}
+            return {requested, again, tech, approves, sources, approverWork, plannerWork}
         },
-        then({requested, again, tech, approves, sources}) {
+        then({requested, again, tech, approves, sources, approverWork, plannerWork}) {
             requested.resultCode == "REQUESTED"
             requested.statusId == "ReqSubmitted"
             again.requestId == requested.requestId
             again.repeated == true
             rows("mantle.request.Request", {requestId: state.requestId})[0].requestTypeEnumId == "RqtPurchase"
             rows("mantle.request.Request", {requestId: state.requestId})[0].filedByPartyId == state.PLANNER_PARTY
+            !String(rows("mantle.request.Request", {requestId: state.requestId})[0].description).includes("Motor windings burnt")
+            approverWork.workList.length == 1
+            approverWork.workList[0].workEffortId == state.work
+            approverWork.workList[0].workEffortName == null
+            approverWork.workList[0].canOpen == false
+            plannerWork.workList[0].workEffortName == "Motor windings burnt"
+            plannerWork.workList[0].canOpen == true
             rows("mantle.request.RequestWorkEffort", {requestId: state.requestId, workEffortId: state.work}).length == 1
             rows("mantle.request.RequestParty", {requestId: state.requestId, partyId: org, roleTypeId: "OrgInternal"}).length == 1
             tech == "PERMISSION_DENIED"
@@ -216,9 +228,34 @@ feature("Purchasing sources it; the order line is the work's, never required wor
             orderId: other.orderId,
             orderItemSeqId: "01"
         })
-        return {approved, sourced, plannerRead, plannerLinks, buyerLinks}
+        // another organization's purchase order line: not the work's to link, even for a buyer
+        const elsewhere = prefix + "_ORG2"
+        organization(elsewhere, "Purchases Spec Elsewhere", "OrgInternal")
+        call("create#mantle.order.OrderHeader", {orderId: prefix + "_PO2", statusId: "OrderOpen", currencyUomId: "USD"})
+        call("create#mantle.order.OrderPart", {
+            orderId: prefix + "_PO2",
+            orderPartSeqId: "01",
+            vendorPartyId: supplier,
+            customerPartyId: elsewhere
+        })
+        call("create#mantle.order.OrderItem", {
+            orderId: prefix + "_PO2",
+            orderItemSeqId: "01",
+            orderPartSeqId: "01",
+            itemTypeEnumId: "ItemProduct",
+            productId: rewind,
+            quantity: 1,
+            unitAmount: 480
+        })
+        const otherOrganization = as(state.buyer, S + "link#MaintenancePurchase", {
+            workEffortId: state.work,
+            orderId: prefix + "_PO2",
+            orderItemSeqId: "01"
+        })
+        const buyerRead = as(state.buyer, S + "get#MaintenancePurchases", {workEffortId: state.work})
+        return {approved, sourced, plannerRead, plannerLinks, buyerLinks, otherOrganization, buyerRead}
     },
-    then({approved, sourced, plannerRead, plannerLinks, buyerLinks}) {
+    then({approved, sourced, plannerRead, plannerLinks, buyerLinks, otherOrganization, buyerRead}) {
         approved.statusId == "ReqInProgress"
         sourced.createdCount == 1
         state.orderId != null
@@ -238,6 +275,10 @@ feature("Purchasing sources it; the order line is the work's, never required wor
         plannerRead.canAccept == false
         plannerLinks == "PERMISSION_DENIED"
         buyerLinks.resultCode == "LINKED"
+        otherOrganization == "RECORD_UNAVAILABLE"
+        rows("mantle.product.maintenance.AssetMaintenanceOrderItem", {orderId: prefix + "_PO2"}).length == 0
+        buyerRead.priceRead == true
+        buyerRead.orderLines.find(row => row.orderId == state.orderId).unitAmountText.includes("480")
     }
 })
 
@@ -293,6 +334,11 @@ feature(
             acceptances.length == 1
             acceptances[0].workEffortId == state.work
             acceptances[0].orderContentId != null
+            rows("mantle.order.OrderContent", {
+                orderId: state.orderId,
+                orderItemSeqId: state.orderItemSeqId,
+                orderContentTypeEnumId: "OctServiceEvidence"
+            }).length == 1
             one("mantle.order.OrderContent", {orderContentId: acceptances[0].orderContentId}).orderContentTypeEnumId ==
                 "OctServiceEvidence"
             item.statusId != "ItemCompleted"

@@ -619,7 +619,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="link" noun="SourcedMaintenancePurchase" allow-remote="false">
         <description>Internal to the RequestItemOrder entity ECA MaintenancePurchaseSourced: when Purchasing sources a line of a
             purchase request linked to managed equipment work, the work's primary AssetMaintenance is linked to the order line
-            (AssetMaintenanceOrderItem). Only a RequestItemOrder that exists is followed; nothing else changes.</description>
+            (AssetMaintenanceOrderItem). Only a RequestItemOrder that exists is followed; nothing else changes. It never fails the
+            sourcing it runs in: what it cannot link is logged with the request, the order line and the work, and the rest goes
+            on (P10 review R2).</description>
         <in-parameters>
             <parameter name="requestId"/>
             <parameter name="orderId"/>
@@ -708,8 +710,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="PurchaseRequestWork" allow-remote="false" read-only="true">
         <description>Purchasing's RequestDetail's originating work (design-purchasing "Maintenance purchases"): for a user who reads
             the purchase request under Purchasing's rule (its people, or PURCHASE_ORDER_EDIT, PURCHASE_APPROVE, SUPPLY_PLAN_VIEW or
-            SUPPLY_PLAN_RUN in its organization), the work orders it was raised from: id, name, target, status and need date, and
-            whether Maintenance opens it for them (canOpen); never its notes, time or people.</description>
+            SUPPLY_PLAN_RUN in its organization), the work orders it was raised from: id, target, status and need date, and
+            whether Maintenance opens it for them (canOpen); the work order's name only when it does (P10 review R3); never its
+            notes, time or people.</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
         <out-parameters><parameter name="workList" type="List"/></out-parameters>
         <actions>

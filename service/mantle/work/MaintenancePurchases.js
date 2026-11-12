@@ -60,8 +60,6 @@ const priceReaders = [
     "ACCOUNTING_VIEW",
     "MAINTENANCE_COST_VIEW"
 ]
-// who reads a purchase request besides its people (PurchaseRequests.js readPermissions, Purchasing's rule)
-const requestReaders = ["PURCHASE_ORDER_EDIT", "PURCHASE_APPROVE", "SUPPLY_PLAN_VIEW", "SUPPLY_PLAN_RUN"]
 const requestFields = [
     "workEffortId",
     "requestName",
@@ -257,9 +255,8 @@ function requestPurchase(p) {
     const created = call("mantle.request.RequestServices.create#PurchaseRequest", {
         organizationPartyId,
         requestName: requestName.substring(0, 255),
-        description: ["For work order " + root.workEffortId + ": " + (root.workEffortName || ""), text(p.description)]
-            .filter(Boolean)
-            .join("\n\n"),
+        // the work order by its id only: its name is Maintenance's, shown to a buyer Maintenance admits (P10 review R3)
+        description: ["For maintenance work order " + root.workEffortId, text(p.description)].filter(Boolean).join("\n\n"),
         facilityId: facility?.ownerPartyId === organizationPartyId ? facility.facilityId : null,
         responseRequiredDate: p.requiredByDate || root.estimatedCompletionDate || null
     })
@@ -330,15 +327,42 @@ function writeLink(assetMaintenanceId, orderId, orderItemSeqId) {
 }
 // link#SourcedMaintenancePurchase (the RequestItemOrder ECA): Purchasing sourced a request line to an order line; when the
 // request is linked to managed equipment work, its primary AssetMaintenance is linked to the line too. Nothing else changes.
+// It runs inside Purchasing's sourcing transaction, so it never fails it (AGENTS.md failure tolerance; P10 review R2): no
+// service call (a failed one would mark the transaction for rollback), each work's link written directly after its checks,
+// and anything that still goes wrong logged with the request, the line and the work, the sourcing going on. The link is a
+// convenience: the work's reads find a sourced line through its request (RequestItemOrder) without it.
 function linkSourced(p) {
-    if (blank(p.requestId) || blank(p.orderId) || blank(p.orderItemSeqId)) return {linkedCount: 0}
-    if (!find(ITEM_ORDER, {requestId: p.requestId, orderId: p.orderId, orderItemSeqId: p.orderItemSeqId}).count())
-        return {linkedCount: 0}
-    if (one(REQUEST, {requestId: p.requestId})?.requestTypeEnumId !== purchaseType) return {linkedCount: 0}
     let linkedCount = 0
-    for (const row of rows(REQUEST_WORK, {requestId: p.requestId})) {
-        const order = one(ORDER, {workEffortId: row.workEffortId})
-        if (order?.assetMaintenanceId && writeLink(order.assetMaintenanceId, p.orderId, p.orderItemSeqId)) linkedCount++
+    const line = (p.orderId || "") + ":" + (p.orderItemSeqId || "")
+    try {
+        if (blank(p.requestId) || blank(p.orderId) || blank(p.orderItemSeqId)) return {linkedCount}
+        const works = rows(REQUEST_WORK, {requestId: p.requestId})
+        if (!works.length || one(REQUEST, {requestId: p.requestId})?.requestTypeEnumId !== purchaseType) return {linkedCount}
+        if (!find(ITEM_ORDER, {requestId: p.requestId, orderId: p.orderId, orderItemSeqId: p.orderItemSeqId}).count())
+            return {linkedCount}
+        if (!one(ITEM, {orderId: p.orderId, orderItemSeqId: p.orderItemSeqId})) return {linkedCount}
+        for (const row of works) {
+            try {
+                const assetMaintenanceId = one(ORDER, {workEffortId: row.workEffortId})?.assetMaintenanceId
+                if (!assetMaintenanceId || !one("mantle.product.maintenance.AssetMaintenance", {assetMaintenanceId})) continue
+                if (one(LINK, {assetMaintenanceId, orderId: p.orderId, orderItemSeqId: p.orderItemSeqId})) continue
+                ec.entity
+                    .makeValue(LINK)
+                    .setAll({assetMaintenanceId, orderId: p.orderId, orderItemSeqId: p.orderItemSeqId})
+                    .create()
+                linkedCount++
+            } catch (error) {
+                ec.logger.error(
+                    `Order line ${line} sourced from purchase request ${p.requestId} was not linked to work order ` +
+                        `${row.workEffortId}: ${error?.message || error}`
+                )
+            }
+        }
+    } catch (error) {
+        ec.logger.error(
+            `Order line ${line} sourced from purchase request ${p.requestId} was not linked to its maintenance work: ` +
+                `${error?.message || error}`
+        )
     }
     return {linkedCount}
 }
@@ -560,13 +584,13 @@ function getOrder(p) {
 
 // ===== get#PurchaseRequestWork (Purchasing's RequestDetail) =====
 // The work orders a purchase request was raised from, for a user who reads the request under Purchasing's rule (its people,
-// or a buyer, approver or planner of its organization): each work order's id, name, target and need date, and whether
-// Maintenance opens it for them; never its notes, time or people.
+// or a buyer, approver or planner of its organization): each work order's id, target, status and need date, and whether
+// Maintenance opens it for them; its name only when it does (P10 review R3); never its notes, time or people.
 function requestWork(p) {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in to read a purchase request")
-    const pr = purchaseRequests().purchaseRequest(text(p.requestId))
-    if (!pr.own && !requestReaders.some(access.has))
-        denied("PERMISSION_DENIED", "Purchase request " + pr.requestId + " is its people's, or " + requestReaders.join(" or "))
+    const requests = purchaseRequests()
+    const pr = requests.purchaseRequest(text(p.requestId))
+    requests.requireRead(pr)
     const partyId = ec.user.userAccount?.partyId || null
     const workList = rows(REQUEST_WORK, {requestId: pr.requestId})
         .map(row => one(ORDER, {workEffortId: row.workEffortId}))
@@ -575,9 +599,10 @@ function requestWork(p) {
             const root = one(WORK, {workEffortId: order.workEffortId})
             const asset = order.assetId ? one("mantle.product.asset.Asset", {assetId: order.assetId}) : null
             const facility = root.facilityId ? one("mantle.facility.Facility", {facilityId: root.facilityId}) : null
+            const canOpen = !maintenanceAccess.workHidden(root.workEffortId, partyId)
             return {
                 workEffortId: root.workEffortId,
-                workEffortName: root.workEffortName || root.workEffortId,
+                workEffortName: canOpen ? root.workEffortName || root.workEffortId : null,
                 targetName: asset
                     ? asset.assetName || asset.assetId
                     : facility
@@ -585,7 +610,7 @@ function requestWork(p) {
                       : "",
                 statusText: statusText(root.statusId),
                 neededByText: dateText(root.estimatedCompletionDate),
-                canOpen: !maintenanceAccess.workHidden(root.workEffortId, partyId)
+                canOpen
             }
         })
     return {workList}
