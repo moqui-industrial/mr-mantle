@@ -22,6 +22,7 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const maintenanceWork = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
+const maintenanceStack = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceStack.js")
 const {find, one, denied, call, ms} = lib
 
 const REQUEST = "mantle.request.Request"
@@ -239,6 +240,8 @@ function reportProblem(p) {
         const earlier = lib.previous(op)
         if (earlier) return {requestId: earlier.requestId, repeated: true}
     }
+    // the message it is reported from (P19: a chat message, a voicemail or a mail), read under its owner's check before any write
+    maintenanceStack.readSource(p)
     const description = [observed != null ? "Observed " + dateText(observed) : null, text(p.description)]
         .filter(Boolean)
         .join("\n\n")
@@ -259,6 +262,8 @@ function reportProblem(p) {
             contentDate: now(),
             contentFile: p.contentFile
         })
+    // the chat message or mail filed on the request (P19)
+    maintenanceStack.fileSource(requestId, p)
     if (op) lib.complete(op, REQUEST, requestId, {requestId})
     return {requestId, repeated: false}
 }
