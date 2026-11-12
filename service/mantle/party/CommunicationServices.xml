@@ -4107,12 +4107,28 @@ along with this software (see the LICENSE.md file). If not, see
             }
         ]]></script></actions>
     </service>
+    <service verb="check" noun="ConfidentialRecordType">
+        <description>Whether a record type's note and message notices go to their named recipients alone: a
+            mantle.party.communication.ConfidentialRecordType row not disabled for its full entity name (the name given, or
+            the full name of a short one). Unknown entity names are not confidential.</description>
+        <in-parameters><parameter name="recordEntityName" required="true"/></in-parameters>
+        <out-parameters><parameter name="confidential" type="Boolean"/></out-parameters>
+        <actions><script><![CDATA[
+            let entityName = recordEntityName
+            try { entityName = ec.entity.makeValue(recordEntityName).getEntityName() } catch (err) { /* as given */ }
+            const row = ec.entity.find('mantle.party.communication.ConfidentialRecordType').condition('recordEntityName', entityName)
+                    .useCache(true).disableAuthz().one()
+            confidential = !!row && row.disabled !== 'Y'
+        ]]></script></actions>
+    </service>
     <service verb="notify" noun="RecordMention">
         <description>
             Notifies the users mentioned in a note or message on a record, on topic ChatterMention: mentionUserIds and the
             users of mentionPartyIds, less the author. The message has recordEntityName, recordId, recordName,
             communicationEventId, authorUserId, authorName, subject and summary; the link is recordUrl, since the
-            record's screen belongs to the app. A failed send is logged and notifies no one.
+            record's screen belongs to the app. A record of a ConfidentialRecordType (check#ConfidentialRecordType) is told to
+            those users alone (directOnly: a subscription to every ChatterMention message receives none). A failed send is
+            logged and notifies no one.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4154,6 +4170,9 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const nm = ec.makeNotificationMessage().topic('ChatterMention').message(message).userIds(Array.from(userIds))
                 if (recordUrl) nm.link(recordUrl)
+                // a confidential record's notice is its recipients' alone (ConfidentialRecordType, People follow-up 1)
+                if (ec.service.sync().name('mantle.party.CommunicationServices.check#ConfidentialRecordType')
+                        .parameter('recordEntityName', recordEntityName).call()?.confidential) nm.directOnly()
                 nm.send()
                 notificationMessageId = nm.getNotificationMessageId()
                 notifiedUserIds = Array.from(nm.getNotifyUserIds() ?? [])
@@ -4166,7 +4185,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             Notifies the followers of a record whose RecordFollower row has the kind on (notifyMessages, notifyNotes,
             notifyActivities, notifyChanges), on topic RecordFollow, less the author and excludeUserIds. The message is
-            that of notify#RecordMention plus kind and workEffortId. A failed send is logged and notifies no one.
+            that of notify#RecordMention plus kind and workEffortId; a record of a ConfidentialRecordType is told to the
+            followers alone (directOnly), as there. A failed send is logged and notifies no one.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -4213,6 +4233,9 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const nm = ec.makeNotificationMessage().topic('RecordFollow').message(message).userIds(userIds)
                 if (recordUrl) nm.link(recordUrl)
+                // a confidential record's notice is its followers' alone (ConfidentialRecordType, People follow-up 1)
+                if (ec.service.sync().name('mantle.party.CommunicationServices.check#ConfidentialRecordType')
+                        .parameter('recordEntityName', recordEntityName).call()?.confidential) nm.directOnly()
                 nm.send()
                 notificationMessageId = nm.getNotificationMessageId()
                 notifiedUserIds = Array.from(nm.getNotifyUserIds() ?? [])

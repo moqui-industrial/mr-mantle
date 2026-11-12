@@ -272,9 +272,13 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="send" noun="InterviewInvitations" allow-remote="false">
         <description>The invitations of an interview (an ApplicationInterview's event) to its new or changed attendees, or its cancel
             (mantle.work.EventServices.send#EventInvitations as the system, the event being People's), run by the tx-commit rules of
-            schedule, change and cancel#Interview (PeopleRecruiting.secas.xml) once they commit (F358, People follow-up 1): the send
-            runs in a transaction of its own, so a failure is logged and answered (invitationsSent false, invitationProblem), adds
-            no error and never undoes the interview. Another event is not sent (invitationsSent false).</description>
+            schedule, change and cancel#Interview (PeopleRecruiting.secas.xml) once they commit (F358, People follow-up 1), and by a
+            recruiter's Send again on ApplicantDetail after a failed one. Who: a recruiter (PEOPLE_RECRUIT_EDIT) of the employer
+            (the rules run as the one who made the change); RECORD_UNAVAILABLE otherwise and for an event that is not an
+            interview. The send runs in a transaction of its own, so a failure, or an attendee not told, is logged, answered
+            (invitationsSent false, invitationProblem), adds no error, never undoes the interview and is recorded on it
+            (invitationSendStatus failed, invitationSendDate, invitationSendError) for its recruiters; a later send that tells
+            everyone marks it sent. An attendee already told is not told again.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="invitationsSent" type="Boolean"/>

@@ -18,8 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
     runs as the issuer, on a service worker, at least once; the service sends a letter once.
     An interview's invitations go once its schedule, change or cancel commits (F358, People follow-up 1, Nov 12, 2026): sent in
     the interview's own transaction, a failing send marked it rollback-only and the change was undone while the screen said it was
-    made. RecruitingServices.send#InterviewInvitations sends them as the system in a transaction of its own, a failure logged; the
-    rules run as the recruiter, on a service worker. send#EventInvitations tells only the attendees whose invitation changed, so a
+    made. RecruitingServices.send#InterviewInvitations sends them as the system in a transaction of its own, a failure logged and
+    recorded on the interview, where its recruiters send them again; the rules run as the recruiter, on a service worker. send#EventInvitations tells only the attendees whose invitation changed, so a
     second run tells nobody again. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
     <seca id="PeopleOfferLetterEmail" service="mantle.humanres.RecruitingServices.change#OfferState" when="tx-commit">
