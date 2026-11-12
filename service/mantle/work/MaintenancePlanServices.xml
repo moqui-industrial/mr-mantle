@@ -18,7 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
     permission (MAINTENANCE_VIEW to read, MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE to write) and the plan's organization
     (mantle/work/MaintenanceAccess.js), never a group or a calling screen; a missing plan and one outside the scope are refused
     alike (RECORD_UNAVAILABLE). EquipmentServices.get#AssetMaintenanceNeeded stays the baseline's and is not called (F11). P14
-    adds the occurrences, generation and reconciliation here. -->
+    adds the occurrences (MaintenanceOccurrence), the generation of a planner and of the generate_MaintenanceWorkOrders job, the
+    reconciliation of missed and counted obligations, and the job's state for Settings. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="MaintenanceSchedules" allow-remote="false">
         <description>The plans of the user's maintenance scope (MAINTENANCE_VIEW; PERMISSION_DENIED without), found in the query
@@ -208,6 +209,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="dueListPageRangeLow" type="Integer"/>
             <parameter name="dueListPageRangeHigh" type="Integer"/>
             <parameter name="failures" type="List"/>
+            <parameter name="dueListCapped" type="Boolean"><description>True when more active plans than the 500 read are in
+                scope (impl-maintenance F192)</description></parameter>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('findDue', context)"/>
@@ -219,6 +222,162 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="dueListPageRangeLow" from="answer.dueListPageRangeLow"/>
             <set field="dueListPageRangeHigh" from="answer.dueListPageRangeHigh"/>
             <set field="failures" from="answer.failures"/>
+            <set field="dueListCapped" from="!!answer.dueListCapped"/>
+        </actions>
+    </service>
+
+    <!-- P14: occurrences, generation, reconciliation (design §5.1, DueMaintenance, PlanDetail; impl-maintenance P14) -->
+    <service verb="find" noun="MaintenanceOccurrences" allow-remote="false" read-only="true">
+        <description>The obligations of one plan the user reads (MAINTENANCE_VIEW in its organization) that were acted on, latest
+            first and paged: each its due (the local date and time in the target's zone, or a meter's threshold), its state (open,
+            work made, completed, skipped, coalesced; a catch-up named), its work order and that work's status, when it was
+            satisfied and whether on time, the catch-up it was coalesced into, who generated it (a planner, or the job) and the
+            decision's reason and who. With them the plan's missed due dates not yet acted on (missedList), the work orders made
+            for the plan (workList, at most 200, a corrected one marked not counted) and whether the user may reconcile.</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleId" required="true"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="occurrenceList" type="List"/>
+            <parameter name="occurrenceListCount" type="Integer"/>
+            <parameter name="occurrenceListPageIndex" type="Integer"/>
+            <parameter name="occurrenceListPageSize" type="Integer"/>
+            <parameter name="occurrenceListPageMaxIndex" type="Integer"/>
+            <parameter name="occurrenceListPageRangeLow" type="Integer"/>
+            <parameter name="occurrenceListPageRangeHigh" type="Integer"/>
+            <parameter name="workList" type="List"/>
+            <parameter name="missedList" type="List"/>
+            <parameter name="canReconcile" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('findOccurrences', context)"/>
+            <set field="occurrenceList" from="answer.occurrenceList"/>
+            <set field="occurrenceListCount" from="answer.occurrenceListCount"/>
+            <set field="occurrenceListPageIndex" from="answer.occurrenceListPageIndex"/>
+            <set field="occurrenceListPageSize" from="answer.occurrenceListPageSize"/>
+            <set field="occurrenceListPageMaxIndex" from="answer.occurrenceListPageMaxIndex"/>
+            <set field="occurrenceListPageRangeLow" from="answer.occurrenceListPageRangeLow"/>
+            <set field="occurrenceListPageRangeHigh" from="answer.occurrenceListPageRangeHigh"/>
+            <set field="workList" from="answer.workList"/>
+            <set field="missedList" from="answer.missedList"/>
+            <set field="canReconcile" from="!!answer.canReconcile"/>
+        </actions>
+    </service>
+    <service verb="generate" noun="MaintenanceWorkOrders" allow-remote="false" operation="maintenance.pm.generate"
+            operation-ref="maintenanceScheduleId">
+        <description>A planner's generation of preventive work (MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE): the plans named
+            (maintenanceScheduleIds, or one maintenanceScheduleId; each in the user's scope, RECORD_UNAVAILABLE named for one that is
+            not), else the active plans of the scope, an organization, a piece of equipment or a facility (with those inside it), at
+            most 500 (capped). Each plan in a transaction of its own with the plan locked, so the job and a planner of the same plan
+            take turns and make one obligation and one work order (the obligation's key is unique): its outcome generated (the work
+            order made for its next uncovered obligation once due: a calendar plan from its lead days before the planned day, a
+            meter plan at its threshold), open (WORK_OPEN: its work is still open; at most one unresolved execution a plan), notDue
+            (NOT_DUE), blocked (PLAN_NOT_ACTIVE, TARGET_MOVED, READING_STALE or BASELINE_REQUIRED: request a reading, ZONE_REQUIRED,
+            PROCEDURE_NOT_QUALIFIED: a retired or unapproved procedure blocks new work) or failed (its reason; the others go on).
+            The work is the plan's procedure (the checked instantiation) or ad hoc with the plan's name and estimate, of the plan's
+            type and team, preventive, from the schedule, waiting for a supervisor's approval unless within the threshold; the plan
+            is set on it by this path alone. With preview, each plan's outcome and nothing changed (ready: work would be made). An
+            operation key answers a retry with its first result. The organization's planners are told on MaintenanceDue.</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleIds" type="List"><parameter name="maintenanceScheduleId"/></parameter>
+            <parameter name="maintenanceScheduleId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>Each {maintenanceScheduleId, scheduleName, outcome, code, message,
+                workEffortId, maintenanceOccurrenceId, obligationText, repeated}</description></parameter>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="generatedCount" type="Integer"/>
+            <parameter name="openCount" type="Integer"/>
+            <parameter name="notDueCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="capped" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('generate', context)"/>
+            <set field="results" from="answer.results"/>
+            <set field="readyCount" from="answer.readyCount"/>
+            <set field="generatedCount" from="answer.generatedCount"/>
+            <set field="openCount" from="answer.openCount"/>
+            <set field="notDueCount" from="answer.notDueCount"/>
+            <set field="blockedCount" from="answer.blockedCount"/>
+            <set field="failedCount" from="answer.failedCount"/>
+            <set field="capped" from="!!answer.capped"/>
+        </actions>
+    </service>
+    <service verb="run" noun="MaintenanceGeneration" authenticate="false" allow-remote="false" transaction="ignore"
+            operation="maintenance.pm.job">
+        <description>The generate_MaintenanceWorkOrders job (seeded paused; its schedule, pause and batch size are Admin's, its run
+            outside the schedule Admin's recovery): the generation of generate#MaintenanceWorkOrders for every active plan of
+            every organization, as a planner who is no supervisor, in batches of batchSize plans by id (100 unless set, at most
+            1000), at most 5000 a run (capped), each plan in a transaction of its own; a failing plan is logged by its id and the
+            rest go on, and a repeat is safe (the obligation's key). Granted to no group; a signed-in caller (the job run as a
+            person) needs MAINTENANCE_SETTINGS_EDIT.</description>
+        <in-parameters>
+            <parameter name="batchSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="scheduleCount" type="Integer"/>
+            <parameter name="generatedCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="capped" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('runJob', context)"/>
+            <set field="scheduleCount" from="answer.scheduleCount"/>
+            <set field="generatedCount" from="answer.generatedCount"/>
+            <set field="blockedCount" from="answer.blockedCount"/>
+            <set field="failedCount" from="answer.failedCount"/>
+            <set field="capped" from="!!answer.capped"/>
+        </actions>
+    </service>
+    <service verb="reconcile" noun="MaintenanceSchedule" allow-remote="false">
+        <description>A planner's decision on a plan's obligations (MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE in its organization),
+            with changeReason (REASON_REQUIRED), keeping what was there: coalesce (the missed due dates named in obligationKeys, all
+            of them when none; two or more, VALUE_INVALID) into one catch-up, the latest of them or the one whose work is open (its
+            work made from now when none; another obligation's open work is WORK_OPEN), each other one coalesced into it, so its
+            completion counts for every one of them (late) and its cancellation opens them all again; skip a due date (the next one,
+            or those named; WORK_OPEN while its work is open); or correct a counted completion (maintenanceOccurrenceId, completed;
+            STATUS_INVALID otherwise): the obligation is open again and its work order is kept and named not counted, and the plan's
+            open work, made from the earlier projection, is named for review (reviewWorkEffortIds). A meter plan's obligation is
+            not coalesced or skipped (VALUE_INVALID): it advances only after a completion with its reading.</description>
+        <in-parameters>
+            <parameter name="maintenanceScheduleId" required="true"/>
+            <parameter name="action" required="true"><description>coalesce, skip or correct</description></parameter>
+            <parameter name="obligationKeys" type="List"><parameter name="obligationKey"/></parameter>
+            <parameter name="maintenanceOccurrenceId"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="occurrenceIds" type="List"/>
+            <parameter name="workEffortId"/>
+            <parameter name="reviewWorkEffortIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('reconcile', context)"/>
+            <set field="occurrenceIds" from="answer.occurrenceIds"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="reviewWorkEffortIds" from="answer.reviewWorkEffortIds"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceDueJob" allow-remote="false" read-only="true">
+        <description>The preventive generation job's state for Maintenance's Settings (MAINTENANCE_SETTINGS_EDIT, MAINTENANCE_PLAN or
+            MAINTENANCE_SUPERVISE): paused or its schedule, and its last run. Its schedule, pause and batch size are changed in
+            Admin's Jobs (the job's JobRegistration).</description>
+        <out-parameters>
+            <parameter name="job" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js').execute('getDueJob', context)"/>
+            <set field="job" from="answer.job"/>
         </actions>
     </service>
 </services>

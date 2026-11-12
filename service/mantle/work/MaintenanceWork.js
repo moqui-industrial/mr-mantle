@@ -37,6 +37,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
+// P14: a preventive plan's generation, completion credit and Home's counts (MaintenancePlans.js)
+const plans = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePlans.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 const {find, one, denied, call, ms} = lib
 
@@ -159,7 +161,8 @@ const defaultPolicy = {
     defaultTeamPartyId: null,
     productionRequestsManaged: false,
     warrantyRepairsManaged: false,
-    procedureSelfApproval: false
+    procedureSelfApproval: false,
+    pmLeadDays: null
 }
 // The policy in effect for an organization, or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
@@ -179,6 +182,7 @@ function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
         productionRequestsManaged: flag(row.productionRequestsManaged),
         warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
         procedureSelfApproval: flag(row.procedureSelfApproval),
+        pmLeadDays: number(row.pmLeadDays),
         comments: row.comments || null
     }
 }
@@ -217,6 +221,10 @@ function storePolicy(p) {
     const typeId = requireEnum(p.defaultMaintenanceTypeEnumId, "MaintenanceType", "Maintenance type")
     const teamId = text(p.defaultTeamPartyId)
     if (teamId) requireTeam(organizationPartyId, teamId)
+    // P14: the days ahead preventive work is made for a plan that names none
+    const leadDays = blank(p.pmLeadDays) ? null : Number(String(p.pmLeadDays))
+    if (leadDays != null && (!Number.isInteger(leadDays) || leadDays < 0 || leadDays > 365))
+        denied("VALUE_INVALID", "Enter the days ahead as a whole number from 0 to 365")
     const now = ec.user.nowTimestamp
     for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", now).list()))
         call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: now})
@@ -230,6 +238,7 @@ function storePolicy(p) {
         productionRequestsManaged: flag(p.productionRequestsManaged) ? "Y" : "N",
         warrantyRepairsManaged: flag(p.warrantyRepairsManaged) ? "Y" : "N",
         procedureSelfApproval: flag(p.procedureSelfApproval) ? "Y" : "N",
+        pmLeadDays: leadDays,
         changedByUserId: ec.user.userId,
         comments: text(p.comments)
     })
@@ -532,7 +541,7 @@ function makeOrder(userScope, target, p, options) {
             const partyId = text(named[roleTypeId])
             if (partyId) roleParties[roleTypeId] = requireMember(target.organizationPartyId, partyId)
         }
-        instantiatedId = procedures().execute("instantiateProcedure", {
+        instantiatedId = procedures().instantiateWith(userScope, {
             templateWorkEffortId: templateId,
             assetId: target.assetId,
             facilityId: target.assetId ? null : target.facilityId,
@@ -600,6 +609,8 @@ function makeOrder(userScope, target, p, options) {
         procedureDate: instantiatedId ? ec.user.nowTimestamp : null,
         revision: 1,
         offlineIntent: flag(p.offlineIntent) ? "Y" : null,
+        // P14: the plan generated work executes, set by its generation alone (MaintenancePlans.js), never from a caller
+        maintenanceScheduleId: options.maintenanceScheduleId || null,
         operationKey: options.operationKey || null,
         operationHash: options.operationHash || null
     })
@@ -1001,7 +1012,9 @@ function actionsFor(userScope, ctx) {
                 // P5: Start's offline intent and Complete's follow-up
                 needsOffline: action === "start",
                 offlineIntent: ctx.order.offlineIntent === "Y",
-                needsFollowUp: action === "complete"
+                needsFollowUp: action === "complete",
+                // P14 (F187): a meter plan's work asks for the reading it took when it has none
+                readingMeterName: action === "complete" ? plans().readingNeeded(ctx.order)?.meterName || null : null
             }
         })
 }
@@ -1054,6 +1067,8 @@ function transitionWorkOrder(p) {
             if (ms(finished) > nowMs() + minuteMs) denied("DATE_FUTURE", "The finish is now or earlier")
             if (root.actualStartDate && ms(finished) < ms(root.actualStartDate))
                 denied("DATES_INVALID", "The finish is before the work started")
+            // P14 (F187): a meter plan's work records the reading it took before it completes
+            plans().requireCompletionReading(order, root, p, finished)
             workFields.statusId = "WeComplete"
             workFields.actualCompletionDate = finished
             Object.assign(orderFields, {
@@ -1088,9 +1103,12 @@ function transitionWorkOrder(p) {
     }
     const revision = bump(order, orderFields)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
+    const statusAfter = one(WORK, {workEffortId: root.workEffortId}).statusId
+    // P14: the plan's obligation completed once, or open again after a cancellation
+    plans().creditCompletion(order, statusAfter)
     return {
         workEffortId: root.workEffortId,
-        statusId: one(WORK, {workEffortId: root.workEffortId}).statusId,
+        statusId: statusAfter,
         revision,
         resultCode,
         resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
@@ -1557,8 +1575,8 @@ function findWorkOrders(p) {
 
 // ===== get#MaintenanceHome =====
 // Home's counters, the caller's work and the teams' (design §3 Home): over the scope (a chosen organization or facility), read
-// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The counts of plans,
-// meters and downtime are not configured until their phases (null, never zero).
+// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The overdue plans and
+// unknown meter readings (P14) are a reader of work's, null for anyone else (never zero); downtime is P5's.
 function home(p) {
     const userScope = scopeWithAny(["workRead"])
     const filters = {organizationPartyId: p.organizationPartyId, facilityId: p.facilityId, statusId: null}
@@ -1586,8 +1604,8 @@ function home(p) {
         unassignedCount: openRows.filter(row => !assignedIds.has(row.workEffortId)).length,
         highPriorityCount: openRows.filter(row => row.priority != null && Number(row.priority) <= highPriority).length,
         overdueCount: openRows.filter(overdue).length,
-        overduePmCount: null,
-        unknownMeterCount: null,
+        // P14: the active plans overdue and those whose meter reading is unknown (a reader of work's; null for another)
+        ...plans().homeCounts(userScope, filters),
         downResourceCount: outages.downCount(userScope, filters),
         capped: openRows.length >= homeLimit
     }
@@ -1660,5 +1678,12 @@ const operations = {
     },
     // P4: for Mantle's own callers only (MaintenanceIntake.js), never a service's parameters
     adoptForOwner,
+    // P14: a plan's work order, for its generation alone (MaintenancePlans.js): the scope it resolved and the plan
+    createForPlan: (userScope, p, options) =>
+        makeOrder(userScope, targetOf(userScope, p), p, {
+            maintenanceScheduleId: options.maintenanceScheduleId,
+            operationKey: null,
+            operationHash: null
+        }),
     policyOf
 })

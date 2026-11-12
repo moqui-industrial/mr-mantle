@@ -260,7 +260,9 @@ along with this software (see the LICENSE.md file). If not, see
             order's, or offlineIntent) records the target's outage as planned maintenance (unavailabilityReasonEnumId), or links
             the one open; complete with equipment still unavailable (MdispUnavailable) records its outage when none is open, and
             followUpName makes a follow-up corrective work order on the same target, caused by this one and linked to its open
-            outage; completion and cancel restore nothing (end#ResourceUnavailability does).</description>
+            outage; completion and cancel restore nothing (end#ResourceUnavailability does). A preventive plan's work (P14):
+            complete or close counts its obligation once, cancel opens it again; a meter plan's work needs the reading of the
+            plan's meter taken in it, or meterValue (READING_REQUIRED).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="action" required="true"><description>approve, start, hold, resume, complete, close or cancel</description></parameter>
@@ -275,6 +277,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="offlineIntent"/>
             <parameter name="unavailabilityReasonEnumId"/>
             <parameter name="followUpName"/>
+            <parameter name="meterValue"><description>Complete of a meter plan's work: the reading of the plan's meter taken in the
+                work, recorded at the finish when the work has none (P14, F187; READING_REQUIRED without either)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>

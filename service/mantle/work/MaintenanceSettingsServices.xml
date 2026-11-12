@@ -19,7 +19,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
-            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed.
+            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, and
+            preventive work made on its day when a plan names no lead days (pmLeadDays, P14).
             canEdit says whether the user may change it.</description>
         <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
         <out-parameters>
@@ -47,6 +48,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productionRequestsManaged"/>
             <parameter name="warrantyRepairsManaged"/>
             <parameter name="procedureSelfApproval"/>
+            <parameter name="pmLeadDays"><description>The days ahead preventive work is made for a plan whose terms name none
+                (P14; 0 to 365, empty: on the day)</description></parameter>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>
