@@ -9,9 +9,11 @@
     <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesInvoiceItem" userGroupId="ADMIN"/>
     <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleInventoryAsset" userGroupId="ADMIN"/>
     <!-- The organization scope policy of business datasets (the report engine's ReportScopePolicy; mantle-sales-orders,
-        mantle-sales-items and mantle-inventory name it): the rows of the viewer's organizations on the field the dataset names -->
+        mantle-sales-items and mantle-inventory name it): the rows of the viewer's organizations on the field the dataset names
+        in the rowFilterParameters entry registered here (optionValue: organizationField), which the dataset forms ask for -->
     <moqui.basic.Enumeration enumId="MantleOrganization" enumTypeId="ReportScopePolicy"
-            enumCode="mantle.party.PartyServices.get#OrganizationRowFilter" description="the viewer's organizations"/>
+            enumCode="mantle.party.PartyServices.get#OrganizationRowFilter" description="the viewer's organizations"
+            optionValue="organizationField"/>
     <!-- Business events (mantle.party.BusinessEventServices; the report engine's ReportAnnotationSource): the dataset
         mantle-business-events over the engine's annotations, scoped to the viewer's organizations by the policy above, which a
         dashboard over business data reads for its markers; the system administrator reads it through the engine's dataset
