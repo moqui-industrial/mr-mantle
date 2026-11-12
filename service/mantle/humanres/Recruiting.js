@@ -13,7 +13,8 @@
 //   interview scorecard purpose (mantle.party.FormDefinitions), as a FormInvitation naming them and the application, with no link:
 //   they answer it once, here (submit#Scorecard), and read their own answer only;
 //   the event is People's (the EventManager PeopleInterview): changed and cancelled only here (change#Interview,
-//   cancel#Interview), never on Commons' EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026);
+//   cancel#Interview), never on Commons' EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026); its room is
+//   a booking of Maintenance's resource booking (EventRooms.js, People follow-up 3), moved and cancelled with it;
 // - mail intake (create#ApplicationFromEmail, the createApplication mail rule action): runs with authorization off, so it checks
 //   itself that the rule may file into the opening and answers a message once.
 // Who reads what: a recruiter (PEOPLE_RECRUIT_VIEW) of the employer, in People's scope (People.js scopeOf), reads its openings
@@ -30,6 +31,7 @@ const people = ec.resource.script("component://mr-mantle/service/mantle/humanres
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
 // the interview's room and equipment bookings kept right when it moves or is cancelled (impl-maintenance F356)
 const bookings = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
+const rooms = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/EventRooms.js")
 const {find, one, rows, denied, call, dateText, ms} = lib
 
 const OPENING = "mantle.humanres.recruitment.JobOpening",
@@ -810,9 +812,13 @@ function scorecardRows(invitationRows, access, partyId) {
 }
 function interviewRows(items, access, partyId) {
     const people_ = people.personNames(unique(items.flatMap(item => item.invitations.map(row => row.partyId))))
+    const roomOf = rooms().roomsOf(items.map(item => item.row.workEffortId))
     return items.map(({row, event, invitations}) => {
         const startMs = ms(event.estimatedStartDate)
         const endMs = ms(event.estimatedCompletionDate)
+        // its place and room for a recruiter and its panel
+        const placeShown = access === "recruiter" || invitations.some(item => item.partyId === partyId)
+        const room = placeShown ? roomOf[row.workEffortId] || null : null
         return {
             workEffortId: row.workEffortId,
             title: event.workEffortName || "",
@@ -820,7 +826,11 @@ function interviewRows(items, access, partyId) {
             startMs,
             endMs,
             cancelled: event.statusId === "WeCancelled",
-            location: access === "recruiter" || invitations.some(item => item.partyId === partyId) ? event.location || "" : "",
+            location: placeShown ? event.location || "" : "",
+            facilityId: room?.facilityId || null,
+            roomName: room?.roomName || "",
+            roomStatus: room?.roomStatus || null,
+            roomStatusText: room?.roomStatusText || "",
             hasCall: !!row.callLinkId,
             panelText: invitations.map(item => people_[item.partyId] || item.partyId).join(", "),
             // the last failed send of its invitations, for its recruiters (send#InterviewInvitations; People follow-up 1 review)
@@ -977,7 +987,9 @@ function siteUrl() {
 }
 // schedule#Interview: a recruiter schedules an interview of an application that is not closed past Interview: a private event
 // (WetEvent, WevRestricted) from start for minutes, owned by the caller, at a location or on a video call (create#CallLink:
-// the link in the event's location, so the iMIP invitation carries it), with the panel (employees of the employer with an
+// the link in the event's location, so the iMIP invitation carries it), in a meeting room (facilityId: booked through the resource
+// booking and named its place unless on a video call; ROOM_UNAVAILABLE refuses the interview when it is not free; People
+// follow-up 3), with the panel (employees of the employer with an
 // account) and, when asked, the candidate as attendees; each panel member assigned the scorecard (the form given, else the
 // opening's, else the employer's only published interview scorecard; SCORECARD_REQUIRED for none) with no link. Moves a
 // received or screening application to Interview. The invitations go once it commits (send#InterviewInvitations: a user is
@@ -1009,7 +1021,8 @@ function scheduleInterview(p) {
     const candidateEmail = applicantEmails([application.applyingPartyId])[application.applyingPartyId] || ""
     if (inviteCandidate && !candidateEmail) denied("CANDIDATE_NO_EMAIL", "The applicant has no email address to invite")
     const title = "Interview: " + (opening?.title || "application " + application.employmentApplicationId)
-    let location = text(p.location) || null
+    const room = text(p.facilityId) ? rooms().roomOf(p.facilityId) : null
+    let location = room ? room.roomName : text(p.location) || null
     let callLinkId = null
     let callPath = null
     if (video) {
@@ -1082,6 +1095,7 @@ function scheduleInterview(p) {
                 createdDate: now
             }).invitationId
     )
+    if (room) rooms().place(workEffortId, room.facilityId, false)
     if (["EaReceived", "EaScreening"].includes(application.statusId))
         call("update#" + APPLICATION, {
             employmentApplicationId: application.employmentApplicationId,
@@ -1161,9 +1175,10 @@ function interviewToChange(p) {
     if (event.statusId === "WeCancelled") denied("INTERVIEW_CANCELLED", "This interview was cancelled; schedule another")
     return {interview, event}
 }
-// change#Interview: a new start (from now on), length (10 minutes to 8 hours), place (not of a video interview, whose place is
-// its call link, kept open until a day after the new end) or note; what is not given stays. The attendees are told once it
-// commits (send#InterviewInvitations).
+// change#Interview: a new start (from now on), length (10 minutes to 8 hours), room (facilityId, empty for none; the room kept is
+// checked again at a new time, a new one booked, one no longer chosen cancelled: ROOM_UNAVAILABLE refuses the change), place (not
+// of a video interview, whose place is its call link, kept open until a day after the new end; a room is the place of any other) or
+// note; what is not given stays. The attendees are told once it commits (send#InterviewInvitations).
 function changeInterview(p) {
     const {interview, event} = interviewToChange(p)
     const workEffortId = interview.workEffortId
@@ -1182,10 +1197,18 @@ function changeInterview(p) {
         denied("DURATION_INVALID", "An interview lasts 10 minutes to 8 hours")
     const endMs = startMs + minutes * 60 * 1000
     const changes = {workEffortId, estimatedStartDate: stamp(startMs), estimatedCompletionDate: stamp(endMs)}
-    if (p.location != null && !interview.callLinkId) changes.location = text(p.location) || null
+    const currentRoom = rooms().roomsOf([workEffortId])[workEffortId] || null
+    const facilityId = p.facilityId != null ? text(p.facilityId) || null : currentRoom?.facilityId || null
+    const room = !facilityId ? null : facilityId === currentRoom?.facilityId ? currentRoom : rooms().roomOf(facilityId)
+    if (!interview.callLinkId) {
+        if (room) changes.location = room.roomName
+        else if (p.location != null) changes.location = text(p.location) || null
+        else if (currentRoom) changes.location = null
+    }
     if (p.note != null) changes.description = text(p.note) || null
     call("update#" + WORK, changes)
     if (startMs !== oldStartMs || endMs !== oldEndMs) bookings().keptEventMoved(workEffortId)
+    rooms().place(workEffortId, facilityId, startMs !== oldStartMs || endMs !== oldEndMs)
     if (interview.callLinkId) {
         const link = one("moqui.call.CallLink", {callLinkId: interview.callLinkId})
         const wantMs = Math.min(nowMs() + 90 * 24 * hourMs, endMs + 24 * hourMs)
@@ -1194,8 +1217,8 @@ function changeInterview(p) {
     }
     return {workEffortId}
 }
-// cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its video call's link closed (closeCallLink)
-// and the attendees told once it commits (send#InterviewInvitations).
+// cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its room booking cancelled, its video call's
+// link closed (closeCallLink) and the attendees told once it commits (send#InterviewInvitations).
 function cancelInterview(p) {
     const {interview} = interviewToChange(p)
     const workEffortId = interview.workEffortId
@@ -1205,6 +1228,7 @@ function cancelInterview(p) {
         statusId_changeReason: text(p.reason) || "Interview cancelled"
     })
     bookings().keptEventCancelled(workEffortId)
+    rooms().cancelAll(workEffortId)
     closeCallLink(interview.callLinkId)
     return {workEffortId}
 }

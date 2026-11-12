@@ -6,8 +6,10 @@
 // to a manager the employer does not employ or on a line another employer the caller does not read keeps too, with the people
 // with no manager at the top of the tree; and a reporting line per employment: a manager at one employer of a person employed by two is
 // that employment's alone, for the team reader, the tree, the directory and Home's due work. A directory reader reads and changes
-// nothing; another employer's unit is refused as a missing one. Standalone: spec-local organizations, people, employments, groups
-// and users, with artifact authorization disabled (the rules are the services' own permission and scope checks).
+// nothing; another employer's unit is refused as a missing one. Follow-up 3: a team takes an agent of its employer (a department's
+// lead does not), and a team's organization is its rollups', else its internal owner's (UnitEmployers.js, Maintenance's too).
+// Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules are
+// the services' own permission and scope checks).
 // Run: ./moq test mr-mantle --spec PeopleOrganization
 const prefix = "PEOPLE_ORG_SPEC"
 const orgA = prefix + "_A",
@@ -477,6 +479,100 @@ feature(
             errors == ["", ""]
             dual == [state.BOTH, ""]
             shared == [state.MGR, state.BOTH]
+        }
+    }
+)
+
+feature(
+    "follow-up 3: a team takes an agent of its employer, a department's lead does not; a team made outside People with no rollup is its internal owner's, for People and Maintenance alike, a rollup first",
+    {
+        when() {
+            const store = parameters => run(state.hr, O + "store#Unit", parameters)
+            const team = store({unitKind: "team", organizationName: "Contract crew", parentPartyId: orgA}).partyId
+            const department = store({unitKind: "department", organizationName: "Contract office", parentPartyId: orgA}).partyId
+            // an agent of A (a contractor) and an agent of B only
+            const agent = person("AGENT")
+            const agentB = person("AGENT_B")
+            for (const [partyId, organizationPartyId] of [
+                [agent, orgA],
+                [agentB, orgB]
+            ])
+                call("create#mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: "PrtAgent",
+                    fromPartyId: partyId,
+                    toPartyId: organizationPartyId,
+                    toRoleTypeId: "OrgInternal",
+                    fromDate: since
+                })
+            const join = (unitPartyId, partyId, memberRole) =>
+                code(run(state.hr, O + "store#Membership", {unitPartyId, partyId, memberRole}))
+            const revision = partyId => run(state.hr, O + "get#Unit", {partyId}).unit.revision
+            // a team made outside People (as Maintenance's demo made one): owned by A, no rollup; a department alike; a team owned
+            // by A but under B's unit
+            const outside = (kind, roleTypeId, ownerPartyId) => {
+                const partyId = prefix + "_OUT_" + kind
+                call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization", ownerPartyId})
+                call("create#mantle.party.Organization", {partyId, organizationName: "Outside " + kind})
+                call("create#mantle.party.PartyRole", {partyId, roleTypeId})
+                return partyId
+            }
+            const outsideTeam = outside("TEAM", "OrgTeam", orgA)
+            const outsideDepartment = outside("DEPT", "OrgDepartment", orgA)
+            const movedTeam = outside("MOVED", "OrgTeam", orgA)
+            const unitB = run(state.hrB, O + "store#Unit", {
+                unitKind: "department",
+                organizationName: "B crew",
+                parentPartyId: orgB
+            }).partyId
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtOrgRollup",
+                fromPartyId: movedTeam,
+                fromRoleTypeId: "OrgTeam",
+                toPartyId: unitB,
+                toRoleTypeId: "OrgDepartment",
+                fromDate: since
+            })
+            const units = ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
+            return {
+                agentMember: join(team, agent, "member"),
+                agentLead: join(team, agent, "lead"),
+                agentOfB: join(team, agentB, "member"),
+                departmentLead: code(store({partyId: department, headPartyId: agent, expectedRevision: revision(department)})),
+                outsideMember: join(outsideTeam, agent, "member"),
+                outsideRead: run(state.hr, O + "get#Unit", {partyId: outsideTeam}).error,
+                outsideReadB: code(run(state.hrB, O + "get#Unit", {partyId: outsideTeam})),
+                outsideDepartment: code(run(state.hr, O + "get#Unit", {partyId: outsideDepartment})),
+                organizations: units.teamOrganizations([team, outsideTeam, movedTeam, outsideDepartment, orgA]),
+                teamsOfA: units.teamsOf([orgA]).map(row => row.partyId),
+                teamsOfB: units.teamsOf([orgB]).map(row => row.partyId),
+                state: {team, outsideTeam, movedTeam}
+            }
+        },
+        then({
+            agentMember,
+            agentLead,
+            agentOfB,
+            departmentLead,
+            outsideMember,
+            outsideRead,
+            outsideReadB,
+            outsideDepartment,
+            organizations,
+            teamsOfA,
+            teamsOfB,
+            state: units
+        }) {
+            agentMember == ""
+            agentLead == ""
+            agentOfB == "NOT_EMPLOYED"
+            departmentLead == "NOT_EMPLOYED"
+            outsideMember == ""
+            outsideRead == ""
+            outsideReadB == "RECORD_UNAVAILABLE"
+            outsideDepartment == "RECORD_UNAVAILABLE"
+            organizations == {[units.team]: orgA, [units.outsideTeam]: orgA, [units.movedTeam]: orgB}
+            teamsOfA.includes(units.team) && teamsOfA.includes(units.outsideTeam) && !teamsOfA.includes(units.movedTeam)
+            teamsOfB.includes(units.movedTeam) && !teamsOfB.includes(units.outsideTeam)
         }
     }
 )

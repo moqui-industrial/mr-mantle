@@ -10,7 +10,8 @@
 // session cancels the places and supersedes a waiting approval. P19 review: the session's event is changed on the session alone
 // (Commons' EventServices refuse its organizer, and no one puts it in a calendar); a place is approved before the session starts,
 // and the person is told the decision (PeopleTrainingDecision, no reason); a trainer who left the employer reads the session as
-// anyone else; a development editor builds a training assessment form.
+// anyone else; a development editor builds a training assessment form. Follow-up 3: a session's room through the resource booking
+// (a clash Busy, a blackout refused, moved and cancelled with it) and its time off its people's capacity, once with leave.
 // Standalone: spec-local organizations, people, employments, a qualification type, an assessment form, groups and users, with
 // artifact authorization disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec Training
@@ -472,6 +473,160 @@ feature(
             out.waiting.statusEnumId == "PtsCancelled" && out.approval.statusId == "PapSuperseded"
             out.cancelledLine.stateText == "Cancelled"
             out.trainerLeft == "RECORD_UNAVAILABLE" && out.trainerLeftList == 0
+        }
+    }
+)
+
+feature(
+    "follow-up 3: a session's room is booked through the resource booking (a clash Busy, a blackout refused), moved and cancelled with it; its time is off its people's capacity, once with leave",
+    {
+        when() {
+            const room = prefix + "_ROOM"
+            call("create#mantle.facility.Facility", {
+                facilityId: room,
+                facilityTypeEnumId: "FcTpRoom",
+                facilityName: "Train spec classroom",
+                bookable: "Y",
+                ownerPartyId: orgA
+            })
+            call("create#mantle.facility.Facility", {
+                facilityId: prefix + "_STORE",
+                facilityTypeEnumId: "FcTpRoom",
+                facilityName: "Train spec store room",
+                ownerPartyId: orgA
+            })
+            // a weekday four days or more out, its hours in the user's zone
+            let dayText = null
+            for (let offset = 4; !dayText; offset++) {
+                const text = ec.l10n.format(new Date(state.now + offset * 24 * hour), "yyyy-MM-dd")
+                const weekday = new Date(text + "T12:00:00Z").getUTCDay()
+                if (weekday >= 1 && weekday <= 5) dayText = text
+            }
+            const on = hhmm => ec.l10n.parseTimestamp(dayText + " " + hhmm + ":00.000", "yyyy-MM-dd HH:mm:ss.SSS")
+            // someone else's meeting in the room 08:00 to 09:00 (john.doe's, which the scheduler may not see)
+            const meeting = call("mantle.work.EventServices.create#Event", {
+                workEffortName: "Train spec board meeting",
+                visibilityEnumId: "WevRestricted",
+                estimatedStartDate: on("08:00"),
+                estimatedCompletionDate: on("09:00")
+            }).workEffortId
+            call("mantle.work.EventServices.book#Resource", {workEffortId: meeting, facilityId: room})
+            // the room blacked out 14:00 to 16:00
+            call("create#mantle.work.effort.ResourceUnavailability", {
+                unavailabilityKindEnumId: "RukPlanned",
+                facilityId: room,
+                organizationPartyId: orgA,
+                fromDate: on("14:00"),
+                thruDate: on("16:00"),
+                unavailabilityReasonEnumId: "RurClosure",
+                plannedOutage: "Y",
+                description: "Train spec painting",
+                revision: 1
+            })
+            const zoe = user("ZOE", orgA, ["PEOPLE_SELF_SERVICE"])
+            const coach = user("COACH", orgA, ["PEOPLE_SELF_SERVICE"])
+            const schedule = (from, to, extra = {}) =>
+                run(
+                    state.dev.userId,
+                    D + "store#Training",
+                    Object.assign(
+                        {
+                            trainingClassId: state.classId,
+                            startDate: on(from),
+                            endDate: on(to),
+                            capacity: "4",
+                            trainerPartyId: coach.partyId,
+                            assessmentFormId: state.formId,
+                            facilityId: room
+                        },
+                        extra
+                    )
+                )
+            const bookingsOf = workEffortId => read("mantle.work.effort.WorkEffortFacility", {workEffortId})
+            const event = workEffortId => read("mantle.work.effort.WorkEffort", {workEffortId})[0]
+            const out = {
+                clash: schedule("08:30", "10:00"),
+                notBookable: code(schedule("10:00", "12:00", {facilityId: prefix + "_STORE"}))
+            }
+            const booked = schedule("10:00", "12:00")
+            const id = booked.workEffortId
+            out.booked = booked.error
+            out.bookedRows = bookingsOf(id).map(row => row.facilityId + " " + row.statusId)
+            out.bookedPlace = event(id).location
+            out.line = run(state.dev.userId, D + "get#Training", {workEffortId: id}).session
+            // no user changes the room of a kept event on Commons' booking services
+            out.directCancel = run(state.dev.userId, "mantle.work.EventServices.cancel#ResourceBooking", {
+                workEffortId: id,
+                facilityId: room
+            }).error
+            // Zoe enrolled, with time off 11:00 to 13:00 that day: the session's last hour is counted once, as leave
+            run(state.dev.userId, D + "enroll#Training", {workEffortId: id, partyId: zoe.partyId})
+            call("mantle.work.EventServices.create#Event", {
+                workEffortName: "Train spec dentist",
+                workEffortTypeEnumId: "WetTimeOff",
+                estimatedStartDate: on("11:00"),
+                estimatedCompletionDate: on("13:00"),
+                assignToPartyId: zoe.partyId
+            })
+            const capacityDay = partyId =>
+                call("mantle.work.ResourceServices.get#PartyCapacity", {partyId, fromDate: dayText, thruDate: dayText})
+                    .capacityList[0].dayList[0]
+            out.zoe = capacityDay(zoe.partyId)
+            out.coach = capacityDay(coach.partyId)
+            // moved into the meeting or the blackout: refused, the session as it was; moved to 12:00 to 14:00: the room kept
+            const revision = () => run(state.dev.userId, D + "get#Training", {workEffortId: id}).session.revision
+            const move = (from, to) =>
+                run(state.dev.userId, D + "store#Training", {
+                    workEffortId: id,
+                    startDate: on(from),
+                    endDate: on(to),
+                    expectedRevision: revision()
+                })
+            out.intoMeeting = move("08:00", "10:00").error
+            out.intoBlackout = code(move("13:00", "15:00"))
+            out.unmoved = ec.l10n.format(event(id).estimatedStartDate, "HH:mm")
+            out.moved = move("12:00", "14:00").error
+            out.movedRows = bookingsOf(id).map(row => row.facilityId + " " + row.statusId)
+            // off site: the room let go and the place the text
+            out.offSite = run(state.dev.userId, D + "store#Training", {
+                workEffortId: id,
+                facilityId: "",
+                location: "Fire station yard",
+                expectedRevision: revision()
+            }).error
+            out.offSiteRows = bookingsOf(id).length
+            out.offSitePlace = event(id).location
+            // back in the room, then the session cancelled: its booking with it, and its time no longer off
+            run(state.dev.userId, D + "store#Training", {workEffortId: id, facilityId: room, expectedRevision: revision()})
+            out.again = bookingsOf(id).length
+            out.cancelled = run(state.dev.userId, D + "store#Training", {workEffortId: id, cancel: "true"}).error
+            out.cancelledRows = bookingsOf(id).length
+            out.coachAfter = capacityDay(coach.partyId)
+            return out
+        },
+        then(out) {
+            code(out.clash) == "ROOM_UNAVAILABLE"
+            out.clash.error.includes("Busy") && !out.clash.error.includes("board meeting")
+            out.notBookable == "ROOM_UNAVAILABLE"
+            out.booked == ""
+            out.bookedRows == [prefix + "_ROOM WefAssigned"]
+            out.bookedPlace == "Train spec classroom"
+            out.line.roomName == "Train spec classroom" &&
+                out.line.roomStatus == "booked" &&
+                out.line.facilityId == prefix + "_ROOM"
+            out.directCancel.includes("is changed on")
+            // Zoe: two hours of leave, the session's one hour not under it; the coach: the session's two hours
+            out.zoe.leave == 2 && out.zoe.training == 1 && out.zoe.capacity == out.zoe.base - 3
+            out.coach.leave == 0 && out.coach.training == 2 && out.coach.capacity == out.coach.base - 2
+            out.intoMeeting.includes("ROOM_UNAVAILABLE") && out.intoMeeting.includes("Busy")
+            out.intoBlackout == "ROOM_UNAVAILABLE"
+            out.unmoved == "10:00"
+            out.moved == ""
+            out.movedRows == [prefix + "_ROOM WefAssigned"]
+            out.offSite == "" && out.offSiteRows == 0 && out.offSitePlace == "Fire station yard"
+            out.again == 1
+            out.cancelled == "" && out.cancelledRows == 0
+            out.coachAfter.training == 0 && out.coachAfter.capacity == out.coachAfter.base
         }
     }
 )

@@ -2,7 +2,9 @@
 // (IronStone Maintenance design §3 AssignSchedule and BulkWork, §9 Teams and MaintenanceSettings, review Y4 and Y8; MT-01, MT-02;
 // impl-maintenance P8). Every call checks the maintenance permission and scope first (MaintenanceAccess.js).
 //
-// - Teams are People's (impl-people P3, F60): an OrgTeam Organization owned by its organization, with dated PrtMember rows from
+// - Teams are People's (impl-people P3, F60): an OrgTeam Organization under its organization (the one its PrtOrgRollup rows
+//   reach, else its internal owner: People's UnitEmployers.js, one rule for both apps; impl-people follow-up 3), with dated
+//   PrtMember rows from
 //   the person (from role Assignee for a member, Manager for the lead) to the team (to role OrgTeam), written by
 //   mantle.humanres.OrganizationServices. Maintenance reads them (find#MaintenanceTeams) and owns only their dispatch defaults
 //   (MaintenanceTeamDefaults, dated: store#MaintenanceTeamDefaults, which also sets the intake plus-tag P4's mail intake reads,
@@ -26,6 +28,8 @@ const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mant
 const work = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
 const development = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Development.js")
 const training = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Training.js")
+// a team's organization, People's rule (its rollups, else its internal owner; impl-people follow-up 3)
+const units = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -124,31 +128,18 @@ function defaultsOf(teamPartyId) {
           )[0] || null
         : null
 }
-// A team the caller's scope reaches: an OrgTeam party whose owner is one of the scope's organizations (RECORD_UNAVAILABLE
-// otherwise, a missing team alike).
+// A team the caller's scope reaches: an OrgTeam party whose organization (People's rule) is one of the scope's
+// (RECORD_UNAVAILABLE otherwise, a missing team alike).
 function requireTeam(userScope, teamPartyId) {
     const id = text(teamPartyId)
-    const party = id ? one("mantle.party.Party", {partyId: id}) : null
-    if (
-        !party ||
-        !one("mantle.party.PartyRole", {partyId: id, roleTypeId: teamRole}) ||
-        !maintenanceAccess.covers(userScope, party.ownerPartyId)
-    )
+    const organizationPartyId = id ? units().teamOrganizations([id])[id] || null : null
+    if (!organizationPartyId || !maintenanceAccess.covers(userScope, organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Team " + (id || "") + " is not available")
-    return {teamPartyId: id, organizationPartyId: party.ownerPartyId}
+    return {teamPartyId: id, organizationPartyId}
 }
-// The teams of organizations (null: every one), by name.
+// The teams of organizations (null: every one), by name: {partyId, organizationName, organizationPartyId}.
 function teamsOf(organizationPartyIds) {
-    const teamIds = Array.from(find("mantle.party.PartyRole", {roleTypeId: teamRole}).selectField("partyId").list()).map(
-        row => row.partyId
-    )
-    if (!teamIds.length) return []
-    let query = find("mantle.party.PartyDetail").condition("partyId", "in", teamIds).orderBy("^organizationName")
-    if (organizationPartyIds != null) {
-        if (!organizationPartyIds.length) return []
-        query = query.condition("ownerPartyId", "in", organizationPartyIds)
-    }
-    return Array.from(query.list())
+    return units().teamsOf(organizationPartyIds)
 }
 function defaultsDisplay(row, teamPartyId) {
     const intakeTag = tagOf(teamPartyId)
@@ -189,7 +180,7 @@ function findTeams(p) {
     }
     const teamIds = teams.map(row => row.partyId)
     const memberships = membershipRows(teamIds, p.includeEnded === true || p.includeEnded === "true")
-    const names = partyNames(memberships.map(row => row.fromPartyId).concat(teams.map(row => row.ownerPartyId)))
+    const names = partyNames(memberships.map(row => row.fromPartyId).concat(teams.map(row => row.organizationPartyId)))
     const at = nowMs()
     return {
         teamList: teams.map(team => {
@@ -210,8 +201,8 @@ function findTeams(p) {
             return {
                 teamPartyId: team.partyId,
                 teamName: team.organizationName || team.partyId,
-                organizationPartyId: team.ownerPartyId,
-                organizationName: names[team.ownerPartyId] || team.ownerPartyId,
+                organizationPartyId: team.organizationPartyId,
+                organizationName: names[team.organizationPartyId] || team.organizationPartyId,
                 memberCount: ids(current.map(row => row.partyId)).length,
                 leadName: current
                     .filter(row => row.roleTypeId === "Manager")

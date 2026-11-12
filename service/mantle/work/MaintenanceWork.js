@@ -43,6 +43,8 @@ const procedures = () => ec.resource.script("component://mr-mantle/service/mantl
 // P14: a preventive plan's generation, completion credit and Home's counts (MaintenancePlans.js)
 const plans = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePlans.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
+// a team's organization, People's rule (its rollups, else its internal owner; impl-people follow-up 3)
+const units = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
 // P10: CompleteWork's outside-service line (MaintenancePurchases.js)
 const purchases = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePurchases.js")
 // P7: the checklist's gate, close and cancel (ProcessChecks.js), and the time services' way through (WorkProcesses.js)
@@ -387,10 +389,9 @@ function targetOf(userScope, p) {
     const found = maintenanceAccess.requireFacility(userScope, facilityId)
     return {assetId: null, facilityId, organizationPartyId: found.organizationPartyId, asset: null}
 }
-// A team of the organization: an OrgTeam party it owns.
+// A team of the organization: an OrgTeam party whose organization (People's rule: its rollups, else its internal owner) it is.
 function requireTeam(organizationPartyId, partyId) {
-    const party = one("mantle.party.Party", {partyId})
-    if (!party || party.ownerPartyId !== organizationPartyId || !one("mantle.party.PartyRole", {partyId, roleTypeId: teamRole}))
+    if (!organizationPartyId || units().teamOrganizations([partyId])[partyId] !== organizationPartyId)
         denied("TEAM_UNAVAILABLE", "Team " + partyId + " is not one of the organization's teams")
     return partyId
 }

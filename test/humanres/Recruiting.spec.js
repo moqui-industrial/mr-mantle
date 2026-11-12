@@ -11,7 +11,8 @@
 // of AI on the entity; an application from a chat message once, by a recruiter, never from their own message; an owner who left
 // files no mail, and their openings are handed over through People's lifecycle participant. P17 (the user's call of Nov 12, 2026):
 // an applicant's resume is shared with the interview panel when attached (by a recruiter, by mail), another file only when a
-// recruiter shares it, and the recruiter can stop sharing the resume.
+// recruiter shares it, and the recruiter can stop sharing the resume. Follow-up 3: an interview's room through the resource booking
+// (a clash Busy, a blackout refused, moved, changed and cancelled with it).
 // Standalone: spec-local organizations, people, employments, positions, a published scorecard, groups and users, artifact
 // authorization disabled (the rules are the services' own checks). The form rules are FormDefinitions'.
 // Run: ./moq test mr-mantle --spec Recruiting
@@ -912,3 +913,113 @@ feature("a cancelled interview's video call link is closed, by the recruiter who
         other.validAfter == false
     }
 })
+
+feature(
+    "follow-up 3: an interview's room is booked through the resource booking (a clash Busy, a blackout refused), moved, changed and cancelled with it",
+    {
+        when() {
+            const room = prefix + "_ROOM"
+            const annex = prefix + "_ANNEX"
+            for (const [facilityId, facilityName] of [
+                [room, "Recruit spec room"],
+                [annex, "Recruit spec annex"]
+            ])
+                call("create#mantle.facility.Facility", {
+                    facilityId,
+                    facilityTypeEnumId: "FcTpRoom",
+                    facilityName,
+                    bookable: "Y",
+                    ownerPartyId: orgA
+                })
+            const base = Number(String(nextWeek()))
+            const at = hours => new Date(base + hours * 3600000)
+            // john.doe's meeting in the room 12:00 to 13:00, which the recruiter may not see; the annex blacked out 15:00 to 17:00
+            const meeting = call("mantle.work.EventServices.create#Event", {
+                workEffortName: "Recruit spec board meeting",
+                visibilityEnumId: "WevRestricted",
+                estimatedStartDate: at(2),
+                estimatedCompletionDate: at(3)
+            }).workEffortId
+            call("mantle.work.EventServices.book#Resource", {workEffortId: meeting, facilityId: room})
+            call("create#mantle.work.effort.ResourceUnavailability", {
+                unavailabilityKindEnumId: "RukPlanned",
+                facilityId: annex,
+                organizationPartyId: orgA,
+                fromDate: at(5),
+                thruDate: at(7),
+                unavailabilityReasonEnumId: "RurClosure",
+                plannedOutage: "Y",
+                description: "Recruit spec painting",
+                revision: 1
+            })
+            const interviews = () =>
+                ec.entity
+                    .find("mantle.humanres.recruitment.ApplicationInterview")
+                    .condition("employmentApplicationId", state.cara)
+                    .disableAuthz()
+                    .count()
+            const bookings = workEffortId =>
+                Array.from(
+                    ec.entity
+                        .find("mantle.work.effort.WorkEffortFacility")
+                        .condition("workEffortId", workEffortId)
+                        .disableAuthz()
+                        .list()
+                ).map(row => row.facilityId + " " + row.statusId)
+            const event = workEffortId =>
+                ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+            const schedule = (hours, facilityId) =>
+                run(state.recruiter.userId, R + "schedule#Interview", {
+                    employmentApplicationId: state.cara,
+                    startDate: at(hours),
+                    durationMinutes: 60,
+                    panelPartyIds: state.ana.partyId,
+                    facilityId
+                })
+            const change = (workEffortId, parameters) =>
+                run(state.recruiter.userId, R + "change#Interview", Object.assign({workEffortId}, parameters))
+            const before = interviews()
+            const out = {clash: schedule(2.5, room)}
+            out.clashKept = interviews() == before
+            const booked = schedule(3, room)
+            const id = booked.workEffortId
+            out.booked = booked.error
+            out.bookedRows = bookings(id)
+            out.place = event(id).location
+            out.row = (
+                run(state.recruiter.userId, R + "get#Application", {employmentApplicationId: state.cara}).application
+                    .interviews || []
+            ).find(row => row.workEffortId == id)
+            out.direct = run(state.recruiter.userId, "mantle.work.EventServices.book#Resource", {
+                workEffortId: id,
+                facilityId: annex
+            }).error
+            out.intoMeeting = change(id, {startDate: at(2)}).error
+            out.intoBlackout = code(change(id, {startDate: at(5), facilityId: annex}))
+            out.unchanged = [Number(String(event(id).estimatedStartDate)) == at(3).getTime(), bookings(id)]
+            out.annex = change(id, {startDate: at(4), facilityId: annex}).error
+            out.annexRows = bookings(id)
+            out.annexPlace = event(id).location
+            out.cancelled = run(state.recruiter.userId, R + "cancel#Interview", {workEffortId: id}).error
+            out.cancelledRows = bookings(id)
+            return out
+        },
+        then(out) {
+            code(out.clash) == "ROOM_UNAVAILABLE"
+            out.clash.error.includes("Busy") && !out.clash.error.includes("board meeting")
+            out.clashKept == true
+            out.booked == ""
+            out.bookedRows == [prefix + "_ROOM WefAssigned"]
+            out.place == "Recruit spec room"
+            out.row.roomName == "Recruit spec room" && out.row.roomStatus == "booked"
+            out.direct.includes("is changed on")
+            out.intoMeeting.includes("ROOM_UNAVAILABLE") && out.intoMeeting.includes("Busy")
+            out.intoBlackout == "ROOM_UNAVAILABLE"
+            out.unchanged == [true, [prefix + "_ROOM WefAssigned"]]
+            out.annex == ""
+            out.annexRows == [prefix + "_ANNEX WefAssigned"]
+            out.annexPlace == "Recruit spec annex"
+            out.cancelled == "" && out.cancelledRows.length == 0
+        }
+    }
+)

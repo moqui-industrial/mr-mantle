@@ -46,8 +46,12 @@ along with this software (see the LICENSE.md file). If not, see
             (schedule: a People working schedule or a published shift plans some day, impl-people P9 and P14: a shift's hours
             replace the schedule's that day and no holiday takes it; available: their WetAvailable working hours; policy: the
             timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
-            and leave), holiday (its name or null), leave (hours), capacity, workingScheduleId (the schedule that planned the day, or
-            null)}], weekList [{weekStart, base, holidayHours, leaveHours, capacity, workDays}], base, capacity}. With no partyId and
+            and leave), holiday (its name or null), leave (hours), training (hours), capacity, workingScheduleId (the schedule that
+            planned the day, or null)}], weekList [{weekStart, base, holidayHours, leaveHours, trainingHours, capacity, workDays}],
+            base, capacity}. A person's time off and People's training sessions (as the trainer, or holding a place enrolled or
+            completed and not marked absent; a cancelled session none: impl-people follow-up 3, impl-maintenance F360) are taken off
+            once where they overlap (training counts the hours leave does not already take), at most the day's base; a holiday
+            takes the whole day and neither counts then. With no partyId and
             no partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
             placeholder is planned. policy with organizationPartyId (as get#WeekDays passes them) apply to every party with no
             working hours of their own on the days no schedule plans. A person whose schedule, working hours or leave do not read is
@@ -143,6 +147,19 @@ capacityList = []
             // plan, read once for every party
             const schedules = ec.resource.script('component://mr-mantle/service/mantle/humanres/Schedules.js')
             let plannedByParty = {}
+            // People's training sessions of each person over the range (impl-people follow-up 3, F360): {partyId: [[startMs, endMs]]}
+            let trainingByParty = {}
+            // the hours of each day a set of intervals covers, each moment once (overlapping intervals merged first)
+            const spreadOnce = (intervals, into) => {
+                const sorted = intervals.filter(([from, to]) => from != null && to > from).sort((a, b) => a[0] - b[0])
+                let current = null
+                for (const [from, to] of sorted) {
+                    if (current && from <= current[1]) { current[1] = Math.max(current[1], to); continue }
+                    if (current) spread(current[0], current[1], into)
+                    current = [from, to]
+                }
+                if (current) spread(current[0], current[1], into)
+            }
             const entryOf = (person) => {
                 const {policy: thePolicy, organizationPartyId: orgId} = policyOf(person)
                 const workDays = Array.from(thePolicy.workDays || [1, 2, 3, 4, 5]).map(Number)
@@ -150,6 +167,9 @@ capacityList = []
                 let base = days.map((day) => workDays.includes(isoDayOf(day)) ? dayHours : 0)
                 let source = 'policy'
                 const leave = days.map(() => 0)
+                // the hours off of leave and training together, each moment once
+                const busy = days.map(() => 0)
+                const leaveIntervals = []
                 const planned = (person && plannedByParty[person]) || null
                 const unplanned = !planned || days.some((day) => !planned[day])
                 if (person && unplanned) {
@@ -190,12 +210,19 @@ capacityList = []
                             } else {
                                 const startMs = toMillis(event.startMillis)
                                 const stopMs = event.endMillis != null ? toMillis(event.endMillis) : startMs + 3600000
-                                if (startMs != null && stopMs > startMs) spread(startMs, stopMs, leave)
+                                if (startMs != null && stopMs > startMs) leaveIntervals.push([startMs, stopMs])
                             }
                         }
                     } catch (err) {
                         ec.logger.error(`Capacity of ${person}: the leave was not read, none taken off: ${err && err.message ? err.message : err}`)
                     } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                    const timed = days.map(() => 0)
+                    spreadOnce(leaveIntervals, timed)
+                    spreadOnce(leaveIntervals.concat(trainingByParty[person] || []), busy)
+                    for (let i = 0; i < days.length; i++) {
+                        if (leave[i] >= 24) { busy[i] = 24; continue }
+                        leave[i] = timed[i]
+                    }
                 }
                 const holidays = holidaysOf(orgId)
                 // a planned day's holiday of its schedule's calendar (the assignment's, else the schedule's), beside the organization's
@@ -209,22 +236,26 @@ capacityList = []
                     const plannedDay = planned ? planned[day] : null
                     // a published shift's day (impl-people P14) is worked as rostered: no holiday takes it
                     const holiday = plannedDay?.shift ? null : holidays[day] || (plannedDay ? plannedDay.holidayCategoryIds.map((id) => calendarHolidays[id]?.[day]).find((name) => name) : null) || null
-                    const off = holiday ? base[i] : Math.min(base[i], round(leave[i]))
-                    return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: holiday ? 0 : off,
-                        capacity: round(Math.max(0, base[i] - off)), workingScheduleId: plannedDay ? plannedDay.workingScheduleId : null}
+                    // leave first, then the training hours it does not already take (impl-people follow-up 3, F360)
+                    const leaveOff = holiday ? 0 : Math.min(base[i], round(leave[i]))
+                    const off = holiday ? base[i] : Math.min(base[i], round(Math.max(leave[i], busy[i])))
+                    return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: leaveOff,
+                        training: holiday ? 0 : round(off - leaveOff), capacity: round(Math.max(0, base[i] - off)),
+                        workingScheduleId: plannedDay ? plannedDay.workingScheduleId : null}
                 })
                 const weeks = new Map()
                 for (const entry of dayList) {
                     let week = weeks.get(entry.weekStart)
-                    if (!week) { week = {weekStart: entry.weekStart, base: 0, holidayHours: 0, leaveHours: 0, capacity: 0, workDays: 0}; weeks.set(entry.weekStart, week) }
+                    if (!week) { week = {weekStart: entry.weekStart, base: 0, holidayHours: 0, leaveHours: 0, trainingHours: 0, capacity: 0, workDays: 0}; weeks.set(entry.weekStart, week) }
                     week.base += entry.base
                     if (entry.holiday) week.holidayHours += entry.base
                     week.leaveHours += entry.leave
+                    week.trainingHours += entry.training
                     week.capacity += entry.capacity
                     if (entry.capacity > 0) week.workDays += 1
                 }
                 const weekList = Array.from(weeks.values()).map((week) => Object.assign(week, {base: round(week.base), holidayHours: round(week.holidayHours),
-                    leaveHours: round(week.leaveHours), capacity: round(week.capacity)}))
+                    leaveHours: round(week.leaveHours), trainingHours: round(week.trainingHours), capacity: round(week.capacity)}))
                 return {partyId: person || null, source: source, organizationPartyId: orgId, dayList: dayList, weekList: weekList,
                     base: round(dayList.reduce((sum, entry) => sum + entry.base, 0)), capacity: round(dayList.reduce((sum, entry) => sum + entry.capacity, 0))}
             }
@@ -233,6 +264,11 @@ capacityList = []
                 if (!parties.length) { capacityList.push(entryOf(null)); return }
                 try { plannedByParty = schedules.scheduledDays(parties, days) } catch (err) {
                     ec.logger.error(`Capacity: the working schedules were not read, each person's own hours or the policy's apply: ${err && err.message ? err.message : err}`)
+                }
+                try {
+                    trainingByParty = ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').sessionTimesOf(parties, starts[0], endMs)
+                } catch (err) {
+                    ec.logger.error(`Capacity: the training sessions were not read, none taken off: ${err && err.message ? err.message : err}`)
                 }
                 for (const person of parties) {
                     try { capacityList.push(entryOf(person)) } catch (err) {
