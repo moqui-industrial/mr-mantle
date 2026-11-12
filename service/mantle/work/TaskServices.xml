@@ -225,6 +225,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <set field="movedProject" from="false"/>
             <if condition="rootWorkEffortId">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="before"/>
@@ -581,6 +583,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             movedList = []
             failedList = []
@@ -767,6 +771,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.TaskServices.get#TaskStatusFlow" in-map="{workEffortId:workEffortId}" out-map="flow"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="oldStatusId" from="flow.statusId"/>
@@ -814,6 +820,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="oldParentWorkEffortId"/><parameter name="sequenceNum" type="Long"/></out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             const find = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one() : null
@@ -1053,6 +1061,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="seriesWorkEffortId"/></out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()

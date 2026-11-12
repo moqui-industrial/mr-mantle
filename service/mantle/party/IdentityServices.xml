@@ -534,6 +534,63 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('retryLifecycleStep', context))</script></actions>
     </service>
+    <!-- People's entry into the lifecycle (Lifecycle.js; impl-people P7, design-admin §4.1 Provisioning from People): the mr-boss
+        tx-commit rule on a People hire or separation calls ironstone.admin.LifecycleServices request#Provisioning or
+        request#AccessEnd, which call these with the app's grant proposal. -->
+    <service verb="request" noun="Provisioning" allow-remote="false">
+        <description>A People hire's provisioning (an applied hire, EmploymentChange employmentChangeId, whose HR officer asked an
+            account for, accessRequested), keyed by the change (operationKey, else people-provision- and its id: a retry answers
+            the first operation, never a second identity or invitation): a UserLifecycleOperation of kind Provisioning for the
+            employer, its steps the organization membership (the employment is it: no second relationship, F49), the account (an
+            existing one, or an invitation of the person's work address, invite#User), the grant proposal (bundleGroupIdList,
+            registered bundles the app supplies: given at the invitation's acceptance or to an existing account) and the person
+            told (the invitation's mail). The steps run now for an identity operator of the organization; for anyone else they
+            wait for one (OPERATOR_REQUIRED), who runs them from LifecycleDetail (retry#LifecycleStep) under Admin's delegation
+            rules. The change records the operation and its IT checklist tasks are linked to it. Refuses a change that is not an
+            applied hire of the caller's (its requester, an HR editor of the employer, an identity operator of it;
+            RECORD_UNAVAILABLE), a hire with no account asked (NOT_REQUESTED) and a bundle not registered (GRANT_INVALID).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="operationId"/>
+            <parameter name="statusId"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('requestProvisioning', context))</script></actions>
+    </service>
+    <service verb="request" noun="AccessEnd" allow-remote="false">
+        <description>A People separation's access end (an applied separation, EmploymentChange employmentChangeId), keyed by the
+            change (operationKey, else people-access-end- and its id; a retry answers the first): an Organization removal
+            operation for the employer from the separation's date, its steps the employer's other relationships of the person
+            ended and, when the person then works for no internal organization, the account signed out (when the date has come)
+            and its memberships ended at the date; a person who still works for another organization keeps the account's access
+            (the memberships step skipped, naming it). The steps run now for an identity operator of the organization, checked as
+            start#Lifecycle checks them (a privileged identity, the administration path); for anyone else they wait for one
+            (OPERATOR_REQUIRED). A person with no account has nothing to end (NO_ACCOUNT, nothing recorded). Refuses a change that
+            is not an applied separation the caller may request for (its requester, the one whose decision applied it, an HR
+            editor of the employer, an identity operator of it; RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="operationId"/>
+            <parameter name="statusId"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('requestAccessEnd', context))</script></actions>
+    </service>
 
     <!-- Internal organizations (impl-admin P7; design-admin §7 Organizations and OrganizationDetail): the OrgInternal parties in the
         caller's scope (the filtered find on mantle.party.InternalOrganization), their profile, dated parent (PrtOrgRollup) and

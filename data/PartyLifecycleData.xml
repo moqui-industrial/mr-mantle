@@ -20,6 +20,9 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="UlkDisable" enumTypeId="UserLifecycleKind" description="Disable" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="UlkOrgRemoval" enumTypeId="UserLifecycleKind" description="Organization removal" sequenceNum="2"/>
     <moqui.basic.Enumeration enumId="UlkRestore" enumTypeId="UserLifecycleKind" description="Restore" sequenceNum="3"/>
+    <!-- impl-people P7: a People hire's provisioning (IdentityServices.request#Provisioning; design-admin §4.1 Provisioning from
+        People): the membership, the account or invitation, the grants and the notice -->
+    <moqui.basic.Enumeration enumId="UlkProvision" enumTypeId="UserLifecycleKind" description="Provisioning" sequenceNum="4"/>
 
     <moqui.basic.StatusType statusTypeId="UserLifecycleOperation" description="Account lifecycle operation"/>
     <moqui.basic.StatusItem statusId="UlopCompleted" statusTypeId="UserLifecycleOperation" description="Completed" sequenceNum="1"/>

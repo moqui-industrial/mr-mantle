@@ -84,7 +84,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="operationId" type="id" is-pk="true"/>
         <field name="userId" type="id"><description>The account the operation is about.</description></field>
         <field name="partyId" type="id"/>
-        <field name="kindEnumId" type="id"><description>UlkDisable, UlkOrgRemoval or UlkRestore.</description></field>
+        <field name="kindEnumId" type="id"><description>UlkDisable, UlkOrgRemoval, UlkRestore, or UlkProvision (a People hire's
+            provisioning, request#Provisioning: userId empty until the person has an account).</description></field>
         <field name="isGlobal" type="text-indicator"><description>Y for an account-wide operation (disable, restore), N for one
             organization's removal.</description></field>
         <field name="organizationPartyId" type="id"/>
@@ -122,7 +123,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="operationId" type="id" is-pk="true"/>
         <field name="stepSeqId" type="id" is-pk="true"/>
         <field name="stepKind" type="text-short"><description>disableAccount, endDate, revokeAccess, endRelationships,
-            endMemberships, enableAccount, pause or transfer.</description></field>
+            endMemberships, enableAccount, pause or transfer; a provisioning's membership, invite, grants and notify.</description></field>
         <field name="providerKey" type="text-medium"><description>identity for the account's own steps, else the participant's
             key (the app's registration).</description></field>
         <field name="ownerApp" type="text-short"/>

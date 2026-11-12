@@ -98,7 +98,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The user's tasks for CalDAV's Tasks collection: the WetTask work efforts the user's party is assigned to
             now, not cancelled, and completed or closed ones only for 30 days after they were completed, each named by its
             UID (universalId, else workEffortId) with .ics, an entity tag over the task and the user's assignment, and the
-            collection's ctag.</description>
+            collection's ctag. A protected task (People's offboarding, separation and grievance-linked tasks, ChecklistStep
+            isProtected; IronStone People design §12, F22) is left out, so a phone never lists, reads or changes it.</description>
         <out-parameters>
             <parameter name="objectList" type="List"/>
             <parameter name="ctag"/>
@@ -120,7 +121,12 @@ along with this software (see the LICENSE.md file). If not, see
             const since = Date.now() - 30 * 86400000
             const tasks = ids.length ? Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition('workEffortId', 'in', ids))
                     .condition('workEffortTypeEnumId', 'WetTask').condition(cf.makeCondition('statusId', 'not-equals', 'WeCancelled', true)).list()) : []
+            // People's protected tasks are left out (impl-people P7, F22)
+            const protectedIds = new Set(tasks.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
+                    .condition(cf.makeCondition('workEffortId', 'in', tasks.map((task) => task.workEffortId))).condition('isProtected', 'Y')
+                    .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : [])
             for (const task of tasks) {
+                if (protectedIds.has(task.workEffortId)) continue
                 const done = ['WeComplete', 'WeClosed'].includes(task.statusId)
                 if (done && (millis(task.actualCompletionDate) ?? millis(task.lastUpdatedStamp) ?? 0) < since) continue
                 const uid = task.universalId || null
