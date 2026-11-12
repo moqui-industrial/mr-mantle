@@ -1994,6 +1994,11 @@ along with this software (see the LICENSE.md file). If not, see
             booking's comments), never by
             allowConflicts alone; and it is approved by its policy's mode. A conflict with an event the user may not see is named
             Busy, with no id. A resource with no policy keeps the approver fallback above.
+
+            impl-maintenance P16: the work centers above a facility are locked before it (F171); an inventory or supplies asset is
+            booked as before P15 (F172); a recurring booking of a resource with no policy is checked against its outages and blocks
+            over its range up to 365 days, its conflicts on the first meeting (F165); a request tells the resource's approvers on the
+            ResourceBooking topic (mantle.work.ResourceBookingServices.decide#ResourceBooking decides it).
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -2023,7 +2028,10 @@ along with this software (see the LICENSE.md file). If not, see
                 const text = String(value)
                 return /^-?\d+$/.test(text) ? Number(text) : Date.parse(text)
             }
-            // the resource locked for the write: two bookings of it are decided one after the other (impl-maintenance P15)
+            // the resource locked for the write: two bookings of it are decided one after the other (impl-maintenance P15), the work
+            // centers above a facility first, as Manufacturing's offline time locks its center (P16, F171)
+            const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
+            if (facilityId) policies.lockCenters(facilityId)
             const resource = facilityId ? ec.entity.find('mantle.facility.Facility').condition('facilityId', facilityId).forUpdate(true).one()
                     : ec.entity.find('mantle.product.asset.Asset').condition('assetId', assetId).forUpdate(true).one()
             if (resource == null) { ec.message.addError(facilityId ? `Facility ${facilityId} not found` : `Asset ${assetId} not found`); return }
@@ -2059,7 +2067,7 @@ along with this software (see the LICENSE.md file). If not, see
                     fromDate: new Date(eventStart), thruDate: new Date(eventEnd), bookingStatusId: event.bookingStatusId ?? null})
             }
             // Maintenance's policy and availability (impl-maintenance P15): outages and blocks, a managed resource's rules
-            const guarded = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').guard({facilityId: facilityId, assetId: assetId,
+            const guarded = policies.guard({facilityId: facilityId, assetId: assetId,
                 workEffortId: workEffortId, startMs: startMs, endMs: endMs, conflicts: conflictList, allowConflicts: allowConflicts,
                 overrideReason: overrideReason, own: [workEffortId]})
             if (guarded.refusal) { conflictList = []; ec.message.addError(guarded.refusal.message); return }
@@ -2095,6 +2103,9 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.service.sync().name('create#mantle.work.effort.WorkEffortAssetAssign').parameters({workEffortId: workEffortId,
                     assetId: assetId, fromDate: now, statusId: statusId, comments: comments}).call()
             }
+            // a request tells the resource's approvers (impl-maintenance P16: the ResourceBooking topic, Commons' approvals inbox)
+            if (requiresApproval) ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js')
+                    .notifyRequested({workEffortId: workEffortId, facilityId: facilityId || null, assetId: facilityId ? null : assetId})
         ]]></script></actions>
     </service>
     <service verb="cancel" noun="ResourceBooking">
@@ -2150,7 +2161,9 @@ along with this software (see the LICENSE.md file). If not, see
             checkOnly); an outage or a planned block over the new time refuses it (with checkOnly, a conflict with hard true and the
             refusal as its name); a managed resource's rules (bookable, maximum, horizon, a recurring range, the override with its
             permission and overrideReason, approval by its mode) apply, and its approval mode decides whether an assigned booking
-            is requested again. A conflict with an event the user may not see is named Busy, with no id.
+            is requested again. A conflict with an event the user may not see is named Busy, with no id. With reapprove (a move), a
+            booking waiting for approval after it (asked again or still waiting) tells the resource's approvers of the new time on the
+            ResourceBooking topic, their older notice of it leaving the inbox (impl-maintenance P16).
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -2255,6 +2268,13 @@ along with this software (see the LICENSE.md file). If not, see
                 return
             }
             for (const [row, statusId] of changes) { row.set('statusId', statusId); row.update(); rerequestedCount++ }
+            // a moved booking waiting for approval, asked again or still waiting, tells its approvers of the new time (impl-maintenance
+            // P16): their older notice of it leaves the inbox, its span no longer the meeting's
+            if (reapprove) {
+                const decisions = ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js')
+                for (const booking of bookingList) if (booking.statusId === 'WefRequested' || booking.statusId === 'WeaaRequested')
+                    decisions.notifyRequested({workEffortId: workEffortId, facilityId: booking.facilityId || null, assetId: booking.facilityId ? null : booking.assetId})
+            }
         ]]></script></actions>
     </service>
 
