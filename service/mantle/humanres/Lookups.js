@@ -26,7 +26,15 @@ const families = {
             ["mantle.humanres.position.EmplPositionClassSkill", "skillTypeEnumId"]
         ]
     },
-    SkillLevel: {title: "Skill levels", uses: []}
+    SkillLevel: {title: "Skill levels", uses: []},
+    // P11: the leave types a leave policy is for (design §7; PeopleLeaveEntities.xml)
+    PeopleLeaveType: {
+        title: "Leave types",
+        uses: [
+            ["mantle.humanres.leave.LeavePolicy", "leaveTypeEnumId"],
+            ["mantle.humanres.leave.LeaveLedgerEntry", "leaveTypeEnumId"]
+        ]
+    }
 }
 // the most values a family lists
 const valueCap = 500

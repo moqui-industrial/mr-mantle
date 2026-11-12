@@ -1129,8 +1129,9 @@ along with this software (see the LICENSE.md file). If not, see
             employments (employer, job title, department, manager, work location, dates and state), their emergency contacts, and
             how many of their own People requests wait (find#MyRequests) and People tasks are theirs to do (find#DueWork's myTask,
             a protected task about them left out). Never pay. Refuses a caller without PEOPLE_SELF_SERVICE or a party
-            (PERMISSION_DENIED), or with checkOnly answers available false. The cards of later phases (balances, the clock,
-            payslips) join here.</description>
+            (PERMISSION_DENIED), or with checkOnly answers available false. P10: the caller's own weeks to submit (the
+            missing-week card; mantle.work.TimesheetServices.find#WeeksToSubmit, the rule of Projects' Today). The cards of later
+            phases (balances, the clock, payslips) join here.</description>
         <in-parameters>
             <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller that shows a card only when the
                 user has self-service (Commons Home): answers available false instead of refusing</description></parameter>
@@ -1146,6 +1147,8 @@ along with this software (see the LICENSE.md file). If not, see
                 relationshipName, phone, fromDateText, revision</description></parameter>
             <parameter name="openRequestCount" type="Integer"/>
             <parameter name="openTaskCount" type="Integer"/>
+            <parameter name="weeksToSubmit" type="List"><description>P10: the caller's own weeks to submit
+                (mantle.work.TimesheetServices.find#WeeksToSubmit): timesheetId, weekStart, weekText, hours, returned, overdue</description></parameter>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('selfService', context)"/>
@@ -1157,6 +1160,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="emergencyContacts" from="found.emergencyContacts || []"/>
             <set field="openRequestCount" from="found.openRequestCount || 0"/>
             <set field="openTaskCount" from="found.openTaskCount || 0"/>
+            <set field="weeksToSubmit" from="found.weeksToSubmit || []"/>
         </actions>
     </service>
 

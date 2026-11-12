@@ -223,7 +223,7 @@ spec({
             call("create#mantle.humanres.rate.RateAmount", {
                 rateAmountId,
                 rateTypeEnumId: "RatpStandard",
-                ratePurposeEnumId: "RaprProductionCost",
+                ratePurposeEnumId: "RaprCost",
                 emplPositionClassId: "PSF_CLASS",
                 workTypeEnumId,
                 rateCurrencyUomId: "USD",
