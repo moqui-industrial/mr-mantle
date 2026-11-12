@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P18 (design-people §10 Qualifications, §1.4 notification topics): a person is reminded once per expiry that a
+        verified qualification of theirs expires within thirty days (and not renewed by a later one). The message holds
+        partyQualificationId, typeText and expiryText, never the reference, issuer or a file, so the title is safe on a lock
+        screen. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="QualificationExpiring" inboxEnumId="NinNotifications"
+            description="Your qualification expiring" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your ${typeText} expires ${expiryText}"/>
+    <!-- the daily reminder (mantle.humanres.DevelopmentServices.send#ExpiryReminders): each qualification in its own transaction,
+        a failing one logged by its id and the rest going on; a rerun sends nothing again for the same expiry -->
+    <moqui.service.job.ServiceJob jobName="send_QualificationExpiryReminders"
+            description="Remind each person once that a verified qualification of theirs expires within thirty days"
+            serviceName="mantle.humanres.DevelopmentServices.send#ExpiryReminders" cronExpression="0 45 0 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>

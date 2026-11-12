@@ -650,7 +650,8 @@ feature(
             }
         },
         then({families, refusals, renamed, ended, afterEnd, current, withEnded, kept, levels, endedSkill}) {
-            families == ["TerminationReason", "TerminationType", "SkillType", "SkillLevel", "PeopleLeaveType"]
+            families ==
+                ["TerminationReason", "TerminationType", "SkillType", "SkillLevel", "PeopleLeaveType", "QualificationType"]
             refusals ==
                 {
                     family: "FAMILY_INVALID",
