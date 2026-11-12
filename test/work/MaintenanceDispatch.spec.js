@@ -232,9 +232,13 @@ feature("the planner's picker ranks a technician on leave below the free ones an
         const found = as(state.planner, S + "find#MaintenanceCandidates", {workEffortId: state.compressor})
         const other = as(state.otherPlanner, S + "find#MaintenanceCandidates", {workEffortId: state.compressor})
         const technician = as(state.tech, S + "find#MaintenanceCandidates", {workEffortId: state.compressor})
-        return {found, other, technician}
+        // review: People's staffing answer never asks a restricted kind (a work permit) for Maintenance
+        const permit = ec.resource
+            .script("component://mr-mantle/service/mantle/humanres/Development.js")
+            .staffingAnswer([state.expired], [{skillTypeEnumId: null, qualificationTypeEnumId: "QualWorkPermit", required: true}])
+        return {found, other, technician, permit: Array.from(permit)}
     },
-    then({found, other, technician}) {
+    then({found, other, technician, permit}) {
         const rows = found.candidateList
         const of = partyId => rows.find(row => row.partyId == partyId)
         const rank = partyId => rows.findIndex(row => row.partyId == partyId)
@@ -252,6 +256,7 @@ feature("the planner's picker ranks a technician on leave below the free ones an
         found.qualificationBlocks == false
         other == "RECORD_UNAVAILABLE"
         technician == "PERMISSION_DENIED"
+        permit[0].state == "qualified" && Array.from(permit[0].requirements).length == 0
     }
 })
 
@@ -372,6 +377,14 @@ feature("team membership grants no permission; the team is read with its members
 
 feature("one refused work order in a bulk assignment names itself and the others are assigned", {
     when() {
+        // review: under the block policy the order whose skill the expired technician lacks is refused by name, the pump assigned
+        as(state.supervisor, T + "store#MaintenancePolicy", {organizationPartyId: orgA, qualificationBlocks: "Y"})
+        const blockedBulk = as(state.planner, S + "act#MaintenanceWorkOrders", {
+            workEffortIds: [state.pump, state.compressor],
+            action: "assign",
+            assigneePartyIds: [state.expired]
+        })
+        as(state.supervisor, T + "store#MaintenancePolicy", {organizationPartyId: orgA, qualificationBlocks: "N"})
         const bulk = as(state.planner, S + "act#MaintenanceWorkOrders", {
             workEffortIds: [state.pump, state.other, state.compressor],
             action: "assign",
@@ -385,9 +398,14 @@ feature("one refused work order in a bulk assignment names itself and the others
             estimatedStartDate: state.from,
             estimatedCompletionDate: state.thru
         })
-        return {bulk, nothing, scheduled}
+        return {blockedBulk, bulk, nothing, scheduled}
     },
-    then({bulk, nothing, scheduled}) {
+    then({blockedBulk, bulk, nothing, scheduled}) {
+        blockedBulk.successCount == 1 && blockedBulk.failedCount == 1
+        const blockedRow = blockedBulk.results.find(row => !row.ok)
+        blockedRow.workEffortId == state.compressor && blockedRow.reasonCode == "QUALIFICATION_BLOCKED"
+        blockedRow.message.includes("Expired")
+        blockedBulk.results.find(row => row.workEffortId == state.pump).resultCode == "ASSIGNED"
         bulk.successCount == 2 && bulk.failedCount == 1
         const refused = bulk.results.find(row => !row.ok)
         refused.workEffortId == state.other && refused.reasonCode == "RECORD_UNAVAILABLE"

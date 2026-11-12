@@ -221,6 +221,14 @@ feature(
                 skillTypeEnumId: prefix + "_SKILL",
                 minimumSkillLevel: 9
             })
+            // P8 review: a work permit (People's restricted kind) proves no skill
+            const restricted = as(state.author, W + "store#ProcessRequirements", {
+                rootWorkEffortId: root,
+                workEffortId: oil.workEffortId,
+                kind: "skill",
+                skillTypeEnumId: prefix + "_SKILL",
+                qualificationTypeEnumId: "QualWorkPermit"
+            })
             instruction(root, oil.workEffortId, "Drain at 40 C; refill with 2 l ISO 46.")
             const reader = as(state.planner, W + "store#ProcessStep", {rootWorkEffortId: root, workEffortName: "No"})
             const other = as(state.otherPlanner, W + "get#WorkProcess", {workEffortId: root})
@@ -243,6 +251,7 @@ feature(
                 part,
                 skill,
                 badLevel,
+                restricted,
                 reader,
                 other,
                 requested,
@@ -262,6 +271,7 @@ feature(
             part,
             skill,
             badLevel,
+            restricted,
             reader,
             other,
             requested,
@@ -283,6 +293,7 @@ feature(
             findings == "PUBLICATION_INVALID"
             part.workEffortId == state.oil && skill.workEffortId == state.oil
             badLevel == "VALUE_INVALID"
+            restricted == "VALUE_INVALID"
             reader == "PERMISSION_DENIED"
             other == "RECORD_UNAVAILABLE"
             requested.repeated == false

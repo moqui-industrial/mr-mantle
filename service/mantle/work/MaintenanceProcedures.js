@@ -27,6 +27,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/work/WorkProcesses.js")
+// P8 review: People's restricted qualification kinds
+const development = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Development.js")
 const {find, one, rows, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -789,6 +791,9 @@ function storeRequirements(p) {
             !one("moqui.basic.Enumeration", {enumId: qualificationTypeEnumId, enumTypeId: "QualificationType"})
         )
             denied("VALUE_INVALID", "Choose a qualification type")
+        // P8 review: never a restricted kind (an identity document or a work permit, People's), whose state dispatch would show
+        if (qualificationTypeEnumId && development().isRestricted(qualificationTypeEnumId))
+            denied("VALUE_INVALID", "An identity document or work permit cannot prove a skill")
         if (remove) {
             if (existing) call("delete#" + SKILL, {workEffortId: nodeId, skillTypeEnumId})
         } else

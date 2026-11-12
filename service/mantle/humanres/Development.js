@@ -717,7 +717,8 @@ function answerFor(partyIds, admitted, asked, at) {
 // The staffing answer of check#Qualifications for Mantle's own callers that have checked their caller first (Maintenance's
 // technician assignment, impl-maintenance P8: a dispatcher holds no People reach, impl-people P18's finding), never a service's
 // parameters: the people given against the requirements given ({skillTypeEnumId, minimumLevel, qualificationTypeEnumId,
-// required}) at a date, the same projection (no reference, issuer, title, reason or file).
+// required}) at a date, the same projection (no reference, issuer, title, reason or file). A restricted kind (an identity document
+// or a work permit) is never asked through it: its qualification part is left out (Maintenance P8 review).
 function staffingAnswer(partyIds, requirements, asOfDate) {
     const at = asOfDate == null || asOfDate === "" ? nowMs() : ms(asOfDate)
     const ids = unique(
@@ -725,7 +726,14 @@ function staffingAnswer(partyIds, requirements, asOfDate) {
             .map(text)
             .filter(Boolean)
     ).slice(0, 500)
-    return answerFor(ids, ids, Array.from(requirements || []), at).results
+    const asked = Array.from(requirements || [])
+        .map(row =>
+            row.qualificationTypeEnumId && isRestricted(row.qualificationTypeEnumId)
+                ? Object.assign({}, row, {qualificationTypeEnumId: null})
+                : row
+        )
+        .filter(row => row.skillTypeEnumId || row.qualificationTypeEnumId)
+    return answerFor(ids, ids, asked, at).results
 }
 
 // ===== skills =====
