@@ -164,39 +164,73 @@ function requireWindow(fromDate, thruDate) {
 }
 
 // ===== the organization's policy =====
-const defaultPolicy = {
-    approvalThresholdHours: 0,
-    closurePolicyEnumId: "MclSupervisor",
-    defaultMaintenanceTypeEnumId: null,
-    defaultTeamPartyId: null,
-    productionRequestsManaged: false,
-    warrantyRepairsManaged: false,
-    procedureSelfApproval: false,
-    voiceNoteTranscription: false,
-    pmLeadDays: null
+// The policy's fields (impl-maintenance P18: the whole policy, one table; a phase that adds a field adds its row): its default
+// with no row (none), how a stored row's value reads (read) and how a call's value is checked and stored (store, with the
+// organization). A store keeps each field it is not given from the policy in effect at its start, so a section of Settings
+// changes its own fields alone and a field a later phase adds is not reset by an older form.
+const flagField = name => ({
+    none: false,
+    read: row => flag(row[name]),
+    store: value => (flag(value) ? "Y" : "N"),
+    stored: v => (v ? "Y" : "N")
+})
+const policyFields = {
+    approvalThresholdHours: {
+        none: 0,
+        read: row => number(row.approvalThresholdHours) ?? 0,
+        store: value => hoursOf(value) ?? toDecimal(0),
+        stored: value => toDecimal(value ?? 0)
+    },
+    closurePolicyEnumId: {
+        none: "MclSupervisor",
+        read: row => row.closurePolicyEnumId || "MclSupervisor",
+        store: value => requireEnum(value, "MaintenanceClosurePolicy", "Closure policy") || "MclSupervisor"
+    },
+    defaultMaintenanceTypeEnumId: {
+        none: null,
+        read: row => row.defaultMaintenanceTypeEnumId || null,
+        store: value => requireEnum(value, "MaintenanceType", "Maintenance type")
+    },
+    defaultTeamPartyId: {
+        none: null,
+        read: row => row.defaultTeamPartyId || null,
+        store: (value, organizationPartyId) => (text(value) ? requireTeam(organizationPartyId, text(value)) : null)
+    },
+    productionRequestsManaged: flagField("productionRequestsManaged"),
+    warrantyRepairsManaged: flagField("warrantyRepairsManaged"),
+    // P6
+    procedureSelfApproval: flagField("procedureSelfApproval"),
+    // P7 review
+    voiceNoteTranscription: flagField("voiceNoteTranscription"),
+    // P14: the days before a due date a plan's work is made when its terms name none (empty: on the day)
+    pmLeadDays: {
+        none: null,
+        read: row => number(row.pmLeadDays),
+        store: value => {
+            const days = blank(value) ? null : Number(String(value))
+            if (days != null && (!Number.isInteger(days) || days < 0 || days > 365))
+                denied("VALUE_INVALID", "Enter the days ahead as a whole number from 0 to 365")
+            return days
+        }
+    }
 }
-// The policy in effect for an organization, or the defaults (fromDate null).
+const defaultPolicy = Object.fromEntries(Object.entries(policyFields).map(([name, field]) => [name, field.none]))
+// A policy row's values, or the defaults (fromDate null).
+function policyValues(organizationPartyId, row) {
+    if (!row) return Object.assign({organizationPartyId, fromDate: null, thruDate: null}, defaultPolicy)
+    const values = {organizationPartyId, fromDate: row.fromDate, thruDate: row.thruDate || null}
+    for (const [name, field] of Object.entries(policyFields)) values[name] = field.read(row)
+    values.comments = row.comments || null
+    return values
+}
+// The policy in effect for an organization at a time (now when not given), or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
     const row = organizationPartyId
         ? Array.from(
               find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", at).orderBy("-fromDate").limit(1).list()
           )[0]
         : null
-    if (!row) return Object.assign({organizationPartyId, fromDate: null}, defaultPolicy)
-    return {
-        organizationPartyId,
-        fromDate: row.fromDate,
-        approvalThresholdHours: number(row.approvalThresholdHours) ?? 0,
-        closurePolicyEnumId: row.closurePolicyEnumId || defaultPolicy.closurePolicyEnumId,
-        defaultMaintenanceTypeEnumId: row.defaultMaintenanceTypeEnumId || null,
-        defaultTeamPartyId: row.defaultTeamPartyId || null,
-        productionRequestsManaged: flag(row.productionRequestsManaged),
-        warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
-        procedureSelfApproval: flag(row.procedureSelfApproval),
-        voiceNoteTranscription: flag(row.voiceNoteTranscription),
-        pmLeadDays: number(row.pmLeadDays),
-        comments: row.comments || null
-    }
+    return policyValues(organizationPartyId, row)
 }
 // Within the threshold: a positive threshold and estimated hours no more than it (no estimate is over it).
 function withinThreshold(policy, hours) {
@@ -209,53 +243,87 @@ function policyOrganization(userScope, organizationPartyId) {
     maintenanceAccess.requireOrganization(userScope, id)
     return id
 }
+// A policy's display values: its dates and its names as text.
+function policyDisplay(policy) {
+    return Object.assign({}, policy, {
+        fromDateText: dateText(policy.fromDate),
+        thruDateText: dateText(policy.thruDate),
+        closurePolicyText: enumText(policy.closurePolicyEnumId),
+        defaultMaintenanceTypeText: enumText(policy.defaultMaintenanceTypeEnumId),
+        defaultTeamName: policy.defaultTeamPartyId ? partyNames([policy.defaultTeamPartyId])[policy.defaultTeamPartyId] : ""
+    })
+}
+// get#MaintenancePolicy: the policy in effect, the ones planned from a later date (P18) and the last ones that ended.
+const policyHistoryCap = 10
 function getPolicy(p) {
     const userScope = scopeWithAny(["settingsEdit", "anyRead"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
-    const policy = policyOf(organizationPartyId)
+    const now = ec.user.nowTimestamp
+    const planned = Array.from(
+        find(POLICY, {organizationPartyId})
+            .condition("fromDate", "greater", now)
+            .orderBy("fromDate")
+            .limit(policyHistoryCap)
+            .list()
+    )
+        // a withdrawn plan ended at its own start
+        .filter(row => row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
+        .map(row => policyDisplay(policyValues(organizationPartyId, row)))
+    const ended = Array.from(
+        find(POLICY, {organizationPartyId})
+            .condition("thruDate", "less-equals", now)
+            .orderBy("-fromDate")
+            .limit(policyHistoryCap)
+            .list()
+    )
+        .filter(row => ms(row.thruDate) > ms(row.fromDate))
+        .map(row => policyDisplay(policyValues(organizationPartyId, row)))
     return {
-        policy: Object.assign({}, policy, {
-            fromDateText: dateText(policy.fromDate),
-            closurePolicyText: enumText(policy.closurePolicyEnumId),
-            defaultMaintenanceTypeText: enumText(policy.defaultMaintenanceTypeEnumId),
-            defaultTeamName: policy.defaultTeamPartyId ? partyNames([policy.defaultTeamPartyId])[policy.defaultTeamPartyId] : ""
-        }),
+        policy: policyDisplay(policyOf(organizationPartyId)),
+        planned,
+        ended,
         canEdit: !!userScope.capabilities.settingsEdit
     }
 }
-// store#MaintenancePolicy: the organization's policy from now, ending the row in effect (MAINTENANCE_SETTINGS_EDIT).
+// store#MaintenancePolicy (MAINTENANCE_SETTINGS_EDIT): the organization's policy from fromDate (now when not given; never
+// earlier, DATE_INVALID), each field not given kept from the policy in effect then. The row in effect then ends at it; a row
+// planned to start later is refused (PLAN_PENDING, naming its date) unless withdrawPlanned, which withdraws it (ended at its own
+// start, kept for the audit; P18 review R4); a row planned for that very time is changed in place. Nothing is deleted.
 function storePolicy(p) {
     const userScope = scopeWithAny(["settingsEdit"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
-    const threshold = hoursOf(p.approvalThresholdHours) ?? toDecimal(0)
-    const closurePolicyEnumId =
-        requireEnum(p.closurePolicyEnumId, "MaintenanceClosurePolicy", "Closure policy") || defaultPolicy.closurePolicyEnumId
-    const typeId = requireEnum(p.defaultMaintenanceTypeEnumId, "MaintenanceType", "Maintenance type")
-    const teamId = text(p.defaultTeamPartyId)
-    if (teamId) requireTeam(organizationPartyId, teamId)
-    // P14: the days ahead preventive work is made for a plan that names none
-    const leadDays = blank(p.pmLeadDays) ? null : Number(String(p.pmLeadDays))
-    if (leadDays != null && (!Number.isInteger(leadDays) || leadDays < 0 || leadDays > 365))
-        denied("VALUE_INVALID", "Enter the days ahead as a whole number from 0 to 365")
     const now = ec.user.nowTimestamp
-    for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", now).list()))
-        call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: now})
-    call("create#" + POLICY, {
-        organizationPartyId,
-        fromDate: now,
-        approvalThresholdHours: threshold,
-        closurePolicyEnumId,
-        defaultMaintenanceTypeEnumId: typeId,
-        defaultTeamPartyId: teamId,
-        productionRequestsManaged: flag(p.productionRequestsManaged) ? "Y" : "N",
-        warrantyRepairsManaged: flag(p.warrantyRepairsManaged) ? "Y" : "N",
-        procedureSelfApproval: flag(p.procedureSelfApproval) ? "Y" : "N",
-        voiceNoteTranscription: flag(p.voiceNoteTranscription) ? "Y" : "N",
-        pmLeadDays: leadDays,
+    const fromDate = blank(p.fromDate) ? now : p.fromDate
+    if (ms(fromDate) < ms(now) - minuteMs) denied("DATE_INVALID", "A policy starts now or later")
+    const at = ms(fromDate) < ms(now) ? now : fromDate
+    const kept = policyOf(organizationPartyId, at)
+    const values = {}
+    for (const [name, field] of Object.entries(policyFields)) {
+        const given = Object.hasOwn(p, name) && p[name] !== undefined
+        values[name] = given ? field.store(p[name], organizationPartyId) : field.stored ? field.stored(kept[name]) : kept[name]
+    }
+    const same = one(POLICY, {organizationPartyId, fromDate: at})
+    // a policy planned to start later is withdrawn only when the call says so (the user's call of Nov 12, P18 review R4)
+    const plannedLater = Array.from(
+        find(POLICY, {organizationPartyId}).condition("fromDate", "greater", at).orderBy("fromDate").list()
+    ).filter(row => row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
+    if (plannedLater.length && !flag(p.withdrawPlanned))
+        denied(
+            "PLAN_PENDING",
+            "A policy is planned from " +
+                plannedLater.map(row => dateText(row.fromDate)).join(", ") +
+                ": start this one then or later, or withdraw the plan"
+        )
+    for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", at).list()))
+        if (!same || ms(row.fromDate) !== ms(same.fromDate))
+            call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: at})
+    for (const row of plannedLater) call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: row.fromDate})
+    const fields = Object.assign({organizationPartyId, fromDate: at, thruDate: null}, values, {
         changedByUserId: ec.user.userId,
         comments: text(p.comments)
     })
-    return {organizationPartyId, fromDate: now}
+    call((same ? "update#" : "create#") + POLICY, fields)
+    return {organizationPartyId, fromDate: at}
 }
 
 // ===== targets, teams and people =====
