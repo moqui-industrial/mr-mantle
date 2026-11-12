@@ -2084,7 +2084,9 @@ along with this software (see the LICENSE.md file). If not, see
             An employment (mantle.humanres.employment.Employment, IronStone People's employment content host) and its files
             (EmploymentContent) are seen only by an HR reader of its employer in People's scope
             (mantle.humanres.PeopleServices.check#EmploymentAccess), for every caller, authorization disabled or not; a call with
-            no user sees none.
+            no user sees none. An application (EmploymentApplication, People's application content host, impl-people P16) and its
+            files (EmploymentApplicationContent) the same, by mantle.humanres.RecruitingServices.check#ApplicationAccess: a
+            recruiter of its employer or a panel member of the application.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2157,7 +2159,10 @@ along with this software (see the LICENSE.md file). If not, see
                 // People's employment content host (IronStone People PE-01, impl-people P2), keyed by the employment's
                 // partyRelationshipId
                 'mantle.humanres.employment.Employment': content('mantle.humanres.employment.EmploymentContent',
-                        'partyRelationshipId', 'contentTypeEnumId')}
+                        'partyRelationshipId', 'contentTypeEnumId'),
+                // People's application content host (impl-people P16): an application's private files (its resume)
+                'mantle.humanres.employment.EmploymentApplication': content('mantle.humanres.employment.EmploymentApplicationContent',
+                        'employmentApplicationId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2584,6 +2589,11 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.humanres.employment.Employment' || entityName === 'mantle.humanres.employment.EmploymentContent')
                     return !!ec.service.sync().name('mantle.humanres.PeopleServices.check#EmploymentAccess')
                             .parameter('partyRelationshipId', value.partyRelationshipId).disableAuthz().call()?.recordVisible
+                // People's applications and their files (impl-people P16): a recruiter of the employer or a panel member of the
+                // application (mantle.humanres.RecruitingServices.check#ApplicationAccess); a call with no user sees none
+                if (entityName === 'mantle.humanres.employment.EmploymentApplication' || entityName === 'mantle.humanres.employment.EmploymentApplicationContent')
+                    return !!ec.service.sync().name('mantle.humanres.RecruitingServices.check#ApplicationAccess')
+                            .parameter('employmentApplicationId', value.employmentApplicationId).disableAuthz().call()?.recordVisible
                 if (financeEntity(entityName)) return false
                 // Catalog record mounts/drive links also enforce owner scope without an active-org filter. A catalog
                 // user's internal file/room callback retains this rule even when artifact authorization is disabled.
