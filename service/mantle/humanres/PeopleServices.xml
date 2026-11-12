@@ -1196,13 +1196,13 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The caller's current reports (design §3 MyTeam Team), with PEOPLE_TEAM_VIEW: the people of their live
             reporting lines, one row per employment at an employer the line is at (never a report's employment at another
             employer), as the public work identity with the department, work location and whether they work or are on a leave of
-            absence now; no employment id, private contact or pay. The caller's own lines only: the service takes no manager or
-            party. Refuses a caller without PEOPLE_TEAM_VIEW (PERMISSION_DENIED). The schedule, who is out and missing time join
-            with P9, P12 and P10.</description>
+            absence now, and the working schedule they follow now (P9); no employment id, private contact or pay. The caller's own
+            lines only: the service takes no manager or party. Refuses a caller without PEOPLE_TEAM_VIEW (PERMISSION_DENIED). Who is
+            out and missing time join with P12 and P10.</description>
         <out-parameters>
             <parameter name="team" type="List"><description>partyId, personName, preferredName, organizationPartyId,
                 organizationName, jobTitle, departmentName, workLocation, workEmail, workPhone, state, stateText, availability,
-                availabilityText</description></parameter>
+                availabilityText, scheduleName</description></parameter>
         </out-parameters>
         <actions>
             <set field="team" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('team', context).team"/>
