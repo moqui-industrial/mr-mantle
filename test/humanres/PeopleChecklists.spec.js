@@ -3,7 +3,8 @@
 // get#TaskObjectTags; IronStone People design §4, §12 ChecklistTemplates, §13, F22, F52; impl-people P7): an HR editor keeps their
 // employer's templates and another employer's HR neither reads nor changes them; an onboarding task is on the new employee's phone
 // and an offboarding task is not; the person and HR read the equipment held and HR returns it to a receiving custodian of the
-// employer, completing the return task. The instantiation itself is WorkProcess's. P16 review: a step linking an exit interview
+// employer, completing the return task, as a dated custody change does (Maintenance's, replace#AssetPartyAssignment's
+// effectiveDate; the Maintenance merge review). The instantiation itself is WorkProcess's. P16 review: a step linking an exit interview
 // is recorded once on its task, by one of its people, on the employer's published exit interview form, with no link; its answers
 // read by the task's people and the employer's HR, never by the leaver.
 // Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules
@@ -487,6 +488,101 @@ feature(
             out.task === "WeComplete"
             out.custody.join("|") === "|SN-77|Chkl MGR/true;Chkl HOLDER/false"
             out.custodyB === "RECORD_UNAVAILABLE"
+        }
+    }
+)
+
+feature(
+    "a dated custody change (Maintenance's change#MaintenanceCustody passes replace#AssetPartyAssignment an effectiveDate) ends the holding on that date and completes its return task; a later date is refused and changes nothing",
+    {
+        when() {
+            // the Maintenance merge review (Nov 12): P7's rule on the holding's end holds for an end dated earlier than now
+            const holder = person("DATED")
+            const employment = employ(holder, orgA)
+            const assetId = call("create#mantle.product.asset.Asset", {
+                assetTypeEnumId: "AstTpEquipment",
+                assetName: "Chkl drill",
+                ownerPartyId: orgA
+            }).assetId
+            call("create#mantle.product.asset.AssetPartyAssignment", {
+                assetId,
+                partyId: holder,
+                roleTypeId: "Custodian",
+                fromDate: since
+            })
+            const rootId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTask",
+                statusId: "WeInPlanning",
+                workEffortName: "Equipment return: Chkl DATED"
+            }).workEffortId
+            call("create#mantle.humanres.checklist.EmploymentChecklist", {
+                workEffortId: rootId,
+                partyRelationshipId: employment,
+                partyId: holder,
+                organizationPartyId: orgA,
+                lifecycleKindEnumId: "ClkOffboarding",
+                startedDate: ec.user.nowTimestamp
+            })
+            const taskId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTask",
+                statusId: "WeInPlanning",
+                workEffortName: "Return Chkl drill",
+                parentWorkEffortId: rootId,
+                rootWorkEffortId: rootId
+            }).workEffortId
+            call("create#mantle.work.effort.WorkEffortAssetAssign", {
+                workEffortId: taskId,
+                assetId,
+                fromDate: since,
+                statusId: "WeaaAssigned"
+            })
+            call("create#mantle.work.effort.WorkEffortParty", {
+                workEffortId: taskId,
+                partyId: holder,
+                roleTypeId: "Custodian",
+                fromDate: since
+            })
+            call("create#mantle.humanres.checklist.ChecklistStep", {
+                workEffortId: taskId,
+                sourceLinkEnumId: "ClsEquipmentReturn",
+                isProtected: "Y"
+            })
+            const nowMs = Number(ec.user.nowTimestamp)
+            const replace = effectiveDate =>
+                run("john.doe", "mantle.product.AssetServices.replace#AssetPartyAssignment", {
+                    assetId,
+                    roleTypeId: "Custodian",
+                    newPartyId: state.mgr,
+                    effectiveDate
+                })
+            const holding = () =>
+                rows("mantle.product.asset.AssetPartyAssignment", {assetId, partyId: holder, roleTypeId: "Custodian"})[0]
+            const taskStatus = () => rows("mantle.work.effort.WorkEffort", {workEffortId: taskId})[0].statusId
+            const later = code(replace(new Date(nowMs + 2 * 86400000).toISOString()))
+            const afterLater = [holding().thruDate == null, taskStatus()]
+            const effective = Math.floor((nowMs - 2 * 86400000) / 1000) * 1000
+            const dated = replace(new Date(effective).toISOString())
+            const received = rows("mantle.product.asset.AssetPartyAssignment", {
+                assetId,
+                partyId: state.mgr,
+                roleTypeId: "Custodian"
+            })
+            return {
+                later,
+                afterLater,
+                dated: dated.error,
+                endedAt: Number(holding().thruDate) === effective,
+                receivedFrom: received.length === 1 && Number(received[0].fromDate) === effective,
+                task: taskStatus()
+            }
+        },
+        then(out) {
+            out.later === "DATE_FUTURE"
+            out.afterLater.join("|") === "true|WeInPlanning"
+            out.dated === ""
+            out.endedAt === true
+            out.receivedFrom === true
+            out.task === "WeComplete"
         }
     }
 )
