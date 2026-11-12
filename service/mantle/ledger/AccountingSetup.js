@@ -321,6 +321,17 @@ function maintenanceMapping(organizationPartyId, values) {
             .facilityOrganization(values.facilityId)
         if (owner !== organizationPartyId) throw new Error("Facility is outside the mapping organization")
     }
+    // never ended before now (impl-maintenance §2's dated rows, P9 review R3): issues already posted under a row keep it, and a
+    // repost takes the same one; an end already stored is left as it is
+    const stored = values.maintenanceCostPolicyId
+        ? one("mantle.ledger.config.MaintenanceCostPolicy", {maintenanceCostPolicyId: values.maintenanceCostPolicyId})
+        : null
+    if (
+        values.thruDate &&
+        !(stored && ms(stored.thruDate) === ms(values.thruDate)) &&
+        ms(values.thruDate) < ms(ec.user.nowTimestamp)
+    )
+        throw new Error("DATE_INVALID: A maintenance expense mapping ends no earlier than now")
     if (!values.fromDate) values.fromDate = ec.user.nowTimestamp
     if (values.thruDate && ms(values.thruDate) <= ms(values.fromDate)) throw new Error("A mapping's end must follow its start")
 }

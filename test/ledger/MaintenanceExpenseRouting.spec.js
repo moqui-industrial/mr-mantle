@@ -437,7 +437,7 @@ feature("a return credits the issuance's expense with the same dimensions at the
     }
 })
 
-feature("Posting defaults maps maintenance expense by kind and facility; a row is ended, not rewritten", {
+feature("Posting defaults maps maintenance expense by kind and facility; a row is ended, not rewritten, and never before now", {
     when() {
         const store = (mapping, extra = {}) =>
             as(
@@ -459,6 +459,18 @@ feature("Posting defaults maps maintenance expense by kind and facility; a row i
             {maintenanceCostPolicyId: row.maintenanceCostPolicyId, glAccountId: accounts.site},
             {lastUpdatedStamp: row.lastUpdatedStamp}
         )
+        const backdated = store(
+            {
+                maintenanceCostPolicyId: row.maintenanceCostPolicyId,
+                maintenanceKindEnumId: "MkPreventive",
+                facilityId: prefix + "_WH",
+                glAccountId: accounts.organization,
+                fromDate: row.fromDate,
+                thruDate: new Date(Date.now() - hour)
+            },
+            {lastUpdatedStamp: row.lastUpdatedStamp}
+        )
+        const addedEnded = store({glAccountId: accounts.site, thruDate: new Date(Date.now() - hour)})
         const ended = store(
             {
                 maintenanceCostPolicyId: row.maintenanceCostPolicyId,
@@ -474,9 +486,11 @@ feature("Posting defaults maps maintenance expense by kind and facility; a row i
             organizationPartyId: orgA,
             mappingKind: "maintenance"
         })
-        return {added, row, otherFacility, rewritten, ended, listed}
+        return {added, row, otherFacility, rewritten, backdated, addedEnded, ended, listed}
     },
-    then({added, row, otherFacility, rewritten, ended, listed}) {
+    then({added, row, otherFacility, rewritten, backdated, addedEnded, ended, listed}) {
+        // a row ends no earlier than now (§2's dated rows, R3)
+        backdated == "DATE_INVALID" && addedEnded == "DATE_INVALID"
         added.complete === true
         row.organizationPartyId == orgA && row.fromDate != null
         otherFacility.startsWith("ERROR") && otherFacility.includes("outside the mapping organization")
