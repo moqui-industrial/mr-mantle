@@ -633,7 +633,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', calendarId)
                     .condition('workEffortId', workEffortId).one() != null) return
             ec.service.sync().name('create#mantle.work.calendar.CalendarWorkEffort').parameters({calendarId: calendarId,
-                workEffortId: workEffortId, addedDate: ec.user.nowTimestamp, viewOnly: eventAccess?.canEdit ? null : 'Y'}).call()
+                workEffortId: workEffortId, addedDate: ec.user.nowTimestamp, viewOnly: eventAccess?.canEdit ? 'N' : 'Y'}).call()
             added = !ec.message.hasError()
         ]]></script></actions>
     </service>
@@ -657,6 +657,126 @@ along with this software (see the LICENSE.md file). If not, see
             if (row == null) return
             row.delete()
             removed = true
+        ]]></script></actions>
+    </service>
+    <service verb="migrate" noun="CalendarViewOnlyLinks" allow-remote="false">
+        <description>The calendar links made before CalendarWorkEffort.viewOnly (Commons calendar editors, Nov 12, 2026) gave edit
+            to their calendar's editors whoever put the event there. This marks each link with no viewOnly: Y (the calendar only
+            shows the event) when the event has an organizer who is not the calendar's owner and may not change the calendar
+            (so the organizer did not put it there, as a delegate or a team member does), and the calendar's owner could not
+            change the event otherwise (no other calendar link of it, not one that only shows it, in a calendar the owner may
+            change): an attendee's invitation put in a calendar of their own. Every other link is N: the organizer's own, one the
+            organizer put in a calendar they change, an event with no organizer (the calendar's own: a feed's, an import's, an
+            outside invitation's) and a subscription calendar's. Nothing to do once done (add#CalendarEvent writes Y or N) or on a
+            new database; a data load calls it (data/CalendarSeedData.xml). Each link on its own: one that fails is logged and
+            counted, and the rest are marked.</description>
+        <in-parameters>
+            <parameter name="calendarIdList" type="List"><description>Only the links of these calendars (a test's own); empty for
+                every calendar</description><parameter name="calendarId"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="markedCount" type="Integer"><description>Links marked Y</description></parameter>
+            <parameter name="keptCount" type="Integer"><description>Links marked N</description></parameter>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            markedCount = 0; keptCount = 0; failedCount = 0
+            const cf = ec.entity.conditionFactory
+            const LINK = 'mantle.work.calendar.CalendarWorkEffort'
+            const chunks = (list) => { const out = []; for (let i = 0; i < list.length; i += 500) out.push(list.slice(i, i + 500)); return out }
+            const already = ec.artifactExecution.disableAuthz()
+            try {
+                const only = Array.from(calendarIdList || []).filter((id) => id)
+                let linkFind = ec.entity.find(LINK).condition('viewOnly', null)
+                if (only.length) linkFind = linkFind.condition(cf.makeCondition('calendarId', 'in', only))
+                const links = Array.from(linkFind.selectField('calendarId,workEffortId').list())
+                if (!links.length) return
+                const eventIds = Array.from(new Set(links.map((link) => link.workEffortId)))
+                const organizerOf = new Map()
+                const linksOf = new Map()
+                for (const ids of chunks(eventIds)) {
+                    for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition('workEffortId', 'in', ids))
+                            .selectField('workEffortId,ownerPartyId').list()) organizerOf.set(row.workEffortId, row.ownerPartyId || null)
+                    // every calendar of these events: the other calendars an owner may change them through
+                    for (const row of ec.entity.find(LINK).condition(cf.makeCondition('workEffortId', 'in', ids)).selectField('calendarId,workEffortId,viewOnly').list()) {
+                        if (!linksOf.has(row.workEffortId)) linksOf.set(row.workEffortId, [])
+                        linksOf.get(row.workEffortId).push({calendarId: row.calendarId, workEffortId: row.workEffortId, viewOnly: row.viewOnly || null})
+                    }
+                }
+                const calendarIds = Array.from(new Set([].concat(...Array.from(linksOf.values()).map((rows) => rows.map((row) => row.calendarId)))))
+                const calendars = new Map()
+                const editSharesOf = new Map()
+                for (const ids of chunks(calendarIds)) {
+                    for (const row of ec.entity.find('mantle.work.calendar.Calendar').condition(cf.makeCondition('calendarId', 'in', ids))
+                            .selectField('calendarId,ownerPartyId,calendarKindEnumId').list()) calendars.set(row.calendarId, row)
+                    for (const share of ec.entity.find('mantle.work.calendar.CalendarShare').condition(cf.makeCondition('calendarId', 'in', ids))
+                            .condition(cf.makeCondition('permissionEnumId', 'in', ['CalpEdit', 'CalpManage']))
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) {
+                        if (!share.userId && !share.userGroupId && !share.partyId) continue
+                        if (!editSharesOf.has(share.calendarId)) editSharesOf.set(share.calendarId, [])
+                        editSharesOf.get(share.calendarId).push(share)
+                    }
+                }
+                // a party as check#CalendarAccess counts it for its users: the users, their groups and its organizations
+                const whoOf = new Map()
+                const who = (partyId) => {
+                    if (whoOf.has(partyId)) return whoOf.get(partyId)
+                    const userIds = Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).selectField('userId').list())
+                            .map((row) => row.userId)
+                    const groups = new Set(userIds.length ? ['ALL_USERS'] : [])
+                    if (userIds.length) for (const row of ec.entity.find('moqui.security.UserGroupMember').condition(cf.makeCondition('userId', 'in', userIds))
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()) groups.add(row.userGroupId)
+                    const orgIds = new Set(Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', partyId)
+                            .condition(cf.makeCondition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']))
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('toPartyId').list()).map((row) => row.toPartyId))
+                    const found = {userIds: new Set(userIds), groups, orgIds}
+                    whoOf.set(partyId, found)
+                    return found
+                }
+                // whether a party may change the events of a calendar: its owner, or an edit or manage share that applies
+                const edits = (partyId, calendarId) => {
+                    const calendar = calendars.get(calendarId)
+                    if (!partyId || !calendar || calendar.calendarKindEnumId === 'CalkSubscription') return false
+                    if (calendar.ownerPartyId === partyId) return true
+                    const shares = editSharesOf.get(calendarId) || []
+                    if (!shares.length) return false
+                    const party = who(partyId)
+                    return shares.some((share) => share.userId ? party.userIds.has(share.userId)
+                            : share.userGroupId ? party.groups.has(share.userGroupId) : share.partyId === partyId || party.orgIds.has(share.partyId))
+                }
+                // a link its organizer could have made: the event has none, the calendar is a feed's or its organizer's, or the
+                // organizer changes the calendar
+                const organizersLink = (link) => {
+                    const calendar = calendars.get(link.calendarId)
+                    const organizerId = organizerOf.get(link.workEffortId)
+                    return !calendar || !organizerId || calendar.calendarKindEnumId === 'CalkSubscription' || calendar.ownerPartyId === organizerId
+                            || edits(organizerId, link.calendarId)
+                }
+                // a link that makes its calendar's editors the event's: marked N, or not marked and the organizer's
+                const editLink = (link) => link.viewOnly === 'N' || (link.viewOnly == null && organizersLink(link))
+                for (const link of links) {
+                    ec.message.pushErrors()
+                    try {
+                        const calendar = calendars.get(link.calendarId)
+                        const shown = !organizersLink(link) && !(linksOf.get(link.workEffortId) || []).some((other) =>
+                                other.calendarId !== link.calendarId && editLink(other) && edits(calendar.ownerPartyId, other.calendarId))
+                        ec.service.sync().name('update#' + LINK).parameters({calendarId: link.calendarId, workEffortId: link.workEffortId,
+                            viewOnly: shown ? 'Y' : 'N'}).requireNewTransaction(true).call()
+                        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                        if (shown) markedCount++
+                        else keptCount++
+                    } catch (err) {
+                        failedCount++
+                        ec.logger.error(`Calendar link ${link.calendarId}/${link.workEffortId} not marked: ${err && err.message ? err.message : err}`)
+                    } finally {
+                        ec.message.clearErrors()
+                        ec.message.popErrors()
+                    }
+                }
+                if (markedCount) ec.logger.info(`Marked ${markedCount} calendar links view only: events put in a calendar by someone who may not change them`)
+            } finally {
+                if (!already) ec.artifactExecution.enableAuthz()
+            }
         ]]></script></actions>
     </service>
 

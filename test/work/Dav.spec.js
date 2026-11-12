@@ -324,9 +324,10 @@ feature("a phone moves a booked event: into a clash with the room's other bookin
 })
 
 // Commons calendar editors (Nov 12, 2026): an invitation an attendee puts in a calendar of their own is there to be seen. The
-// attendee's phone reads it and is refused (403) a change, under its name or another with its UID, and a delete; the
-// organizer's delete still cancels it, since the attendee's calendar only shows it
-feature("an attendee's phone reads an invitation put in their own calendar and is refused its change and delete; the organizer's delete cancels it", {
+// attendee's phone reads it and is refused (403) a change, under its name or another with its UID; its delete takes it out of
+// the attendee's calendar and leaves the event as it was (the review's fix: it was refused); the organizer's delete still
+// cancels it
+feature("an attendee's phone reads an invitation put in their own calendar, is refused its change and deletes it from that calendar only; the organizer's delete cancels it", {
     when() {
         const benPartyId = call("mantle.party.PartyServices.create#Person", { firstName: "Ben", lastName: "Davspec" }).partyId
         call("mantle.party.PartyServices.create#PartyUserAccount", { partyId: benPartyId, emailAddress: "dv.ben@example.com",
@@ -365,11 +366,11 @@ feature("an attendee's phone reads an invitation put in their own calendar and i
         got.body.includes("SUMMARY:Budget review")
         moved.status == 403
         otherName.status == 403
-        deleted.status == 403
+        deleted.status == 204
         afterBen.workEffortName == "Budget review"
         Number(String(afterBen.estimatedStartDate)) == Date.UTC(2027, 5, 16, 15, 0, 0)
         afterBen.statusId != "WeCancelled"
-        benEvents == 1
+        benEvents == 0
         organizerDeleted.status == 204
         afterAna.statusId == "WeCancelled"
     },

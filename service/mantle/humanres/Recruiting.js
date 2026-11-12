@@ -1152,7 +1152,8 @@ function changeInterview(p) {
     const invitationProblem = tellAttendees(workEffortId)
     return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
 }
-// cancel#Interview: the interview's event cancelled (its scorecards stay as they are) and the attendees told.
+// cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its video call's link closed (closeCallLink)
+// and the attendees told.
 function cancelInterview(p) {
     const {interview} = interviewToChange(p)
     const workEffortId = interview.workEffortId
@@ -1161,8 +1162,38 @@ function cancelInterview(p) {
         statusId: "WeCancelled",
         statusId_changeReason: text(p.reason) || "Interview cancelled"
     })
+    closeCallLink(interview.callLinkId)
     const invitationProblem = tellAttendees(workEffortId)
     return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
+}
+// The video call link of a cancelled interview takes no one more (Commons calendar editors review, Nov 12, 2026). The framework's
+// revoke#CallLink is its owner's (the recruiter who scheduled it): it revokes the link and removes its guests at once. Another
+// recruiter of the employer (checked by cancel#Interview) closes it as the system: the link is revoked, so its token and its
+// guests' credentials are refused, and the guests' credentials end now, so the call's minute job (expire#Calls) takes any still in
+// the meeting out and ends it. Nothing here may add an error, which would roll the cancel back: the preconditions of revoke#CallLink
+// are checked first.
+function closeCallLink(callLinkId) {
+    if (!callLinkId) return
+    const link = one("moqui.call.CallLink", {callLinkId})
+    if (!link || link.revokedDate) return
+    if (ec.user.userId && link.ownerUserId === ec.user.userId) {
+        call("org.moqui.call.CallServices.revoke#CallLink", {callLinkId})
+        return
+    }
+    ec.artifactExecution.runAsSystem(() => {
+        const now = ec.user.nowTimestamp
+        const row = ec.entity.find("moqui.call.CallLink").condition("callLinkId", callLinkId).forUpdate(true).one()
+        if (!row || row.revokedDate) return
+        row.set("revokedDate", now)
+        row.update()
+        for (const guest of Array.from(
+            ec.entity.find("moqui.call.CallGuest").condition("callLinkId", callLinkId).condition("revokedDate", null).list()
+        )) {
+            if ((ms(guest.credentialExpiry) ?? Infinity) <= nowMs()) continue
+            guest.set("credentialExpiry", now)
+            guest.update()
+        }
+    })
 }
 // submit#Scorecard: a panel member answers the scorecard assigned to them (the invitation's party is the caller's: another's is
 // not available), once (ALREADY_ANSWERED), the values checked against the form as of now (FORM_VALUES_INVALID).

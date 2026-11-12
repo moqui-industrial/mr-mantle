@@ -548,9 +548,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A CalDAV client's delete: an event series of a calendar (edit permission) is cancelled with its changed
             instances, or only taken out of this calendar when another calendar holds it for its editors (one that only shows it,
             CalendarWorkEffort.viewOnly, does not count); a task leaves the Tasks collection by the end of the user's assignment
-            (the task stays for the others on it). status 412 when ifMatch fails, 404 when the name is not there, 403 when the
-            calendar may not be changed, or the event may not be changed by the user (EventServices.check#EventAccess: one the
-            calendar only shows, one an application keeps; Commons calendar editors, Nov 12, 2026).</description>
+            (the task stays for the others on it). An event the calendar only shows (an attendee's invitation put there to be
+            seen) is taken out of it and stays as it was. status 412 when ifMatch fails, 404 when the name is not there, 403 when
+            the calendar may not be changed, or the event may not be changed by the user and the calendar does not only show it
+            (EventServices.check#EventAccess: one an application keeps; Commons calendar editors, Nov 12, 2026).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
             <parameter name="objectName" required="true"/>
@@ -584,8 +585,17 @@ along with this software (see the LICENSE.md file). If not, see
             const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: object.workEffortId, permission: 'check'}).call()
             if (ec.message.hasError()) return
             if (!eventAccess?.canEdit) {
-                status = 403
-                ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${object.workEffortId} is not deleted by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                // an event the calendar only shows (an attendee put it there to see it) is taken out of it, the event as it was;
+                // any other the user may not change is refused
+                const shownOnly = !eventAccess?.managedBy && ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', collectionId)
+                        .condition('workEffortId', object.workEffortId).one()?.viewOnly === 'Y'
+                if (!shownOnly) {
+                    status = 403
+                    ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${object.workEffortId} is not deleted by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                    return
+                }
+                if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
+                ec.service.sync().name('mantle.work.CalendarServices.remove#CalendarEvent').parameters({calendarId: collectionId, workEffortId: object.workEffortId}).call()
                 return
             }
             if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }

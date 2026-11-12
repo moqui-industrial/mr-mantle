@@ -731,3 +731,71 @@ feature("an interview's event changes only through recruiting: the organizer ref
         r.again == "INTERVIEW_CANCELLED"
     }
 })
+
+// Commons calendar review (Nov 12, 2026): a cancelled interview's video call link takes no one more. The recruiter who scheduled
+// it revokes it with the framework's revoke#CallLink (its guests removed at once); another recruiter of the employer closes it as
+// the system (the link revoked, so its token and its guests are refused, and its guests' credentials ended for the call's minute
+// job)
+feature("a cancelled interview's video call link is closed, by the recruiter who made it or another of the employer", {
+    when() {
+        const schedule = () =>
+            run(state.recruiter.userId, R + "schedule#Interview", {
+                employmentApplicationId: state.cara,
+                startDate: nextWeek(),
+                durationMinutes: 30,
+                panelPartyIds: state.ana.partyId,
+                videoCall: true
+            })
+        const linkIdOf = workEffortId =>
+            ec.entity
+                .find("mantle.humanres.recruitment.ApplicationInterview")
+                .condition("workEffortId", workEffortId)
+                .disableAuthz()
+                .one().callLinkId
+        const guestOf = callLinkId =>
+            call("create#moqui.call.CallGuest", {
+                callLinkId,
+                displayName: "Recruit spec candidate",
+                credentialHash: "recruit-spec-" + callLinkId,
+                credentialExpiry: new Date(Number(String(ec.user.nowTimestamp)) + 4 * 3600000),
+                createdDate: ec.user.nowTimestamp
+            }).callGuestId
+        const tokenValid = scheduled =>
+            call("org.moqui.call.CallServices.check#CallLinkToken", {token: String(scheduled.callPath).split("/").pop()}).valid
+        const row = (entity, field, id) => ec.entity.find(entity).condition(field, id).disableAuthz().one()
+        const out = {}
+        const colleague = user("RECRUITER_2", orgA, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
+        for (const [key, canceller] of [
+            ["mine", state.recruiter],
+            ["other", colleague]
+        ]) {
+            const scheduled = schedule()
+            const callLinkId = linkIdOf(scheduled.workEffortId)
+            const callGuestId = guestOf(callLinkId)
+            const validBefore = tokenValid(scheduled)
+            const cancelled = run(canceller.userId, R + "cancel#Interview", {workEffortId: scheduled.workEffortId})
+            out[key] = {
+                scheduled,
+                validBefore,
+                cancelled,
+                validAfter: tokenValid(scheduled),
+                link: row("moqui.call.CallLink", "callLinkId", callLinkId),
+                guest: row("moqui.call.CallGuest", "callGuestId", callGuestId),
+                nowMs: Number(String(ec.user.nowTimestamp))
+            }
+        }
+        return out
+    },
+    then({mine, other}) {
+        mine.scheduled.error == "" && mine.validBefore == true
+        mine.cancelled.error == ""
+        mine.link.revokedDate != null
+        mine.guest.revokedDate != null
+        mine.validAfter == false
+        other.scheduled.error == "" && other.validBefore == true
+        other.cancelled.error == ""
+        other.link.revokedDate != null
+        Number(String(other.guest.credentialExpiry)) <= other.nowMs
+        other.validAfter == false
+    }
+})

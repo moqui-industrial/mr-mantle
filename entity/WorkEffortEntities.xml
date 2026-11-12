@@ -136,7 +136,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="viewOnly" type="text-indicator"><description>Y when the event was put in this calendar by someone who may not
             change it (an attendee adding an invitation to a calendar of their own: add#CalendarEvent): the calendar shows it, and
             its editors do not become the event's (check#EventAccess), nor its feed, import or CalDAV writes change it (impl-people
-            P19 review, Commons calendar editors, Nov 12, 2026)</description></field>
+            P19 review, Commons calendar editors, Nov 12, 2026); N when it was put there by someone who may change it, and on a
+            link migrate#CalendarViewOnlyLinks kept. Empty on a link made before then (marked by that migration) and on one a
+            feed, a CalDAV client, an outside invitation or demo data made for an event of the calendar's own</description></field>
         <relationship type="one" related="mantle.work.calendar.Calendar" short-alias="calendar"/>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <index name="CAL_WEFF_WEFF"><index-field name="workEffortId"/></index>

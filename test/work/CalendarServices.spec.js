@@ -313,7 +313,84 @@ feature("an attendee who puts an invitation in a calendar of their own sees it t
         review.statusId != "WeCancelled"
         dee.access.canEdit == true
         dee.added == true
-        deeLink.viewOnly == null
+        deeLink.viewOnly == "N"
+    },
+})
+
+// Commons calendar review (Nov 12, 2026): the links made before viewOnly are marked once (migrate#CalendarViewOnlyLinks). Ben's old
+// link to Ada's design review in his own calendar is marked to be seen only, so he and Cy, his calendar's editor, change nothing;
+// Ada's own links, the call Dee (her delegate) made in Ada's calendar, the all-hands Ben edits through the team calendar and an
+// event with no organizer stay as they were; a second run has nothing to do
+feature("the calendar links made before viewOnly are marked once: an attendee's invitation in their own calendar to be seen only, the rest as they were", {
+    when() {
+        setTime(8.23)
+        const LINK = "mantle.work.calendar.CalendarWorkEffort"
+        const linkOf = (calendarId, workEffortId) => ec.entity.find(LINK).condition("calendarId", calendarId).condition("workEffortId", workEffortId).one()
+        // a link as it was before viewOnly
+        const legacy = (calendarId, workEffortId) => {
+            const row = linkOf(calendarId, workEffortId)
+            if (row == null) call(`create#${LINK}`, { calendarId, workEffortId })
+            else { row.set("viewOnly", null); row.update() }
+        }
+        const later = (hours) => new Date(Date.UTC(2028, 0, 10, 15, 0, 0) + hours * hour)
+        const benCalendarId = as("Ben", () => call(`${CAL}.ensure#UserDefaultCalendar`, {}).calendarId)
+        as("Ben", () => call(`${CAL}.share#Calendar`, { calendarId: benCalendarId, userId: user.Cy, permissionEnumId: "CalpEdit" }))
+        as("Ada", () => {
+            call(`${CAL}.share#Calendar`, { calendarId: cal.projects, userId: user.Dee, permissionEnumId: "CalpEdit" })
+            call(`${CAL}.share#Calendar`, { calendarId: cal.team, userId: user.Ben, permissionEnumId: "CalpEdit" })
+        })
+        const delegated = as("Dee", () => event("Delegated call", { estimatedStartDate: later(0), estimatedCompletionDate: later(1), calendarId: cal.projects }))
+        const allHands = as("Ada", () => event("All hands", { estimatedStartDate: later(2), estimatedCompletionDate: later(3), calendarId: cal.team }))
+        const ownerless = call("create#mantle.work.effort.WorkEffort", { workEffortTypeEnumId: "WetEvent", workEffortName: "Imported", statusId: "WeApproved",
+                estimatedStartDate: later(4), estimatedCompletionDate: later(5) }).workEffortId
+        const added = { delegated: linkOf(cal.projects, delegated).viewOnly, allHands: linkOf(cal.team, allHands).viewOnly }
+        for (const [calendarId, workEffortId] of [[benCalendarId, we.review], [cal.projects, we.review], [cal.projects, we.focus], [cal.projects, delegated],
+                [cal.team, allHands], [benCalendarId, allHands], [benCalendarId, ownerless]]) legacy(calendarId, workEffortId)
+        const calendarIdList = [benCalendarId, cal.projects, cal.team]
+        const first = call(`${CAL}.migrate#CalendarViewOnlyLinks`, { calendarIdList })
+        const again = call(`${CAL}.migrate#CalendarViewOnlyLinks`, { calendarIdList })
+        const marks = { review: linkOf(benCalendarId, we.review).viewOnly, reviewOwn: linkOf(cal.projects, we.review).viewOnly,
+            focus: linkOf(cal.projects, we.focus).viewOnly, delegated: linkOf(cal.projects, delegated).viewOnly, teamAllHands: linkOf(cal.team, allHands).viewOnly,
+            benAllHands: linkOf(benCalendarId, allHands).viewOnly, ownerless: linkOf(benCalendarId, ownerless).viewOnly }
+        const ben = as("Ben", () => ({ review: call(`${EV}.check#EventAccess`, { workEffortId: we.review }).canEdit,
+            allHands: call(`${EV}.check#EventAccess`, { workEffortId: allHands }).canEdit }))
+        const cy = as("Cy", () => ({ review: errorOf(`${EV}.update#EventOccurrence`, { workEffortId: we.review, start: "2027-05-10 15:00", end: "2027-05-10 16:00" }),
+            allHands: call(`${EV}.check#EventAccess`, { workEffortId: allHands }).canEdit }))
+        const ada = as("Ada", () => call(`${EV}.check#EventAccess`, { workEffortId: delegated }).canEdit)
+        const review = ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", we.review).one()
+        // as it was for the features after
+        setTime(8.24)
+        as("Ben", () => { for (const id of [we.review, allHands, ownerless]) call(`${CAL}.remove#CalendarEvent`, { calendarId: benCalendarId, workEffortId: id }) })
+        as("Ada", () => {
+            call(`${CAL}.remove#CalendarEvent`, { calendarId: cal.projects, workEffortId: delegated })
+            call(`${CAL}.remove#CalendarEvent`, { calendarId: cal.team, workEffortId: allHands })
+            call(`${CAL}.unshare#Calendar`, { calendarId: cal.projects, userId: user.Dee })
+            call(`${CAL}.unshare#Calendar`, { calendarId: cal.team, userId: user.Ben })
+        })
+        as("Ben", () => call(`${CAL}.unshare#Calendar`, { calendarId: benCalendarId, userId: user.Cy }))
+        return { added, first, again, marks, ben, cy, ada, review }
+    },
+    then({ added, first, again, marks, ben, cy, ada, review }) {
+        added.delegated == "N"
+        added.allHands == "N"
+        first.markedCount == 1
+        first.keptCount == 6
+        first.failedCount == 0
+        again.markedCount == 0
+        again.keptCount == 0
+        marks.review == "Y"
+        marks.reviewOwn == "N"
+        marks.focus == "N"
+        marks.delegated == "N"
+        marks.teamAllHands == "N"
+        marks.benAllHands == "N"
+        marks.ownerless == "N"
+        ben.review == false
+        ben.allHands == true
+        cy.review.includes("Only the organizer of Design review")
+        cy.allHands == true
+        ada == true
+        millis(review.estimatedStartDate) == millis(at(10))
     },
 })
 
