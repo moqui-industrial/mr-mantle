@@ -2696,6 +2696,10 @@ along with this software (see the LICENSE.md file). If not, see
                 const s = userScope()
                 if (entityName === WORK_EFFORT && protectedHidden(value.workEffortId, s.userPartyId)) return false
                 if (entityName === WORK_EFFORT && maintenanceHidden(value, s.userPartyId)) return false
+                // a reported maintenance problem: its reporter, its people and Maintenance's, not every member of its organization
+                // (MaintenanceAccess.js requestHidden; impl-maintenance P4 review)
+                if (entityName === REQUEST && value.requestTypeEnumId === 'RqtMaintenance' && ec.resource
+                        .script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js').requestHidden(value, s.userPartyId)) return false
                 if (s.orgIds == null || staffSees(entityName)) return true
                 if (entityName === ORDER) return orderVisible(value, s)
                 return entityName === WORK_EFFORT ? workEffortVisible(value, s) : requestVisible(value, s)
