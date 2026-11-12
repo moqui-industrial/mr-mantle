@@ -21,8 +21,13 @@ along with this software (see the LICENSE.md file). If not, see
     blocked days, allocations and the accrual need PEOPLE_HR_VIEW (reads) and PEOPLE_HR_EDIT (changes) of the employer; balances
     are the person's own (PEOPLE_SELF_SERVICE), a manager's live reports' (PEOPLE_TEAM_VIEW, balances only) and an HR reader's;
     the movements the person's and HR's. A batch (an assignment run, an allocation, the accrual) takes each employment in its own
-    transaction, names each refusal and goes on. No leave reason is in any answer. Leave requests and their consumption and
-    reversal are P12's. -->
+    transaction, names each refusal and goes on. P12 adds leave requests (design §7 LeaveRequests and LeaveRequestDetail): a preview
+    that counts the days from the employment's working schedule and holidays and names what blocks the request, its submission for
+    a People approval (PeopleLeaveApproval), its reading and its decision (the last approval recounts, checks the other requests and
+    the balance with the other reservations under the employment's lock and posts the leave taken once; a cancellation posts its
+    reversal once), the team's absences (TeamCalendar) and the Team absence projected CalDAV collection. A request's reason is
+    read on the request alone (the person, who asked, the approvers and HR) and reaches no AI tool (ai-opt-out); an allocation's
+    reason is HR's (F202). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="find" noun="Policies" allow-remote="false">
@@ -217,8 +222,9 @@ along with this software (see the LICENSE.md file). If not, see
             default, or LbkMandatory) for the policy's employer, narrowed to a department of it (departmentPartyId) and a leave type
             (leaveTypeEnumId; every type when empty), from fromDate through thruDate (whole days), with whether an approver may
             override a blocked day and why; or a change of them (leaveBlockedIntervalId) at their revision (expectedRevision), or with
-            cancel their cancellation (kept). Approved leave is not cancelled: overlappingRequests lists the requests the days overlap
-            for review (none until leave requests exist). Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer
+            cancel their cancellation (kept). Approved leave is not cancelled: overlappingRequests lists the requests waiting or
+            approved on the days (of the leave type and department, when named) for review: leaveRequestId, personName, fromDay,
+            thruDay, statusEnumId; no reason. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer
             (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope). Refuses: DATE_REQUIRED, DATES_INVALID, KIND_INVALID,
             DEPARTMENT_INVALID, TYPE_INVALID, REVISION_CHANGED, BLOCK_CANCELLED.</description>
         <in-parameters>
@@ -330,7 +336,8 @@ along with this software (see the LICENSE.md file). If not, see
             employer (ORGANIZATION_DENIED outside the scope), a department and the units under it (by the assignment in effect then)
             or a leave type. One row per employment and leave type with entries by then or a policy in effect then: the person,
             employer, leave type, unit, policy in effect, the movements by kind (opening, granted, accrued, consumed, expired,
-            adjusted), the balance, pending reservations (none until leave requests exist), what is available, the negative limit and
+            adjusted), the balance, pending (what the requests waiting for approval reserve), what is available (the balance less
+            pending), the negative limit and
             whether the caller reads its movements (find#Ledger: the person and HR). Paged by employment. Refuses a caller with none
             of the three permissions (PERMISSION_DENIED).</description>
         <in-parameters>
@@ -503,6 +510,264 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="posted" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('accrueAssignment', context).posted"/>
+        </actions>
+    </service>
+    <!-- ===== P12: leave requests (design-people §7 LeaveRequests and LeaveRequestDetail, PE-07, PE-21) ===== -->
+    <service verb="define" noun="RequestParameters" type="interface">
+        <description>What a leave request names, preview#Request and submit#Request alike: the employment (partyRelationshipId;
+            the caller's own when they have one employment), the leave type, and its days: segments, a list of {fromDate, thruDate,
+            dayPartEnumId}, or one given by fromDate, thruDate (the first when empty) and dayPartEnumId (LeaveDayPart: LdpFull, the
+            default, LdpMorning or LdpAfternoon, a morning or an afternoon being of one day).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="segments" type="List"><parameter name="segment" type="Map"/></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="dayPartEnumId"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="Request" allow-remote="false">
+        <description>What a leave request would be, before it is made: the policy of its type the employment is under on its
+            first day, each day with the hours its working schedule plans (a standard Monday-to-Friday week of 8 hours with none),
+            its holiday (of the schedule's calendar or the employer) and what it charges in the policy's unit (a whole working day
+            a day or its hours, a morning or an afternoon half of it, a day off or a holiday nothing), the total, the balance, what
+            the other requests waiting reserve, what is available and what is left; the blocked and mandatory days on them, the
+            approvers of its route; problems that block it (NO_POLICY, NOTHING_CHARGED, BALANCE_INSUFFICIENT when the policy needs
+            an entitlement and the leave passes the negative limit, OVERLAP with another request of the day and part, BLOCKED_DAY,
+            DATE_OUTSIDE the employment, NO_APPROVER: no one may decide a step) and warnings (BLOCKED_OVERRIDABLE, MANDATORY_DAYS,
+            EVIDENCE_REQUIRED). The person (PEOPLE_SELF_SERVICE) for their own employment, or an HR editor of the employer
+            (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT); another employment is refused as missing (RECORD_UNAVAILABLE). Refuses:
+            EMPLOYMENT_REQUIRED, TYPE_REQUIRED, TYPE_INVALID, DATE_REQUIRED, DATES_INVALID, PART_INVALID, TOO_LONG,
+            SEGMENTS_OVERLAP.</description>
+        <implements service="mantle.humanres.LeaveServices.define#RequestParameters"/>
+        <out-parameters>
+            <parameter name="preview" type="Map"><description>partyRelationshipId, partyId, personName, organizationPartyId,
+                organizationName, leaveTypeEnumId, leaveTypeText, leavePolicyId, policyName, unitEnumId, unitText, datesText, days
+                (day, weekdayText, partText, hours, holidayName, charged, note, source), chargedAmount, balance, pending, available,
+                remainder, needsBalance, blocks, approverSteps (stepText, approverNames, explanation), problems and warnings (code,
+                message), canSubmit</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('previewRequest', context)"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="Request" allow-remote="false">
+        <description>A leave request made: assessed again under the employment's lock as preview#Request does and refused with its
+            first problem (the code, every message), then kept with its segments, what it charges (reserved while it waits) and the
+            person's reason (ai-opt-out: read on the request alone), and sent for a People approval of kind PakLeave (the
+            PeopleLeaveApproval topic to the first step's approvers; the person's manager unless a rule says otherwise). A retry with
+            the same operationKey answers the first (repeated).</description>
+        <implements service="mantle.humanres.LeaveServices.define#RequestParameters"/>
+        <in-parameters>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="leaveRequestId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="chargedAmount" type="BigDecimal"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('submitRequest', context)"/>
+            <set field="leaveRequestId" from="out.leaveRequestId"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="statusText" from="out.statusText"/>
+            <set field="chargedAmount" from="out.chargedAmount"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Request" allow-remote="false">
+        <description>A leave request the caller reads (the person, who asked for it, HR of the employer, the person's manager there,
+            an approver of it; another is refused as missing, RECORD_UNAVAILABLE): the request (person, employer, leave type, policy,
+            days, what it charges, state, dates, the reason only to the person, who asked, the approvers and HR, and its revision), its
+            segments, each day with what it charges, the balance statement (the balance, what the other requests reserve, this
+            request, whether it is reserved or taken, what is left), blocked days on it, the approval (steps, decisions, who decides
+            now, canDecide), the decision notice (the outcome, who decided, when, a refusal's reason) and what the caller may do:
+            canDecide (an approver of the step waiting), canWithdraw (the person or who asked, while it waits), canAskCancel (the
+            person, of approved leave), canCancel (an HR editor of the employer, at once).</description>
+        <in-parameters><parameter name="leaveRequestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="request" type="Map"/>
+            <parameter name="segments" type="List"/>
+            <parameter name="days" type="List"/>
+            <parameter name="statement" type="Map"/>
+            <parameter name="blocks" type="List"/>
+            <parameter name="approval" type="Map"/>
+            <parameter name="notice" type="Map"/>
+            <parameter name="access" type="List"/>
+            <parameter name="canDecide" type="Boolean"/>
+            <parameter name="canWithdraw" type="Boolean"/>
+            <parameter name="canAskCancel" type="Boolean"/>
+            <parameter name="canCancel" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getRequest', context)"/>
+            <set field="request" from="out.request"/>
+            <set field="segments" from="out.segments"/>
+            <set field="days" from="out.days"/>
+            <set field="statement" from="out.statement"/>
+            <set field="blocks" from="out.blocks"/>
+            <set field="approval" from="out.approval"/>
+            <set field="notice" from="out.notice"/>
+            <set field="access" from="out.access"/>
+            <set field="canDecide" from="out.canDecide"/>
+            <set field="canWithdraw" from="out.canWithdraw"/>
+            <set field="canAskCancel" from="out.canAskCancel"/>
+            <set field="canCancel" from="out.canCancel"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="Request" allow-remote="false">
+        <description>A leave request decided, under its employment's lock. approve or refuse: the step waiting, through
+            PeopleApprovalServices.record#Decision at the request's revision (sourceRevision from a notice); the last approval of a
+            request recounts its days, checks the other requests of its days and the balance with the other reservations (refused
+            with the problem, nothing recorded: BALANCE_INSUFFICIENT, OVERLAP, BLOCKED_DAY, NOTHING_CHARGED) and posts the leave
+            taken once (when the policy keeps a balance), approves it and projects it (WetTimeOff "Out of office" work efforts the
+            capacity and calendars read, a leave-start reminder for the person); the last approval of a cancellation posts the
+            reversal once and cancels the projection; a refusal needs a reason (refused leave, or the cancellation refused: approved
+            again). withdraw: the person or who asked, while it waits (its approval superseded). cancel: approved leave; the person
+            asks it (cancellation asked, sent for approval as a request is), an HR editor of the employer cancels it at once with a
+            reason. The person (and who asked) is told the outcome (PeopleLeaveDecision: the days and the outcome only). A decision
+            retried answers the first (repeated). Refuses: DECISION_INVALID, RECORD_UNAVAILABLE, REVISION_CHANGED (expectedRevision
+            for withdraw and cancel), NOT_YOURS, NOT_PENDING, NOT_APPROVED, CANCEL_PENDING, REASON_REQUIRED and record#Decision's
+            refusals (NOT_APPROVER, SELF_APPROVAL, ALREADY_DECIDED, SOURCE_CHANGED).</description>
+        <in-parameters>
+            <parameter name="leaveRequestId" required="true"/>
+            <parameter name="decision"><description>approve (the default), refuse, withdraw or cancel</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="leaveRequestId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('decideRequest', context)"/>
+            <set field="leaveRequestId" from="out.leaveRequestId"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="statusText" from="out.statusText"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="Request" allow-remote="false">
+        <description>The PeopleLeaveApproval topic's approve service, which approve#NotificationMessage calls as the user deciding
+            the notice: decide#Request at the request and revision in the message (a notice of an earlier revision is refused);
+            refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('approveNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Request" allow-remote="false">
+        <description>The PeopleLeaveApproval topic's refuse service, with the reason (the topic requires one): as approve#Request,
+            the request refused (or a cancellation refused: the leave stays approved).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('refuseNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Requests" allow-remote="false">
+        <description>The leave requests the caller reads: their own (PEOPLE_SELF_SERVICE; mine for those alone), their live
+            reports' at the line's employers (PEOPLE_TEAM_VIEW), those whose step waiting they decide (PEOPLE_REQUEST_APPROVE) and an
+            HR reader's employers' (PEOPLE_HR_VIEW); narrowed to a person, an employer, states (statusEnumId, a comma list), a leave
+            type, days from fromDate through thruDate, and toDecide (those the caller decides now). Newest first, paged; each with
+            the person, employer, leave type, days, part, what it charges, state, whether the caller decides it and whether it is
+            their own; never the reason. Refuses a caller with none of the four permissions (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="toDecide" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requests" type="List"><description>leaveRequestId, partyId, personName, organizationPartyId,
+                organizationName, leaveTypeEnumId, leaveTypeText, fromDay, thruDay, datesText, partText, chargedAmount, chargedText,
+                statusEnumId, statusText, toDecide, own, requestedDateText</description></parameter>
+            <parameter name="requestsCount" type="Integer"/>
+            <parameter name="requestsPageIndex" type="Integer"/>
+            <parameter name="requestsPageSize" type="Integer"/>
+            <parameter name="requestsPageMaxIndex" type="Integer"/>
+            <parameter name="requestsPageRangeLow" type="Integer"/>
+            <parameter name="requestsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('findRequests', context)"/>
+            <set field="requests" from="found.requests"/>
+            <set field="requestsCount" from="found.requestsCount || 0"/>
+            <set field="requestsPageIndex" from="found.requestsPageIndex || 0"/>
+            <set field="requestsPageSize" from="found.requestsPageSize || 20"/>
+            <set field="requestsPageMaxIndex" from="found.requestsPageMaxIndex || 0"/>
+            <set field="requestsPageRangeLow" from="found.requestsPageRangeLow || 0"/>
+            <set field="requestsPageRangeHigh" from="found.requestsPageRangeHigh || 0"/>
+        </actions>
+    </service>
+
+    <!-- ===== P12: absences (design §13 TeamCalendar; CX-SYNC, PE-24) ===== -->
+    <service verb="get" noun="TeamAbsences" allow-remote="false">
+        <description>The team calendar's items from start through end (yyyy-MM-dd; a month from today when empty), as Commons'
+            Calendar.qvue takes them: the approved leave (and leave whose cancellation waits) of the people the caller sees, their
+            own and their colleagues' (PEOPLE_SELF_SERVICE: the people who share a department, a team or a manager with them, at an
+            employer of both; the user's call of Nov 11, 2026), their live reports' at the line's employers (PEOPLE_TEAM_VIEW) and an
+            HR reader's employers' (PEOPLE_HR_VIEW), each segment as "{person} · Out" (a morning or an afternoon said so), kind
+            absence, read only, with its leaveRequestId and whether the caller opens the request (openable, never for a colleague);
+            never the leave type, the reason, a waiting or a refused request. Refuses a caller with none of the three permissions (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="start"/>
+            <parameter name="end"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="eventList" type="List"/>
+            <parameter name="startDay"/>
+            <parameter name="endDay"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getTeamAbsences', context)"/>
+            <set field="eventList" from="out.eventList"/>
+            <set field="startDay" from="out.startDay"/>
+            <set field="endDay" from="out.endDay"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AbsenceProjection" allow-remote="false">
+        <description>The Team absence projected CalDAV collection's owner service (mantle.work.CalendarDavServices, the
+            CalendarProjection PeopleTeamAbsence): admitted is whether the caller sees absences (PEOPLE_SELF_SERVICE,
+            PEOPLE_TEAM_VIEW or PEOPLE_HR_VIEW); without checkOnly, the absences get#TeamAbsences shows them from start through end
+            (epoch millis; 90 days back to a year ahead when none) as the ICalendar tool's event maps: "{person} · Out", never the
+            leave type or the reason.</description>
+        <implements service="mantle.work.CalendarDavServices.define#ProjectionOwner"/>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getAbsenceProjection', context)"/>
+            <set field="admitted" from="out.admitted"/>
+            <set field="eventList" from="out.eventList"/>
         </actions>
     </service>
 </services>
