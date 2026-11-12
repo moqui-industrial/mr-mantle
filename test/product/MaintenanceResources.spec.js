@@ -5,7 +5,8 @@
 // permission alone refused), the custody change (dated, the earlier holder ended at that date, a later date refused, F61) and the
 // facility's new fields and room features (store#Facility, store#FacilityFeature) with the inherited time zone, an
 // every-organization reader's list narrowed to the active organization (F83) but not a record's, the custody change inside an
-// ended holding and replace#AssetPartyAssignment's own refusal of a later date, and the equipment move (stock move authority,
+// ended holding, the holder only the scope's organizations, their employees or the asset's owner (R7),
+// replace#AssetPartyAssignment's own refusal of a later date, and the equipment move (stock move authority,
 // both facilities, equipment only, audit-logged, out of its container).
 // Standalone: spec-local organizations, facilities, a model with an hour meter, equipment, groups and users, with artifact
 // authorization disabled (the rules are the services' own permission and scope checks).
@@ -123,6 +124,19 @@ spec({
         state.otherPump = asset("OTHER", orgB, state.otherSite)
         state.holder = person("HOLDER")
         state.newHolder = person("NEWHOLDER")
+        // the holders are A's employees; an outsider is no one's, and a customer owns equipment held at A's room (R7)
+        for (const partyId of [state.holder, state.newHolder])
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtEmployee",
+                fromPartyId: partyId,
+                toPartyId: orgA,
+                fromDate: since
+            })
+        state.outsider = person("OUTSIDER")
+        state.customer = prefix + "_CUSTOMER"
+        call("create#mantle.party.Party", {partyId: state.customer, partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.Organization", {partyId: state.customer, organizationName: "Maintenance resources customer"})
+        state.customerUnit = asset("CUSTUNIT", prefix + "_CUSTOMER", state.room)
         call("create#mantle.product.asset.AssetPartyAssignment", {
             assetId: state.compressor,
             partyId: state.holder,
@@ -275,6 +289,12 @@ feature("a custody change takes effect at its date, ending the earlier holding t
         })
         const overlapping = change({roleTypeId: "Operator", effectiveDate: stamp("2026-02-01 09:00")})
         const afterIt = change({roleTypeId: "Operator", effectiveDate: stamp("2026-03-02 09:00")})
+        // the holder is one of the scope's organizations or their employees, or the asset's owner (the user's call, R7)
+        const outsider = change({roleTypeId: "Operator", newPartyId: state.outsider, effectiveDate: stamp("2026-03-03 09:00")})
+        const otherOrganization = change({roleTypeId: "Operator", newPartyId: orgB, effectiveDate: stamp("2026-03-03 09:00")})
+        const customerOnOurs = change({roleTypeId: "Operator", newPartyId: state.customer, effectiveDate: stamp("2026-03-03 09:00")})
+        const organization = change({roleTypeId: "Operator", newPartyId: orgA, effectiveDate: stamp("2026-03-03 09:00")})
+        const customerOwn = change({assetId: state.customerUnit, newPartyId: state.customer})
         // the owner service refuses a later date itself (it is on the /mantle REST asset path too)
         const replacedLater = attempt("john.doe", "mantle.product.AssetServices.replace#AssetPartyAssignment", {
             assetId: state.compressor,
@@ -282,7 +302,8 @@ feature("a custody change takes effect at its date, ending the earlier holding t
             newPartyId: state.holder,
             effectiveDate: stamp("2099-01-01 09:00")
         })
-        return {later, beforeHolding, dated, ended, started, other, overlapping, afterIt, replacedLater, expected: stamp("2026-06-01 09:00")}
+        return {later, beforeHolding, dated, ended, started, other, overlapping, afterIt, replacedLater, outsider, otherOrganization,
+            customerOnOurs, organization, customerOwn, expected: stamp("2026-06-01 09:00")}
     },
     then(r) {
         r.later.refused.includes("DATE_FUTURE")
@@ -295,6 +316,11 @@ feature("a custody change takes effect at its date, ending the earlier holding t
         r.overlapping.refused.includes("DATE_BEFORE_HOLDING")
         !r.afterIt.refused
         r.replacedLater.refused.includes("DATE_FUTURE")
+        r.outsider.refused.includes("HOLDER_UNAVAILABLE")
+        r.otherOrganization.refused.includes("HOLDER_UNAVAILABLE")
+        r.customerOnOurs.refused.includes("HOLDER_UNAVAILABLE")
+        !r.organization.refused
+        !r.customerOwn.refused
     }
 })
 

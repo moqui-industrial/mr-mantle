@@ -669,8 +669,8 @@ function storeRegistration(p) {
 // ===== change#MaintenanceCustody =====
 // A new holder of a role of one of the caller's pieces of equipment (MAINTENANCE_RESOURCE_EDIT) from an effective date, now or
 // earlier (DATE_FUTURE; F61) and not before a current holder's start (DATE_BEFORE_HOLDING): the current holders of the role end
-// and the new one starts at that date, through AssetServices.replace#AssetPartyAssignment. The new holder is a person or an
-// organization (PARTY_UNAVAILABLE).
+// and the new one starts at that date, through AssetServices.replace#AssetPartyAssignment. The new holder is one of the scope's
+// organizations, a person they employ now, or the asset's owner organization (HOLDER_UNAVAILABLE otherwise; the user's call, R7).
 function changeCustody(p) {
     const userScope = scopeWith("resourceEdit")
     const asset = equipmentOf(userScope, p.assetId, true)
@@ -679,6 +679,8 @@ function changeCustody(p) {
     const party = blank(p.newPartyId) ? null : one("mantle.party.Party", {partyId: p.newPartyId})
     if (!party || !["PtyPerson", "PtyOrganization"].includes(party.partyTypeEnumId) || party.disabled === "Y")
         denied("PARTY_UNAVAILABLE", "Choose the person or organization who holds it")
+    if (!holderAdmitted(userScope, asset, party.partyId))
+        denied("HOLDER_UNAVAILABLE", "Equipment is held by one of your organizations or their current employees, or by its owner")
     const effectiveDate = blank(p.effectiveDate) ? ec.user.nowTimestamp : p.effectiveDate
     if (ms(effectiveDate) > ms(ec.user.nowTimestamp) + 60 * 1000)
         denied("DATE_FUTURE", "A custody change takes effect now or earlier; record it when the equipment changes hands")
@@ -706,6 +708,22 @@ function changeCustody(p) {
         effectiveDate
     })
     return {assetId: asset.assetId, endedCount: ending.length, effectiveDate}
+}
+
+// Whether a party may hold equipment of the scope (the user's call, R7): one of the scope's internal organizations, a person
+// employed now by one of them (PrtEmployee), or the asset's own owner organization (a customer's equipment in its custody).
+function holderAdmitted(userScope, asset, partyId) {
+    if (asset.ownerPartyId && partyId === asset.ownerPartyId) return true
+    const internal = internalOrganizationIds()
+    const organizations = userScope.organizationPartyIds == null ? internal : Array.from(userScope.organizationPartyIds).filter(id => internal.includes(id))
+    if (!organizations.length) return false
+    if (organizations.includes(partyId)) return true
+    return (
+        find("mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtEmployee", fromPartyId: partyId})
+            .condition("toPartyId", "in", organizations)
+            .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+            .count() > 0
+    )
 }
 
 // ===== move#MaintenanceEquipment =====
@@ -750,11 +768,9 @@ function moveEquipment(p) {
     if (flag(p.preview)) return {effect, moved: false}
     if (!lib.access.has("STOCK_MOVE")) denied("PERMISSION_DENIED", "Stock move authority is required to move equipment")
     const stockScope = facilityScope.scope()
-    for (const id of [asset.facilityId, toFacilityId].filter(Boolean)) {
-        const facility = one(FACILITY, {facilityId: id})
-        const owner = facility ? maintenanceAccess.facilityOrganization(id) : null
-        if (!facilityScope.owns(stockScope, owner)) denied("RECORD_UNAVAILABLE", "Facility " + id + " is not available")
-    }
+    // each facility by its owner or nearest owning ancestor, as Warehouse's facility checks read it (R8)
+    for (const id of [asset.facilityId, toFacilityId].filter(Boolean))
+        if (!facilityScope.ownsFacility(stockScope, id)) denied("RECORD_UNAVAILABLE", "Facility " + id + " is not available")
     if (effect.organizationChanges)
         denied("ORGANIZATION_CHANGE", "The equipment would pass to another organization; its owner changes it first")
     // out of any container too, as move#Asset's whole move does (a container's move would carry it back, ContainerAssetLocation)

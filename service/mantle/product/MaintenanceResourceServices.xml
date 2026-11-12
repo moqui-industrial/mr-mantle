@@ -210,8 +210,10 @@ along with this software (see the LICENSE.md file). If not, see
             (DATE_FUTURE) and not before a current holder's start or inside another holder's ended holding
             (DATE_BEFORE_HOLDING). The role's current holders end and the
             new one starts at that date, through AssetServices.replace#AssetPartyAssignment; People's rule on the end of a
-            holding then completes a separation's return task, as for People's and Warehouse's changes. The new holder is a
-            person or an organization (PARTY_UNAVAILABLE).</description>
+            holding then completes a separation's return task, as for People's and Warehouse's changes. The new holder is one
+            of the scope's internal organizations, a person one of them employs now, or the asset's own owner organization (a
+            customer's equipment); anything else is HOLDER_UNAVAILABLE, a party that is no enabled person or organization
+            PARTY_UNAVAILABLE.</description>
         <in-parameters>
             <parameter name="assetId" required="true"/>
             <parameter name="roleTypeId"/>

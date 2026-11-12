@@ -26,12 +26,13 @@ function scope() {
     return facilityScope.scope()
 }
 const ownedBy = (userScope, partyId) => facilityScope.owns(userScope, partyId)
-// A facility of the user's, locked for update when asked; a missing one and another organization's are refused alike.
+// A facility of the user's (by its owner, or its nearest owning ancestor when it names none: FacilityScope.facilityOrganization),
+// locked for update when asked; a missing one and another organization's are refused alike.
 function facilityOf(userScope, facilityId, lock = false) {
     let query = find(facilityEntity, {facilityId: facilityId || "_NA_"})
     if (lock) query = query.forUpdate(true)
     const facility = blank(facilityId) ? null : query.one()
-    if (!facility || !ownedBy(userScope, facility.ownerPartyId))
+    if (!facility || !facilityScope.ownsFacility(userScope, facility))
         denied("FACILITY_UNAVAILABLE", "Facility " + (facilityId || "") + " is not available")
     return facility
 }
@@ -57,10 +58,14 @@ function storeFacility(p) {
     if (existing) facilityOf(userScope, existing.facilityId)
     const has = name => Object.prototype.hasOwnProperty.call(p, name) && p[name] !== undefined
     const ownerPartyId = has("ownerPartyId") && !blank(p.ownerPartyId) ? p.ownerPartyId : existing?.ownerPartyId
-    if (!ownerPartyId) denied("OWNER_REQUIRED", "Choose the organization that owns the facility")
-    if (!one("mantle.party.PartyRole", {partyId: ownerPartyId, roleTypeId: "OrgInternal"}) || !ownedBy(userScope, ownerPartyId))
+    // a stored facility that names no owner keeps none and stays its nearest owning ancestor's (facilityOf checked it); a new
+    // facility names its owner
+    const inherited = existing && !existing.ownerPartyId ? facilityScope.facilityOrganization(existing) : null
+    if (!ownerPartyId && !inherited) denied("OWNER_REQUIRED", "Choose the organization that owns the facility")
+    if (ownerPartyId && (!one("mantle.party.PartyRole", {partyId: ownerPartyId, roleTypeId: "OrgInternal"}) || !ownedBy(userScope, ownerPartyId)))
         denied("OWNER_UNAVAILABLE", "Organization " + ownerPartyId + " is not available")
-    if (existing && existing.ownerPartyId !== ownerPartyId && blank(p.changeReason))
+    // a change of the facility's organization needs a reason; naming the organization it already takes from its ancestor does not
+    if (existing && ownerPartyId && (existing.ownerPartyId || inherited) !== ownerPartyId && blank(p.changeReason))
         denied("REASON_REQUIRED", "Give a reason for the change of owner")
     const facilityName = has("facilityName") ? text(p.facilityName) : existing?.facilityName
     if (!facilityName) denied("NAME_REQUIRED", "Give the facility a name")
@@ -112,7 +117,7 @@ function storeFacility(p) {
     if (existing) {
         // a new owner first, through the entity's own update, so the audit log keeps it with its reason
         if (existing.ownerPartyId !== ownerPartyId) {
-            ec.context.putAll({ownerPartyId_changeReason: String(p.changeReason).trim()})
+            ec.context.putAll({ownerPartyId_changeReason: text(p.changeReason)})
             call("update#" + facilityEntity, {facilityId: existing.facilityId, ownerPartyId})
         }
         call("mantle.facility.FacilityServices.update#Facility", values)
