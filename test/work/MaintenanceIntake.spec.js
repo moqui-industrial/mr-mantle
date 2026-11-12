@@ -67,6 +67,19 @@ const rows = (entityName, fields) => Array.from(ec.entity.find(entityName).condi
 const request = requestId => one("mantle.request.Request", {requestId})
 const ids = list => Array.from(list || []).map(row => row.requestId)
 const rowOf = (list, requestId) => Array.from(list || []).find(row => row.requestId === requestId) || {}
+// MaintenanceAccess.requestHidden as the user: the rule get#RecordLinkInfo and search#Universal apply to a maintenance request
+// (P4 review)
+function hidden(username, requestId) {
+    login(username)
+    try {
+        return ec.resource
+            .script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
+            .requestHidden(request(requestId), ec.user.userAccount?.partyId || null)
+    } finally {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+    }
+}
 let messageCount = 0
 function receive(fields) {
     messageCount++
@@ -346,6 +359,29 @@ feature("a rejected report keeps its reason", {
     }
 })
 
+feature("a reported problem is its reporter's, its people's and Maintenance's, not every member's of its organization", {
+    when() {
+        return {
+            own: hidden(state.requester, state.report1),
+            colleague: hidden(state.requester2, state.report1),
+            colleagueOwn: hidden(state.requester2, state.report2),
+            operator: hidden(state.operator, state.report1),
+            reader: hidden(state.member, state.report1),
+            planner: hidden(state.planner, state.report3),
+            otherPlanner: hidden(state.otherPlanner, state.report1)
+        }
+    },
+    then(out) {
+        out.own == false
+        out.colleague == true
+        out.colleagueOwn == false
+        out.operator == true
+        out.reader == false
+        out.planner == false
+        out.otherPlanner == true
+    }
+})
+
 feature("a mail to the team's plus-tag address makes one request, the sender its reporter, an unknown asset left for triage", {
     when() {
         const unknown = receive({
@@ -422,10 +458,12 @@ feature("request#ProductionMaintenance twice makes one root under the organizati
             linked: rows("mantle.request.RequestWorkEffort", {requestId: first.requestId, workEffortId: first.workEffortId})
                 .length,
             status: request(first.requestId).statusId,
-            queue: as(state.planner, S + "find#UnmanagedMaintenance", {}).maintenanceList
+            queue: as(state.planner, S + "find#UnmanagedMaintenance", {}).maintenanceList,
+            // Manufacturing's request keeps its owner's rule: its organization's operator reaches it (P4 review)
+            operatorHidden: hidden(state.operator, first.requestId)
         }
     },
-    then({first, second, roots, order, linked, status, queue}) {
+    then({first, second, roots, order, linked, status, queue, operatorHidden}) {
         !!first.workEffortId
         second.workEffortId == first.workEffortId
         roots == 1
@@ -433,6 +471,7 @@ feature("request#ProductionMaintenance twice makes one root under the organizati
         linked == 1
         status == "ReqReviewed"
         !Array.from(queue).some(row => row.assetMaintenanceId == first.assetMaintenanceId)
+        operatorHidden == false
     }
 })
 

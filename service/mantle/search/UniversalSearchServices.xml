@@ -297,6 +297,10 @@ along with this software (see the LICENSE.md file). If not, see
                 // (MaintenanceAccess.js workHidden, as get#RecordLinkInfo has it; impl-maintenance F69, P3 review)
                 if (hit.documentId === 'MantleTask' && ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
                         .workHidden(current.workEffortId, userPartyId)) continue
+                // a reported maintenance problem only for its reporter, its people and Maintenance's (MaintenanceAccess.js
+                // requestHidden, as get#RecordLinkInfo has it; impl-maintenance P4 review)
+                if (hit.documentId === 'MantleRequest' && current.requestTypeEnumId === 'RqtMaintenance' && ec.resource
+                        .script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js').requestHidden(current, userPartyId)) continue
                 if (hit.documentId === 'MantleCommunicationEvent' && boundMailboxes.has(current.contactListId)) {
                     const was = ec.artifactExecution.disableAuthz()
                     try {
