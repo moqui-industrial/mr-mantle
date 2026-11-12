@@ -160,9 +160,11 @@ moqui load location=runtime/component/mr-boss/data/BossMaintenanceReportData.xml
 
 These four are initial data: loading one again puts back its rows as shipped, over what the deployment has changed since
 (a resumed job paused again, a group's changed grant). On a database made during the build, load only the files it lacks,
-or the rows it lacks by hand. mr-boss `BossSetupData.xml` also gained `maintenance` in the client deny patterns of
-`BOSS_PROJECTS_INTERNAL` (Maintenance P1); a deployment that keeps that file's rows as shipped loads it again, others add the
-package to the pattern rows.
+or the rows it lacks by hand. The last phases, dispatch (P8) and customer repair (P12), added rows to
+`MaintenanceWorkData` (loaded again by `types=seed`) and to `BossSetupMaintenanceData` (Teams' grant to planners and
+supervisors among them), so a database made before them takes those rows too. mr-boss `BossSetupData.xml` also gained
+`maintenance` in the client deny patterns of `BOSS_PROJECTS_INTERNAL` (Maintenance P1); a deployment that keeps that
+file's rows as shipped loads it again, others add the package to the pattern rows.
 
 Start the server and refresh the three Maintenance datasets (`boss-maintenance-work-status`, `boss-maintenance-pm-compliance`
 and `boss-maintenance-outages`) from Admin's data readiness, so the work orders, obligations and outages already written are
