@@ -170,15 +170,19 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="JobRequirement" allow-remote="false">
         <description>A skill a job class requires (EmplPositionClassSkill), added, changed with change (its terms, at the revision
-            read) or removed with remove (ended, never deleted; required again, its row opens from the new date). P18: a
-            requirement's least level (minimumLevel, a SkillLevel value's number; empty for any), the qualification type a verified,
-            valid qualification of which proves it, required or desired (requiredFlag N) and the date it is required from;
-            mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix read them. Refuses a caller without
-            PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a missing class (RECORD_UNAVAILABLE) or an ended one
-            (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a SkillType (SKILL_INVALID), a skill required already
-            (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED, People's lookups; P5), to change or remove one not
-            required (RECORD_UNAVAILABLE), a level that is not one (LEVEL_INVALID), a qualification type that is not one or ended
-            (TYPE_INVALID, VALUE_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
+            read) or removed with remove (ended, never deleted). Each period of a requirement is its own row keyed by its start (the
+            user's call of Nov 12, 2026): a change ends the period in effect and starts a new one from now or fromDate (a period
+            not started yet is changed in place), and a skill required again starts a new period, never before the last one ended.
+            P18: a requirement's least level (minimumLevel, a SkillLevel value's number; empty for any), the qualification type a
+            verified, valid qualification of which proves it, required or desired (requiredFlag N) and the date it is required
+            from; mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix read the period in effect at their
+            date. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a missing class
+            (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a SkillType
+            (SKILL_INVALID), a skill required already (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED, People's lookups;
+            P5), to change or remove one not required (RECORD_UNAVAILABLE), a level that is not one (LEVEL_INVALID), a
+            qualification type that is not one or ended (TYPE_INVALID, VALUE_ENDED), a change before the period's own start or a
+            new period before the last one ended (DATES_INVALID) and a revision other than the one read
+            (REVISION_CHANGED).</description>
         <in-parameters>
             <parameter name="emplPositionClassId" required="true"/>
             <parameter name="skillTypeEnumId"/>

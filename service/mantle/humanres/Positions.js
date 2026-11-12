@@ -5,8 +5,9 @@
 //
 // The records (design §5; impl-people F10, F35):
 // - a job class is an EmplPositionClass: its title, description, work types (EmplPositionClassWorkType) and required skills
-//   (EmplPositionClassSkill: P18's least level, the qualification type that proves it, required or desired, and its dates; a
-//   requirement removed is ended, never deleted). Classes are shared by every employer: a staff
+//   (EmplPositionClassSkill: P18's least level, the qualification type that proves it, required or desired, and its dates, each
+//   period its own row keyed by its start, the user's call of Nov 12, 2026: a change starts a new row, a requirement removed is
+//   ended, never deleted, and one required again starts a new row). Classes are shared by every employer: a staff
 //   reader reads them, an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) changes them, and a used class is ended (thruDate), never
 //   deleted, so its positions keep it and no new position takes it;
 // - a position is a dated seat, an EmplPosition of its legal employer (organizationPartyId, which create#Employment checks), in a
@@ -738,9 +739,15 @@ function classRows(userScope, classes) {
     if (!classes.length) return []
     const ids = classes.map(row => row.emplPositionClassId)
     const skills = {}
-    // the requirements in effect now (P18: an ended one is kept and not counted)
-    for (const row of Array.from(find(CLASS_SKILL).condition("emplPositionClassId", "in", ids).list()))
-        if (requirementOpen(row)) skills[row.emplPositionClassId] = (skills[row.emplPositionClassId] || 0) + 1
+    // the skills required now or from a later date (P18: an ended period is kept and not counted; a skill counted once whatever
+    // periods it has)
+    const counted = new Set()
+    for (const row of Array.from(find(CLASS_SKILL).condition("emplPositionClassId", "in", ids).list())) {
+        const key = row.emplPositionClassId + "/" + row.skillTypeEnumId
+        if (!requirementOpen(row) || counted.has(key)) continue
+        counted.add(key)
+        skills[row.emplPositionClassId] = (skills[row.emplPositionClassId] || 0) + 1
+    }
     const reach = positionReach(userScope)
     const positions = {}
     if (reach.organizationPartyIds.length || reach.unitPartyIds.length) {
@@ -794,8 +801,19 @@ function findJobClasses(p) {
     out.jobClasses = found
     return out
 }
-// A requirement not ended (P18: an ended one is kept; one dated later is shown from its date).
+// A requirement's period not ended (P18: an ended one is kept; one dated later is shown from its date).
 const requirementOpen = row => (ms(row.thruDate) ?? Infinity) > nowMs()
+// The requirement of each skill that an editor reads and changes: its latest period not ended (the one in effect, or a change
+// that starts later), keyed by skill.
+function openRequirements(skillRows) {
+    const found = new Map()
+    for (const row of skillRows) {
+        if (!requirementOpen(row)) continue
+        const other = found.get(row.skillTypeEnumId)
+        if (!other || (ms(row.fromDate) ?? -Infinity) > (ms(other.fromDate) ?? -Infinity)) found.set(row.skillTypeEnumId, row)
+    }
+    return found
+}
 // The skill levels: {number: name} of the SkillLevel values (each value's enumCode its number).
 function levelNames() {
     const found = {}
@@ -810,7 +828,7 @@ function getJobClass(p) {
     const id = text(p.emplPositionClassId)
     const positionClass = id ? one(CLASS, {emplPositionClassId: id}) : null
     if (!positionClass) denied("RECORD_UNAVAILABLE", "Job class " + id + " is not available")
-    const skillRows = rows(CLASS_SKILL, {emplPositionClassId: id}).filter(requirementOpen)
+    const skillRows = Array.from(openRequirements(rows(CLASS_SKILL, {emplPositionClassId: id})).values())
     const workTypeRows = rows(CLASS_WORK_TYPE, {emplPositionClassId: id})
     const names = enumNames(
         skillRows
@@ -895,7 +913,9 @@ function storeJobClass(p) {
     return {emplPositionClassId: id, revision: classRevision(id)}
 }
 // store#JobRequirement: a skill a job class requires, added, changed (change: its terms at the revision read) or removed (ended,
-// never deleted: a skill required again opens its row again from the new date). P18: a requirement's least level (a SkillLevel
+// never deleted). Each period is its own row keyed by its start (the user's call of Nov 12, 2026): a change ends the period in
+// effect and starts a new one from now (or the date given), unless the period has not started yet, which is changed in place; a
+// skill required again starts a new period, never before the last one ended. P18: a requirement's least level (a SkillLevel
 // value's number, minimumLevel), the qualification type a verified, valid qualification of which proves it, required or desired
 // (requiredFlag) and the date it is required from. Refused: a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT
 // (PERMISSION_DENIED); a missing class (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED); no skill (SKILL_REQUIRED) or one that
@@ -913,30 +933,66 @@ function storeJobRequirement(p) {
     if (!skillTypeEnumId) denied("SKILL_REQUIRED", "Choose the skill")
     const skill = one("moqui.basic.Enumeration", {enumId: skillTypeEnumId})
     if (!skill || skill.enumTypeId !== "SkillType") denied("SKILL_INVALID", skillTypeEnumId + " is not a skill")
-    const existing = one(CLASS_SKILL, {emplPositionClassId: id, skillTypeEnumId})
-    const required = existing && requirementOpen(existing)
+    const periods = rows(CLASS_SKILL, {emplPositionClassId: id, skillTypeEnumId})
+    const open = periods.filter(requirementOpen)
+    const existing = openRequirements(periods).get(skillTypeEnumId) || null
     const skillName = skill.description || skillTypeEnumId
+    const now = nowMs()
+    const key = row => ({emplPositionClassId: id, skillTypeEnumId, fromDate: row.fromDate})
     if (p.remove === true || p.remove === "true") {
-        if (!required) denied("RECORD_UNAVAILABLE", skillName + " is not required")
-        call("update#" + CLASS_SKILL, {emplPositionClassId: id, skillTypeEnumId, thruDate: ec.user.nowTimestamp})
+        if (!existing) denied("RECORD_UNAVAILABLE", skillName + " is not required")
+        // each period not ended is ended now (one not started yet ends at its start: it never takes effect)
+        for (const row of open)
+            call("update#" + CLASS_SKILL, Object.assign(key(row), {thruDate: new Date(Math.max(now, ms(row.fromDate) ?? now))}))
         return {emplPositionClassId: id, skillTypeEnumId}
     }
     const change = p.change === true || p.change === "true"
-    if (change && !required) denied("RECORD_UNAVAILABLE", skillName + " is not required")
+    if (change && !existing) denied("RECORD_UNAVAILABLE", skillName + " is not required")
     if (change && text(p.expectedRevision) !== String(stampOf(existing)))
         denied("REVISION_CHANGED", "This requirement changed since you read it; open the class again")
-    if (!change && required) denied("ALREADY_REQUIRED", skillName + " is required already")
+    if (!change && existing) denied("ALREADY_REQUIRED", skillName + " is required already")
     // an ended skill type (People's lookups, Enumeration.thruDate) is kept where it is held and taken by no new requirement
-    if (!change && (ms(skill.thruDate) ?? Infinity) <= nowMs()) denied("VALUE_ENDED", skillName + " has ended")
+    if (!change && (ms(skill.thruDate) ?? Infinity) <= now) denied("VALUE_ENDED", skillName + " has ended")
     const terms = requirementTerms(p, change ? existing : null)
     if (change) {
-        call("update#" + CLASS_SKILL, Object.assign({emplPositionClassId: id, skillTypeEnumId}, terms))
+        const startedMs = ms(existing.fromDate) ?? -Infinity
+        const startMs = terms.fromDate ? terms.fromDate.getTime() : Math.max(now, startedMs)
+        delete terms.fromDate
+        if (startMs < startedMs) denied("DATES_INVALID", "A change starts on or after the requirement's own start")
+        if (startMs === startedMs) {
+            // a period not started yet (or changed at its own start) is changed in place
+            call("update#" + CLASS_SKILL, Object.assign(key(existing), terms))
+            return {emplPositionClassId: id, skillTypeEnumId}
+        }
+        // the period in effect ends where the change starts, and the changed terms are a new period from then
+        call("update#" + CLASS_SKILL, Object.assign(key(existing), {thruDate: new Date(startMs)}))
+        call(
+            "create#" + CLASS_SKILL,
+            Object.assign(
+                {
+                    emplPositionClassId: id,
+                    skillTypeEnumId,
+                    fromDate: new Date(startMs),
+                    thruDate: existing.thruDate ?? null,
+                    minimumLevel: existing.minimumLevel ?? null,
+                    qualificationTypeEnumId: existing.qualificationTypeEnumId || null,
+                    requiredFlag: existing.requiredFlag || "Y"
+                },
+                terms
+            )
+        )
         return {emplPositionClassId: id, skillTypeEnumId}
     }
-    // a new requirement, or an ended one required again from the new date
+    // a new requirement, or one required again: a new period, from now or the date given, never before an earlier one ended
     const values = Object.assign({emplPositionClassId: id, skillTypeEnumId, thruDate: null}, terms)
-    if (!values.fromDate) values.fromDate = ec.user.nowTimestamp
-    call((existing ? "update#" : "create#") + CLASS_SKILL, values)
+    if (!values.fromDate) values.fromDate = new Date(now)
+    const lastEnd = Math.max(-Infinity, ...periods.map(row => ms(row.thruDate) ?? -Infinity))
+    if (values.fromDate.getTime() < lastEnd || periods.some(row => ms(row.fromDate) === values.fromDate.getTime()))
+        denied(
+            "DATES_INVALID",
+            skillName + " is required again from " + (lastEnd > -Infinity ? dateText(lastEnd) : "a later time") + " or later"
+        )
+    call("create#" + CLASS_SKILL, values)
     return {emplPositionClassId: id, skillTypeEnumId}
 }
 // A requirement's terms from the parameters given (P18): the least level, the qualification type, required or desired, and its

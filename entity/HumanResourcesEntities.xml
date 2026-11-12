@@ -28,17 +28,18 @@ along with this software (see the LICENSE.md file). If not, see
 
     <entity entity-name="PartySkill" package="mantle.humanres.ability" use="nontransactional">
         <description>A party's current level of a skill. IronStone People (design §10, PE-14; impl-people P18) keeps each
-            evaluation as a PartySkillEvaluation and the accepted level here: an evaluation (sourceEnumId SksEvaluated) sets it, a
-            self-declaration (SksSelfDeclared) only where no evaluation has (mantle.humanres.DevelopmentServices.store#Skill). A row
-            with no source was recorded before People (Projects' skills, a rating) and counts as recorded by staff.</description>
+            evaluation as a PartySkillEvaluation and the accepted level here: an evaluation (sourceEnumId SksEvaluated, or
+            SksManagerEvaluated for a manager's evaluation of a report) sets it, a self-declaration (SksSelfDeclared) only where
+            no evaluation has (mantle.humanres.DevelopmentServices.store#Skill). A row with no source was recorded before People
+            (Projects' skills, a rating) and counts as recorded by staff.</description>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
         <field name="rating" type="number-integer"/>
         <field name="skillLevel" type="number-integer"><description>The level, a SkillLevel value's number (enumCode, 1 to 5)</description></field>
         <field name="startedUsingDate" type="date-time"/>
         <field name="yearsExperience" type="number-integer"/>
-        <field name="sourceEnumId" type="id"><description>Where the level comes from (SkillSource): self-declared or
-            evaluated; empty for a level recorded before People</description></field>
+        <field name="sourceEnumId" type="id"><description>Where the level comes from (SkillSource): self-declared,
+            evaluated or a manager's evaluation; empty for a level recorded before People</description></field>
         <field name="partySkillEvaluationId" type="id"><description>The evaluation the level is from</description></field>
         <field name="evaluatedDate" type="date-time"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
@@ -55,6 +56,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Skill Source" enumTypeId="SkillSource"/>
             <moqui.basic.Enumeration enumId="SksSelfDeclared" enumTypeId="SkillSource" description="Self-declared" sequenceNum="1"/>
             <moqui.basic.Enumeration enumId="SksEvaluated" enumTypeId="SkillSource" description="Evaluated" sequenceNum="2"/>
+            <!-- a manager's evaluation of a report (the user's call of Nov 12, 2026): meets a requirement as an evaluation does -->
+            <moqui.basic.Enumeration enumId="SksManagerEvaluated" enumTypeId="SkillSource" description="Manager's evaluation" sequenceNum="3"/>
         </seed-data>
     </entity>
     <entity entity-name="PartySkillEvaluation" package="mantle.humanres.ability" cache="never">
@@ -101,8 +104,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="qualificationTypeEnumId" type="id"/>
         <field name="title" type="text-medium"><description>Its name, such as the degree or certificate</description></field>
         <field name="issuerName" type="text-medium"/>
-        <field name="referenceNumber" type="text-medium"><description>The document or certificate number; restricted for an
-            identity document or work permit</description></field>
+        <field name="referenceNumber" type="text-medium" ai-opt-out="true"><description>The document or certificate number;
+            restricted for an identity document or work permit, and kept from every model tool (PE-21)</description></field>
         <field name="fromDate" type="date-time"><description>Issued, or valid from</description></field>
         <field name="thruDate" type="date-time"><description>Expires: required for an identity document or work permit</description></field>
         <field name="verificationStatusId" type="id" enable-audit-log="true"/>
@@ -1132,17 +1135,19 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="EmplPositionClassSkill" package="mantle.humanres.position" use="configuration">
         <description>A skill a job class requires (IronStone People design §5 JobClassDetail Requirements, §10, PE-14;
             impl-people P4, P18): the least level, whether a verified qualification of a type must prove it, whether it is
-            required or desired, and the dates it is required between. A requirement removed is ended (thruDate), never
-            deleted; a skill required again opens its row again (mantle.humanres.PositionServices.store#JobRequirement).
-            mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix read it.</description>
+            required or desired, and the dates it is required between. Each period is its own row, keyed by its start
+            (fromDate, the user's call of Nov 12, 2026), so the requirement's history is kept: a change starts a new row, a
+            requirement removed ends its row (thruDate), never deleted, and a skill required again starts a new one
+            (mantle.humanres.PositionServices.store#JobRequirement). Readers take the row in effect at their date
+            (mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix, PositionServices get#JobClass).</description>
         <field name="emplPositionClassId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="minimumLevel" type="number-integer"><description>The least level, a SkillLevel value's number; empty
             for any level</description></field>
         <field name="qualificationTypeEnumId" type="id"><description>A qualification type a verified, valid qualification of
             which must prove the skill (a certificate or licence)</description></field>
         <field name="requiredFlag" type="text-indicator"><description>Y required (the default), N desired</description></field>
-        <field name="fromDate" type="date-time"/>
         <field name="thruDate" type="date-time"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass"/>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">

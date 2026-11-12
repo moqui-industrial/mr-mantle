@@ -24,7 +24,9 @@
 // check#Qualifications answers the staffing projection to every caller: per requirement qualified, expiring, missing or expired
 // at the date, with the reason in words, never a number, issuer or file. Skills are read by the person, a manager, development
 // and HR. A self-declaration is the person's; an evaluation needs PEOPLE_DEVELOP_EDIT and a development reader's or manager's
-// scope. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
+// scope, or is a manager's own of a live report (SksManagerEvaluated, the user's call of Nov 12, 2026, with no PEOPLE_DEVELOP_EDIT);
+// certificates stay the development and HR verifiers'. No one verifies or evaluates their own record, whatever their permissions.
+// Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const employees = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Employees.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -42,6 +44,9 @@ const ENUM = "moqui.basic.Enumeration"
 const restrictedKinds = ["QualIdentityDocument", "QualWorkPermit"]
 const self = "SksSelfDeclared"
 const evaluated = "SksEvaluated"
+// a manager's evaluation of a live report, without PEOPLE_DEVELOP_EDIT (the user's call of Nov 12, 2026): it meets a requirement
+// as an evaluation does
+const managerEvaluated = "SksManagerEvaluated"
 const PENDING = "QlVerPending",
     VERIFIED = "QlVerVerified",
     REJECTED = "QlVerRejected",
@@ -127,11 +132,15 @@ function accessOf(userScope, partyId, kinds) {
     const hr = staff && !!caps.hrView
     const develop = staff && !!caps.developView
     const team = !!kinds.team
+    // the caller's own record, whatever admits it (a staff reader's own employment too): never verified or evaluated by them
+    const own = !!userScope.partyId && partyId === userScope.partyId
     const level = isSelf || hr ? "full" : develop ? "develop" : team || staff ? "staffing" : null
+    const developEdit = (develop || team) && !!caps.developEdit
     return {
         partyId,
         admitted: isSelf || staff || team,
         self: isSelf,
+        own,
         hr,
         develop,
         team,
@@ -139,7 +148,11 @@ function accessOf(userScope, partyId, kinds) {
         level,
         readsSkills: isSelf || hr || develop || team,
         hrEdit: hr && !!caps.hrEdit,
-        developEdit: (develop || team) && !!caps.developEdit
+        developEdit,
+        // who evaluates the person's skills: a development editor of their employer or manager, and a manager of a live line
+        // without PEOPLE_DEVELOP_EDIT (their evaluation recorded as the manager's); never the person themselves
+        evaluates: !own && (developEdit || team),
+        evaluationSource: developEdit ? evaluated : managerEvaluated
     }
 }
 function requireAdmitted(found, what) {
@@ -206,7 +219,7 @@ function qualificationRow(row, found, names, personNames, at) {
     })
     const open = row.verificationStatusId === PENDING || row.verificationStatusId === REJECTED
     out.canVerify =
-        !found.self &&
+        !found.own &&
         verifies(found, restricted) &&
         (row.verificationStatusId === PENDING || row.verificationStatusId === VERIFIED)
     out.canChange = open && submits(found, restricted)
@@ -452,7 +465,8 @@ function verifyQualification(p) {
     const found = row ? accessTo(userScope, row.partyId) : {admitted: false}
     if (!row || !found.admitted || !found.level || (found.level === "staffing" && row.verificationStatusId !== VERIFIED))
         denied("RECORD_UNAVAILABLE", "Qualification " + id + " is not available")
-    if (found.self) denied("SELF_APPROVAL", "Your own qualification is verified by someone else")
+    // the verifier's own qualification, whatever admits them to it (an HR editor's own employment too)
+    if (found.own) denied("SELF_APPROVAL", "Your own qualification is verified by someone else")
     const restricted = isRestricted(row.qualificationTypeEnumId)
     if (!verifies(found, restricted))
         denied(
@@ -489,8 +503,8 @@ function verifyQualification(p) {
 
 // ===== the qualification's content host (PE-01) =====
 // Whether the caller reads a qualification's files: the person and an HR reader of an employer of theirs; canEdit for the person
-// while it waits or was rejected, and for an HR editor. Never refuses: a qualification that is not one, or not the caller's to
-// read, answers recordVisible false, and so does a call with no user.
+// while it waits or was rejected, and for an HR editor of another person's. Never refuses: a qualification that is not one, or
+// not the caller's to read, answers recordVisible false, and so does a call with no user.
 function qualificationAccess(p) {
     const no = {recordVisible: false, canEdit: false, partyId: null}
     if (!ec.user.userId || !text(p.partyQualificationId)) return no
@@ -499,7 +513,8 @@ function qualificationAccess(p) {
     const found = accessTo(people.scopeOf(), row.partyId)
     if (!found.self && !found.hr) return no
     const open = row.verificationStatusId === PENDING || row.verificationStatusId === REJECTED
-    return {recordVisible: true, canEdit: found.hrEdit || (found.self && open), partyId: row.partyId}
+    // an HR editor changes another person's files at any state, their own only while it waits or was rejected, as the person does
+    return {recordVisible: true, canEdit: (found.hrEdit && !found.own) || (found.own && open), partyId: row.partyId}
 }
 function contentAccess(p) {
     const found = qualificationAccess(p)
@@ -511,11 +526,19 @@ function contentAccess(p) {
 
 // ===== requirements and the staffing check =====
 // A job class's requirements in effect at a time (EmplPositionClassSkill: the level, the qualification type, required or desired).
+// Each period of a requirement is its own row (keyed by its start, the user's call of Nov 12, 2026): the row in effect at the time,
+// the latest start should two overlap.
 function classRequirements(emplPositionClassIds, at) {
     const found = {}
     if (!emplPositionClassIds.length) return found
+    const inEffect = new Map()
     for (const row of Array.from(find(CLASS_SKILL).condition("emplPositionClassId", "in", emplPositionClassIds).list())) {
         if (!openAt(row, at)) continue
+        const key = row.emplPositionClassId + "/" + row.skillTypeEnumId
+        const other = inEffect.get(key)
+        if (!other || (ms(row.fromDate) ?? -Infinity) > (ms(other.fromDate) ?? -Infinity)) inEffect.set(key, row)
+    }
+    for (const row of inEffect.values()) {
         ;(found[row.emplPositionClassId] || (found[row.emplPositionClassId] = [])).push({
             skillTypeEnumId: row.skillTypeEnumId,
             minimumLevel: row.minimumLevel ?? null,
@@ -688,9 +711,10 @@ function checkQualifications(p) {
 
 // ===== skills =====
 // store#Skill: a person's level of a skill, as a self-declaration (the person themselves) or an evaluation (a development editor,
-// PEOPLE_DEVELOP_EDIT, of an employer of theirs or as their manager), each kept as a PartySkillEvaluation; PartySkill takes an
-// evaluation, and a self-declaration only where no evaluation (or level recorded before People) has set it. Refused: a person not
-// in scope (RECORD_UNAVAILABLE); a caller who may not evaluate them (PERMISSION_DENIED); no skill, not one or ended
+// PEOPLE_DEVELOP_EDIT, of an employer of theirs or as their manager; or a manager of a live line without it, recorded as the
+// manager's evaluation, SksManagerEvaluated: the user's call of Nov 12, 2026), each kept as a PartySkillEvaluation; PartySkill takes
+// an evaluation, and a self-declaration only where no evaluation (or level recorded before People) has set it. Refused: a person
+// not in scope (RECORD_UNAVAILABLE); a caller who may not evaluate them (PERMISSION_DENIED); no skill, not one or ended
 // (SKILL_REQUIRED, SKILL_INVALID, VALUE_ENDED); a level that is not a current skill level (LEVEL_INVALID); a date after now
 // (DATE_INVALID); a qualification as evidence that is not the person's (QUALIFICATION_INVALID); a revision other than the one read
 // (REVISION_CHANGED).
@@ -699,9 +723,13 @@ function storeSkill(p) {
     const partyId = text(p.partyId) || userScope.partyId
     if (!partyId) denied("RECORD_UNAVAILABLE", "Choose the person")
     const found = requireAdmitted(accessTo(userScope, partyId), "Person " + partyId)
-    const selfDeclared = found.self
-    if (!selfDeclared && !found.developEdit)
-        denied("PERMISSION_DENIED", "Evaluating a skill needs PEOPLE_DEVELOP_EDIT and the person in your scope")
+    // the caller's own skill is a self-declaration, whatever else admits them to their record
+    const selfDeclared = found.own
+    if (!selfDeclared && !found.evaluates)
+        denied(
+            "PERMISSION_DENIED",
+            "Evaluating a skill needs PEOPLE_DEVELOP_EDIT and the person in your scope, or a report of yours"
+        )
     const skillTypeEnumId = text(p.skillTypeEnumId)
     if (!skillTypeEnumId) denied("SKILL_REQUIRED", "Choose the skill")
     const skill = one(ENUM, {enumId: skillTypeEnumId})
@@ -718,7 +746,7 @@ function storeSkill(p) {
     const current = one(SKILL, {partyId, skillTypeEnumId})
     if (given(p.expectedRevision) && text(p.expectedRevision) && text(p.expectedRevision) !== stampOf(current))
         denied("REVISION_CHANGED", "This skill changed since you read it; open it again (revision " + stampOf(current) + ")")
-    const sourceEnumId = selfDeclared ? self : evaluated
+    const sourceEnumId = selfDeclared ? self : found.evaluationSource
     const partySkillEvaluationId = call("create#" + EVALUATION, {
         partyId,
         skillTypeEnumId,
@@ -903,7 +931,7 @@ function getSkillsMatrix(p) {
             personName: personNames[partyId] || partyId,
             jobText: (titles[partyId] || []).join(" · "),
             gapCount,
-            canEvaluate: found.developEdit,
+            canEvaluate: found.evaluates,
             cells
         }
     })
@@ -912,7 +940,7 @@ function getSkillsMatrix(p) {
     return Object.assign(out, {
         columns,
         rows: rowsOut,
-        canEvaluate: !!caps.developEdit,
+        canEvaluate: !!caps.developEdit || rowsOut.some(row => row.canEvaluate),
         levelOptions: Object.entries(levels).map(([value, label]) => ({value: String(value), label: value + " " + label})),
         asOfText: dateText(at),
         // every person the filters keep (FindAvailable bounds Projects' staffing candidates to them)
@@ -984,7 +1012,7 @@ function personDevelopment(p) {
         showsSkills: found.readsSkills,
         showsResume: found.self || found.hr || found.develop,
         canDeclare: found.self,
-        canEvaluate: found.developEdit,
+        canEvaluate: found.evaluates,
         canSubmit: submits(found, false),
         canEditResume: found.self || found.hrEdit || (found.develop && found.developEdit)
     }

@@ -130,9 +130,9 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- the qualification's content host (PE-01; impl-people P18, as P2's employment host and F66) -->
     <service verb="check" noun="QualificationAccess" allow-remote="false">
         <description>Whether the caller reads a qualification's files: the person and an HR reader (PEOPLE_HR_VIEW) of an employer
-            of theirs in scope; canEdit for an HR editor, and for the person while it waits or was rejected. Never refuses: a
-            qualification that is not one, or not the caller's to read, answers recordVisible false, and so does a call with no
-            user. get#RecordLinkInfo and RecordFiles read it.</description>
+            of theirs in scope; canEdit for an HR editor of another person's, and for the person while it waits or was rejected.
+            Never refuses: a qualification that is not one, or not the caller's to read, answers recordVisible false, and so does a
+            call with no user. get#RecordLinkInfo and RecordFiles read it.</description>
         <in-parameters><parameter name="partyQualificationId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="recordVisible" type="Boolean"/>
@@ -231,11 +231,13 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ===== skills ===== -->
     <service verb="store" noun="Skill" allow-remote="false">
         <description>A person's level of a skill (skillLevel, a SkillLevel value's number) as a self-declaration (the person,
-            PEOPLE_SELF_SERVICE) or an evaluation (a development editor, PEOPLE_DEVELOP_EDIT, reading the person as a development
-            reader of an employer of theirs or as their manager), with its date (now when empty, never later), evidence and a
-            qualification of the person it rests on; each kept as a PartySkillEvaluation, the caller its assessor. PartySkill takes
-            an evaluation, and a self-declaration only where no evaluation or earlier recorded level has set it (accepted says
-            which). Refuses a person not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no skill, not one or
+            PEOPLE_SELF_SERVICE; the caller's own skill is always one) or an evaluation (a development editor, PEOPLE_DEVELOP_EDIT,
+            reading the person as a development reader of an employer of theirs or as their manager; or, the user's call of Nov 12,
+            2026, a manager of a live reporting line without PEOPLE_DEVELOP_EDIT, recorded as the manager's evaluation,
+            SksManagerEvaluated, which meets a requirement as an evaluation does), with its date (now when empty, never later),
+            evidence and a qualification of the person it rests on; each kept as a PartySkillEvaluation, the caller its assessor.
+            PartySkill takes an evaluation, and a self-declaration only where no evaluation or earlier recorded level has set it
+            (accepted says which). Refuses a person not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no skill, not one or
             ended (SKILL_REQUIRED, SKILL_INVALID, VALUE_ENDED), a level that is not a current one (LEVEL_INVALID), a date after now
             (DATE_INVALID), evidence that is not the person's (QUALIFICATION_INVALID) and a revision other than the one read
             (REVISION_CHANGED).</description>
@@ -307,8 +309,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A person's skills (level, self-declared or evaluated, when), qualifications (as find#Qualifications projects
             them for the caller, with their expiry) and resume lines, for Employee360's Skills and reviews: the person, a manager,
             development and HR read the skills; the person, HR and development the resume; a manager and other staff readers the
-            verified qualifications alone. With what the caller may change: declare (the person), evaluate (a development editor),
-            submit a qualification, change the resume. Refuses a person not in scope (RECORD_UNAVAILABLE); checkOnly answers
+            verified qualifications alone. With what the caller may change: declare (the person), evaluate (a development editor,
+            or a manager of a live line), submit a qualification, change the resume. Refuses a person not in scope (RECORD_UNAVAILABLE); checkOnly answers
             visible false instead.</description>
         <in-parameters>
             <parameter name="partyId"/>

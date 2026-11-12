@@ -6,9 +6,11 @@
 // own, and a reader who may not verify is refused with the same parameters a verifier is answered with; an identity document or
 // work permit needs an expiry, its number is the person's and HR's (never development's or a manager's), only HR verifies it,
 // its files are the person's and HR's, and another employer's HR reads nothing; a job class's requirement carries a level, a
-// certificate and required or desired, is changed at its revision and ended (not deleted) when removed, and the skills matrix
-// shows the person against it; a work effort's skill standard is checked at its level; an expiry is reminded once, and a renewed
-// qualification is no longer due.
+// certificate and required or desired, is changed at its revision and ended (not deleted) when removed, each period its own row
+// read at its date (the user's call of Nov 12, 2026), and the skills matrix shows the person against it; a work effort's skill
+// standard is checked at its level; an HR editor never verifies their own qualification, nor a development editor evaluates
+// their own skill; a manager evaluates a report's skill without PEOPLE_DEVELOP_EDIT, as the manager's evaluation, and is refused
+// another person's (the user's call of Nov 12, 2026); an expiry is reminded once, and a renewed qualification is no longer due.
 // Standalone: spec-local organizations, people, employments, a job class and seat, groups and users, with artifact authorization
 // disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec Qualifications
@@ -172,13 +174,34 @@ feature("a job class's requirement has a level, a certificate and required or de
         )
         out.removed = code(requirement({skillTypeEnumId: state.safety, remove: true}))
         const after = read()
-        out.kept = !!ec.entity
-            .find("mantle.humanres.position.EmplPositionClassSkill")
-            .condition({emplPositionClassId: state.classId, skillTypeEnumId: state.safety})
-            .condition("thruDate", "is-not-null", null)
-            .disableAuthz()
-            .one()
+        // each period its own row: the first (level 2) ended by the change, the changed one (level 1) ended by the removal
+        const periods = () =>
+            Array.from(
+                ec.entity
+                    .find("mantle.humanres.position.EmplPositionClassSkill")
+                    .condition({emplPositionClassId: state.classId, skillTypeEnumId: state.safety})
+                    .orderBy("fromDate")
+                    .disableAuthz()
+                    .list()
+            ).map(row => [row.minimumLevel, row.thruDate != null])
+        out.kept = periods()
         out.again = code(requirement({skillTypeEnumId: state.safety, minimumLevel: "2", requiredFlag: "N"}))
+        // a change from a later date: the period in effect ends then, and readers take the period of their date
+        const again = read().skills.find(row => row.skillTypeEnumId === state.safety)
+        out.later = code(
+            requirement({
+                skillTypeEnumId: state.safety,
+                change: true,
+                minimumLevel: "3",
+                fromDate: stamp(30),
+                expectedRevision: again.revision
+            })
+        )
+        out.periods = periods()
+        out.levels = [null, dayText(40)].map(
+            asOfDate =>
+                requirementOf(check(state.uMax, {emplPositionClassId: state.classId, asOfDate}), state.safety)?.minimumLevel
+        )
         out.weld = before.skills.find(row => row.skillTypeEnumId === state.weld)
         out.safety = safety
         out.afterSkills = after.skills.map(row => row.skillTypeEnumId)
@@ -192,8 +215,21 @@ feature("a job class's requirement has a level, a certificate and required or de
         out.weld.qualificationTypeName == "Qual spec welding certificate"
         out.safety.requiredText == "Desired" && out.safety.minimumLevel == 2
         out.stale == "REVISION_CHANGED" && out.changed == "" && out.removed == ""
-        out.afterSkills == [state.weld] && out.kept
-        out.again == "" && out.skillCount == 2
+        out.afterSkills == [state.weld]
+        out.kept ==
+            [
+                [2, true],
+                [1, true]
+            ]
+        out.again == "" && out.skillCount == 2 && out.later == ""
+        out.periods ==
+            [
+                [2, true],
+                [1, true],
+                [2, true],
+                [3, false]
+            ]
+        out.levels == [2, 3]
     }
 })
 
@@ -250,6 +286,21 @@ feature("a self-declared skill and an unverified or expired certificate meet not
         out.own = [out.own, check(state.uMax, {}).results[0].state]
         out.job = requirementOf(check(state.uMax, {workEffortId: state.workEffortId}), state.weld)
         out.outside = check(state.hrB, {emplPositionClassId: state.classId}).results[0]
+        // an HR editor's own qualification (admitted by their own employment at A, with no PEOPLE_SELF_SERVICE) is verified by
+        // someone else; a development editor's own skill is a self-declaration
+        const hrOwn = run(state.hr, D + "store#Qualification", {qualificationTypeEnumId: "QualDegree", title: "HR spec degree"})
+        out.hrOwn = code(
+            run(state.hr, D + "verify#Qualification", {
+                partyQualificationId: hrOwn.partyQualificationId,
+                expectedRevision: hrOwn.revision
+            })
+        )
+        run(state.dev, D + "store#Skill", {partyId: state.DEV, skillTypeEnumId: state.weld, skillLevel: "5"})
+        out.devOwn = ec.entity
+            .find("mantle.humanres.ability.PartySkill")
+            .condition({partyId: state.DEV, skillTypeEnumId: state.weld})
+            .disableAuthz()
+            .one()?.sourceEnumId
         return out
     },
     then(out) {
@@ -270,6 +321,7 @@ feature("a self-declared skill and an unverified or expired certificate meet not
         out.expired.state == "expired" && out.expired.explanation.startsWith("Expired ")
         out.job.state == "missing" && out.job.explanation == "Level 3 Proficient of 4 Advanced"
         out.outside.state == "unavailable" && out.outside.requirements.length == 0 && out.outside.personName == null
+        out.hrOwn == "SELF_APPROVAL" && out.devOwn == "SksSelfDeclared"
     }
 })
 
@@ -412,6 +464,22 @@ feature("the skills matrix shows the person against their job class; an expiry i
         out.development = [development.showsSkills, development.showsResume, development.skills.length, development.canEvaluate]
         out.devDevelopment = run(state.dev, D + "get#PersonDevelopment", {partyId: state.ana}).canEvaluate
         out.hidden = run(state.hrB, D + "get#PersonDevelopment", {partyId: state.ana, checkOnly: true}).visible
+        // the user's call of Nov 12, 2026: Max evaluates his report's safety skill without PEOPLE_DEVELOP_EDIT, recorded as his
+        // evaluation, and it meets the requirement; he is refused a person who is not his report
+        const managed = run(state.uMax, D + "store#Skill", {partyId: state.ana, skillTypeEnumId: state.safety, skillLevel: "2"})
+        const evaluation = ec.entity
+            .find("mantle.humanres.ability.PartySkillEvaluation")
+            .condition("partySkillEvaluationId", managed.partySkillEvaluationId || "_NA_")
+            .disableAuthz()
+            .one()
+        out.managed = [!!managed.accepted, evaluation?.sourceEnumId, evaluation?.assessorPartyId]
+        out.managedSource = run(state.dev, D + "get#PersonDevelopment", {partyId: state.ana}).skills.find(
+            row => row.skillTypeEnumId === state.safety
+        )?.sourceText
+        out.managedState = requirementOf(check(state.uMax, {emplPositionClassId: state.classId}), state.safety)?.state
+        out.notReport = code(
+            run(state.uMax, D + "store#Skill", {partyId: state.DIR, skillTypeEnumId: state.safety, skillLevel: "2"})
+        )
         return out
     },
     then(out) {
@@ -428,6 +496,8 @@ feature("the skills matrix shows the person against their job class; an expiry i
         out.sent[0] >= 1 && out.sent[1] == 0
         out.titles.length == 1 && out.titles[0].startsWith("Your licence expires on ")
         out.badRenewal == "RENEWAL_INVALID" && out.after == 0
-        out.development == [true, false, 1, false] && out.devDevelopment && out.hidden == false
+        out.development == [true, false, 1, true] && out.devDevelopment && out.hidden == false
+        out.managed == [true, "SksManagerEvaluated", state.max] && out.managedSource == "Manager's evaluation"
+        out.managedState == "qualified" && out.notReport == "RECORD_UNAVAILABLE"
     }
 })
