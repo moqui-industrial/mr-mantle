@@ -1013,7 +1013,9 @@ function offline(p) {
         let named = blank(p.resourceUnavailabilityId) ? null : one(OUTAGE, {resourceUnavailabilityId: p.resourceUnavailabilityId})
         for (let guard = 0; named?.supersededByUnavailabilityId && guard < 50; guard++)
             named = one(OUTAGE, {resourceUnavailabilityId: named.supersededByUnavailabilityId})
-        const outage = named ? find(OUTAGE, {resourceUnavailabilityId: named.resourceUnavailabilityId}).forUpdate(true).one() : null
+        const outage = named
+            ? find(OUTAGE, {resourceUnavailabilityId: named.resourceUnavailabilityId}).forUpdate(true).one()
+            : null
         if (!outage || outage.facilityId !== center.facilityId || outage.unavailabilityKindEnumId !== "RukPlanned")
             denied("RECORD_UNAVAILABLE", "Planned offline time " + (p.resourceUnavailabilityId || "") + " is not available")
         const now = ms(ec.user.nowTimestamp)

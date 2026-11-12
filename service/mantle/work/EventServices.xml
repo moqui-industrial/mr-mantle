@@ -57,6 +57,9 @@ along with this software (see the LICENSE.md file). If not, see
             unavailableList (impl-maintenance P15): for an asked facility or asset, its outages and planned blocks in force over the
             range (a facility's own and those above it), each {facilityId or assetId, fromDate, thruDate, kind (actual or planned),
             status, label}, a safe reason only; they are not events.
+            A booking of an asked managed resource (a ResourceBookingPolicy in force) that the user may not open (check#EventAccess)
+            is answered as free/busy: title Busy, freeBusyOnly, no url, location or organizer (§2 of impl-maintenance: a busy
+            interval the caller may not open carries no title or attendee). An unmanaged resource's bookings are as before.
         </description>
         <in-parameters>
             <parameter name="facilityId"/>
@@ -181,13 +184,18 @@ along with this software (see the LICENSE.md file). If not, see
                 if (onProject) projectEventIds = linkedIds
                 else if (userPartyId && !partyIdSet.includes(userPartyId)) partyIdSet.push(userPartyId)
             }
-            // the asked resources' outages and planned blocks (impl-maintenance P15), apart from the events
+            // the asked resources' outages and planned blocks (impl-maintenance P15), apart from the events; and the managed ones (a
+            // ResourceBookingPolicy in force), whose bookings the user may not see are Busy below
+            const managedFacilityIds = []
+            const managedAssetIds = []
             if (facilityIdSet.length || assetIdSet.length) {
                 const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
                 const keys = facilityIdSet.map((id) => ({facilityId: id})).concat(assetIdSet.map((id) => ({assetId: id})))
                 for (const key of keys.slice(0, 50)) {
-                    try { unavailableList.push(...Array.from(policies.unavailableOver(Object.assign({fromDate: startTs, thruDate: endTs}, key)))) }
-                    catch (err) { ec.logger.warn(`Availability of ${key.facilityId || key.assetId} not read: ${err && err.message ? err.message : err}`) }
+                    try {
+                        unavailableList.push(...Array.from(policies.unavailableOver(Object.assign({fromDate: startTs, thruDate: endTs}, key))))
+                        if (policies.policyAt(key)) (key.facilityId ? managedFacilityIds : managedAssetIds).push(key.facilityId || key.assetId)
+                    } catch (err) { ec.logger.warn(`Availability of ${key.facilityId || key.assetId} not read: ${err && err.message ? err.message : err}`) }
                 }
             }
             if (!facilityIdSet.length && !partyIdSet.length && !assetIdSet.length && !calendarLevel.size && !projectEventIds.length) return
@@ -227,7 +235,7 @@ along with this software (see the LICENSE.md file). If not, see
             const memberOf = (id) => {
                 let member = members.get(id)
                 if (!member) {
-                    member = {calendarIds: [], partyRows: [], owner: false, allUsers: false, resource: false, project: false, bookingStatusId: null}
+                    member = {calendarIds: [], partyRows: [], owner: false, allUsers: false, resource: false, managed: false, project: false, bookingStatusId: null}
                     members.set(id, member)
                 }
                 return member
@@ -244,6 +252,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (row.visibilityEnumId === 'WevAllUsers') member.allUsers = true
                     if (row.ownerPartyId && partyIdSet.includes(row.ownerPartyId)) member.owner = true
                     if (row.facilityId && facilityIdSet.includes(row.facilityId)) member.resource = true
+                    if (row.facilityId && managedFacilityIds.includes(row.facilityId)) member.managed = true
                 }
                 if (partyIdSet.length) for (const row of ec.entity.find('mantle.work.effort.WorkEffortAndParty').condition(base)
                         .condition(cf.makeCondition('partyId', 'in', partyIdSet)).condition(cf.makeConditionDate('fromDate', 'thruDate', null))
@@ -257,6 +266,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .selectField('workEffortId,facilityId,bookingStatusId').list()) {
                     const member = memberOf(row.workEffortId)
                     member.resource = true
+                    if (managedFacilityIds.includes(row.facilityId)) member.managed = true
                     if (row.bookingStatusId && !member.bookingStatusId) member.bookingStatusId = row.bookingStatusId
                 }
                 if (assetIdSet.length) for (const row of ec.entity.find('mantle.work.effort.WorkEffortAndAssetBooking').condition(base)
@@ -269,6 +279,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (thru != null && (eventStart == null ? thru <= toMillis(ec.user.nowTimestamp) : thru <= eventStart)) continue
                     const member = memberOf(row.workEffortId)
                     member.resource = true
+                    if (managedAssetIds.includes(row.assetId)) member.managed = true
                     if (row.bookingStatusId && !member.bookingStatusId) member.bookingStatusId = row.bookingStatusId
                 }
                 if (projectEventIds.length) for (let i = 0; i < projectEventIds.length; i += 500) for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition(base)
@@ -328,12 +339,26 @@ along with this software (see the LICENSE.md file). If not, see
             const ownerIds = Array.from(new Set(instances.map((instance) => instance.workEffort?.ownerPartyId).filter((id) => id)))
             if (ownerIds.length) for (const detail of ec.entity.find('mantle.party.PartyDetail').condition(cf.makeCondition('partyId', 'in', ownerIds)).list())
                 ownerNames.set(detail.partyId, detail.organizationName || [detail.firstName, detail.lastName].filter((part) => part).join(' ') || detail.partyId)
+            // a booking of a managed resource the user may not open (check#EventAccess) is Busy, with no title, link, place or
+            // organizer (impl-maintenance P15, §2: a busy interval the caller may not open carries no title or attendee)
+            const seen = new Map()
+            const canOpen = (id) => {
+                if (!seen.has(id)) {
+                    ec.message.pushErrors()
+                    try {
+                        seen.set(id, !!ec.service.sync().name('mantle.work.EventServices.check#EventAccess')
+                                .parameters({workEffortId: id, permission: 'none'}).disableAuthz().call()?.canView)
+                    } catch (err) { seen.set(id, false) } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                }
+                return seen.get(id)
+            }
             for (const instance of instances) {
                 const workEffort = instance.workEffort
                 const member = members.get(instance.workEffortId) || members.get(instance.seriesWorkEffortId) || memberOf(instance.workEffortId)
                 const calendarId = calendarOrder.find((id) => member.calendarIds.includes(id)) || null
-                const freeBusyOnly = member.calendarIds.length > 0 && member.calendarIds.every((id) => calendarLevel.get(id) === 1)
-                        && !member.partyRows.length && !member.owner && !member.allUsers && !member.resource && !member.project
+                const freeBusyOnly = (member.calendarIds.length > 0 && member.calendarIds.every((id) => calendarLevel.get(id) === 1)
+                        && !member.partyRows.length && !member.owner && !member.allUsers && !member.resource && !member.project)
+                        || (member.managed && !canOpen(instance.seriesWorkEffortId || instance.workEffortId))
                 const partyRow = member.partyRows.find((row) => row.partyId === userPartyId) || member.partyRows[0] || null
                 let url = ''
                 if (urlGString && !freeBusyOnly) {
@@ -586,6 +611,9 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <if condition="requestId"><service-call name="create#mantle.request.RequestWorkEffort"
                     in-map="{workEffortId:workEffortId, requestId:requestId}"/></if>
+            <!-- the recurrence before the equipment, so a managed asset's series is checked over its range (impl-maintenance P15) -->
+            <if condition="rrule"><service-call name="mantle.work.EventServices.store#EventRecurrence"
+                    in-map="{workEffortId:workEffortId, rrule:rrule, timeZone:recurrenceTimeZone}"/></if>
             <!-- equipment named at creation (impl-maintenance P15, design §13.2): a managed asset is booked through book#Resource, its
                 policy and availability; any other is assigned at once as before, unless an outage or a blackout covers the event -->
             <if condition="assetId"><script><![CDATA[
@@ -605,8 +633,6 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script></if>
             <if condition="calendarId"><service-call name="mantle.work.CalendarServices.add#CalendarEvent"
                     in-map="{calendarId:calendarId, workEffortId:workEffortId}"/></if>
-            <if condition="rrule"><service-call name="mantle.work.EventServices.store#EventRecurrence"
-                    in-map="{workEffortId:workEffortId, rrule:rrule, timeZone:recurrenceTimeZone}"/></if>
         </actions>
     </service>
 
@@ -748,7 +774,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="EventRecurrence">
         <description>Sets the recurrence of an event (edit access): rrule is the RFC 5545 RRULE value (FREQ=WEEKLY;BYDAY=MO),
             exdates and rdates comma separated EXDATE and RDATE values, timeZone an IANA name (default the user's). An empty
-            rrule and rdates make it a single event again.</description>
+            rrule and rdates make it a single event again. An event booking a managed resource (a ResourceBookingPolicy in force) is
+            checked again by check#ResourceBookings over its new range (impl-maintenance P15): a range past the horizon, overlapping
+            meetings or a clash with another booking refuses the change.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="rrule"/>
@@ -767,6 +795,18 @@ along with this software (see the LICENSE.md file). If not, see
             const fields = {rrule: rule || null, exdates: exdates || null, rdates: rdates || null, timeZone: timeZone || ec.user.timeZone || null}
             if (row == null) ec.service.sync().name('create#mantle.work.effort.WorkEffortRecurrence').parameters(Object.assign({workEffortId: workEffortId}, fields)).call()
             else { for (const [field, value] of Object.entries(fields)) row.set(field, value); row.update() }
+            // a series that books a managed resource (impl-maintenance P15) is checked again over its new range, its horizon and its
+            // other bookings (check#ResourceBookings); an event booking only unmanaged resources is as before
+            const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
+            const toMs = (value) => value == null || value === '' ? null : (/^-?\d+$/.test(String(value)) ? Number(String(value)) : Date.parse(String(value)))
+            const nowMs = toMs(ec.user.nowTimestamp)
+            const managed = Array.from(ec.entity.find('mantle.work.effort.WorkEffortFacility').condition('workEffortId', workEffortId).list())
+                    .some((booking) => booking.statusId && booking.statusId !== 'WefRequestDenied' && policies.policyAt({facilityId: booking.facilityId}))
+                || Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssetAssign').condition('workEffortId', workEffortId).list())
+                    .some((booking) => booking.statusId !== 'WeaaRequestDenied' && (booking.thruDate == null || toMs(booking.thruDate) > nowMs)
+                        && policies.policyAt({assetId: booking.assetId}))
+            if (managed) ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings')
+                    .parameters({workEffortId: workEffortId, reapprove: false}).call()
         ]]></script></actions>
     </service>
 
@@ -1950,7 +1990,8 @@ along with this software (see the LICENSE.md file). If not, see
             nothing more). A resource with a ResourceBookingPolicy in force is managed: not bookable, longer than its maximum,
             starting past its horizon, a recurring booking whose range runs past the horizon or whose instances overlap, and
             approval by approvers with none named are refused; a conflict is booked over only where its policy allows an
-            override, by a holder of RESOURCE_BOOKING_OVERRIDE with overrideReason (kept in the booking's comments), never by
+            override, by a holder of RESOURCE_BOOKING_OVERRIDE who works for its organization, with overrideReason (kept in the
+            booking's comments), never by
             allowConflicts alone; and it is approved by its policy's mode. A conflict with an event the user may not see is named
             Busy, with no id. A resource with no policy keeps the approver fallback above.
         </description>

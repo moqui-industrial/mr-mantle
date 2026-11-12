@@ -13,11 +13,13 @@
 // Run: ./moq test mr-mantle --spec ResourceBookingPolicy
 const prefix = "RBP"
 const orgA = prefix + "_A",
+    orgB = prefix + "_B",
     building = prefix + "_BLDG",
     managedRoom = prefix + "_ROOM_M",
     plainRoom = prefix + "_ROOM_U",
     approvedRoom = prefix + "_ROOM_P",
     compressor = prefix + "_COMP",
+    projector = prefix + "_PROJ",
     plant = prefix + "_PLANT",
     line = prefix + "_LINE",
     since = "2000-01-01T00:00:00Z"
@@ -57,7 +59,7 @@ function organization(partyId) {
     call("create#mantle.party.Organization", {partyId, organizationName: partyId})
     call("create#mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
 }
-function user(kind, permissions) {
+function user(kind, permissions, organizationPartyId = orgA) {
     const id = prefix + "_U_" + kind
     call("create#moqui.security.UserGroup", {userGroupId: id, description: "Booking policy " + kind})
     for (const permission of permissions)
@@ -68,7 +70,7 @@ function user(kind, permissions) {
     call("create#mantle.party.PartyRelationship", {
         relationshipTypeEnumId: "PrtAgent",
         fromPartyId: partyId,
-        toPartyId: orgA,
+        toPartyId: organizationPartyId,
         toRoleTypeId: "OrgInternal",
         fromDate: since
     })
@@ -94,11 +96,7 @@ function event(username, name, from, to, rrule) {
     }).workEffortId
 }
 const facilityBooking = (workEffortId, facilityId) =>
-    ec.entity
-        .find("mantle.work.effort.WorkEffortFacility")
-        .condition({workEffortId, facilityId})
-        .disableAuthz()
-        .one()
+    ec.entity.find("mantle.work.effort.WorkEffortFacility").condition({workEffortId, facilityId}).disableAuthz().one()
 
 spec({
     stepwise: true,
@@ -106,6 +104,7 @@ spec({
         login("john.doe")
         ec.artifactExecution.disableAuthz()
         organization(orgA)
+        organization(orgB)
         call("create#mantle.facility.Facility", {
             facilityId: building,
             facilityTypeEnumId: "FcTpBuilding",
@@ -134,7 +133,21 @@ spec({
             facilityId: building,
             bookable: "Y"
         })
-        call("create#mantle.facility.Facility", {facilityId: plant, facilityTypeEnumId: "FcTpPlant", facilityName: "Policy plant", ownerPartyId: orgA})
+        call("create#mantle.product.asset.Asset", {
+            assetId: projector,
+            assetTypeEnumId: "AstTpEquipment",
+            assetName: "Spec projector",
+            statusId: "AstAvailable",
+            ownerPartyId: orgA,
+            facilityId: building,
+            bookable: "Y"
+        })
+        call("create#mantle.facility.Facility", {
+            facilityId: plant,
+            facilityTypeEnumId: "FcTpPlant",
+            facilityName: "Policy plant",
+            ownerPartyId: orgA
+        })
         call("create#mantle.facility.Facility", {
             facilityId: line,
             facilityTypeEnumId: "FcTpLine",
@@ -149,9 +162,15 @@ spec({
         state.ann = user("ANN", [])
         state.bob = user("BOB", [])
         state.overrider = user("OVERRIDER", ["RESOURCE_BOOKING_OVERRIDE"])
+        state.outsider = user("OUTSIDER", ["RESOURCE_BOOKING_OVERRIDE"], orgB)
         state.approver = user("APPROVER", ["RESOURCE_BOOKING_VIEW_ASSIGNED", "RESOURCE_BOOKING_APPROVE"])
         // the plain room keeps the approver fallback: an approver and no policy
-        call("create#mantle.facility.FacilityParty", {facilityId: approvedRoom, partyId: state.APPROVER_PARTY, roleTypeId: "BookingApprover", fromDate: since})
+        call("create#mantle.facility.FacilityParty", {
+            facilityId: approvedRoom,
+            partyId: state.APPROVER_PARTY,
+            roleTypeId: "BookingApprover",
+            fromDate: since
+        })
         // the compressor is out of service (an actual outage, open)
         call("create#mantle.work.effort.ResourceUnavailability", {
             unavailabilityKindEnumId: "RukActual",
@@ -172,7 +191,10 @@ spec({
 
 feature("the managed room's policy: a holder of the edit permission sets it, another user cannot, and it reads back in words", {
     when() {
-        const refused = as(state.supervisor, R + "store#ResourceBookingPolicy", {facilityId: managedRoom, approvalModeEnumId: "RbamAutomatic"})
+        const refused = as(state.supervisor, R + "store#ResourceBookingPolicy", {
+            facilityId: managedRoom,
+            approvalModeEnumId: "RbamAutomatic"
+        })
         const stored = as(state.resources, R + "store#ResourceBookingPolicy", {
             facilityId: managedRoom,
             approvalModeEnumId: "RbamAutomatic",
@@ -180,7 +202,16 @@ feature("the managed room's policy: a holder of the edit permission sets it, ano
             maximumDurationMinutes: 120,
             softConflictOverride: "Y"
         })
-        const noReason = as(state.resources, R + "store#ResourceBookingPolicy", {facilityId: managedRoom, expectedRevision: 1, maximumDurationMinutes: 90})
+        as(state.resources, R + "store#ResourceBookingPolicy", {
+            assetId: projector,
+            approvalModeEnumId: "RbamAutomatic",
+            bookingHorizonDays: 30
+        })
+        const noReason = as(state.resources, R + "store#ResourceBookingPolicy", {
+            facilityId: managedRoom,
+            expectedRevision: 1,
+            maximumDurationMinutes: 90
+        })
         const read = as(state.resources, R + "get#ResourceBookingPolicy", {facilityId: managedRoom})
         const listed = as(state.resources, R + "find#BookableResources", {facilityId: building, managed: "Y"})
         const strangers = as(state.ann, R + "get#ResourceBookingPolicy", {facilityId: managedRoom})
@@ -194,7 +225,7 @@ feature("the managed room's policy: a holder of the edit permission sets it, ano
         read.managed == true
         read.policy.maximumDurationMinutes == 120
         read.policyText.includes("at most 2 hours")
-        listed.resourceList.map(row => row.facilityId) == [managedRoom]
+        listed.resourceList.map(row => row.facilityId || row.assetId) == [managedRoom, projector]
         code(strangers) == "PERMISSION_DENIED"
     }
 })
@@ -207,18 +238,40 @@ feature("adjacent bookings of the managed room are accepted; one longer than two
         const far = event(state.ann, "Ann far ahead", at(0, 40), at(1, 40))
         const daily = event(state.ann, "Ann daily", at(4, 1), at(5, 1), "FREQ=DAILY")
         const threeDays = event(state.ann, "Ann three days", at(6, 1), at(7, 1), "FREQ=DAILY;COUNT=3")
+        const standing = event(state.ann, "Ann standing", at(10, -600), at(10.5, -600), "FREQ=DAILY;COUNT=610")
         state.annFirst = first
         state.bobNext = next
+        const threeDaysBooked = as(state.ann, E + "book#Resource", {workEffortId: threeDays, facilityId: managedRoom})
+        // the booked series' rule made unbounded afterwards: checked again over its range and refused, the rule kept as it was
+        const extended = as(state.ann, E + "store#EventRecurrence", {workEffortId: threeDays, rrule: "FREQ=DAILY"})
+        const rule = ec.entity
+            .find("mantle.work.effort.WorkEffortRecurrence")
+            .condition("workEffortId", threeDays)
+            .disableAuthz()
+            .one()?.rrule
+        // equipment named at an unbounded series' creation: the rule is stored first, so the whole range is checked
+        const projectorSeries = as(state.ann, E + "create#Event", {
+            workEffortName: "Ann projector daily",
+            estimatedStartDate: at(8, 1),
+            estimatedCompletionDate: at(9, 1),
+            assetId: projector,
+            rrule: "FREQ=DAILY"
+        })
         return {
+            projectorSeries,
+            threeDays: threeDaysBooked,
+            extended,
+            rule,
+            // a series begun long ago is decided from now: its past meetings do not count against the horizon
+            standing: as(state.ann, E + "book#Resource", {workEffortId: standing, facilityId: managedRoom}),
             first: as(state.ann, E + "book#Resource", {workEffortId: first, facilityId: managedRoom}),
             next: as(state.bob, E + "book#Resource", {workEffortId: next, facilityId: managedRoom}),
             long: as(state.ann, E + "book#Resource", {workEffortId: long, facilityId: managedRoom}),
             far: as(state.ann, E + "book#Resource", {workEffortId: far, facilityId: managedRoom}),
-            daily: as(state.ann, E + "book#Resource", {workEffortId: daily, facilityId: managedRoom}),
-            threeDays: as(state.ann, E + "book#Resource", {workEffortId: threeDays, facilityId: managedRoom})
+            daily: as(state.ann, E + "book#Resource", {workEffortId: daily, facilityId: managedRoom})
         }
     },
-    then({first, next, long, far, daily, threeDays}) {
+    then({first, next, long, far, daily, threeDays, extended, rule, standing, projectorSeries}) {
         first.error == ""
         first.statusId == "WefAssigned"
         next.error == ""
@@ -228,6 +281,10 @@ feature("adjacent bookings of the managed room are accepted; one longer than two
         // an unbounded series runs past the horizon: the whole range is checked, not its first meeting
         daily.error.includes("at most 30 days ahead")
         threeDays.error == ""
+        extended.error.includes("at most 30 days ahead")
+        rule == "FREQ=DAILY;COUNT=3"
+        standing.error == ""
+        projectorSeries.error.includes("at most 30 days ahead")
     }
 })
 
@@ -237,17 +294,46 @@ feature("a hidden event is Busy with no title; allowConflicts alone books nothin
         const bare = as(state.bob, E + "book#Resource", {workEffortId: clash, facilityId: managedRoom})
         const allowed = as(state.bob, E + "book#Resource", {workEffortId: clash, facilityId: managedRoom, allowConflicts: true})
         const overrideClash = event(state.overrider, "Override clash", at(0.5), at(1.5))
-        const noReason = as(state.overrider, E + "book#Resource", {workEffortId: overrideClash, facilityId: managedRoom, allowConflicts: true})
+        const noReason = as(state.overrider, E + "book#Resource", {
+            workEffortId: overrideClash,
+            facilityId: managedRoom,
+            allowConflicts: true
+        })
         const overridden = as(state.overrider, E + "book#Resource", {
             workEffortId: overrideClash,
             facilityId: managedRoom,
             allowConflicts: true,
             overrideReason: "Board visit"
         })
-        const availability = as(state.bob, R + "get#ResourceAvailability", {facilityId: managedRoom, fromDate: at(0), thruDate: at(2)})
-        return {bare, allowed, noReason, overridden, availability, comments: facilityBooking(overrideClash, managedRoom)?.comments}
+        const availability = as(state.bob, R + "get#ResourceAvailability", {
+            facilityId: managedRoom,
+            fromDate: at(0),
+            thruDate: at(2)
+        })
+        // the managed room's calendar read: Ann's event is Busy to Bob, with no organizer
+        const calendar = as(state.bob, E + "get#FullCalendarData", {
+            facilityId: managedRoom,
+            start: at(-24).toISOString().substring(0, 10),
+            end: at(24).toISOString().substring(0, 10)
+        })
+        const otherOrg = as(state.outsider, E + "book#Resource", {
+            workEffortId: event(state.outsider, "Outsider clash", at(0.5), at(1.5)),
+            facilityId: managedRoom,
+            allowConflicts: true,
+            overrideReason: "Not ours"
+        })
+        return {
+            bare,
+            allowed,
+            noReason,
+            overridden,
+            availability,
+            calendar,
+            otherOrg,
+            comments: facilityBooking(overrideClash, managedRoom)?.comments
+        }
     },
-    then({bare, allowed, noReason, overridden, availability, comments}) {
+    then({bare, allowed, noReason, overridden, availability, calendar, otherOrg, comments}) {
         // Ann's event is hidden from Bob: Busy, never its title; Bob's own is named
         bare.error.includes("is booked then: Busy")
         bare.error.includes("Bob next")
@@ -260,6 +346,12 @@ feature("a hidden event is Busy with no title; allowConflicts alone books nothin
         availability.intervalList.map(row => row.label).includes("Busy")
         !availability.intervalList.map(row => row.label).includes("Ann first")
         availability.intervalList.filter(row => row.label == "Busy").every(row => row.workEffortId == null)
+        calendar.error == ""
+        !calendar.eventList.some(row => row.title.startsWith("Ann first"))
+        calendar.eventList.some(row => row.title.startsWith("Bob next"))
+        calendar.eventList.filter(row => row.title == "Busy").every(row => row.ownerName == null && row.freeBusyOnly)
+        // the override permission is the room's organization's: another organization's holder overrides nothing
+        otherOrg.error.includes("override")
     }
 })
 
@@ -284,44 +376,54 @@ feature("a booking over an outage is refused with allowConflicts and says only t
     }
 })
 
-feature("approval required with no approver blocks; an approver added makes it requested, and ending them with it waiting needs another", {
-    when() {
-        const changed = as(state.resources, R + "store#ResourceBookingPolicy", {
-            facilityId: managedRoom,
-            approvalModeEnumId: "RbamApprovers",
-            bookingHorizonDays: 30,
-            maximumDurationMinutes: 120,
-            softConflictOverride: "Y",
-            expectedRevision: 1,
-            changeReason: "Approval from now on"
-        })
-        const meeting = event(state.ann, "Ann needs approval", at(6), at(7))
-        const blocked = as(state.ann, E + "book#Resource", {workEffortId: meeting, facilityId: managedRoom})
-        const findings = as(state.resources, R + "get#ResourceBookingPolicy", {facilityId: managedRoom}).setupFindings
-        const added = as(state.resources, R + "store#ResourceApprover", {facilityId: managedRoom, partyId: state.APPROVER_PARTY})
-        const requested = as(state.ann, E + "book#Resource", {workEffortId: meeting, facilityId: managedRoom})
-        const approverReads = as(state.approver, R + "get#ResourceBookingPolicy", {facilityId: managedRoom})
-        const pending = as(state.resources, R + "store#ResourceApprover", {facilityId: managedRoom, partyId: state.APPROVER_PARTY, end: "Y"})
-        const handedOver = as(state.resources, R + "store#ResourceApprover", {
-            facilityId: managedRoom,
-            partyId: state.APPROVER_PARTY,
-            end: "Y",
-            replacementPartyId: state.RESOURCES_PARTY
-        })
-        return {changed, blocked, findings, added, requested, approverReads, pending, handedOver}
-    },
-    then({changed, blocked, findings, added, requested, approverReads, pending, handedOver}) {
-        changed.error == ""
-        blocked.error.includes("has no approver")
-        findings.length == 1
-        added.added == true
-        requested.statusId == "WefRequested"
-        requested.requiresApproval == true
-        approverReads.error == ""
-        code(pending) == "APPROVER_PENDING"
-        handedOver.ended == true
+feature(
+    "approval required with no approver blocks; an approver added makes it requested, and ending them with it waiting needs another",
+    {
+        when() {
+            const changed = as(state.resources, R + "store#ResourceBookingPolicy", {
+                facilityId: managedRoom,
+                approvalModeEnumId: "RbamApprovers",
+                bookingHorizonDays: 30,
+                maximumDurationMinutes: 120,
+                softConflictOverride: "Y",
+                expectedRevision: 1,
+                changeReason: "Approval from now on"
+            })
+            const meeting = event(state.ann, "Ann needs approval", at(6), at(7))
+            const blocked = as(state.ann, E + "book#Resource", {workEffortId: meeting, facilityId: managedRoom})
+            const findings = as(state.resources, R + "get#ResourceBookingPolicy", {facilityId: managedRoom}).setupFindings
+            const added = as(state.resources, R + "store#ResourceApprover", {
+                facilityId: managedRoom,
+                partyId: state.APPROVER_PARTY
+            })
+            const requested = as(state.ann, E + "book#Resource", {workEffortId: meeting, facilityId: managedRoom})
+            const approverReads = as(state.approver, R + "get#ResourceBookingPolicy", {facilityId: managedRoom})
+            const pending = as(state.resources, R + "store#ResourceApprover", {
+                facilityId: managedRoom,
+                partyId: state.APPROVER_PARTY,
+                end: "Y"
+            })
+            const handedOver = as(state.resources, R + "store#ResourceApprover", {
+                facilityId: managedRoom,
+                partyId: state.APPROVER_PARTY,
+                end: "Y",
+                replacementPartyId: state.RESOURCES_PARTY
+            })
+            return {changed, blocked, findings, added, requested, approverReads, pending, handedOver}
+        },
+        then({changed, blocked, findings, added, requested, approverReads, pending, handedOver}) {
+            changed.error == ""
+            blocked.error.includes("has no approver")
+            findings.length == 1
+            added.added == true
+            requested.statusId == "WefRequested"
+            requested.requiresApproval == true
+            approverReads.error == ""
+            code(pending) == "APPROVER_PENDING"
+            handedOver.ended == true
+        }
     }
-})
+)
 
 feature("an unmanaged room behaves as before: its approver's fallback, a conflict refused and allowConflicts booking it", {
     when() {
@@ -367,7 +469,10 @@ feature("a blackout of the building flags the approved booking of its room, canc
         })
         const underIt = event(state.bob, "Bob under the blackout", at(1.5, 0), at(1.75, 0))
         const refused = as(state.bob, E + "book#Resource", {workEffortId: underIt, facilityId: plainRoom})
-        const listed = as(state.resources, R + "find#ResourceUnavailability", {unavailabilityKindEnumId: "RukPlanned", facilityId: building})
+        const listed = as(state.resources, R + "find#ResourceUnavailability", {
+            unavailabilityKindEnumId: "RukPlanned",
+            facilityId: building
+        })
         return {notStaff, noEnd, blackout, refused, listed, kept: facilityBooking(state.annFirst, managedRoom)}
     },
     then({notStaff, noEnd, blackout, refused, listed, kept}) {
@@ -385,46 +490,67 @@ feature("a blackout of the building flags the approved booking of its room, canc
     }
 })
 
-feature("Manufacturing's offline time is a planned block written by record#; a supervisor corrects it and the withdraw ends the row in force", {
-    when() {
-        const applied = as(state.scheduler, L + "store#WorkCenterOffline", {
-            action: "apply",
-            facilityId: line,
-            fromDate: at(0, 2),
-            thruDate: at(4, 2),
-            reason: "Retooling",
-            operationKey: key()
-        })
-        const blockId = applied.result?.resourceUnavailabilityId
-        const row = ec.entity.find("mantle.work.effort.ResourceUnavailability").condition("resourceUnavailabilityId", blockId).disableAuthz().one()
-        const corrected = as(state.supervisor, R + "correct#ResourceUnavailability", {
-            resourceUnavailabilityId: blockId,
-            expectedRevision: 1,
-            thruDate: at(6, 2),
-            changeReason: "The tooling arrives late"
-        })
-        const withdrawn = as(state.scheduler, L + "store#WorkCenterOffline", {
-            action: "withdraw",
-            facilityId: line,
-            resourceUnavailabilityId: blockId,
-            operationKey: key()
-        })
-        const inForce = ec.entity
-            .find("mantle.work.effort.ResourceUnavailability")
-            .condition("resourceUnavailabilityId", corrected.resourceUnavailabilityId)
-            .disableAuthz()
-            .one()
-        return {applied, row, corrected, withdrawn, inForce}
-    },
-    then({applied, row, corrected, withdrawn, inForce}) {
-        applied.error == ""
-        row.unavailabilityKindEnumId == "RukPlanned"
-        row.unavailabilityReasonEnumId == "RurOffline"
-        row.revision == 1
-        corrected.error == ""
-        corrected.correctedUnavailabilityId == row.resourceUnavailabilityId
-        withdrawn.error == ""
-        withdrawn.result.resourceUnavailabilityId == corrected.resourceUnavailabilityId
-        ms(inForce.thruDate) == ms(inForce.fromDate)
+feature(
+    "Manufacturing's offline time is a planned block written by record#; a supervisor corrects it and the withdraw ends the row in force",
+    {
+        when() {
+            const applied = as(state.scheduler, L + "store#WorkCenterOffline", {
+                action: "apply",
+                facilityId: line,
+                fromDate: at(0, 2),
+                thruDate: at(4, 2),
+                reason: "Retooling",
+                operationKey: key()
+            })
+            const blockId = applied.result?.resourceUnavailabilityId
+            const row = ec.entity
+                .find("mantle.work.effort.ResourceUnavailability")
+                .condition("resourceUnavailabilityId", blockId)
+                .disableAuthz()
+                .one()
+            const corrected = as(state.supervisor, R + "correct#ResourceUnavailability", {
+                resourceUnavailabilityId: blockId,
+                expectedRevision: 1,
+                thruDate: at(6, 2),
+                changeReason: "The tooling arrives late"
+            })
+            const withdrawn = as(state.scheduler, L + "store#WorkCenterOffline", {
+                action: "withdraw",
+                facilityId: line,
+                resourceUnavailabilityId: blockId,
+                operationKey: key()
+            })
+            const inForce = ec.entity
+                .find("mantle.work.effort.ResourceUnavailability")
+                .condition("resourceUnavailabilityId", corrected.resourceUnavailabilityId)
+                .disableAuthz()
+                .one()
+            // a blackout of the plant is the line's offline time too (ProductionCalendar's offline read, the plant above the center)
+            const plantBlackout = as(state.resources, R + "record#ResourceUnavailability", {
+                facilityId: plant,
+                unavailabilityKindEnumId: "RukPlanned",
+                fromDate: at(0, 4),
+                thruDate: at(3, 4)
+            })
+            const time = ec.resource.script("component://mr-mantle/service/mantle/work/ProductionCalendar.js")
+            const ctx = time.forCall()
+            const offline = Array.from(
+                time.offlineOf(ctx, time.centerOf(ctx, line), base + 4 * day - hour, base + 4 * day + 4 * hour)
+            )
+            return {applied, row, corrected, withdrawn, inForce, plantBlackout, offline}
+        },
+        then({applied, row, corrected, withdrawn, inForce, plantBlackout, offline}) {
+            plantBlackout.error == ""
+            offline.some(block => block.sourceId == plantBlackout.resourceUnavailabilityId && block.kind == "planned")
+            applied.error == ""
+            row.unavailabilityKindEnumId == "RukPlanned"
+            row.unavailabilityReasonEnumId == "RurOffline"
+            row.revision == 1
+            corrected.error == ""
+            corrected.correctedUnavailabilityId == row.resourceUnavailabilityId
+            withdrawn.error == ""
+            withdrawn.result.resourceUnavailabilityId == corrected.resourceUnavailabilityId
+            ms(inForce.thruDate) == ms(inForce.fromDate)
+        }
     }
-})
+)

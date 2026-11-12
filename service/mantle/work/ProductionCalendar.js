@@ -140,7 +140,7 @@ function offlineOf(ctx, center, fromMs, thruMs) {
     // the center and the facilities above it: a blackout of its plant or building covers it (the one availability read,
     // impl-maintenance P15; design-maintenance §7.1 "facility blocks include descendants")
     const centerAndAbove = [center.facilityId]
-    for (let row = center.facility; row?.parentFacilityId && centerAndAbove.length < 12; ) {
+    for (let row = center.facility; row?.parentFacilityId && centerAndAbove.length < 12;) {
         if (centerAndAbove.includes(row.parentFacilityId)) break
         centerAndAbove.push(row.parentFacilityId)
         row = one(FACILITY, {facilityId: row.parentFacilityId})

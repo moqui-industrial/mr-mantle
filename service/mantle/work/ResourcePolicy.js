@@ -9,7 +9,8 @@
 //   managed: not bookable refuses (NOT_BOOKABLE), a booking longer than its maximum (DURATION_EXCEEDED) or starting past its horizon
 //   (HORIZON_EXCEEDED) is refused, a recurring booking is checked over its whole range up to the horizon (a range past it refused,
 //   HORIZON_EXCEEDED) and its own instances may not overlap (SERIES_OVERLAP), allowConflicts books over another booking only where
-//   the policy allows an override, for a holder of RESOURCE_BOOKING_OVERRIDE, with a reason (OVERRIDE_DENIED), and approval follows
+//   the policy allows an override, for a holder of RESOURCE_BOOKING_OVERRIDE who works for its organization, with a reason
+//   (OVERRIDE_DENIED), and approval follows
 //   its mode: automatic, or by its approvers, none of them blocking (APPROVER_REQUIRED). A resource with no policy keeps the
 //   approver fallback (EventServices). A conflict with an event the user may not see is named Busy, with no id or title.
 // - availability (get#ResourceAvailability, get#FreeBusy, get#FullCalendarData): the intervals of a resource in a range, kept
@@ -45,8 +46,7 @@ const dateText = value => (value == null || value === "" ? "" : lib.dateText(val
 const dayText = millis => ec.l10n.format(String(millis), "yyyy-MM-dd")
 const enumText = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.description || enumId : "")
 const ids = list => Array.from(new Set(list.filter(Boolean)))
-const minutesText = minutes =>
-    minutes % 60 === 0 ? minutes / 60 + (minutes === 60 ? " hour" : " hours") : minutes + " minutes"
+const minutesText = minutes => (minutes % 60 === 0 ? minutes / 60 + (minutes === 60 ? " hour" : " hours") : minutes + " minutes")
 
 // ===== the resource =====
 // Exactly one resource, equipment (an asset that is not stock) or a facility, locked when asked.
@@ -56,7 +56,8 @@ function resourceOf(p, lock = false) {
     if (!!assetId === !!facilityId) denied("RESOURCE_REQUIRED", "Name the equipment or the facility, one of them")
     if (assetId) {
         const asset = find(ASSET, {assetId}).forUpdate(lock).one()
-        if (!asset || stockTypes.includes(asset.assetTypeEnumId)) denied("RECORD_UNAVAILABLE", "Equipment " + assetId + " is not available")
+        if (!asset || stockTypes.includes(asset.assetTypeEnumId))
+            denied("RECORD_UNAVAILABLE", "Equipment " + assetId + " is not available")
         return {assetId, facilityId: null, row: asset, name: asset.assetName || assetId}
     }
     const facility = find(FACILITY, {facilityId}).forUpdate(lock).one()
@@ -87,7 +88,12 @@ function policyAt(resource, atMs = nowMs()) {
         Array.from(
             find(POLICY, keyOf(resource))
                 .condition("fromDate", "less-equals", new Date(atMs))
-                .condition(f.makeCondition([f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", new Date(atMs))], "or"))
+                .condition(
+                    f.makeCondition(
+                        [f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", new Date(atMs))],
+                        "or"
+                    )
+                )
                 .orderBy("-fromDate")
                 .limit(1)
                 .list()
@@ -103,7 +109,12 @@ function approverRows(resource, all = false) {
     const f = ec.entity.conditionFactory
     return Array.from(
         query
-            .condition(f.makeCondition([f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", ec.user.nowTimestamp)], "or"))
+            .condition(
+                f.makeCondition(
+                    [f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", ec.user.nowTimestamp)],
+                    "or"
+                )
+            )
             .orderBy("fromDate")
             .list()
     )
@@ -111,7 +122,9 @@ function approverRows(resource, all = false) {
 const approversOf = resource => ids(approverRows(resource).map(row => row.partyId))
 function partyName(partyId) {
     const detail = partyId ? one("mantle.party.PartyDetail", {partyId}) : null
-    return detail ? detail.organizationName || [detail.firstName, detail.lastName].filter(Boolean).join(" ") || partyId : partyId || ""
+    return detail
+        ? detail.organizationName || [detail.firstName, detail.lastName].filter(Boolean).join(" ") || partyId
+        : partyId || ""
 }
 // The policy's rules in words, for a list or a header.
 function policyText(policy, approverIds) {
@@ -162,7 +175,12 @@ function blocksOver(resource, fromMs, thruMs) {
     let query = find(OUTAGE)
         .condition("supersededByUnavailabilityId", "is-null", null)
         .condition("fromDate", "less", new Date(thruMs))
-        .condition(f.makeCondition([f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", new Date(fromMs))], "or"))
+        .condition(
+            f.makeCondition(
+                [f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", new Date(fromMs))],
+                "or"
+            )
+        )
         .orderBy("fromDate")
     query = resource.assetId
         ? query.condition("assetId", resource.assetId)
@@ -174,7 +192,8 @@ function blocksOver(resource, fromMs, thruMs) {
 function blockLabel(row, resource) {
     const inherited = resource.facilityId && row.facilityId && row.facilityId !== resource.facilityId
     const where = inherited ? " (" + (one(FACILITY, {facilityId: row.facilityId})?.facilityName || row.facilityId) + ")" : ""
-    if (row.unavailabilityKindEnumId === "RukPlanned") return "Not available: " + (enumText(row.unavailabilityReasonEnumId) || "planned block").toLowerCase() + where
+    if (row.unavailabilityKindEnumId === "RukPlanned")
+        return "Not available: " + (enumText(row.unavailabilityReasonEnumId) || "planned block").toLowerCase() + where
     return "Out of service" + where
 }
 // Whether the user may see an event (organizer, attendee, a calendar's reader or visible to all), read once per event.
@@ -210,14 +229,25 @@ function bookingsOver(resource, fromMs, thruMs) {
             .sync()
             .name("mantle.work.EventServices.get#FullCalendarData")
             .parameters(
-                Object.assign({start: dayText(fromMs), end: dayText(thruMs), excludeCancelled: true, titleGString: "${workEffort.workEffortName || workEffort.workEffortId}"}, keyOf(resource))
+                Object.assign(
+                    {
+                        start: dayText(fromMs),
+                        end: dayText(thruMs),
+                        excludeCancelled: true,
+                        titleGString: "${workEffort.workEffortName || workEffort.workEffortId}"
+                    },
+                    keyOf(resource)
+                )
             )
             .disableAuthz()
             .call() || {}
     return Array.from(out.eventList || [])
         .map(event => {
             const start = ms(event.startMillis)
-            return Object.assign({}, event, {fromMs: start, thruMs: event.endMillis != null ? ms(event.endMillis) : start + 3600000})
+            return Object.assign({}, event, {
+                fromMs: start,
+                thruMs: event.endMillis != null ? ms(event.endMillis) : start + 3600000
+            })
         })
         .filter(event => event.fromMs < thruMs && event.thruMs > fromMs)
 }
@@ -229,11 +259,16 @@ function availability(p) {
     const resource = resourceOf(p)
     const fromMs = ms(p.fromDate) ?? nowMs()
     const thruMs = ms(p.thruDate) ?? fromMs + 14 * dayMs
-    if (!(thruMs > fromMs) || thruMs - fromMs > 92 * dayMs) denied("INTERVAL_INVALID", "A range of at most 92 days, ending after it starts")
+    if (!(thruMs > fromMs) || thruMs - fromMs > 92 * dayMs)
+        denied("INTERVAL_INVALID", "A range of at most 92 days, ending after it starts")
     const visible = eventVisibility()
     const intervals = []
     for (const event of bookingsOver(resource, fromMs, thruMs)) {
-        if (p.excludeWorkEffortId && (event.workEffortId === p.excludeWorkEffortId || event.recurringEventId === p.excludeWorkEffortId)) continue
+        if (
+            p.excludeWorkEffortId &&
+            (event.workEffortId === p.excludeWorkEffortId || event.recurringEventId === p.excludeWorkEffortId)
+        )
+            continue
         const seen = visible(event.recurringEventId || event.workEffortId)
         intervals.push({
             fromMs: event.fromMs,
@@ -291,7 +326,8 @@ function unavailableOver(p) {
 }
 
 // ===== the booking guard =====
-// The instances a booking of a recurring event covers, within the bound: [[startMs, endMs]], and whether the range runs past it.
+// The instances a booking of a recurring event covers from now (its past meetings are no booking to decide) within the bound:
+// [[startMs, endMs]], and whether the range runs past it.
 function seriesInstances(workEffortId, startMs, endMs, boundMs) {
     const row = one("mantle.work.effort.WorkEffort", {workEffortId})
     const recurring = !!row && (!!row.recurStartCron || !!one("mantle.work.effort.WorkEffortRecurrence", {workEffortId}))
@@ -300,7 +336,11 @@ function seriesInstances(workEffortId, startMs, endMs, boundMs) {
         ec.service
             .sync()
             .name("mantle.work.EventServices.get#EventInstances")
-            .parameters({workEffortList: [row.getMap()], rangeStart: new Date(startMs), rangeEnd: new Date(boundMs + dayMs)})
+            .parameters({
+                workEffortList: [row.getMap()],
+                rangeStart: new Date(Math.max(startMs, nowMs() - (endMs - startMs))),
+                rangeEnd: new Date(boundMs + dayMs)
+            })
             .disableAuthz()
             .call() || {}
     const length = endMs - startMs
@@ -339,6 +379,16 @@ function safeConflicts(conflicts) {
         visible(conflict.workEffortId) ? conflict : Object.assign({}, conflict, {workEffortId: null, workEffortName: "Busy"})
     )
 }
+// Whether the override permission reaches the resource: it is held for the organizations the user works for (all of them for a
+// system administrator or an every-organization holder), so another organization's holder overrides nothing here.
+function overrideCovers(resource) {
+    const userScope = maintenanceAccess.scope()
+    if (userScope.allOrganizations || lib.access.systemAdmin()) return true
+    const organizations = userScope.capabilities.anyRead
+        ? userScope.organizationPartyIds
+        : maintenanceAccess.ownOrganizations().organizationPartyIds
+    return organizations.includes(organizationOf(resource))
+}
 // guard: what a booking of the resource for the event at startMs to endMs is allowed. p: facilityId or assetId, workEffortId,
 // startMs, endMs, conflicts (the caller's, for one interval), allowConflicts, overrideReason, lock (a write: the resource locked),
 // own (the ids of the event and its series). Answers {managed, refusal {code, message, hard} or null, conflicts (safe), approval
@@ -368,7 +418,10 @@ function guard(p) {
         if (block)
             return refuse(
                 "RESOURCE_UNAVAILABLE",
-                resource.name + (block.unavailabilityKindEnumId === "RukPlanned" ? " is not available then (" + blockLabel(block, resource).replace(/^Not available: /, "") + ")" : " is out of service then"),
+                resource.name +
+                    (block.unavailabilityKindEnumId === "RukPlanned"
+                        ? " is not available then (" + blockLabel(block, resource).replace(/^Not available: /, "") + ")"
+                        : " is out of service then"),
                 true
             )
     }
@@ -380,7 +433,11 @@ function guard(p) {
     if (series?.pastBound || (horizonDays != null && instances.some(([from]) => from > now + horizonDays * dayMs)))
         return refuse(
             "HORIZON_EXCEEDED",
-            resource.name + " is booked at most " + (horizonDays ?? defaultRecurringDays) + " days ahead" + (series?.recurring ? "; end the series within it" : ""),
+            resource.name +
+                " is booked at most " +
+                (horizonDays ?? defaultRecurringDays) +
+                " days ahead" +
+                (series?.recurring ? "; end the series within it" : ""),
             true
         )
     const sorted = instances.slice().sort((a, b) => a[0] - b[0])
@@ -391,15 +448,22 @@ function guard(p) {
     if (conflicts.length && yes(p.allowConflicts)) {
         if (policy.softConflictOverride !== "Y")
             return refuse("OVERRIDE_DENIED", resource.name + " is booked then, and its policy allows no override")
-        if (!lib.access.has("RESOURCE_BOOKING_OVERRIDE") || blank(p.overrideReason))
-            return refuse("OVERRIDE_DENIED", resource.name + " is booked then: an override needs the override permission and a reason")
+        if (!lib.access.has("RESOURCE_BOOKING_OVERRIDE") || !overrideCovers(resource) || blank(p.overrideReason))
+            return refuse(
+                "OVERRIDE_DENIED",
+                resource.name + " is booked then: an override needs the override permission and a reason"
+            )
         overridden = true
     }
     let approval = null
     if (approvalModes.includes(policy.approvalModeEnumId)) {
         const approverPartyIdList = approversOf(resource)
         if (policy.approvalModeEnumId === "RbamApprovers" && !approverPartyIdList.length)
-            return refuse("APPROVER_REQUIRED", resource.name + " needs approval and has no approver; ask its resource administrator", true)
+            return refuse(
+                "APPROVER_REQUIRED",
+                resource.name + " needs approval and has no approver; ask its resource administrator",
+                true
+            )
         const userPartyId = ec.user.userAccount?.partyId || null
         approval = {
             requiresApproval: policy.approvalModeEnumId === "RbamApprovers" && !approverPartyIdList.includes(userPartyId),
@@ -513,7 +577,11 @@ function impactOf(resource, wanted, fromMs, endPolicy) {
                 findings.push("longer than " + minutesText(wanted.maximumDurationMinutes))
             if (wanted.bookingHorizonDays && event.fromMs > nowMs() + wanted.bookingHorizonDays * dayMs)
                 findings.push("past the " + wanted.bookingHorizonDays + "-day horizon")
-            if (wanted.approvalModeEnumId === "RbamApprovers" && assignedStatuses.includes(event.bookingStatusId) && !approversOf(resource).length)
+            if (
+                wanted.approvalModeEnumId === "RbamApprovers" &&
+                assignedStatuses.includes(event.bookingStatusId) &&
+                !approversOf(resource).length
+            )
                 findings.push("approval required with no approver")
         }
         if (!findings.length) continue
@@ -561,7 +629,12 @@ function storePolicy(p) {
     const f = ec.entity.conditionFactory
     for (const row of Array.from(
         find(POLICY, keyOf(resource))
-            .condition(f.makeCondition([f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", fromDate)], "or"))
+            .condition(
+                f.makeCondition(
+                    [f.makeCondition("thruDate", "is-null", null), f.makeCondition("thruDate", "greater", fromDate)],
+                    "or"
+                )
+            )
             .forUpdate(true)
             .list()
     )) {
@@ -574,14 +647,17 @@ function storePolicy(p) {
     }
     const impactList = impactOf(resource, wanted || {}, Math.max(fromMs, now), endPolicy)
     if (endPolicy) return {resourceBookingPolicyId: null, revision: 0, impactList, impactCount: impactList.length}
-    const created = call("create#" + POLICY, Object.assign({}, keyOf(resource), wanted, {
-        organizationPartyId: authority.organizationPartyId,
-        fromDate,
-        changeReason,
-        revision: 1,
-        createdByUserId: ec.user.userId,
-        createdDate: ec.user.nowTimestamp
-    }))
+    const created = call(
+        "create#" + POLICY,
+        Object.assign({}, keyOf(resource), wanted, {
+            organizationPartyId: authority.organizationPartyId,
+            fromDate,
+            changeReason,
+            revision: 1,
+            createdByUserId: ec.user.userId,
+            createdDate: ec.user.nowTimestamp
+        })
+    )
     return {resourceBookingPolicyId: created.resourceBookingPolicyId, revision: 1, impactList, impactCount: impactList.length}
 }
 // The requested bookings of the resource not over yet (an approver's pending work), as event ids: of events not cancelled whose
@@ -589,18 +665,37 @@ function storePolicy(p) {
 function pendingRequests(resource) {
     const f = ec.entity.conditionFactory
     const ahead = f.makeCondition(
-        [f.makeCondition("estimatedCompletionDate", "is-null", null), f.makeCondition("estimatedCompletionDate", "greater", ec.user.nowTimestamp)],
+        [
+            f.makeCondition("estimatedCompletionDate", "is-null", null),
+            f.makeCondition("estimatedCompletionDate", "greater", ec.user.nowTimestamp)
+        ],
         "or"
     )
     const query = resource.assetId
-        ? find("mantle.work.effort.WorkEffortAndAssetBooking", {assetId: resource.assetId, bookingStatusId: "WeaaRequested"}).condition(
-              f.makeCondition([f.makeCondition("bookingThruDate", "is-null", null), f.makeCondition("bookingThruDate", "greater", ec.user.nowTimestamp)], "or")
+        ? find("mantle.work.effort.WorkEffortAndAssetBooking", {
+              assetId: resource.assetId,
+              bookingStatusId: "WeaaRequested"
+          }).condition(
+              f.makeCondition(
+                  [
+                      f.makeCondition("bookingThruDate", "is-null", null),
+                      f.makeCondition("bookingThruDate", "greater", ec.user.nowTimestamp)
+                  ],
+                  "or"
+              )
           )
-        : find("mantle.work.effort.WorkEffortAndFacilityBooking", {facilityId: resource.facilityId, bookingStatusId: "WefRequested"})
+        : find("mantle.work.effort.WorkEffortAndFacilityBooking", {
+              facilityId: resource.facilityId,
+              bookingStatusId: "WefRequested"
+          })
     return ids(
-        Array.from(query.condition(f.makeCondition("statusId", "not-equals", "WeCancelled", true)).condition(ahead).selectField("workEffortId").list()).map(
-            row => row.workEffortId
-        )
+        Array.from(
+            query
+                .condition(f.makeCondition("statusId", "not-equals", "WeCancelled", true))
+                .condition(ahead)
+                .selectField("workEffortId")
+                .list()
+        ).map(row => row.workEffortId)
     )
 }
 // store#ResourceApprover: a BookingApprover of the resource added from fromDate (now when empty), or (thruDate, or end) ended then.
@@ -619,7 +714,10 @@ function storeApprover(p) {
         const fromMs = ms(p.fromDate) ?? now
         const existing = approverRows(resource, true).find(row => row.partyId === partyId)
         if (existing) return {added: false, ended: false, partyId, pendingCount: pendingRequests(resource).length}
-        call("create#" + entity, Object.assign({}, keyOf(resource), {partyId, roleTypeId: "BookingApprover", fromDate: new Date(fromMs)}))
+        call(
+            "create#" + entity,
+            Object.assign({}, keyOf(resource), {partyId, roleTypeId: "BookingApprover", fromDate: new Date(fromMs)})
+        )
         return {added: true, ended: false, partyId, pendingCount: pendingRequests(resource).length}
     }
     const thruMs = ms(p.thruDate) ?? now
@@ -631,15 +729,34 @@ function storeApprover(p) {
     if (pending.length && !others.length && !replacementPartyId && blank(p.unresolvedReason))
         denied(
             "APPROVER_PENDING",
-            pending.length + " request(s) of " + resource.name + " wait for approval: name another approver or say why they are left unresolved"
+            pending.length +
+                " request(s) of " +
+                resource.name +
+                " wait for approval: name another approver or say why they are left unresolved"
         )
     for (const row of rows)
-        call("update#" + entity, Object.assign({}, keyOf(resource), {partyId, roleTypeId: "BookingApprover", fromDate: row.fromDate,
-            thruDate: new Date(Math.max(thruMs, ms(row.fromDate)))}))
+        call(
+            "update#" + entity,
+            Object.assign({}, keyOf(resource), {
+                partyId,
+                roleTypeId: "BookingApprover",
+                fromDate: row.fromDate,
+                thruDate: new Date(Math.max(thruMs, ms(row.fromDate)))
+            })
+        )
     if (replacementPartyId && replacementPartyId !== partyId)
         storeApprover(Object.assign({}, keyOf(resource), {partyId: replacementPartyId, fromDate: new Date(thruMs)}))
     if (pending.length && !others.length && !replacementPartyId)
-        ec.logger.warn("Approver " + partyId + " of " + resource.name + " ended with " + pending.length + " request(s) unresolved: " + text(p.unresolvedReason))
+        ec.logger.warn(
+            "Approver " +
+                partyId +
+                " of " +
+                resource.name +
+                " ended with " +
+                pending.length +
+                " request(s) unresolved: " +
+                text(p.unresolvedReason)
+        )
     return {added: false, ended: true, partyId, pendingCount: pending.length}
 }
 // find#BookableResources: the bookable equipment and facilities of the user's scope (a policy reader or resource reader; a booking
@@ -651,7 +768,8 @@ function findBookable(p) {
     const userScope = maintenanceAccess.scope()
     const caps = userScope.capabilities
     const broad = !!(caps.policyView || caps.policyEdit || caps.resourceRead)
-    if (!broad && !caps.bookingViewAssigned) denied("PERMISSION_DENIED", "A resource policy, resource or booking approval view is required")
+    if (!broad && !caps.bookingViewAssigned)
+        denied("PERMISSION_DENIED", "A resource policy, resource or booking approval view is required")
     const f = ec.entity.conditionFactory
     const like = value => "%" + String(value).replace(/[\\%_]/g, character => "\\" + character) + "%"
     const term = text(p.text)
@@ -661,8 +779,16 @@ function findBookable(p) {
     let approvedAssets = null
     if (!broad) {
         const partyId = userScope.partyId || "_NA_"
-        approvedFacilities = Array.from(find("mantle.facility.FacilityParty", {partyId, roleTypeId: "BookingApprover"}).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list()).map(row => row.facilityId)
-        approvedAssets = Array.from(find("mantle.product.asset.AssetPartyAssignment", {partyId, roleTypeId: "BookingApprover"}).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list()).map(row => row.assetId)
+        approvedFacilities = Array.from(
+            find("mantle.facility.FacilityParty", {partyId, roleTypeId: "BookingApprover"})
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .list()
+        ).map(row => row.facilityId)
+        approvedAssets = Array.from(
+            find("mantle.product.asset.AssetPartyAssignment", {partyId, roleTypeId: "BookingApprover"})
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .list()
+        ).map(row => row.assetId)
     }
     const covers = organizationPartyId => (broad ? maintenanceAccess.covers(userScope, organizationPartyId) : true)
     const found = []
@@ -670,7 +796,8 @@ function findBookable(p) {
         let query = find(FACILITY, {bookable: "Y"}).condition("closedDate", "is-null", null).orderBy("facilityName").limit(300)
         if (term) query = query.condition(f.makeCondition("facilityName", "like", like(term)).ignoreCase())
         if (within) query = query.condition("facilityId", "in", within)
-        if (approvedFacilities) query = query.condition("facilityId", "in", approvedFacilities.length ? approvedFacilities : ["_NA_"])
+        if (approvedFacilities)
+            query = query.condition("facilityId", "in", approvedFacilities.length ? approvedFacilities : ["_NA_"])
         for (const row of Array.from(query.list())) {
             const organizationPartyId = maintenanceAccess.facilityOrganization(row.facilityId)
             if (covers(organizationPartyId)) found.push({facilityId: row.facilityId, row, organizationPartyId})
@@ -692,8 +819,12 @@ function findBookable(p) {
     const now = nowMs()
     const candidates = []
     for (const item of found) {
-        const resource = {assetId: item.assetId || null, facilityId: item.facilityId || null, row: item.row,
-            name: (item.assetId ? item.row.assetName : item.row.facilityName) || item.assetId || item.facilityId}
+        const resource = {
+            assetId: item.assetId || null,
+            facilityId: item.facilityId || null,
+            row: item.row,
+            name: (item.assetId ? item.row.assetName : item.row.facilityName) || item.assetId || item.facilityId
+        }
         const policy = policyAt(resource)
         if (p.managed === "Y" && !policy) continue
         if (p.managed === "N" && policy) continue
@@ -707,7 +838,11 @@ function findBookable(p) {
         const blockAhead = blockNow ? null : blocksOver(resource, now, now + 14 * dayMs)[0]
         const locationId = item.assetId ? item.row.facilityId : item.row.parentFacilityId
         const features = item.facilityId
-            ? Array.from(find("mantle.facility.FacilityFeature", {facilityId: item.facilityId}).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list())
+            ? Array.from(
+                  find("mantle.facility.FacilityFeature", {facilityId: item.facilityId})
+                      .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                      .list()
+              )
                   .map(row => enumText(row.featureEnumId))
                   .join(", ")
             : ""
@@ -732,7 +867,11 @@ function findBookable(p) {
             softConflictOverride: policy?.softConflictOverride || "N",
             maximumText: policy?.maximumDurationMinutes ? minutesText(Number(policy.maximumDurationMinutes)) : "",
             approverNames: approverIds.map(partyName).join(", "),
-            blockText: blockNow ? blockLabel(blockNow, resource) : blockAhead ? blockLabel(blockAhead, resource) + " from " + dateText(blockAhead.fromDate) : "",
+            blockText: blockNow
+                ? blockLabel(blockNow, resource)
+                : blockAhead
+                  ? blockLabel(blockAhead, resource) + " from " + dateText(blockAhead.fromDate)
+                  : "",
             blockedNow: !!blockNow,
             pendingCount: pendingRequests(resource).length,
             canEdit: !!caps.policyEdit && maintenanceAccess.covers(userScope, item.organizationPartyId)

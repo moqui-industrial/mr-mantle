@@ -473,7 +473,25 @@ function blockAuthority(resource) {
             return {organizationPartyId, userScope, maintenance: false}
     }
     if (caps.policyEdit || caps.supervise) denied("RECORD_UNAVAILABLE", resource.name + " is not available")
-    denied("PERMISSION_DENIED", "A resource administrator or supervisor plans a blackout; a scheduler a work center's offline time")
+    denied(
+        "PERMISSION_DENIED",
+        "A resource administrator or supervisor plans a blackout; a scheduler a work center's offline time"
+    )
+}
+// The bookable facilities inside a facility, locked in their id order (a booking locks its own resource only, so the order is
+// free of cycles with it).
+function lockCovered(resource) {
+    if (!resource.facilityId) return
+    const inside = subtreeIds(resource.facilityId).filter(id => id !== resource.facilityId)
+    if (!inside.length) return
+    for (const row of Array.from(
+        find(FACILITY, {bookable: "Y"})
+            .condition("facilityId", "in", inside)
+            .orderBy("facilityId")
+            .selectField("facilityId")
+            .list()
+    ))
+        find(FACILITY, {facilityId: row.facilityId}).forUpdate(true).one()
 }
 function requireBlockInterval(fromDate, thruDate) {
     if (thruDate == null) denied("END_REQUIRED", "A planned block needs its end")
@@ -496,15 +514,18 @@ function recordBlock(p) {
     if (!blank(p.sourceProductionDowntimeId)) denied("SOURCE_INVALID", "A planned block has no production stop")
     const resource = resourceOf(p, false)
     const authority = blockAuthority(resource)
-    // Maintenance's blackout locks the resource as a booking does; Manufacturing's offline time does not, since it moves the center's
-    // operations in transactions of their own after it (store#WorkCenterOffline), which would wait on the lock
-    if (authority.maintenance) resourceOf(p, true)
+    // Maintenance's blackout locks the resource as a booking does, and a facility's the bookable facilities inside it, which their
+    // bookings lock (book#Resource), so a booking of a room is decided before or after a blackout of its building, never beside it;
+    // Manufacturing's offline time does not, since it moves the center's operations in transactions of their own after it
+    // (store#WorkCenterOffline), which would wait on the lock
+    if (authority.maintenance) lockCovered(resourceOf(p, true))
     const reason = requireReason(text(p.unavailabilityReasonEnumId) || (authority.maintenance ? "RurClosure" : "RurOffline"))
     const fromDate = p.fromDate || ec.user.nowTimestamp
     const thruDate = p.thruDate || null
     requireBlockInterval(fromDate, thruDate)
     const work = authority.maintenance && !blank(p.workEffortId) ? workOf(authority.userScope, p, resource) : null
-    if (!authority.maintenance && !blank(p.workEffortId)) denied("WORK_INVALID", "A work center's offline time names no work order")
+    if (!authority.maintenance && !blank(p.workEffortId))
+        denied("WORK_INVALID", "A work center's offline time names no work order")
     const created = call("create#" + OUTAGE, {
         unavailabilityKindEnumId: "RukPlanned",
         assetId: resource.assetId,
@@ -525,7 +546,10 @@ function recordBlock(p) {
 }
 // A planned block in force the caller may change, locked, with its resource.
 function blockFor(p) {
-    const row = find(OUTAGE, {resourceUnavailabilityId: text(p.resourceUnavailabilityId)}).forUpdate(true).one()
+    const row = find(OUTAGE, {resourceUnavailabilityId: text(p.resourceUnavailabilityId)})
+        .forUpdate(true)
+        .one()
+    if (!row) denied("RECORD_UNAVAILABLE", "Planned block " + (p.resourceUnavailabilityId || "") + " is not available")
     const resource = resourceOf({assetId: row.assetId, facilityId: row.facilityId}, false)
     let authority
     try {
@@ -539,7 +563,9 @@ function blockFor(p) {
 }
 // correct#: a new row in force with the corrected interval, reason and note, the block kept and superseded (either entry point).
 function correctBlock(p) {
-    const {row, resource} = blockFor(p)
+    const {row, resource, authority} = blockFor(p)
+    // a correction may widen the block: locked as record#'s (Maintenance's entry)
+    if (authority.maintenance) lockCovered(resourceOf({assetId: row.assetId, facilityId: row.facilityId}, true))
     const changeReason = text(p.changeReason)
     if (!changeReason) denied("REASON_REQUIRED", "A correction needs its reason")
     const fromDate = p.fromDate || row.fromDate
@@ -800,7 +826,13 @@ function displayRows(list, userScope) {
             stateText: blockState ? blockState[0] : superseded ? "Corrected" : open ? "Out of service" : "Restored",
             stateColor: blockState ? blockState[1] : superseded ? "grey-8" : open ? "negative" : "positive",
             kind: planned ? "planned" : "actual",
-            blockSourceText: planned ? (row.workEffortId ? "Work order" : isWorkCenter(row.facilityId) ? "Production offline" : "Blackout") : "",
+            blockSourceText: planned
+                ? row.workEffortId
+                    ? "Work order"
+                    : isWorkCenter(row.facilityId)
+                      ? "Production offline"
+                      : "Blackout"
+                : "",
             restoredText:
                 planned || open || superseded
                     ? ""
@@ -812,7 +844,9 @@ function displayRows(list, userScope) {
             canRestore: staff && open && !superseded && row.unavailabilityKindEnumId === "RukActual",
             canCorrect:
                 !superseded &&
-                (planned ? blockStaff && ms(row.thruDate) > ms(row.fromDate) : staff && row.unavailabilityKindEnumId === "RukActual"),
+                (planned
+                    ? blockStaff && ms(row.thruDate) > ms(row.fromDate)
+                    : staff && row.unavailabilityKindEnumId === "RukActual"),
             canEnd: planned && blockStaff && blockLive
         }
     })
