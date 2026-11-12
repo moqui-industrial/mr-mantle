@@ -999,7 +999,7 @@ function transitionWorkOrder(p) {
 // The downtime of a transition (P5): Start with offline intent (the order's, or offlineIntent given) records the target's outage
 // as planned maintenance, or links the one open; Complete leaving equipment still unavailable records its outage when none is
 // open, and a follow-up (followUpName) is a new corrective work order on the same target, caused by this one and linked to its
-// open outage, so the outage waits for it. Hold and Cancel leave an outage as it is.
+// open outage, which a restoration lists while it is open (it stays open). Hold and Cancel leave an outage as it is.
 function downtimeOf(userScope, ctx, action, p, workFields) {
     const {root, order} = ctx
     const target = order.assetId ? {assetId: order.assetId} : {facilityId: root.facilityId}

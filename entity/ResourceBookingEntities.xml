@@ -66,6 +66,8 @@ along with this software (see the LICENSE.md file). If not, see
             restoration: available for use or usable with restrictions</description></field>
         <field name="endComments" type="text-long"><description>The readiness evidence or reason given at the
             restoration</description></field>
+        <field name="openWorkReason" type="text-long"><description>Why the resource was restored while work orders linked to the
+            outage were still open (they stay open; the user's call of Nov 12, impl-maintenance P5 review)</description></field>
         <relationship type="one" title="ResourceUnavailabilityKind" related="moqui.basic.Enumeration"
                 short-alias="kindEnum"><key-map field-name="unavailabilityKindEnumId"/></relationship>
         <relationship type="one" related="mantle.product.asset.Asset"/>

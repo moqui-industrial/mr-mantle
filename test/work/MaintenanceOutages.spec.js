@@ -2,8 +2,10 @@
 // order's downtime in transition#MaintenanceWorkOrder; IronStone Maintenance design §6 Downtime, §3, §7.1; impl-maintenance P5,
 // F14): an equipment-fault stop in Manufacturing records the asset's one outage, and a second fault Maintenance records links it;
 // closing the stop restores nothing and end# does, with the disposition; a technician not on the work is refused; a correction
-// keeps the original interval and the row in force is the one the reads count; two work orders linked to one outage cannot each
-// end the other's (the outage waits for both, and for a follow-up a completion leaves). Standalone: spec-local organizations, a
+// keeps the original interval and the row in force is the one the reads count, and a planned block is not corrected here; a stop
+// already recorded cannot be named again to record another outage; two work orders linked to one outage cannot each end the
+// other's (no completion or cancel restores), and a restoration while linked work is open (a completion's follow-up) lists it,
+// needs its reason and leaves it open (the user's call, Nov 12). Standalone: spec-local organizations, a
 // plant with a line, equipment, a stop reason, groups and users; the services called as each user with the artifact check aside.
 // Run: ./moq test mr-mantle --spec MaintenanceOutages
 const prefix = "MNT_OUT"
@@ -240,10 +242,20 @@ feature("a technician records an outage only from work assigned to them; a reade
         const otherFinds = as(state.otherSupervisor, R + "find#ResourceUnavailability", {
             resourceUnavailabilityId: recorded.resourceUnavailabilityId
         })
+        // the work order's title is its readers' (F69): the resource administrator and another technician see its id and status
+        const workOf = user =>
+            as(user, R + "find#ResourceUnavailability", {resourceUnavailabilityId: recorded.resourceUnavailabilityId})
+                .outageList[0].workList[0]
+        const seen = {supervisor: workOf(state.supervisor), resources: workOf(state.resources), tech2: workOf(state.tech2)}
         state.compOutage = recorded.resourceUnavailabilityId
-        return {work, notAssigned, noWork, planner, noReason, otherOrg, recorded, techEnds, otherFinds}
+        return {work, notAssigned, noWork, planner, noReason, otherOrg, recorded, techEnds, otherFinds, seen}
     },
-    then({work, notAssigned, noWork, planner, noReason, otherOrg, recorded, techEnds, otherFinds}) {
+    then({work, notAssigned, noWork, planner, noReason, otherOrg, recorded, techEnds, otherFinds, seen}) {
+        seen.supervisor.workEffortName == "Compressor trips"
+        seen.resources.workEffortId == work.workEffortId
+        seen.resources.workEffortName == ""
+        seen.resources.readable == false
+        seen.tech2.workEffortName == ""
         work.started.statusId == "WeInProgress"
         notAssigned == "NOT_ASSIGNED"
         noWork == "WORK_REQUIRED"
@@ -295,7 +307,21 @@ feature("closing the production stop restores nothing; end# restores the press w
         const manufacturing = as(state.operator, P + "find#ProductionDowntime", {
             productionDowntimeId: state.stop.productionDowntimeId
         })
+        // the stop recorded its outage: naming it again records no new one, open or ended
+        const replay = as(state.operator, R + "record#ResourceUnavailability", {
+            assetId: prefix + "_PRESS",
+            sourceProductionDowntimeId: state.stop.productionDowntimeId
+        })
+        const forged = as(state.operator, R + "record#ResourceUnavailability", {
+            assetId: prefix + "_PRESS",
+            sourceProductionDowntimeId: state.stop.productionDowntimeId,
+            fromDate: minutesAgo(600),
+            thruDate: minutesAgo(500)
+        })
         return {
+            replay,
+            forged,
+            outageCount: outagesOf(prefix + "_PRESS").length,
             closed,
             afterClose,
             stale,
@@ -307,7 +333,23 @@ feature("closing the production stop restores nothing; end# restores the press w
             row: outage(state.stop.resourceUnavailabilityId)
         }
     },
-    then({closed, afterClose, stale, noDisposition, stillDown, restored, again, manufacturing, row}) {
+    then({
+        closed,
+        afterClose,
+        stale,
+        noDisposition,
+        stillDown,
+        restored,
+        again,
+        manufacturing,
+        row,
+        replay,
+        forged,
+        outageCount
+    }) {
+        replay == "SOURCE_INVALID"
+        forged == "SOURCE_INVALID"
+        outageCount == 1
         closed.statusId == "PdtClosed"
         afterClose.thruDate == null
         stale == "REVISION_CHANGED"
@@ -355,6 +397,22 @@ feature("a correction keeps the original interval; the row in force is the one c
             unavailabilityReasonEnumId: "RurDamage"
         })
         const listed = as(state.supervisor, R + "find#ResourceUnavailability", {assetId: prefix + "_COMP"})
+        // a planned block (Manufacturing's offline time of the line) is corrected where it was made, not here
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        const block = call("create#" + OUTAGE, {
+            unavailabilityKindEnumId: "RukPlanned",
+            facilityId: line,
+            organizationPartyId: orgA,
+            fromDate: minutesAgo(30),
+            thruDate: minutesAgo(10),
+            description: "Line offline (spec)"
+        }).resourceUnavailabilityId
+        const plannedCorrected = as(state.supervisor, R + "correct#ResourceUnavailability", {
+            resourceUnavailabilityId: block,
+            expectedRevision: 0,
+            changeReason: "Not here"
+        })
         const history = as(state.supervisor, R + "find#ResourceUnavailability", {
             resourceUnavailabilityId: corrected.resourceUnavailabilityId
         })
@@ -368,11 +426,13 @@ feature("a correction keeps the original interval; the row in force is the one c
             linked,
             listed,
             history,
+            plannedCorrected,
             kept: outage(original.resourceUnavailabilityId),
             now: outage(corrected.resourceUnavailabilityId)
         }
     },
-    then({original, noReason, techCorrects, corrected, twice, linked, listed, history, kept, now}) {
+    then({original, noReason, techCorrects, corrected, twice, linked, listed, history, plannedCorrected, kept, now}) {
+        plannedCorrected == "KIND_INVALID"
         noReason == "REASON_REQUIRED"
         techCorrects == "PERMISSION_DENIED"
         corrected.correctedUnavailabilityId == original.resourceUnavailabilityId
@@ -391,11 +451,12 @@ feature("a correction keeps the original interval; the row in force is the one c
     }
 })
 
-feature("two work orders on one outage cannot each end the other's; a completion leaving it down makes a linked follow-up", {
+feature("no work order ends another's outage; restoring with a follow-up open lists it, needs a reason and leaves it open", {
     when() {
         // a second work order on the compressor, taken offline: it links the open outage
         const second = startedWork(prefix + "_COMP", "Compressor valve", state.tech2, state.TECH2_PARTY, true)
         const linkedSecond = order(second.workEffortId).resourceUnavailabilityId
+        // the first completes with the compressor available: the second's outage stays open
         const firstDone = as(state.tech, M + "transition#MaintenanceWorkOrder", {
             workEffortId: state.compWork,
             action: "complete",
@@ -403,11 +464,16 @@ feature("two work orders on one outage cannot each end the other's; a completion
             outcomeEnumId: "MoutRepaired",
             dispositionEnumId: "MdispAvailable"
         })
-        const blocked = as(state.supervisor, R + "end#ResourceUnavailability", {
-            resourceUnavailabilityId: state.compOutage,
-            expectedRevision: 1,
-            dispositionEnumId: "MdispAvailable"
+        const afterFirst = outage(state.compOutage).thruDate
+        // a third, taken offline and cancelled: cancelling restores nothing
+        const third = startedWork(prefix + "_COMP", "Compressor guard", state.tech, state.TECH_PARTY, true)
+        const cancelled = as(state.supervisor, M + "transition#MaintenanceWorkOrder", {
+            workEffortId: third.workEffortId,
+            action: "cancel",
+            expectedRevision: revision(third.workEffortId),
+            cancelReasonEnumId: "McrDuplicate"
         })
+        const afterCancel = outage(state.compOutage).thruDate
         const secondDone = as(state.tech2, M + "transition#MaintenanceWorkOrder", {
             workEffortId: second.workEffortId,
             action: "complete",
@@ -416,44 +482,48 @@ feature("two work orders on one outage cannot each end the other's; a completion
             dispositionEnumId: "MdispUnavailable",
             followUpName: "Replace compressor valve"
         })
-        const followUpBlocks = as(state.supervisor, R + "end#ResourceUnavailability", {
+        const followUp = secondDone.followUpWorkEffortId
+        const preview = as(state.supervisor, R + "find#ResourceUnavailability", {resourceUnavailabilityId: state.compOutage})
+        const noReason = as(state.supervisor, R + "end#ResourceUnavailability", {
             resourceUnavailabilityId: state.compOutage,
             expectedRevision: 1,
             dispositionEnumId: "MdispAvailable"
         })
-        const cancelled = as(state.supervisor, M + "transition#MaintenanceWorkOrder", {
-            workEffortId: secondDone.followUpWorkEffortId,
-            action: "cancel",
-            expectedRevision: revision(secondDone.followUpWorkEffortId),
-            cancelReasonEnumId: "McrDuplicate"
-        })
-        const stillOpen = outage(state.compOutage).thruDate
         const restored = as(state.supervisor, R + "end#ResourceUnavailability", {
             resourceUnavailabilityId: state.compOutage,
             expectedRevision: 1,
-            dispositionEnumId: "MdispRestricted"
+            dispositionEnumId: "MdispRestricted",
+            openWorkReason: "Runs on the old valve at reduced pressure until the new one comes"
         })
+        const followUpStatus = ec.entity
+            .find("mantle.work.effort.WorkEffort")
+            .condition("workEffortId", followUp)
+            .disableAuthz()
+            .one().statusId
         // equipment left down with no outage open records one at completion
-        const third = startedWork(prefix + "_COMP", "Compressor noise", state.tech, state.TECH_PARTY, false)
-        const thirdDone = as(state.tech, M + "transition#MaintenanceWorkOrder", {
-            workEffortId: third.workEffortId,
+        const fourth = startedWork(prefix + "_COMP", "Compressor noise", state.tech, state.TECH_PARTY, false)
+        const fourthDone = as(state.tech, M + "transition#MaintenanceWorkOrder", {
+            workEffortId: fourth.workEffortId,
             action: "complete",
-            expectedRevision: revision(third.workEffortId),
+            expectedRevision: revision(fourth.workEffortId),
             outcomeEnumId: "MoutNotRepaired",
             dispositionEnumId: "MdispUnavailable"
         })
-        const read = as(state.tech, M + "get#MaintenanceWorkOrder", {workEffortId: third.workEffortId})
+        const read = as(state.tech, M + "get#MaintenanceWorkOrder", {workEffortId: fourth.workEffortId})
         return {
             second,
             linkedSecond,
             firstDone,
-            blocked,
-            secondDone,
-            followUpBlocks,
+            afterFirst,
             cancelled,
-            stillOpen,
+            afterCancel,
+            secondDone,
+            followUp,
+            preview,
+            noReason,
             restored,
-            thirdDone,
+            followUpStatus,
+            fourthDone,
             read
         }
     },
@@ -461,31 +531,43 @@ feature("two work orders on one outage cannot each end the other's; a completion
         second,
         linkedSecond,
         firstDone,
-        blocked,
-        secondDone,
-        followUpBlocks,
+        afterFirst,
         cancelled,
-        stillOpen,
+        afterCancel,
+        secondDone,
+        followUp,
+        preview,
+        noReason,
         restored,
-        thirdDone,
+        followUpStatus,
+        fourthDone,
         read
     }) {
         second.started.resourceUnavailabilityId == state.compOutage
         linkedSecond == state.compOutage
         firstDone.statusId == "WeComplete"
-        blocked == "OPEN_WORK"
-        secondDone.statusId == "WeComplete"
-        secondDone.followUpWorkEffortId != null
-        order(secondDone.followUpWorkEffortId).sourceEnumId == "MsrcFollowUp"
-        order(secondDone.followUpWorkEffortId).resourceUnavailabilityId == state.compOutage
-        followUpBlocks == "OPEN_WORK"
+        afterFirst == null
         cancelled.statusId == "WeCancelled"
-        stillOpen == null
+        afterCancel == null
+        secondDone.statusId == "WeComplete"
+        followUp != null
+        order(followUp).sourceEnumId == "MsrcFollowUp"
+        order(followUp).resourceUnavailabilityId == state.compOutage
+        preview.outageList[0].canRestore == true
+        preview.outageList[0].openWorkList.map(work => work.workEffortId).join() == followUp
+        noReason == "OPEN_WORK"
         restored.resultCode == "RESTORED"
+        Array.from(restored.openWorkList)
+            .map(work => work.workEffortId)
+            .join() == followUp
+        outage(state.compOutage).thruDate != null
         outage(state.compOutage).dispositionEnumId == "MdispRestricted"
-        thirdDone.resourceUnavailabilityId != null
-        thirdDone.resourceUnavailabilityId != state.compOutage
-        outage(thirdDone.resourceUnavailabilityId).thruDate == null
+        outage(state.compOutage)
+            .openWorkReason.startsWith("Runs on the old valve")
+            [("WeInPlanning", "WeApproved")].includes(followUpStatus)
+        fourthDone.resourceUnavailabilityId != null
+        fourthDone.resourceUnavailabilityId != state.compOutage
+        outage(fourthDone.resourceUnavailabilityId).thruDate == null
         read.workOrder.outage.open == true
     }
 })

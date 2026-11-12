@@ -51,8 +51,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="offlineIntent" type="text-indicator"><description>Y: starting the work takes its equipment or facility out
             of service (records or links its outage)</description></field>
         <field name="resourceUnavailabilityId" type="id"><description>The outage of the target this work order recorded or
-            linked (mantle.work.effort.ResourceUnavailability); restoration (end#ResourceUnavailability) waits for every open
-            work order linked to it</description></field>
+            linked (mantle.work.effort.ResourceUnavailability); a restoration (end#ResourceUnavailability) lists the open work
+            orders linked to it, which stay open, and needs a reason while any is</description></field>
         <field name="operationKey" type="text-medium"/>
         <field name="operationHash" type="text-medium"/>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>

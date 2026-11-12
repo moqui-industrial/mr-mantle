@@ -5,7 +5,9 @@
 // - record: an actual outage of an asset (equipment, not stock) or a facility, from fromDate (now when empty), or the resource's
 //   open outage linked (linked true): one open outage a resource. Two entry points, each checked by data, never by a caller:
 //   Manufacturing's, an equipment-fault ProductionDowntime of the asset (sourceProductionDowntimeId) that the user may operate
-//   (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE in the stop's organization, as store#ProductionDowntime checked); and
+//   (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE in the stop's organization, as store#ProductionDowntime checked), not corrected
+//   and with no outage yet, from the stop's start, open and an equipment fault, so naming a stop does no more than the stop's
+//   own recording did; and
 //   Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a resource of the user's maintenance scope, or
 //   MAINTENANCE_EXECUTE on work assigned to the user that targets the resource (workEffortId, with its step). A work order names
 //   the outage it recorded or linked (MaintenanceWorkOrder.resourceUnavailabilityId). A fault is recorded although bookings of the
@@ -14,9 +16,10 @@
 //   and note, and the row it corrects kept with its values, superseded by the new one (the work orders' links move to it). A
 //   superseded row is history: every read of current availability leaves it out.
 // - end: the only restoration, a supervisor's or resource administrator's, with the disposition (available, or usable with
-//   restrictions) and the readiness evidence, once every work order linked to the outage is done (OPEN_WORK names the others):
-//   two work orders on one resource cannot each end the other's. Closing the production downtime, completing a work order and
-//   cancelling one restore nothing.
+//   restrictions) and the readiness evidence. Work orders linked to the outage that are still open stay open: the answer lists
+//   them, and restoring while any is open needs the reason (openWorkReason; OPEN_WORK names them without one), the user's call
+//   of Nov 12. No work order ends an outage: completing one, cancelling one or closing the production downtime restores nothing,
+//   so two work orders on one resource cannot each end the other's.
 // - find: the outages of the user's maintenance scope (a work or resource read), newest first, with their production and work
 //   context, corrections, restoration and readiness; a resource's correction chain.
 // Every write names the revision it read (REVISION_CHANGED).
@@ -119,6 +122,13 @@ function productionAuthority(p, resource) {
     const stop = one(DOWNTIME, {productionDowntimeId: p.sourceProductionDowntimeId})
     if (!stop || !resource.assetId || stop.assetId !== resource.assetId || stop.equipmentFault !== "Y")
         denied("SOURCE_INVALID", "Downtime " + p.sourceProductionDowntimeId + " is no equipment fault of " + resource.name)
+    // the stop's own recording only (ProductionDowntime.js outageOf): once, from its start, open, an equipment fault
+    if (stop.statusId === "PdtCorrected" || stop.resourceUnavailabilityId)
+        denied("SOURCE_INVALID", "Downtime " + stop.productionDowntimeId + " has recorded its outage")
+    if (p.thruDate || (p.fromDate && ms(p.fromDate) !== ms(stop.fromDate)))
+        denied("SOURCE_INVALID", "A stop's outage starts with the stop and is ended by restoring the equipment")
+    if (!blank(p.unavailabilityReasonEnumId) && p.unavailabilityReasonEnumId !== "RurEquipmentFault")
+        denied("SOURCE_INVALID", "A stop's outage is an equipment fault")
     if (!productionPermissions.some(lib.access.has) || !facilityScope.owns(facilityScope.scope(), stop.organizationPartyId))
         denied("PERMISSION_DENIED", "Downtime " + stop.productionDowntimeId + " is not one you may report")
     const home = resource.asset.facilityId ? one(FACILITY, {facilityId: resource.asset.facilityId}) : null
@@ -156,7 +166,7 @@ function maintenanceAuthority(p, resource) {
     const work = blank(p.workEffortId) ? null : workOf(userScope, p, resource)
     if (!(caps.supervise || caps.resourceEdit)) {
         if (!work) denied("WORK_REQUIRED", "A technician records an outage from the work assigned to them")
-        if (!maintenanceAccess.assignment(userScope, work.order.workEffortId).step)
+        if (!maintenanceAccess.assignment(userScope, work.stepId || work.order.workEffortId).step)
             denied("NOT_ASSIGNED", "Work order " + work.order.workEffortId + " is not assigned to you")
     }
     return {organizationPartyId, work, userScope}
@@ -294,6 +304,8 @@ function correct(p) {
     requireStaff(userScope)
     const row = outageOf(userScope, p.resourceUnavailabilityId, true)
     requireInForce(row)
+    // a planned block is Manufacturing's offline time (store#WorkCenterOffline) or P15's blackout, corrected there
+    if (row.unavailabilityKindEnumId !== "RukActual") denied("KIND_INVALID", "A planned block is not corrected here")
     requireRevision(row, p.expectedRevision)
     const changeReason = text(p.changeReason)
     if (!changeReason) denied("REASON_REQUIRED", "A correction needs its reason")
@@ -322,6 +334,7 @@ function correct(p) {
         endedDate: row.endedDate || null,
         dispositionEnumId: row.dispositionEnumId || null,
         endComments: row.endComments || null,
+        openWorkReason: row.openWorkReason || null,
         originalUnavailabilityId: row.originalUnavailabilityId || row.resourceUnavailabilityId,
         correctionOfUnavailabilityId: row.resourceUnavailabilityId,
         changeReason,
@@ -348,14 +361,32 @@ function correct(p) {
 }
 
 // ===== end#ResourceUnavailability =====
-// What keeps an outage from being ended now: the open work orders linked to it.
-function restoreBlockers(row) {
+// Whether the caller may read a work order (F69: a work reader of its organization or its technician; a resource administrator
+// or another technician sees its id and status only, never its title).
+function workReader(userScope) {
+    const known = new Map()
+    return workEffortId => {
+        if (!known.has(workEffortId)) {
+            let readable = true
+            try {
+                maintenanceAccess.requireWork(userScope, workEffortId)
+            } catch (error) {
+                readable = false
+            }
+            known.set(workEffortId, readable)
+        }
+        return known.get(workEffortId)
+    }
+}
+// The work orders linked to an outage that are still open: a restoration lists them, they stay open, and it needs its reason.
+function openWorkOf(row, readable) {
     return linkedWork(row.resourceUnavailabilityId)
         .filter(root => openWork.includes(root.statusId))
         .map(root => ({
             workEffortId: root.workEffortId,
-            blocker: "Work order " + root.workEffortId + " is " + statusText(root.statusId).toLowerCase(),
-            detail: root.workEffortName || ""
+            workEffortName: readable(root.workEffortId) ? root.workEffortName || "" : "",
+            statusText: statusText(root.statusId),
+            text: "Work order " + root.workEffortId + " is " + statusText(root.statusId).toLowerCase()
         }))
 }
 function end(p) {
@@ -372,9 +403,11 @@ function end(p) {
         denied("DISPOSITION_INVALID", "A restored resource is available, or usable with restrictions")
     const thruDate = p.thruDate || ec.user.nowTimestamp
     requireInterval(row.fromDate, thruDate)
-    const blockers = restoreBlockers(row)
-    if (blockers.length)
-        denied("OPEN_WORK", blockers.map(blocker => blocker.blocker).join("; ") + ": finish or cancel it before restoring")
+    // open work orders on it stay open; restoring now needs the reason (the user's call, Nov 12)
+    const openList = openWorkOf(row, workReader(userScope))
+    const openWorkReason = text(p.openWorkReason)
+    if (openList.length && !openWorkReason)
+        denied("OPEN_WORK", openList.map(work => work.text).join("; ") + ": give the reason to restore while it stays open")
     call("update#" + OUTAGE, {
         resourceUnavailabilityId: row.resourceUnavailabilityId,
         thruDate,
@@ -382,12 +415,14 @@ function end(p) {
         endedDate: ec.user.nowTimestamp,
         dispositionEnumId: disposition,
         endComments: text(p.endComments),
+        openWorkReason: openList.length ? openWorkReason : null,
         revision: Number(row.revision || 0) + 1
     })
     return {
         resourceUnavailabilityId: row.resourceUnavailabilityId,
         resultCode: "RESTORED",
-        revision: Number(row.revision || 0) + 1
+        revision: Number(row.revision || 0) + 1,
+        openWorkList: openList
     }
 }
 
@@ -479,6 +514,7 @@ function displayRows(list, userScope) {
         cached("f" + facilityId, () => (facilityId ? one(FACILITY, {facilityId})?.facilityName || facilityId : ""))
     const caps = userScope.capabilities
     const staff = !!(caps.supervise || caps.resourceEdit)
+    const readable = workReader(userScope)
     const at = nowMs()
     return list.map(row => {
         const asset = row.assetId ? cached("a" + row.assetId, () => one(ASSET, {assetId: row.assetId})) : null
@@ -504,7 +540,7 @@ function displayRows(list, userScope) {
             const source = one(WORK, {workEffortId: row.workEffortId})
             if (source) work.unshift(source)
         }
-        const blockers = open && !superseded ? restoreBlockers(row) : []
+        const openList = open && !superseded ? openWorkOf(row, readable) : []
         const bookings =
             open && !superseded
                 ? affectedBookings(row.assetId ? {assetId: row.assetId} : {facilityId: row.facilityId}, row.fromDate, null)
@@ -537,14 +573,23 @@ function displayRows(list, userScope) {
                       .join(" · ") + (stopCount > 1 ? " (" + stopCount + " stops)" : "")
                 : "",
             sourceText: stop ? "Production stop" : row.workEffortId ? "Work order" : "Recorded in Maintenance",
+            // a work order the caller may not read shows its id and status, not its title (F69)
             workList: work.map(root => ({
                 workEffortId: root.workEffortId,
-                workEffortName: root.workEffortName || root.workEffortId,
+                workEffortName: readable(root.workEffortId) ? root.workEffortName || root.workEffortId : "",
                 statusText: statusText(root.statusId),
-                open: openWork.includes(root.statusId)
+                open: openWork.includes(root.statusId),
+                readable: readable(root.workEffortId)
             })),
             workText: work
-                .map(root => root.workEffortId + " " + (root.workEffortName || "") + " (" + statusText(root.statusId) + ")")
+                .map(
+                    root =>
+                        root.workEffortId +
+                        (readable(root.workEffortId) ? " " + (root.workEffortName || "") : "") +
+                        " (" +
+                        statusText(root.statusId) +
+                        ")"
+                )
                 .join(", "),
             createdByName: userName(row.createdByUserId),
             createdText: dateText(row.createdDate),
@@ -567,10 +612,11 @@ function displayRows(list, userScope) {
                     ? ""
                     : "Restored " + dateText(row.thruDate) + (row.endedByUserId ? " by " + userName(row.endedByUserId) : ""),
             affectedBookingCount: bookings.length,
-            restoreBlockers: blockers,
-            restoreBlockerText: blockers.map(blocker => blocker.blocker).join("; "),
-            canRestore: staff && open && !superseded && !blockers.length && row.unavailabilityKindEnumId === "RukActual",
-            canCorrect: staff && !superseded
+            openWorkReason: row.openWorkReason || "",
+            openWorkList: openList,
+            openWorkText: openList.map(work => work.text).join("; "),
+            canRestore: staff && open && !superseded && row.unavailabilityKindEnumId === "RukActual",
+            canCorrect: staff && !superseded && row.unavailabilityKindEnumId === "RukActual"
         }
     })
 }

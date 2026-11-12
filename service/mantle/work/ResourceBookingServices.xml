@@ -30,10 +30,11 @@ along with this software (see the LICENSE.md file). If not, see
             the outage (MaintenanceWorkOrder.resourceUnavailabilityId). Bookings of the resource over it are kept and answered by
             id (affectedBookingIds). Nothing here ends an outage: end#ResourceUnavailability restores the resource.
             Two entry points, checked by data: Manufacturing's, sourceProductionDowntimeId an equipment-fault stop of the asset
-            in an organization the user operates (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE; the reason defaults to an
-            equipment fault); and Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a resource of the user's
-            maintenance scope, or MAINTENANCE_EXECUTE on the work order assigned to the user (workEffortId) that targets it, with
-            a reason (REASON_INVALID). Refuses a kind other than RukActual (KIND_INVALID), no resource or two (RESOURCE_REQUIRED),
+            in an organization the user operates (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE), a stop not corrected and with no
+            outage yet, the outage from its start, open and an equipment fault (SOURCE_INVALID otherwise), as
+            ProductionDowntime.js records it; and Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a
+            resource of the user's maintenance scope, or MAINTENANCE_EXECUTE on the work order (or its step) assigned to the
+            user (workEffortId) that targets it, with a reason (REASON_INVALID). Refuses a kind other than RukActual (KIND_INVALID), no resource or two (RESOURCE_REQUIRED),
             stock or a missing asset (ASSET_INVALID), a resource or work outside the scope (RECORD_UNAVAILABLE), another
             permission (PERMISSION_DENIED), a technician without work (WORK_REQUIRED) or on work not theirs (NOT_ASSIGNED), work
             that is no work order on the resource (WORK_INVALID), a step of other work (STEP_INVALID), a source that is no
@@ -78,9 +79,9 @@ along with this software (see the LICENSE.md file). If not, see
             thruDate overlapping). Each row carries its resource, interval and elapsed time (open ones to now), reason and
             classification, production context (the stop's work center, reason and run, and how many stops link it), the work
             orders recorded with or linked, who recorded and who restored it with the disposition, its corrections, the bookings
-            it affects (a count), the restoration blockers, and canRestore and canCorrect for the user. With
-            resourceUnavailabilityId, history is its correction chain. A holder of every organization with an active one lists
-            that organization's.</description>
+            it affects (a count), the open work orders a restoration leaves open (openWorkList), and canRestore and canCorrect
+            for the user. With resourceUnavailabilityId, history is its correction chain. A holder of every organization with an
+            active one lists that organization's.</description>
         <in-parameters>
             <parameter name="resourceUnavailabilityId"/>
             <parameter name="organizationPartyId"/>
@@ -130,7 +131,7 @@ along with this software (see the LICENSE.md file). If not, see
             (REASON_REQUIRED): a new row with the corrected start, the end of an ended outage, the reason and the description,
             which keeps who recorded and who restored it, and the corrected row kept with its values, superseded by the new one
             (supersession, design §6); the work orders linked to it are linked to the new row. Refuses an outage outside the scope
-            (RECORD_UNAVAILABLE), one already corrected (OUTAGE_CORRECTED), a changed revision (REVISION_CHANGED), an end on an
+            (RECORD_UNAVAILABLE), a planned block (KIND_INVALID: Manufacturing's offline time or a blackout), one already corrected (OUTAGE_CORRECTED), a changed revision (REVISION_CHANGED), an end on an
             open outage, which restoration gives (OUTAGE_OPEN), a reason that is no downtime reason (REASON_INVALID) and an
             interval in the future or ending before it starts (INTERVAL_INVALID).</description>
         <in-parameters>
@@ -159,9 +160,11 @@ along with this software (see the LICENSE.md file). If not, see
             maintenance supervisor's or resource administrator's (MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT,
             PERMISSION_DENIED) in the user's scope, at thruDate (now when empty, not before the start nor in the future), with
             the disposition, available for use (MdispAvailable) or usable with restrictions (MdispRestricted), and the readiness
-            evidence (endComments), once every maintenance work order linked to the outage is done: an open one is OPEN_WORK,
-            naming it, so two work orders on one resource cannot each end the other's. Closing the production downtime that
-            recorded it, completing a work order or cancelling one ends nothing. Refuses an outage outside the scope
+            evidence (endComments). Maintenance work orders linked to the outage that are still open stay open: the answer lists
+            them (openWorkList, as find# does for the dialog), and restoring while any is open needs the reason (openWorkReason,
+            kept on the row; OPEN_WORK names them without one; the user's call of Nov 12). No work order ends an outage: closing
+            the production downtime that recorded it, completing a work order or cancelling one ends nothing, so two work orders
+            on one resource cannot each end the other's. Refuses an outage outside the scope
             (RECORD_UNAVAILABLE), one corrected (OUTAGE_CORRECTED), a planned block (KIND_INVALID), one ended
             (OUTAGE_ENDED), a changed revision (REVISION_CHANGED), no disposition (DISPOSITION_REQUIRED) or another one
             (DISPOSITION_INVALID) and an end out of its interval (INTERVAL_INVALID).</description>
@@ -171,17 +174,21 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="dispositionEnumId"/>
             <parameter name="endComments"/>
+            <parameter name="openWorkReason"><description>Required while a linked work order is open</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="resourceUnavailabilityId"/>
             <parameter name="resultCode"/>
             <parameter name="revision" type="Integer"/>
+            <parameter name="openWorkList" type="List"><description>The linked work orders still open (workEffortId,
+                workEffortName, statusText, text), which stay open</description></parameter>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('end', context)"/>
             <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
             <set field="resultCode" from="answer.resultCode"/>
             <set field="revision" from="answer.revision"/>
+            <set field="openWorkList" from="answer.openWorkList"/>
         </actions>
     </service>
 </services>

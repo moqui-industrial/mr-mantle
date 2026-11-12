@@ -1083,8 +1083,10 @@ function storeEquipment(p) {
         resultCode = "ENDED"
     } else {
         if (current.length) denied("ALREADY_ASSIGNED", "Equipment " + asset.assetId + " is assigned to this work order already")
-        if (blockedEquipment.includes(asset.statusId) || openMaintenance(asset.assetId))
-            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is " + (statusText(asset.statusId) || "in maintenance"))
+        if (blockedEquipment.includes(asset.statusId))
+            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is " + statusText(asset.statusId))
+        if (openMaintenance(asset.assetId))
+            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is in maintenance or out of service")
         const fromDate = p.fromDate || run.estimatedStartDate || now
         const thruDate = p.thruDate || run.estimatedCompletionDate || null
         if (thruDate != null && lib.ms(thruDate) <= lib.ms(fromDate))

@@ -212,6 +212,34 @@ spec({
             ownerPartyId: org,
             statusId: "AstOnHold"
         })
+        // out of service (impl-maintenance P5): PO5_DOWN's open outage refuses it; PO5_FIXED's open row was corrected by an
+        // ended one, so the superseded row counts for nothing
+        for (const assetId of ["PO5_DOWN", "PO5_FIXED"])
+            call("create#mantle.product.asset.Asset", {
+                assetId,
+                assetTypeEnumId: "AstTpEquipment",
+                assetName: "Spec " + assetId,
+                facilityId: plant,
+                ownerPartyId: org,
+                statusId: "AstAvailable"
+            })
+        const outage = (id, assetId, extra = {}) =>
+            call(
+                "create#mantle.work.effort.ResourceUnavailability",
+                Object.assign(
+                    {
+                        resourceUnavailabilityId: id,
+                        unavailabilityKindEnumId: "RukActual",
+                        assetId,
+                        organizationPartyId: org,
+                        fromDate: "2020-01-01T08:00:00Z"
+                    },
+                    extra
+                )
+            )
+        outage("PO5_OUT_DOWN", "PO5_DOWN")
+        outage("PO5_OUT_FIXED", "PO5_FIXED", {supersededByUnavailabilityId: "PO5_OUT_FIXED2"})
+        outage("PO5_OUT_FIXED2", "PO5_FIXED", {thruDate: "2020-01-01T09:00:00Z"})
         ec.artifactExecution.enableAuthz()
         // the routing: Assemble (10), then Test (20) after it; FIN takes PO5_RM at Assemble and PO5_SHORT at Test, ALT only RM
         as("po5_method", () => {
@@ -652,6 +680,8 @@ feature("the draft header, equipment and people are stored with the revision; a 
             )
         const robot = equipment("PO5_ROBOT", {fromDate: "2030-01-01T08:00:00Z", thruDate: "2030-01-02T08:00:00Z"})
         const broken = equipment("PO5_BROKEN")
+        const down = equipment("PO5_DOWN")
+        const fixed = equipment("PO5_FIXED")
         const stockAsset = equipment(state.rm)
         const party = (partyId, roleTypeId, extra = {}) =>
             run(
@@ -693,6 +723,8 @@ feature("the draft header, equipment and people are stored with the revision; a 
             renamed,
             robot,
             broken,
+            down,
+            fixed,
             stockAsset,
             supervisor,
             outsider,
@@ -710,11 +742,13 @@ feature("the draft header, equipment and people are stored with the revision; a 
         runOf(r.workEffortId).workEffortName == "Renamed run"
         r.robot.error == ""
         r.broken.error.includes("EQUIPMENT_BLOCKED")
+        r.down.error.includes("EQUIPMENT_BLOCKED")
+        r.fixed.error == ""
         r.stockAsset.error.includes("EQUIPMENT_INVALID")
         r.supervisor.error == ""
         r.outsider.error.includes("PARTY_UNAVAILABLE")
         r.role.error.includes("ROLE_INVALID")
-        r.resources.equipmentRows.length == 1
+        r.resources.equipmentRows.length == 2
         r.resources.peopleRows.some(row => row.partyId === "PO5_SUPER" && row.roleText === "Supervisor")
         r.clash.error.includes("EQUIPMENT_OVERLAP")
         r.ended.error == ""
