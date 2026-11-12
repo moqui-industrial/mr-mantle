@@ -198,6 +198,10 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_VIEW" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_HR_EDIT" description="People HR Edit (employment and private person data of an employer)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_HR_EDIT" fromDate="0"/>
+    <!-- the shift roster (impl-people P14; the user's call, impl-people §4, Nov 12, 2026): saving and publishing shifts, which a
+        manager (on their live reporting lines) and an HR editor (of the employer) need beside their own scope -->
+    <userPermissions userPermissionId="PEOPLE_ROSTER_EDIT" description="People Roster Edit (save and publish shifts in the user's scope)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_ROSTER_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_RECRUIT_VIEW" description="People Recruit View (openings, applications and offers)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_RECRUIT_VIEW" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_RECRUIT_EDIT" description="People Recruit Edit (openings, applications and offers)"/>

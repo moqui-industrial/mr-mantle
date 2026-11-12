@@ -16,7 +16,8 @@
 // and publish assess again under the person's lock (their Party row), so two rosterers cannot overlap one person.
 //
 // Who: a manager (PEOPLE_TEAM_VIEW) rosters their live reports at the employers of their lines, an HR editor (PEOPLE_HR_VIEW and
-// PEOPLE_HR_EDIT) the employees of their employers; an HR reader reads their employers' roster. A worker reads their own
+// PEOPLE_HR_EDIT) the employees of their employers, each only with PEOPLE_ROSTER_EDIT (the user's call, impl-people §4, Nov 12,
+// 2026); without it the manager and HR read the roster of the same people, as an HR reader reads their employers'. A worker reads their own
 // published shifts (PEOPLE_SELF_SERVICE); the team calendar shows the published shifts of the people its absences show (the user's
 // own, their colleagues', reports' and HR's employers'). Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
@@ -137,21 +138,22 @@ function accessKinds(userScope, employment) {
     if (canEditAt(userScope, organizationPartyId)) kinds.push("hrEdit")
     return kinds
 }
-// who rosters an employment: the person's manager at the line's employer, an HR editor of the employer; who reads its roster: those
-// and an HR reader of the employer
+// who rosters an employment: with PEOPLE_ROSTER_EDIT, the person's manager at the line's employer or an HR editor of the employer;
+// who reads its roster: those (with the permission or without it) and an HR reader of the employer
 const rosterKinds = ["team", "hrEdit"]
 const readKinds = ["team", "hr", "hrEdit"]
-const rosters = kinds => kinds.some(kind => rosterKinds.includes(kind))
-function rosterScope(what) {
+const rosters = (userScope, kinds) => !!userScope.capabilities.rosterEdit && kinds.some(kind => rosterKinds.includes(kind))
+function rosterScope(what, edit) {
     const userScope = people.scopeOf()
     const caps = userScope.capabilities
     if (!caps.team && !caps.hrView) denied("PERMISSION_DENIED", what + " needs PEOPLE_TEAM_VIEW or PEOPLE_HR_VIEW")
+    if (edit && !caps.rosterEdit) denied("PERMISSION_DENIED", what + " needs PEOPLE_ROSTER_EDIT")
     return userScope
 }
 // A rostered employment the caller may change, else refused as missing.
 function rosterEmployment(userScope, partyRelationshipId) {
     const employment = employmentRow(text(partyRelationshipId))
-    if (!employment || !rosters(accessKinds(userScope, employment)))
+    if (!employment || !rosters(userScope, accessKinds(userScope, employment)))
         denied("RECORD_UNAVAILABLE", "Employment " + text(partyRelationshipId) + " is not available to roster")
     return employment
 }
@@ -288,14 +290,24 @@ function assess(userScope, p, existing) {
     if (startMs < nowMs()) refuse("DATE_PAST", "A shift starts after now")
     if (!Number.isInteger(breakMinutes) || breakMinutes < 0 || (endMs > startMs && breakMinutes * minuteMs >= endMs - startMs))
         refuse("BREAK_INVALID", "The break is shorter than the shift")
+    // a work location of the employer's own, or the employment's assignment's (one kept as it was is not asked again)
+    if (facilityId && facilityId !== (existing?.facilityId || null)) {
+        const facility = one(FACILITY, {facilityId})
+        const assigned = primaryAssignment(employment.partyRelationshipId, startMs)?.facilityId || null
+        if (!facility || (facility.ownerPartyId !== employment.toPartyId && facilityId !== assigned))
+            refuse("FACILITY_INVALID", "Choose a work location of the employer")
+    }
     if ((ms(employment.fromDate) ?? -Infinity) > startMs) refuse("DATE_OUTSIDE", "The shift starts before the employment does")
     if ((ms(employment.thruDate) ?? Infinity) < endMs) refuse("EMPLOYMENT_ENDED", "The employment ends before the shift does")
     if (endMs > startMs) {
         const other = overlappingShifts(employment.fromPartyId, startMs, endMs, existing?.shiftAssignmentId)[0]
+        // the other shift's times only when the caller reads its employment (one at an employer they do not read is named alone)
         if (other)
             refuse(
                 "OVERLAP",
-                "It overlaps the shift " + whenText(ms(other.startDate), ms(other.endDate), zone) + " of the same person"
+                accessKinds(userScope, employmentRow(other.partyRelationshipId)).some(kind => readKinds.includes(kind))
+                    ? "It overlaps the shift " + whenText(ms(other.startDate), ms(other.endDate), zone) + " of the same person"
+                    : "It overlaps another shift of the same person"
             )
         const slots = slotsOf(startMs, endMs, zone)
         if (leaveOn(employment.fromPartyId, slots, approvedLeave).length)
@@ -511,7 +523,7 @@ function getRoster(p) {
             personName: entry.personName,
             organizationPartyId: employment.toPartyId,
             organizationName: organizations[employment.toPartyId] || employment.toPartyId,
-            canRoster: rosters(entry.kinds),
+            canRoster: rosters(userScope, entry.kinds),
             timeZone: zone || "",
             scheduleName: assignment?.workingScheduleId ? scheduleNames[assignment.workingScheduleId] || "" : "",
             facilityId: assignment?.facilityId || null,
@@ -630,7 +642,7 @@ const tellOne = (row, outcomeText) =>
 // store#Shift: preview (nothing written), apply (a new draft, or a change of one; a published shift stays published and its
 // worker is told) or remove (cancelled; a published one told).
 function storeShift(p) {
-    const userScope = rosterScope("A shift")
+    const userScope = rosterScope("A shift", true)
     const action = ["preview", "apply", "remove"].includes(text(p.action)) ? text(p.action) : "preview"
     const operationKey = text(p.operationKey) || null
     const shiftAssignmentId = text(p.shiftAssignmentId) || null
@@ -643,7 +655,7 @@ function storeShift(p) {
         const row = one(SHIFT, {shiftAssignmentId})
         if (!row || !accessKinds(userScope, employmentRow(row.partyRelationshipId)).some(kind => readKinds.includes(kind)))
             denied("RECORD_UNAVAILABLE", "Shift " + shiftAssignmentId + " is not available")
-        if (!rosters(accessKinds(userScope, employmentRow(row.partyRelationshipId))))
+        if (!rosters(userScope, accessKinds(userScope, employmentRow(row.partyRelationshipId))))
             denied("PERMISSION_DENIED", "Their manager or HR rosters this shift")
         return row
     }
@@ -716,7 +728,7 @@ function storeShift(p) {
 // assessed again (leave approved since, an overlap, an ended employment, a start passed: skipped and named); each worker told
 // once of theirs.
 function publishShifts(p) {
-    const userScope = rosterScope("Publishing shifts")
+    const userScope = rosterScope("Publishing shifts", true)
     const named = Array.from(p.shiftAssignmentIds || [])
         .map(text)
         .filter(Boolean)
@@ -732,13 +744,15 @@ function publishShifts(p) {
     }
     if (text(p.organizationPartyId)) query = query.condition("organizationPartyId", text(p.organizationPartyId))
     const drafts = Array.from(query.orderBy("startDate").limit(listCap).list()).filter(row =>
-        rosters(accessKinds(userScope, employmentRow(row.partyRelationshipId)))
+        rosters(userScope, accessKinds(userScope, employmentRow(row.partyRelationshipId)))
     )
     const names = people.personNames(unique(drafts.map(row => row.partyId)))
     const published = []
     const skipped = []
     for (const draft of drafts) {
         ec.message.pushErrors()
+        // the shift as published, kept only once its transaction has committed (a notice never names one rolled back)
+        let done = null
         try {
             ec.transaction.runRequireNew(null, "Publishing shift " + draft.shiftAssignmentId + " failed", () => {
                 lockPerson(draft.partyId)
@@ -752,9 +766,10 @@ function publishShifts(p) {
                     publishedDate: ec.user.nowTimestamp,
                     publishedByUserId: ec.user.userId
                 })
-                published.push(row)
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                done = row
             })
+            if (done) published.push(done)
         } catch (error) {
             const reasonCode = lib.reasonCode(error)
             if (!reasonCode) ec.logger.error("Publishing shift " + draft.shiftAssignmentId + " failed: " + error.message)
@@ -818,7 +833,8 @@ function getMyShifts(p) {
         instantIn(addDay(fromDay, days), "00:00", null)
     )
     const names = namesOf(rowList)
-    const shifts = rowList.map(row => shiftRow(row, names, false))
+    // the rosterer's comments (the reason given for a shift or its change) stay the roster's, never the worker's
+    const shifts = rowList.map(row => Object.assign(shiftRow(row, names, false), {comments: ""}))
     const next = shifts.find(row => !row.started)
     return {shifts, nextShiftText: next ? next.whenText : "", fromDay, days}
 }
@@ -860,15 +876,22 @@ function getTeamShifts(p) {
         instantIn(addDay(endDay), "00:00", null)
     )
     const names = namesOf(rowList)
+    const employers = hrEmployers(userScope)
     const eventList = rowList.map(row => {
         const shift = shiftRow(row, names, false)
+        // a colleague's shift is its times alone, as their absences are the days alone (the user's call of Nov 11, 2026); the
+        // work location is the person's own, their manager's and HR's
+        const detailed =
+            row.partyId === userScope.partyId ||
+            employers.includes(row.organizationPartyId) ||
+            ((userScope.reportLines || {})[row.partyId] || []).includes(row.organizationPartyId)
         return {
             kind: "workHours",
             key: "shift|" + row.shiftAssignmentId,
             shiftAssignmentId: row.shiftAssignmentId,
             partyId: row.partyId,
             own: row.partyId === userScope.partyId,
-            title: shift.personName + " · Shift" + (shift.facilityName ? " · " + shift.facilityName : ""),
+            title: shift.personName + " · Shift" + (detailed && shift.facilityName ? " · " + shift.facilityName : ""),
             start: shift.startText,
             end: shift.endText,
             allDay: false,

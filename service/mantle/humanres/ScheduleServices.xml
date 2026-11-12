@@ -22,7 +22,8 @@ along with this software (see the LICENSE.md file). If not, see
     group. Reads need a staff read of the employer (a manager reads the schedules their reports follow); changes PEOPLE_HR_VIEW
     and PEOPLE_HR_EDIT, a shared calendar PEOPLE_ALL_ORGANIZATIONS too. Rows are ended, never deleted.
     P14 (design §6 ShiftRoster; Shifts.js): the shift roster, an employment's dated shifts, rostered by the person's manager
-    (PEOPLE_TEAM_VIEW, a live line at the employer) or an HR editor of the employer, drafts until published; a published shift is
+    (PEOPLE_TEAM_VIEW, a live line at the employer) or an HR editor of the employer, each with PEOPLE_ROSTER_EDIT (the user's call,
+    impl-people §4, Nov 12, 2026; without it they read the roster), drafts until published; a published shift is
     its worker's (told, read by capacity in place of the schedule's hours that day, on the team calendar and the My shifts
     projected calendar). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
@@ -325,8 +326,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The shift roster from fromDay (the Monday of this week when empty) for days (7, 14 or 28): the employments the
             caller reads, a manager's live reports at the employers of their lines and an HR reader's employers' employees
             (organizationPartyId, an employer of either, narrows; ORGANIZATION_DENIED otherwise), at most 200 by name (truncated),
-            each a lane with the person, employer, whether the caller rosters it (a manager of the line, an HR editor of the
-            employer), its zone and working schedule, the schedule's working intervals, the holidays and the approved leave of those
+            each a lane with the person, employer, whether the caller rosters it (with PEOPLE_ROSTER_EDIT, a manager of the line or
+            an HR editor of the employer), its zone and working schedule, the schedule's working intervals, the holidays and the approved leave of those
             days (a whole day, a morning or an afternoon, never the leave type or reason); and their draft and published shifts of
             those days, each with its times (in the user's zone, and its own zone's when another), hours, break, work location,
             state, revision, whether the caller changes it and its conflicts now (approved leave since it was set, a holiday);
@@ -348,14 +349,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="store" noun="Shift" allow-remote="false">
-        <description>A shift of an employment the caller rosters (a manager of the person's live line at its employer, an HR editor
-            of the employer; RECORD_UNAVAILABLE otherwise): with action preview (the default) its assessment, writing nothing:
+        <description>A shift of an employment the caller rosters (PEOPLE_ROSTER_EDIT, PERMISSION_DENIED without it; and a manager
+            of the person's live line at its employer or an HR editor of the employer, RECORD_UNAVAILABLE otherwise): with action preview (the default) its assessment, writing nothing:
             the times in the user's zone and in the shift's own (the employment's working schedule's zone, else the user's), the
             day it counts on, its hours, refusals and warnings (LEAVE_REQUESTED, HOLIDAY); with apply a new draft
             (operationKey: a retry answers the first) or the change of shiftAssignmentId at its revision (expectedRevision); with
             remove the shift cancelled. startText and endText are "yyyy-MM-dd HH:mm" in timeZone (the user's when empty). A
             published shift stays published when changed and its worker is told (PeopleShiftChange), as when it is removed; it
-            does not move to another person (PERSON_CHANGE). Refuses: TIME_INVALID, TOO_LONG (over a day), DATE_PAST (it starts
+            does not move to another person (PERSON_CHANGE). Refuses: TIME_INVALID, FACILITY_INVALID (a work location neither the
+            employer's nor the assignment's), TOO_LONG (over a day), DATE_PAST (it starts
             before now), BREAK_INVALID, DATE_OUTSIDE (before the employment), EMPLOYMENT_ENDED, OVERLAP (another shift of the
             person, in any employment), LEAVE_CONFLICT (approved leave then), REVISION_CHANGED, SHIFT_STARTED, SHIFT_REMOVED,
             SHIFT_REQUIRED.</description>
@@ -394,8 +396,8 @@ along with this software (see the LICENSE.md file). If not, see
             transaction (one now refused, by approved leave since it was set, an overlap, an ended employment or a start passed,
             is skipped and named with its reason, and the rest go on); each worker told once of their shifts (PeopleShiftChange).
             Published shifts are their worker's: capacity reads them in place of the schedule's hours of their days, and the team
-            calendar and My shifts show them. Refuses a caller who is neither a manager nor an HR reader (PERMISSION_DENIED) and no
-            days (DATE_REQUIRED).</description>
+            calendar and My shifts show them. Refuses a caller without PEOPLE_ROSTER_EDIT or who is neither a manager nor an HR reader
+            (PERMISSION_DENIED) and no days (DATE_REQUIRED).</description>
         <in-parameters>
             <parameter name="fromDay"/>
             <parameter name="days" type="Integer"/>
@@ -418,7 +420,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="MyShifts" allow-remote="false">
         <description>The caller's own published shifts from fromDay (today when empty) for days (14; at most 62), each with its day,
             times (in the user's zone, and its own zone's when another), hours, employer and work location; nextShiftText, the next
-            one not started. Takes no party: a self-service employee reads their own alone (PEOPLE_SELF_SERVICE; PERMISSION_DENIED
+            one not started; never the rosterer's comments. Takes no party: a self-service employee reads their own alone (PEOPLE_SELF_SERVICE; PERMISSION_DENIED
             without it).</description>
         <in-parameters>
             <parameter name="fromDay"/>
@@ -443,8 +445,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The team calendar's shifts from start through end (yyyy-MM-dd; a month from today when empty), as Commons'
             Calendar.qvue takes them (kind workHours, read only): the published shifts of the people its absences show, the caller's
             own and their colleagues' (PEOPLE_SELF_SERVICE), their live reports' at the line's employers (PEOPLE_TEAM_VIEW) and an
-            HR reader's employers' (PEOPLE_HR_VIEW), each as "{person} · Shift" with its work location; never a draft or a removed
-            shift. Refuses a caller with none of the three permissions (PERMISSION_DENIED).</description>
+            HR reader's employers' (PEOPLE_HR_VIEW), each as "{person} · Shift", with its work location for the caller's own, a
+            report's or an HR reader's (a colleague's is its times alone); never a draft or a removed shift. Refuses a caller with none of the three permissions (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="start"/>
             <parameter name="end"/>

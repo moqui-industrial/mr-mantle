@@ -39,6 +39,8 @@ const capabilityPermissions = {
     requestApprove: "PEOPLE_REQUEST_APPROVE",
     hrView: "PEOPLE_HR_VIEW",
     hrEdit: "PEOPLE_HR_EDIT",
+    // P14: saving and publishing shifts (the user's call, impl-people §4, Nov 12, 2026), beside a manager's or HR editor's scope
+    rosterEdit: "PEOPLE_ROSTER_EDIT",
     recruitView: "PEOPLE_RECRUIT_VIEW",
     recruitEdit: "PEOPLE_RECRUIT_EDIT",
     developView: "PEOPLE_DEVELOP_VIEW",

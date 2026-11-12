@@ -2,9 +2,12 @@
 // get#ShiftProjection; impl-people P14, design-people §6 ShiftRoster, PE-06): a shift over another of the person, over their
 // approved leave, after their employment ends or before now is refused, leave still waiting is a warning, and a preview writes
 // nothing; the person themselves, an HR reader who does not edit and another employer's HR roster nothing, while the manager and HR
-// of the employer do; a draft changes no capacity, and a published shift takes its day's planned hours in place of the
+// of the employer do, each only with PEOPLE_ROSTER_EDIT (the user's call of Nov 12, 2026: without it they read the roster and save
+// and publish nothing); a work location not the employer's is refused, and an overlap with a shift at an employer the caller does
+// not read does not name its times; a draft changes no capacity, and a published shift takes its day's planned hours in place of the
 // schedule's (not on top of them), once, its worker told once and seeing it in their shifts, on the team calendar and in the My
-// shifts projection; a published shift changed or removed changes capacity again and is told.
+// shifts projection (a colleague sees its times alone, the worker never the rosterer's comments); a published shift changed or
+// removed changes capacity again and is told.
 // Standalone: spec-local organizations, people, employments, schedule, leave rows, groups and users, with artifact authorization
 // disabled (the rules are the services' own checks). The weeks after next, in America/Chicago.
 // Run: ./moq test mr-mantle --spec ShiftRoster
@@ -181,11 +184,28 @@ spec({
         employ(state.readerParty, orgA)
         state.hrBParty = person("HRB")
         employ(state.hrBParty, orgB)
+        // Ana also works for B, whose HR rosters her there
+        state.anaEmpB = employ(state.ana, orgB)
         state.uAna = user("ANA", ["PEOPLE_SELF_SERVICE"], state.ana)
-        state.uMgr = user("MAX", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW"], state.max)
-        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
-        state.reader = user("READER", ["PEOPLE_HR_VIEW"], state.readerParty)
-        state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrBParty)
+        state.uLeo = user("LEO", ["PEOPLE_SELF_SERVICE"], state.leo)
+        state.uMgr = user("MAX", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW", "PEOPLE_ROSTER_EDIT"], state.max)
+        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_ROSTER_EDIT"], state.hrParty)
+        state.reader = user("READER", ["PEOPLE_HR_VIEW", "PEOPLE_ROSTER_EDIT"], state.readerParty)
+        state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_ROSTER_EDIT"], state.hrBParty)
+        // the same manager and HR officer without PEOPLE_ROSTER_EDIT (accounts of the same people)
+        state.uMgrRead = user("MAX_READ", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW"], state.max)
+        state.hrRead = user("HR_READ", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
+        // A's shop and B's
+        for (const [facilityId, ownerPartyId] of [
+            [prefix + "_SHOP_A", orgA],
+            [prefix + "_SHOP_B", orgB]
+        ])
+            call("create#mantle.facility.Facility", {
+                facilityId,
+                facilityName: facilityId,
+                ownerPartyId,
+                facilityTypeEnumId: "FcTpRetailStore"
+            })
         // Ana follows a week of 09:00 to 17:00, Monday to Friday, from today
         const week = run(state.hr, S + "store#Schedule", {
             organizationPartyId: orgA,
@@ -274,6 +294,24 @@ feature(
             out.self = code(shift(state.uAna, tuesday))
             out.reader = code(shift(state.reader, tuesday))
             out.hrB = code(shift(state.hrB, tuesday))
+            // the manager and HR without PEOPLE_ROSTER_EDIT: refused the same shift, preview included; the manager reads the roster
+            out.mgrRead = code(shift(state.uMgrRead, tuesday))
+            out.mgrReadPreview = code(run(state.uMgrRead, S + "store#Shift", Object.assign({timeZone: zone}, tuesday)))
+            out.hrRead = code(shift(state.hrRead, tuesday))
+            out.mgrReadRoster = run(state.uMgrRead, S + "get#Roster", {fromDay: state.mon}).roster
+            // B's shop for A's shift is refused; B's HR rostering Ana at B over A's Monday is told of an overlap without its times
+            out.otherShop = code(shift(state.uMgr, Object.assign({facilityId: prefix + "_SHOP_B"}, tuesday)))
+            out.overlapB = run(state.hrB, S + "store#Shift", {
+                partyRelationshipId: state.anaEmpB,
+                startText: state.mon + " 12:00",
+                endText: state.mon + " 14:00",
+                timeZone: zone
+            }).preview
+            out.overlapA = run(
+                state.uMgr,
+                S + "store#Shift",
+                Object.assign({timeZone: zone}, monday, {startText: state.mon + " 12:00"})
+            ).preview
             const byHr = shift(state.hr, tuesday)
             state.tueShift = byHr.shiftAssignmentId
             out.byHr = byHr.error
@@ -302,7 +340,14 @@ feature(
             rosterSelf,
             roster,
             readerRoster,
-            hrBRoster
+            hrBRoster,
+            mgrRead,
+            mgrReadPreview,
+            hrRead,
+            mgrReadRoster,
+            otherShop,
+            overlapB,
+            overlapA
         }) {
             setup == ""
             preview.canApply && preview.hours == 10 && preview.shiftDate == state.mon && preview.refusals.length == 0
@@ -317,6 +362,16 @@ feature(
             long == "TOO_LONG"
             // the person holds no roster permission; an HR reader and another employer's HR are answered as for a missing employment
             self == "PERMISSION_DENIED" && reader == "RECORD_UNAVAILABLE" && hrB == "RECORD_UNAVAILABLE"
+            // without PEOPLE_ROSTER_EDIT the manager and HR save nothing, a preview neither; the manager still reads the roster
+            mgrRead == "PERMISSION_DENIED" && mgrReadPreview == "PERMISSION_DENIED" && hrRead == "PERMISSION_DENIED"
+            mgrReadRoster.lanes.map(lane => lane.personName).join() == "Shift ANA,Shift LEO"
+            mgrReadRoster.lanes.every(lane => !lane.canRoster) && !mgrReadRoster.canRoster && mgrReadRoster.draftCount == 0
+            mgrReadRoster.shifts.length == 1 && mgrReadRoster.shifts.every(row => !row.canChange)
+            otherShop == "FACILITY_INVALID"
+            overlapB.refusals.map(item => item.code + ": " + item.message).join() ==
+                "OVERLAP: It overlaps another shift of the same person"
+            overlapA.refusals.map(item => item.code).join() == "OVERLAP" &&
+                overlapA.refusals[0].message.includes(state.mon + " 10:00")
             byHr == ""
             rosterSelf == "PERMISSION_DENIED"
             // the manager's lanes: Ana and Leo, rostered by them; Ana's leave and working hours drawn, her two drafts
@@ -341,9 +396,13 @@ feature("a published shift takes its day's hours in place of the schedule's, onc
         out.saturday = shift(state.uMgr, {
             partyRelationshipId: state.anaEmp,
             startText: state.sat + " 10:00",
-            endText: state.sat + " 14:00"
+            endText: state.sat + " 14:00",
+            facilityId: prefix + "_SHOP_A",
+            reason: "Covering the stocktake"
         }).error
         out.draft = capacity()
+        // the manager without PEOPLE_ROSTER_EDIT publishes nothing, with the parameters the holder then publishes with
+        out.readPublish = code(run(state.uMgrRead, S + "publish#Shifts", {fromDay: state.mon, days: 7}))
         const published = run(state.uMgr, S + "publish#Shifts", {fromDay: state.mon, days: 7})
         out.published = [published.error, published.publishedCount, published.notifiedCount, published.skipped?.length].join("|")
         out.again = run(state.uMgr, S + "publish#Shifts", {fromDay: state.mon, days: 7}).publishedCount
@@ -351,6 +410,7 @@ feature("a published shift takes its day's hours in place of the schedule's, onc
         out.notices = notices()
         out.mine = run(state.uAna, S + "get#MyShifts", {fromDay: state.mon, days: 7})
         out.team = run(state.uAna, S + "get#TeamShifts", {start: state.mon, end: state.sat}).eventList
+        out.colleague = run(state.uLeo, S + "get#TeamShifts", {start: state.mon, end: state.sat}).eventList
         out.managerTeam = run(state.uMgr, S + "get#TeamShifts", {start: state.mon, end: state.sat}).eventList
         out.projection = run(state.uAna, S + "get#ShiftProjection", {}).eventList
         out.hrBProjection = run(state.hrB, S + "get#ShiftProjection", {checkOnly: true}).admitted
@@ -385,6 +445,8 @@ feature("a published shift takes its day's hours in place of the schedule's, onc
     then({
         saturday,
         draft,
+        readPublish,
+        colleague,
         published,
         again,
         after,
@@ -404,6 +466,7 @@ feature("a published shift takes its day's hours in place of the schedule's, onc
         saturday == ""
         // drafts plan nothing: the schedule's 8 hours on weekdays, none on Saturday, and Wednesday's leave
         draft[state.mon].join() == "8,8" && draft[state.sat].join() == "0,0" && draft[state.wed].join() == "8,0"
+        readPublish == "PERMISSION_DENIED"
         published == "|3|1|0"
         again == 0
         // published: Monday's 10 hours replace the schedule's 8 (not 18), Tuesday's 4, Saturday's 4; Wednesday still on leave
@@ -412,7 +475,13 @@ feature("a published shift takes its day's hours in place of the schedule's, onc
         // told once, of the three
         notices.length == 1 && notices[0].includes("3 shifts published")
         mine.shifts.length == 3 && mine.nextShiftText.length > 0
+        // the worker reads the work location, never the rosterer's comments
+        mine.shifts.every(row => row.comments == "") && mine.shifts.some(row => row.facilityName == prefix + "_SHOP_A")
         team.length == 3 && team.every(event => event.kind == "workHours" && event.title.startsWith("Shift ANA · Shift"))
+        team.some(event => event.title == "Shift ANA · Shift · " + prefix + "_SHOP_A")
+        // a colleague (the same manager) sees Ana's shifts as their times alone
+        colleague.filter(event => event.partyId == state.ana).length == 3
+        colleague.every(event => event.title == "Shift ANA · Shift")
         managerTeam.filter(event => event.partyId == state.ana).length == 3
         projection.length == 3 && projection.every(event => event.uid.startsWith("people-shift-"))
         hrBProjection == false
