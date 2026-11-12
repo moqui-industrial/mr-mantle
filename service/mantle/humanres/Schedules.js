@@ -523,8 +523,8 @@ function checkLine(line, fromMs, thruMs, others) {
         )
 }
 // A line added to a schedule, changed or ended from a date (fromDate: the start of that day; empty, today, or the schedule's start
-// when it starts later). A change before the line's start changes it in place; a later one ends it then and starts another with
-// the new values, so a past week keeps its hours. An end on or before its start voids it (it never took effect). The schedule's
+// when it starts later; a schedule anyone has followed changes from today or later, DATE_PAST). A change before the line's start
+// changes it in place; a later one ends it then and starts another with the new values, so a past week keeps its hours. An end on or before its start voids it (it never took effect). The schedule's
 // revision is named; lines in effect at the same time never overlap (OVERLAP). HR editors of the employer only.
 function storeScheduleLine(p) {
     const userScope = editorScope("Changing a working schedule")
@@ -536,6 +536,12 @@ function storeScheduleLine(p) {
     const scheduleFrom = ms(schedule.fromDate) ?? -Infinity
     const fromMs = p.fromDate ? ec.user.timestampMillis(p.fromDate) : Math.max(todayStart(), scheduleFrom)
     if ((ms(schedule.thruDate) ?? Infinity) <= fromMs) denied("DATE_OUTSIDE", "The schedule has ended by that date")
+    // the weeks people have been planned by stay as they were: a followed schedule changes from today on
+    const followed = assignedEver(id)
+    const notPast = changeMs => {
+        if (followed && changeMs < todayStart())
+            denied("DATE_PAST", "People follow this schedule: its weeks change from today or later")
+    }
     const lines = linesOf(id)
     const lineId = text(p.workingScheduleLineId)
     const values = {
@@ -560,6 +566,7 @@ function storeScheduleLine(p) {
             breakMinutes: values.breakMinutes ?? 0
         })
         const start = Math.max(fromMs, scheduleFrom)
+        notPast(start)
         checkLine(line, start, ms(schedule.thruDate), lines)
         const created = call("create#" + LINE, Object.assign({workingScheduleId: id, fromDate: stamp(start)}, line))
         return {workingScheduleLineId: created.workingScheduleLineId, revision: scheduleRevision(id)}
@@ -570,6 +577,7 @@ function storeScheduleLine(p) {
     if ((ms(old.thruDate) ?? Infinity) <= fromMs) denied("LINE_ENDED", "The line has ended by that date")
     const reason = text(p.changeReason) || null
     if (truthy(p.end)) {
+        notPast(Math.max(fromMs, oldFrom))
         call("update#" + LINE, {
             workingScheduleLineId: lineId,
             thruDate: stamp(Math.max(fromMs, oldFrom)),
@@ -585,10 +593,12 @@ function storeScheduleLine(p) {
     })
     const others = lines.filter(other => other.workingScheduleLineId !== lineId)
     if (fromMs <= oldFrom) {
+        notPast(oldFrom)
         checkLine(line, oldFrom, ms(old.thruDate), others)
         call("update#" + LINE, Object.assign({workingScheduleLineId: lineId}, line))
         return {workingScheduleLineId: lineId, revision: scheduleRevision(id)}
     }
+    notPast(fromMs)
     checkLine(line, fromMs, ms(old.thruDate), others)
     call("update#" + LINE, {workingScheduleLineId: lineId, thruDate: stamp(fromMs), thruDate_changeReason: reason || "Changed"})
     const created = call(
@@ -705,8 +715,8 @@ function storeHolidayCalendar(p) {
     return {holidayCategoryId: id}
 }
 // store#Holiday: a holiday added to a calendar the caller changes (its name and day), a holiday's new name or day at its revision,
-// or a holiday removed (remove). A holiday whose day has passed is kept as it is (HOLIDAY_PAST), and a day is a calendar's
-// holiday once (DAY_TAKEN).
+// or a holiday removed (remove). A holiday whose day has passed is kept as it is, and none is added on or moved to a past day
+// (HOLIDAY_PAST); a day is a calendar's holiday once (DAY_TAKEN).
 function storeHoliday(p) {
     const userScope = editorScope("Changing a holiday")
     const id = text(p.workEffortId)
@@ -721,6 +731,8 @@ function storeHoliday(p) {
         if (!name) denied("NAME_REQUIRED", "Name the holiday")
         const day = dayOf(p.holidayDate)
         if (!day) denied("DATE_REQUIRED", "Choose the day")
+        // a day that has passed stays as it was, as a holiday on it does: the weeks planned by it are not changed afterwards
+        if (day < today) denied("HOLIDAY_PAST", "A holiday is added for today or later")
         checkDayFree(calendarId, day, null)
         const created = call("create#" + WORK_EFFORT, {
             workEffortTypeEnumId: "WetEvent",
@@ -900,7 +912,22 @@ function capacityPreview(p) {
                 .capacityList || []
         )[0] || null
     if (!entry) return {partyId, personName: people.personNames([partyId])[partyId] || partyId, source: "", days: [], weeks: []}
-    const names = scheduleNames(Array.from(entry.dayList || []).map(row => row.workingScheduleId))
+    // the names of the schedules the caller reads (a person employed by two employers follows another's too: its hours count, its
+    // name is that employer's)
+    const planning = unique(
+        Array.from(entry.dayList || [])
+            .map(row => row.workingScheduleId)
+            .filter(Boolean)
+    )
+    const teamIds = planning.length ? teamScheduleIds(userScope) : []
+    const readable = planning.length
+        ? Array.from(find(SCHEDULE).condition("workingScheduleId", "in", planning).list())
+              .filter(
+                  row => staffEmployers(userScope).includes(row.organizationPartyId) || teamIds.includes(row.workingScheduleId)
+              )
+              .map(row => row.workingScheduleId)
+        : []
+    const names = scheduleNames(readable)
     return {
         partyId,
         personName: people.personNames([partyId])[partyId] || partyId,

@@ -136,6 +136,7 @@ along with this software (see the LICENSE.md file). If not, see
             PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the schedule's employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope).
             Refuses: REVISION_CHANGED, DAY_INVALID, TIME_INVALID, BREAK_INVALID (not shorter than the interval), OVERLAP (another
             line in effect then overlaps it, across midnight and the week's end too), DATE_OUTSIDE (the schedule has ended),
+            DATE_PAST (a date before today on a schedule anyone has followed: the weeks planned by it stay as they were),
             LINE_ENDED.</description>
         <in-parameters>
             <parameter name="workingScheduleId" required="true"/>
@@ -162,14 +163,18 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="assign" noun="Schedule" allow-remote="false">
-        <description>An employment follows a working schedule from fromDate (the start of today when empty), with holidayCategoryId
-            in place of the schedule's holiday calendar when given; an empty workingScheduleId ends the following of one. Applied at
+        <description>An employment follows a working schedule from fromDate (the start of today when empty, or of the employment or
+            its assignment when either began later today), with holidayCategoryId in place of the schedule's holiday calendar when
+            given; an empty workingScheduleId ends the following of one. Applied at
             once by an HR editor of the employer, a change of its own (EmploymentChange of kind EckSchedule, with its reason and
             operation key, a retry answering the first): the assignment in effect ends on the date and the next starts with the
-            other terms as they were (an employment written before People's assignments gets its first), so a later transfer
-            carries the schedule; withdrawn by withdraw#EmploymentChange while its date is to come. expectedRevision, when given, is
-            the employment's. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: an employment outside the scope
+            other terms as they were (an employment written before People's assignments gets its first; from the day the
+            assignment in effect starts, a hire's first day, that assignment's schedule changes in place), so a later transfer
+            carries the schedule; a transfer or separation of the employment waiting for approval stays waiting with its approval
+            (the approvers notified again) and takes the schedule in effect on its date; withdrawn by withdraw#EmploymentChange
+            while its date is to come. expectedRevision, when given, is the employment's. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: an employment outside the scope
             (RECORD_UNAVAILABLE), REVISION_CHANGED, DATE_OUTSIDE, ASSIGNMENT_SCHEDULED (a later change is set; choose a later date),
+            CHANGE_WAITING (a transfer or separation from that date or earlier waits for approval),
             a schedule of another employer (SCHEDULE_OUTSIDE) or not in effect on the date (SCHEDULE_NOT_IN_EFFECT),
             CALENDAR_UNAVAILABLE, SCHEDULE_REQUIRED (a calendar with no schedule), NOTHING_CHANGES.</description>
         <in-parameters>
@@ -257,7 +262,7 @@ along with this software (see the LICENSE.md file). If not, see
             remove, a holiday removed. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the calendar's employer (a shared calendar
             PEOPLE_ALL_ORGANIZATIONS too). Refuses: a calendar or holiday the caller does not change (RECORD_UNAVAILABLE),
             NAME_REQUIRED, DATE_REQUIRED, DAY_TAKEN (the calendar has a holiday that day), REVISION_CHANGED, HOLIDAY_PAST (a holiday
-            whose day has passed stays as it was, and none moves to a past day).</description>
+            whose day has passed stays as it was, and none is added on or moves to a past day).</description>
         <in-parameters>
             <parameter name="workEffortId"/>
             <parameter name="expectedRevision"/>

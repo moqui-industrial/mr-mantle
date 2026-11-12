@@ -387,3 +387,150 @@ feature(
         }
     }
 )
+
+feature(
+    "A schedule assigned beside a transfer waiting for approval keeps the transfer and its approval, which applies with the schedule; one from the day the assignment in effect starts changes it in place; a followed schedule's past weeks and a past day's holidays stay as they were; another employer's schedule is not named in the preview",
+    {
+        when() {
+            const out = {}
+            const P = "mantle.humanres.PeopleServices."
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtManager",
+                fromPartyId: state.mgr,
+                toPartyId: state.ben,
+                fromDate: since
+            })
+            call("create#moqui.security.UserGroupPermission", {
+                userGroupId: state.uMgr,
+                userPermissionId: "PEOPLE_REQUEST_APPROVE",
+                fromDate: since
+            })
+            const benEmp = rows("mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtEmployee",
+                fromPartyId: state.ben,
+                toPartyId: orgA
+            })[0].partyRelationshipId
+            const transfer = {
+                partyRelationshipId: benEmp,
+                changeKind: "transfer",
+                effectiveDate: "2027-06-07",
+                managerPartyId: state.cal
+            }
+            const asked = run(
+                state.hr,
+                P + "apply#EmploymentChange",
+                Object.assign({}, transfer, {
+                    expectedRevision: run(state.hr, P + "preview#EmploymentChange", transfer).revision,
+                    reason: "Moves to Cal's team"
+                })
+            )
+            out.asked = [asked.error, asked.statusId].join("/")
+            const changeOf = id => rows("mantle.humanres.employment.EmploymentChange", {employmentChangeId: id})[0]
+            const approvalOf = id =>
+                rows("mantle.humanres.approval.PeopleApproval", {sourceId: id}).find(row => row.statusId === "PapPending")
+            const unread = id => {
+                const messageIds = rows("moqui.security.user.NotificationMessage", {
+                    topic: "PeopleEmploymentChangeApproval",
+                    recordId: id
+                }).map(row => row.notificationMessageId)
+                return messageIds.length
+                    ? Array.from(
+                          ec.entity
+                              .find("moqui.security.user.NotificationMessageUser")
+                              .condition("notificationMessageId", "in", messageIds)
+                              .condition("userId", state.uMgr)
+                              .condition("viewedDate", "is-null", null)
+                              .disableAuthz()
+                              .list()
+                      ).map(row => row.notificationMessageId)
+                    : []
+            }
+            const firstNotice = unread(asked.employmentChangeId)[0]
+            const assign = parameters =>
+                run(state.hr, S + "assign#Schedule", Object.assign({partyRelationshipId: benEmp}, parameters))
+            // from the transfer's date: it would come after the schedule and be refused when approved
+            out.onTransfer = code(assign({workingScheduleId: state.four, fromDate: "2027-06-07"}))
+            const assigned = assign({workingScheduleId: state.four, fromDate: "2027-05-03"})
+            out.assigned = [assigned.error, assigned.applied].join("/")
+            const waiting = changeOf(asked.employmentChangeId)
+            out.waiting = [
+                waiting.statusId,
+                waiting.workingScheduleId === state.four,
+                !!approvalOf(asked.employmentChangeId)
+            ].join("/")
+            // the approver's notice is sent again at the new revision, the first one read
+            const notices = unread(asked.employmentChangeId)
+            out.notices = [notices.length, notices.includes(firstNotice)].join("/")
+            const approved = run(state.uMgr, "org.moqui.ui.NotificationServices.approve#NotificationMessage", {
+                notificationMessageId: notices[0]
+            })
+            out.approved = [approved.error, changeOf(asked.employmentChangeId).statusId].join("/")
+            out.after = rows("mantle.humanres.employment.EmploymentAssignment", {partyRelationshipId: benEmp})
+                .filter(row => row.thruDate == null)
+                .map(row => [row.managerPartyId === state.cal, row.workingScheduleId === state.four].join("/"))
+                .join(";")
+            // from the day the assignment in effect starts: changed in place, not a new assignment voiding it
+            state.dan = person("DAN")
+            const danEmp = employ(state.dan, orgA)
+            const early = run(state.hr, S + "store#Schedule", {
+                organizationPartyId: orgA,
+                scheduleName: "Early week",
+                timeZone: "Europe/Berlin",
+                fromDate: "2026-01-01"
+            }).workingScheduleId
+            run(state.hr, S + "assign#Schedule", {partyRelationshipId: danEmp, workingScheduleId: early, fromDate: "2026-01-05"})
+            const sameDay = run(state.hr, S + "assign#Schedule", {
+                partyRelationshipId: danEmp,
+                workingScheduleId: early,
+                holidayCategoryId: state.c1,
+                fromDate: "2026-01-05"
+            })
+            const danRows = rows("mantle.humanres.employment.EmploymentAssignment", {partyRelationshipId: danEmp})
+            out.sameDay = [
+                sameDay.error,
+                danRows.length,
+                danRows[0]?.holidayCategoryId === state.c1,
+                sameDay.employmentAssignmentId === danRows[0]?.employmentAssignmentId
+            ].join("/")
+            out.pastLine = code(line(early, {isoDay: 1, startTime: "08:00", endTime: "16:00", fromDate: "2026-02-02"}))
+            out.todayLine = line(early, {isoDay: 1, startTime: "08:00", endTime: "16:00"}).error
+            out.pastHoliday = code(
+                run(state.hr, S + "store#Holiday", {
+                    holidayCategoryId: state.c1,
+                    workEffortName: "Past day",
+                    holidayDate: "2026-02-03"
+                })
+            )
+            // a person employed by both employers follows B's schedule: A's HR sees the hours, not the schedule's name
+            const fay = person("FAY")
+            employ(fay, orgA)
+            const fayB = employ(fay, orgB)
+            run(state.hrB, S + "assign#Schedule", {
+                partyRelationshipId: fayB,
+                workingScheduleId: state.other,
+                fromDate: "2027-03-01"
+            })
+            const preview = run(state.hr, S + "get#CapacityPreview", {
+                partyId: fay,
+                fromDate: "2027-03-01",
+                thruDate: "2027-03-03"
+            })
+            out.preview = [preview.error, preview.source, (preview.days || []).map(row => row.scheduleName).join(",")].join("/")
+            return out
+        },
+        then(out) {
+            out.asked === "/EchRequested"
+            out.onTransfer === "CHANGE_WAITING"
+            out.assigned === "/true"
+            out.waiting === "EchRequested/true/true"
+            out.notices === "1/false"
+            out.approved === "/EchApplied"
+            out.after === "true/true"
+            out.sameDay === "/1/true/true"
+            out.pastLine === "DATE_PAST"
+            out.todayLine === ""
+            out.pastHoliday === "HOLIDAY_PAST"
+            out.preview === "/schedule/,,"
+        }
+    }
+)
