@@ -31,17 +31,17 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- impl-people P13 (design-people §6 TimeImport; design-admin §11.1; impl-people §4): the time-and-attendance import as a
         registered target of the framework's org.moqui.admin.DataTransferServices, on the pattern of Accounting's statement imports
         (AccountingSetupData.xml): People keeps its own wizard (TimeImport: punches need a device and a zone), so only its result
-        contract is registered, the imports of the employers the caller reads with the place that opens each. It names People's own
-        import permission, PEOPLE_IMPORT, which preview#Import and import#Records check beside PEOPLE_HR_VIEW, PEOPLE_HR_EDIT and the
-        employer, and no ADMIN_* permission (a target's permissions are all required); its runs are read with PEOPLE_HR_VIEW and
-        People's scope, which find#ImportRuns checks again. Nothing is staged or applied through the registration, and it adds no
+        contract is registered, the imports of the employers the caller reads with the place that opens each. Its import permissions
+        are all that preview#Import and import#Records require (the framework's holdsAll: every one of the list): People's own import
+        permission PEOPLE_IMPORT with PEOPLE_HR_VIEW and PEOPLE_HR_EDIT, which the services check again with the employer; no ADMIN_*
+        permission; its runs are read with PEOPLE_HR_VIEW and People's scope, which find#ImportRuns checks again. Nothing is staged or applied through the registration, and it adds no
         right. Its owner place is People's TimeImport (the app maps ownerRoute). -->
     <moqui.server.TransferTarget targetId="timeAndAttendance" direction="import" targetMode="wizard" title="Time and attendance"
             description="Clock events of a device or time system (worker, time, in or out), previewed and recorded in People's Time import"
             effectsNote="Each new event becomes a raw attendance punch of the worker's employment; events already recorded are skipped. Nothing is approved and no timesheet changes."
             ownerApp="People" targetVersion="1" scopeLabel="Employer"
             findService="mantle.humanres.AttendanceServices.find#ImportRuns"
-            importPermission="PEOPLE_IMPORT" viewPermission="PEOPLE_HR_VIEW"
+            importPermission="PEOPLE_IMPORT,PEOPLE_HR_VIEW,PEOPLE_HR_EDIT" viewPermission="PEOPLE_HR_VIEW"
             ownerRoute="peopleTimeImport" sequenceNum="41"/>
     <!-- the find service runs as the reader wherever the framework calls it (Admin's Imports): every user may call it, and it
         checks PEOPLE_HR_VIEW and People's scope itself -->

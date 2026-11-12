@@ -195,7 +195,30 @@ function accessKinds(userScope, employment) {
 const correctsKinds = ["self", "team", "hrEdit"]
 // lock an employment's attendance: every punch and correction of it takes its relationship row first, so they serialize
 const lockEmployment = partyRelationshipId => find(RELATIONSHIP, {partyRelationshipId}).forUpdate(true).one()
-const clockingOn = partyRelationshipId => one(EMPLOYMENT, {partyRelationshipId})?.clockingEnabled === "Y"
+
+// ===== clocking =====
+// Whether an employment clocks (impl-people §4, Nov 12): its own setting when it has one (Employment.clockingEnabled Y or N, the
+// exception HR sets), else its employer's default (the employer's PartySetting PeopleClocking: Y on; N or none off). The one rule
+// every caller reads: record#Punch, get#MyClock, find#Clocking and get#ClockOffer here, and any later reader (the kiosk, hours for
+// pay) through isClockingOn. employerDefaults caches the employers' defaults for a caller that asks of many employments.
+const SETTING = "mantle.party.PartySetting"
+function employerClocking(organizationPartyId, employerDefaults) {
+    if (!organizationPartyId) return false
+    if (employerDefaults?.has(organizationPartyId)) return employerDefaults.get(organizationPartyId)
+    const on = one(SETTING, {partyId: organizationPartyId, partySettingTypeId: "PeopleClocking"})?.settingValue === "Y"
+    employerDefaults?.set(organizationPartyId, on)
+    return on
+}
+// The clocking of an employment: on, its own setting (Y, N or null) and its employer's default.
+function clockingOf(partyRelationshipId, employerDefaults = new Map()) {
+    const relationship = employmentRow(partyRelationshipId)
+    if (!relationship) return {on: false, setting: null, employerOn: false}
+    const own = one(EMPLOYMENT, {partyRelationshipId})?.clockingEnabled
+    const setting = own === "Y" || own === "N" ? own : null
+    const employerOn = employerClocking(relationship.toPartyId, employerDefaults)
+    return {on: setting ? setting === "Y" : employerOn, setting, employerOn}
+}
+const isClockingOn = (partyRelationshipId, employerDefaults) => clockingOf(partyRelationshipId, employerDefaults).on
 
 // ===== punches and days =====
 // The day a punch counts on: an in-punch's own day in the zone; an out-punch the day of the employment's in-punch it closes (the
@@ -332,10 +355,10 @@ function ownClockingEmployment(userScope, partyRelationshipId) {
     if (text(partyRelationshipId)) {
         const row = own.find(employment => employment.partyRelationshipId === text(partyRelationshipId))
         if (!row) denied("RECORD_UNAVAILABLE", "Employment " + text(partyRelationshipId) + " is not available")
-        if (!clockingOn(row.partyRelationshipId)) denied("CLOCKING_OFF", "Clocking is not on for this employment")
+        if (!isClockingOn(row.partyRelationshipId)) denied("CLOCKING_OFF", "Clocking is not on for this employment")
         return employmentRow(row.partyRelationshipId)
     }
-    const clocking = own.filter(row => clockingOn(row.partyRelationshipId))
+    const clocking = own.filter(row => isClockingOn(row.partyRelationshipId))
     if (!clocking.length) denied("CLOCKING_OFF", "Clocking is not on for your employment")
     if (clocking.length > 1) denied("EMPLOYMENT_REQUIRED", "You clock for more than one employer: choose the employment")
     return employmentRow(clocking[0].partyRelationshipId)
@@ -398,7 +421,7 @@ function myClock() {
     )
     const names = people.organizationNames(unique(own.map(row => row.organizationPartyId)))
     const employments = own.map(row => {
-        const on = clockingOn(row.partyRelationshipId)
+        const on = isClockingOn(row.partyRelationshipId)
         const zone = scheduleZone(row.partyRelationshipId, now) || userZone()
         const state = on ? clockState(row.partyRelationshipId, now) : {clockedIn: false, last: null}
         const today = on
@@ -430,26 +453,46 @@ function myClock() {
     return {clocking: employments.some(row => row.clockingEnabled), employments}
 }
 
+// get#ClockOffer: whether the caller clocks for any current employment of their own (PEOPLE_SELF_SERVICE and a person), the
+// condition of the quick create Clock in (org.moqui.ui.ShellServices.offer#QuickCreate). It answers the session's user alone and
+// reads only their employments, so the shell can ask it on every page load.
+function offerClock() {
+    const partyId = ec.user.userAccount?.partyId || null
+    if (!partyId || !ec.user.hasPermission("PEOPLE_SELF_SERVICE")) return {offer: false}
+    const now = nowMs()
+    const own = Array.from(
+        people.current(people.employmentFind().condition("fromPartyId", partyId), null).limit(20).list()
+    ).filter(row => (ms(row.fromDate) ?? -Infinity) <= now && (ms(row.thruDate) ?? Infinity) > now)
+    const defaults = new Map()
+    return {offer: own.some(row => isClockingOn(row.partyRelationshipId, defaults))}
+}
+
 // ===== store#Clocking, find#Clocking (HR) =====
-// store#Clocking: an HR editor of the employer turns clocking on or off for an employment, with a reason (the audit row's).
+// store#Clocking: an HR editor of the employer sets an employment's clocking, with a reason (the audit row's): Y on, N off (each an
+// exception to the employer's default), or empty to follow the employer's default.
 function storeClocking(p) {
     const userScope = people.scopeOf()
     const employment = employmentRow(text(p.partyRelationshipId))
     if (!employment || !canEditAt(userScope, employment.toPartyId))
         denied("RECORD_UNAVAILABLE", "Employment " + text(p.partyRelationshipId) + " is not available")
-    const on = truthy(p.clockingEnabled)
+    const given = text(p.clockingEnabled)
+    const setting = given === "" ? null : truthy(given) ? "Y" : given === "N" || given === "false" ? "N" : undefined
+    if (setting === undefined) denied("CLOCKING_INVALID", "Clocking is Y, N or empty to follow the employer")
     const existing = one(EMPLOYMENT, {partyRelationshipId: employment.partyRelationshipId})
-    if ((existing?.clockingEnabled === "Y") === on) return {clockingEnabled: on, changed: false}
-    const values = {
-        partyRelationshipId: employment.partyRelationshipId,
-        clockingEnabled: on ? "Y" : "N",
-        clockingEnabled_changeReason: text(p.reason) || null
+    const before = existing?.clockingEnabled === "Y" || existing?.clockingEnabled === "N" ? existing.clockingEnabled : null
+    if (before !== setting) {
+        const values = {
+            partyRelationshipId: employment.partyRelationshipId,
+            clockingEnabled: setting,
+            clockingEnabled_changeReason: text(p.reason) || null
+        }
+        call((existing ? "update#" : "create#") + EMPLOYMENT, values)
     }
-    call((existing ? "update#" : "create#") + EMPLOYMENT, values)
-    return {clockingEnabled: on, changed: true}
+    const now = clockingOf(employment.partyRelationshipId)
+    return {clockingEnabled: now.on, clockingSetting: now.setting, employerDefault: now.employerOn, changed: before !== setting}
 }
-// find#Clocking: the current employments of an HR reader's employers (or the one asked) with clocking on, each with whether the
-// person is clocked in now.
+// find#Clocking: the current employments of an HR reader's employers (or the one asked) that clock, by their own setting or their
+// employer's default, and those set apart from the default (an exception off), each with how and whether the person is clocked in now.
 function findClocking(p) {
     const userScope = people.scopeOf()
     const organizationPartyIds = hrEmployers(userScope)
@@ -463,27 +506,37 @@ function findClocking(p) {
             .limit(exportCap)
             .list()
     )
-    const clocking = employments.length
-        ? new Set(
-              Array.from(
-                  find(EMPLOYMENT)
-                      .condition(
-                          "partyRelationshipId",
-                          "in",
-                          employments.map(row => row.partyRelationshipId)
-                      )
-                      .condition("clockingEnabled", "Y")
-                      .selectField("partyRelationshipId")
-                      .list()
-              ).map(row => row.partyRelationshipId)
-          )
-        : new Set()
-    const found = employments.filter(row => clocking.has(row.partyRelationshipId))
+    // each employment's own setting (an exception), else its employer's default
+    const settings = new Map()
+    for (let index = 0; index < employments.length; index += 500)
+        for (const row of Array.from(
+            find(EMPLOYMENT)
+                .condition(
+                    "partyRelationshipId",
+                    "in",
+                    employments.slice(index, index + 500).map(row => row.partyRelationshipId)
+                )
+                .condition("clockingEnabled", "in", ["Y", "N"])
+                .selectField("partyRelationshipId,clockingEnabled")
+                .list()
+        ))
+            settings.set(row.partyRelationshipId, row.clockingEnabled)
+    const defaults = new Map()
+    const clockingRow = row => {
+        const setting = settings.get(row.partyRelationshipId) || null
+        const employerOn = employerClocking(row.toPartyId, defaults)
+        return {on: setting ? setting === "Y" : employerOn, setting, employerOn}
+    }
+    const found = employments.filter(row => {
+        const clocking = clockingRow(row)
+        return clocking.on || clocking.setting
+    })
     const persons = people.personNames(unique(found.map(row => row.fromPartyId)))
     const organizations = people.organizationNames(unique(found.map(row => row.toPartyId)))
     const list = found
         .map(row => {
-            const state = clockState(row.partyRelationshipId, now)
+            const clocking = clockingRow(row)
+            const state = clocking.on ? clockState(row.partyRelationshipId, now) : {clockedIn: false}
             const zone = scheduleZone(row.partyRelationshipId, now) || userZone()
             return {
                 partyRelationshipId: row.partyRelationshipId,
@@ -491,8 +544,20 @@ function findClocking(p) {
                 personName: persons[row.fromPartyId] || row.fromPartyId,
                 organizationPartyId: row.toPartyId,
                 organizationName: organizations[row.toPartyId] || row.toPartyId,
+                clockingEnabled: clocking.on,
+                clockingSetting: clocking.setting,
+                employerDefault: clocking.employerOn,
+                settingText: !clocking.setting
+                    ? "Employer's default"
+                    : clocking.setting === "Y"
+                      ? "On for this employee"
+                      : "Off for this employee",
                 clockedIn: state.clockedIn,
-                stateText: state.clockedIn ? "Clocked in since " + timeIn(state.sinceMs, zone) : "Clocked out",
+                stateText: !clocking.on
+                    ? "Does not clock"
+                    : state.clockedIn
+                      ? "Clocked in since " + timeIn(state.sinceMs, zone)
+                      : "Clocked out",
                 canChange: canEditAt(userScope, row.toPartyId)
             }
         })
@@ -985,8 +1050,23 @@ function parseTime(value, zone) {
     }
     return null
 }
-// The person a file's worker cell names: People's person id, or a work email (EmailWork), each read once.
-function workerResolver(kind) {
+// The person a file's worker cell names among those the employer employs or employed: People's person id, or a work email
+// (EmailWork), each read once. Anyone else is unknown, as one who does not exist (the file tells the importer nothing of another
+// employer's people).
+function workerResolver(kind, organizationPartyId) {
+    const employedThere = partyIds =>
+        partyIds.length
+            ? unique(
+                  Array.from(
+                      people
+                          .employmentFind()
+                          .condition("fromPartyId", "in", partyIds)
+                          .condition("toPartyId", organizationPartyId)
+                          .selectField("fromPartyId")
+                          .list()
+                  ).map(row => row.fromPartyId)
+              )
+            : []
     const cache = new Map()
     return value => {
         const key = text(value)
@@ -1003,21 +1083,23 @@ function workerResolver(kind) {
                     .list()
             ).map(row => row.contactMechId)
             if (mechs.length) {
-                const owners = unique(
-                    Array.from(
-                        people
-                            .current(
-                                find("mantle.party.contact.PartyContactMech")
-                                    .condition("contactMechId", "in", mechs)
-                                    .condition("contactMechPurposeId", "EmailWork"),
-                                null
-                            )
-                            .list()
-                    ).map(row => row.partyId)
+                const owners = employedThere(
+                    unique(
+                        Array.from(
+                            people
+                                .current(
+                                    find("mantle.party.contact.PartyContactMech")
+                                        .condition("contactMechId", "in", mechs)
+                                        .condition("contactMechPurposeId", "EmailWork"),
+                                    null
+                                )
+                                .list()
+                        ).map(row => row.partyId)
+                    )
                 )
                 partyId = owners.length === 1 ? owners[0] : owners.length > 1 ? "_AMBIGUOUS_" : null
             }
-        } else partyId = one("mantle.party.Person", {partyId: key}) ? key : null
+        } else partyId = one("mantle.party.Person", {partyId: key}) && employedThere([key]).length ? key : null
         cache.set(key.toLowerCase(), partyId)
         return partyId
     }
@@ -1107,7 +1189,7 @@ function previewImport(p) {
         createdByUserId: ec.user.userId || null,
         createdDate: ec.user.nowTimestamp
     }).attendanceImportId
-    const workerOf = workerResolver(workerIdKind)
+    const workerOf = workerResolver(workerIdKind, organizationPartyId)
     const employmentOf = employmentResolver(organizationPartyId)
     const now = nowMs()
     const seen = new Set()
@@ -1132,6 +1214,7 @@ function previewImport(p) {
                 const partyId = workerOf(out.workerText)
                 const punchMs = parseTime(out.timeText, zone)
                 const directionEnumId = directionWords[out.directionText.toLowerCase()] || null
+                // a person the employer never employed is unknown here, as one who does not exist
                 if (!partyId) refuse("WORKER_UNKNOWN", "No person is " + (out.workerText || "named"))
                 else if (partyId === "_AMBIGUOUS_") refuse("WORKER_AMBIGUOUS", "More than one person has that work email")
                 else if (punchMs == null) refuse("TIME_INVALID", "The time is not read as yyyy-MM-dd HH:mm")
@@ -1351,6 +1434,7 @@ function findImportRuns(p) {
 const operations = {
     recordSelfPunch,
     myClock,
+    offerClock,
     storeClocking,
     findClocking,
     findAttendance,
@@ -1368,4 +1452,4 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown attendance operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({execute: run, isClockingOn})

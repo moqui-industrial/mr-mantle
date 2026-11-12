@@ -65,6 +65,11 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="AtsSelf" description="Self-service clock" sequenceNum="1" enumTypeId="AttendanceSource"/>
             <moqui.basic.Enumeration enumId="AtsImport" description="Imported file" sequenceNum="2" enumTypeId="AttendanceSource"/>
             <moqui.basic.Enumeration enumId="AtsKiosk" description="Clocking kiosk" sequenceNum="3" enumTypeId="AttendanceSource"/>
+            <!-- an employer's clocking default (impl-people §4, Nov 12): Y, its employees clock in and out unless their employment
+                says N (Employment.clockingEnabled); N or none, only those whose employment says Y. People's Settings sets it
+                (P29); Attendance.js isClockingOn reads it. -->
+            <mantle.party.PartySettingType partySettingTypeId="PeopleClocking" description="People - Employees clock in and out"
+                    validRegexp="^[YN]$" defaultValue="N"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
         </seed-data>
     </entity>
     <entity entity-name="AttendanceDay" package="mantle.humanres.attendance" cache="never">

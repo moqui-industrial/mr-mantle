@@ -15,8 +15,8 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- People's attendance (IronStone People design §6 Attendance and TimeImport, §3 SelfService's Clock, §16.2 AttendanceServices,
     PE-05, PE-19; impl-people P13; Attendance.js): evidence of presence, apart from work allocation and payable time. Raw punches
     (AttendancePunch) are recorded once by their source key and never changed: the person's own clock in self-service (record#Punch:
-    the worker is the session's, never a parameter; the time is the server's; only for an employment with clocking on, which an HR
-    editor turns on, store#Clocking) and the device files an HR officer imports (preview#Import, import#Records: each row in its own
+    the worker is the session's, never a parameter; the time is the server's; only for an employment that clocks: its employer's
+    default, the PartySetting PeopleClocking, unless HR set the employment apart, store#Clocking; Attendance.js isClockingOn) and the device files an HR officer imports (preview#Import, import#Records: each row in its own
     transaction, known source keys skipped, bad rows named; PEOPLE_IMPORT beside PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer).
     Each punch counts on its employment's day in the zone of its working schedule; an out-punch on the day of the in-punch it closes,
     so an overnight shift is its start day's; a day says what is missing (find#Attendance, get#Day). A correction asks for a day's
@@ -71,29 +71,46 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="employments" from="out.employments"/>
         </actions>
     </service>
+    <service verb="get" noun="ClockOffer" allow-remote="false">
+        <description>Whether the caller clocks for a current employment of their own (PEOPLE_SELF_SERVICE and a person; no party
+            parameter): the condition-service of the quick create Clock in, which the shell asks on each page load. Answers false
+            for anyone else.</description>
+        <implements service="org.moqui.ui.ShellServices.offer#QuickCreate"/>
+        <actions>
+            <set field="offer" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('offerClock', context).offer"/>
+        </actions>
+    </service>
     <service verb="store" noun="Clocking" allow-remote="false">
-        <description>Clocking turned on (clockingEnabled Y) or off for an employment by an HR editor of the employer (PEOPLE_HR_VIEW
-            and PEOPLE_HR_EDIT; another is refused as missing, RECORD_UNAVAILABLE), with the reason kept by the field's audit row.
+        <description>An employment's clocking set by an HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; another is
+            refused as missing, RECORD_UNAVAILABLE), with the reason kept by the field's audit row: clockingEnabled Y (it clocks)
+            or N (it does not), each an exception to the employer's default (its PartySetting PeopleClocking), or empty to follow
+            that default (CLOCKING_INVALID otherwise). Answers whether it clocks now, its own setting and the employer's default.
             Turning it off keeps every punch.</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
-            <parameter name="clockingEnabled" required="true"/>
+            <parameter name="clockingEnabled"><description>Y, N, or empty to follow the employer's default</description></parameter>
             <parameter name="reason" allow-html="none"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="clockingEnabled" type="Boolean"/>
+            <parameter name="clockingEnabled" type="Boolean"><description>Whether the employment clocks now</description></parameter>
+            <parameter name="clockingSetting"><description>Its own setting, Y or N, or none when it follows the employer</description></parameter>
+            <parameter name="employerDefault" type="Boolean"/>
             <parameter name="changed" type="Boolean"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('storeClocking', context)"/>
             <set field="clockingEnabled" from="out.clockingEnabled"/>
+            <set field="clockingSetting" from="out.clockingSetting"/>
+            <set field="employerDefault" from="out.employerDefault"/>
             <set field="changed" from="out.changed"/>
         </actions>
     </service>
     <service verb="find" noun="Clocking" allow-remote="false">
-        <description>Who clocks: the current employments with clocking on of the employers an HR reader reads (PEOPLE_HR_VIEW; one
-            employer when organizationPartyId names it, ORGANIZATION_DENIED outside the scope), each with the person, the employer,
-            whether they are clocked in now and whether the caller may change it. Paged.</description>
+        <description>Who clocks: the current employments of the employers an HR reader reads (PEOPLE_HR_VIEW; one employer when
+            organizationPartyId names it, ORGANIZATION_DENIED outside the scope) that clock, by their own setting or the employer's
+            default, and those set apart from it, each with the person, the employer, whether it clocks (clockingEnabled), its own
+            setting (clockingSetting Y, N or none) and the employer's default, how in words, whether they are clocked in now and
+            whether the caller may change it. Paged.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="pageIndex" type="Integer"/>

@@ -3,7 +3,8 @@
 // and names the bad row; a day with an in-punch and no out is flagged; an overnight shift counts on the day it started; a
 // correction asked by the person and approved by their manager is the day's attendance and keeps the raw punches, the person may
 // not approve it and another employer's HR does not read it; the self-service clock records the session's own employment only
-// where clocking is on, refuses clocking in twice and answers a retry with the first punch; an import needs PEOPLE_IMPORT.
+// where clocking is on, refuses clocking in twice and answers a retry with the first punch; clocking follows the employer's default
+// (PartySetting PeopleClocking) unless HR sets the employment apart, and so does the Clock in offer; an import needs PEOPLE_IMPORT.
 // Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules are
 // the services' own checks). Days of March 2026 (Monday the 2nd) in America/Chicago.
 // Run: ./moq test mr-mantle --spec Attendance
@@ -283,18 +284,67 @@ feature("the self-service clock records the session's own employment where clock
     }
 })
 
+feature("clocking follows the employer's default unless HR sets the employment apart, and the Clock in offer follows it", {
+    when() {
+        const employerDefault = value =>
+            call("store#mantle.party.PartySetting", {partyId: orgA, partySettingTypeId: "PeopleClocking", settingValue: value})
+        const before = run(state.uBob, A + "get#ClockOffer", {})
+        employerDefault("Y")
+        const byDefault = run(state.uBob, A + "get#ClockOffer", {})
+        const clock = run(state.uBob, A + "get#MyClock", {})
+        const apart = run(state.hr, A + "store#Clocking", {
+            partyRelationshipId: state.bobEmp,
+            clockingEnabled: "N",
+            reason: "Office"
+        })
+        const apartOffer = run(state.uBob, A + "get#ClockOffer", {})
+        const apartPunch = run(state.uBob, A + "record#Punch", {})
+        const who = run(state.hr, A + "find#Clocking", {organizationPartyId: orgA}).clocking
+        const follows = run(state.hr, A + "store#Clocking", {partyRelationshipId: state.bobEmp, clockingEnabled: ""})
+        const followsOffer = run(state.uBob, A + "get#ClockOffer", {})
+        // the default off again: Ana's own Y still clocks, Carl's following employment no longer does
+        employerDefault("N")
+        const exceptionOn = run(state.uAna, A + "get#ClockOffer", {})
+        const after = run(state.hr, A + "find#Clocking", {organizationPartyId: orgA}).clocking
+        const outsider = run(state.hrB, A + "get#ClockOffer", {})
+        return {before, byDefault, clock, apart, apartOffer, apartPunch, who, follows, followsOffer, exceptionOn, after, outsider}
+    },
+    then({before, byDefault, clock, apart, apartOffer, apartPunch, who, follows, followsOffer, exceptionOn, after, outsider}) {
+        before.offer === false && byDefault.offer === true && clock.clocking
+        apart.clockingEnabled === false && apart.clockingSetting == "N" && apart.employerDefault === true && apart.changed
+        apartOffer.offer === false && code(apartPunch) == "CLOCKING_OFF"
+        const bob = who.find(row => row.partyId == state.bob)
+        bob.clockingEnabled === false && bob.settingText == "Off for this employee" && bob.stateText == "Does not clock"
+        const carl = who.find(row => row.partyId == state.carl)
+        carl.clockingEnabled === true && carl.settingText == "Employer's default"
+        who.find(row => row.partyId == state.ana).settingText == "On for this employee"
+        // empty follows the employer again, whose default is on
+        follows.clockingEnabled === true && !follows.clockingSetting && follows.changed
+        followsOffer.offer === true
+        exceptionOn.offer === true
+        after.map(row => row.partyId).join(",") == state.ana
+        // a person employed only by B, whose default is none
+        outsider.offer === false
+    }
+})
+
 feature("an import needs PEOPLE_IMPORT and the employer: HR without it and another employer's HR are refused", {
     when() {
-        const text = file([state.ana + ",2026-03-09 08:00,in,P1,door"])
+        // B's HR officer, whom A never employed, is unknown to A's file as one who does not exist
+        const text = file([state.ana + ",2026-03-09 08:00,in,P1,door", state.hrBParty + ",2026-03-09 08:00,in,P2,door"])
+        const allowed = importOf(text)
         return {
-            allowed: importOf(text),
+            allowed,
+            allowedRows: run(state.hr, A + "get#Import", {attendanceImportId: allowed.attendanceImportId, outcome: "problems"})
+                .rows,
             noImport: importOf(text, state.hrNoImport),
             otherEmployer: importOf(text, state.hrB),
             otherRuns: run(state.hrB, A + "find#ImportRuns", {targetId: "timeAndAttendance"}).runList
         }
     },
-    then({allowed, noImport, otherEmployer, otherRuns}) {
-        allowed.error == "" && allowed.readyCount == 1
+    then({allowed, allowedRows, noImport, otherEmployer, otherRuns}) {
+        allowed.error == "" && allowed.readyCount == 1 && allowed.errorCount == 1
+        allowedRows.map(row => row.reasonCode).join(",") == "WORKER_UNKNOWN"
         code(noImport) == "PERMISSION_DENIED"
         code(otherEmployer) == "ORGANIZATION_DENIED"
         otherRuns.length == 0
