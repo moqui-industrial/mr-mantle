@@ -755,8 +755,9 @@ function storeCostThreshold(p) {
 
 // ===== Projects' money (owner contract) =====
 // The maintenance work charged to a project (a work order naming it, or an issuance carrying it) with its cost by currency,
-// for get#ProjectMoneySummary, which checks the money reader and the project first: per work order its parts, labor and
-// outside service and the hours not priced, and the totals; never a source, a rate or a person.
+// for get#ProjectMoneySummary, which checks the money reader and the project first: per work order its total by currency and
+// the hours not priced, and the totals by currency; never a source, a component, a rate or a person (a work order's labor alone
+// would be one technician's hours at their class's rate).
 function projectCosts(projectWorkEffortId) {
     if (!projectWorkEffortId || !ec.entity.isEntityDefined(ORDER)) return {workList: [], totalList: []}
     const charged = Array.from(find(ORDER, {projectWorkEffortId}).selectField("workEffortId").list()).map(row => row.workEffortId)
@@ -768,6 +769,9 @@ function projectCosts(projectWorkEffortId) {
     const roots = rootIds.length ? rowsIn(ORDER_VIEW, "workEffortId", rootIds).filter(row => row.isTemplate !== "Y") : []
     if (!roots.length) return {workList: [], totalList: []}
     const sources = sourcesOf(roots, {}, {projectWorkEffortId})
+    // the total of each currency alone (P11 review R3)
+    const totalsOnly = totalList =>
+        totalList.map(row => ({currencyUomId: row.currencyUomId, total: row.total, totalText: row.totalText}))
     const workList = roots.map(root => {
         const own = sources.filter(row => row.workEffortId === root.workEffortId)
         const totals = totalsOf(own)
@@ -775,11 +779,11 @@ function projectCosts(projectWorkEffortId) {
             workEffortId: root.workEffortId,
             workEffortName: root.workEffortName || root.workEffortId,
             statusText: statusText(root.statusId),
-            totalList: totals.totalList,
+            totalList: totalsOnly(totals.totalList),
             unpricedHours: totals.unpricedHours.add(totals.unapprovedHours)
         }
     })
-    return {workList, totalList: totalsOf(sources).totalList}
+    return {workList, totalList: totalsOnly(totalsOf(sources).totalList)}
 }
 
 const operations = {costs, storeCostThreshold}

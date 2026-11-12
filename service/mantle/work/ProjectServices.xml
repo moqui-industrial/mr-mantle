@@ -4152,8 +4152,8 @@ along with this software (see the LICENSE.md file). If not, see
             actualClientCost, rolled up from the time; profit; budget used and remaining); what was billed (the project's client invoices
             not cancelled: invoiced, paid, open; a list of them), the expenses (expense invoices on the project: total, billed through),
             the unbilled time (get#UnbilledSummary), the order lines and the milestone shares (get#MilestoneBilling: contracted, shared,
-            billed, due), and the maintenance work charged to the project with its cost by currency (maintenanceList,
-            maintenanceTotalList; impl-maintenance P11). BigDecimal amounts in currencyUomId. For those who manage money and see the
+            billed, due), and the maintenance work charged to the project with each work order's total by currency and its hours not
+            priced, never a component, rate or person (maintenanceList, maintenanceTotalList; impl-maintenance P11). BigDecimal amounts in currencyUomId. For those who manage money and see the
             project; else an error.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="summary" type="Map"/></out-parameters>
@@ -4224,8 +4224,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const budget = D(project.totalClientCostAllowed)
                 const actualClient = D(project.actualClientCost)
                 const actualCost = D(project.actualCost)
-                // impl-maintenance P11 (owner contract, design-projects §4): the maintenance work charged to the project, its parts,
-                // labor and outside service by currency; a failure leaves it out, logged, and the rest of the money stands
+                // impl-maintenance P11 (owner contract, design-projects §4): the maintenance work charged to the project, each work
+                // order's total by currency; a failure leaves it out, logged, and the rest of the money stands
                 let maintenance = {workList: [], totalList: []}
                 try {
                     maintenance = ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceCosts.js').projectCosts(workEffortId)

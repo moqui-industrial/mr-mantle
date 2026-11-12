@@ -430,7 +430,55 @@ feature(
             // unset, the cost is not compared: the seal's work is the planner's to approve
             as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: ""})
             const unsetApproved = approve(state.planner, odd.workEffortId)
+            // P11 review: the second technician now holds a class of 60 USD an hour; with both on the work its hours take the higher
+            // rate. A threshold in euros leaves the estimate unknown (the costs are in dollars), so the planner cannot approve it
+            call("create#mantle.humanres.position.EmplPositionClass", {
+                emplPositionClassId: prefix + "_LEAD",
+                title: "Costs spec lead"
+            })
+            call("create#mantle.humanres.position.EmplPosition", {
+                emplPositionId: prefix + "_LEAD_POSITION",
+                organizationPartyId: org,
+                emplPositionClassId: prefix + "_LEAD"
+            })
+            call("create#mantle.humanres.position.EmplPositionParty", {
+                emplPositionId: prefix + "_LEAD_POSITION",
+                partyId: state.TECH2_PARTY,
+                roleTypeId: "Employee",
+                fromDate: new Date(since)
+            })
+            call("create#mantle.humanres.rate.RateAmount", {
+                rateAmountId: prefix + "_LEAD_RATE",
+                rateTypeEnumId: "RatpStandard",
+                ratePurposeEnumId: "RaprCost",
+                emplPositionClassId: prefix + "_LEAD",
+                organizationPartyId: org,
+                rateAmount: 60,
+                rateCurrencyUomId: "USD",
+                timePeriodUomId: "TF_hr",
+                fromDate: new Date(since)
+            })
+            as(state.settings, T + "store#MaintenanceCostThreshold", {
+                organizationPartyId: org,
+                approvalThresholdCost: 500,
+                approvalThresholdCurrencyUomId: "EUR"
+            })
+            const pair = plan("Pump rebuild", 2, [[part, 2]])
+            as(state.planner, S + "schedule#MaintenanceWorkOrder", {
+                workEffortId: pair.workEffortId,
+                assigneePartyIds: [state.TECH_PARTY, state.TECH2_PARTY]
+            })
+            const euroEstimate = as(state.cost, R + "get#MaintenanceCosts", {workEffortId: pair.workEffortId}).costs.estimate
+            const euroRefused = approve(state.planner, pair.workEffortId)
+            as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: 500})
+            const pairEstimate = as(state.cost, R + "get#MaintenanceCosts", {workEffortId: pair.workEffortId}).costs.estimate
+            const pairApproved = approve(state.planner, pair.workEffortId)
+            as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: ""})
             return {
+                euroEstimate,
+                euroRefused,
+                pairEstimate,
+                pairApproved,
                 threshold,
                 kept,
                 plannerPolicy,
@@ -468,6 +516,13 @@ feature(
             r.supervisorApproves.statusId == "WeApproved"
             r.unsetApproved.statusId == "WeApproved"
             status(r.over.workEffortId) == "WeApproved"
+            r.euroEstimate.known == false
+            r.euroEstimate.unknownList.some(reason => reason.includes("is in USD"))
+            r.euroRefused == "APPROVAL_REQUIRED"
+            r.pairEstimate.known == true
+            r.pairEstimate.labor.compare(120) == 0
+            r.pairEstimate.amount.compare(160) == 0
+            r.pairApproved.statusId == "WeApproved"
         }
     }
 )
