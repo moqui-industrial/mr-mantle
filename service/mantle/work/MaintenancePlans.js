@@ -52,6 +52,8 @@ const resources = ec.resource.script("component://mr-mantle/service/mantle/produ
 const procedures = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
 // the work orders (create through the generation's own path, the organization's policy), loaded when used: it loads this module
 const work = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
+// a team's organization, People's rule (its rollups, else its internal owner; impl-people follow-up 3)
+const units = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
 const {find, one, rows, denied, call, ms} = lib
 
 const SCHEDULE = "mantle.work.maintenance.MaintenanceSchedule"
@@ -336,15 +338,8 @@ function termFrom(p, target) {
         !one("moqui.basic.Enumeration", {enumId: term.maintenanceTypeEnumId, enumTypeId: "MaintenanceType"})
     )
         denied("VALUE_INVALID", "Choose a maintenance type")
-    if (term.teamPartyId) {
-        const team = one("mantle.party.Party", {partyId: term.teamPartyId})
-        if (
-            !team ||
-            team.ownerPartyId !== target.organizationPartyId ||
-            !one("mantle.party.PartyRole", {partyId: term.teamPartyId, roleTypeId: "OrgTeam"})
-        )
-            denied("VALUE_INVALID", "Choose a team of the organization")
-    }
+    if (term.teamPartyId && units().teamOrganizations([term.teamPartyId])[term.teamPartyId] !== target.organizationPartyId)
+        denied("VALUE_INVALID", "Choose a team of the organization")
     if (term.productMeterId) {
         if (!target.assetId) denied("METER_INVALID", "A facility's plan is by the calendar")
         const meter = one(PRODUCT_METER, {productMeterId: term.productMeterId})

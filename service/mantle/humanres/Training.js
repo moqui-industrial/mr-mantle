@@ -9,7 +9,9 @@
 //   an identity document or work permit) and whether its completion needs an assessment;
 // - a session (TrainingSession) is a WepTraining event of Commons' calendar (EventServices.create#Event: a private event whose
 //   attendees are its trainer and the people enrolled, each reminded a day before), with its course, trainer, seats and the
-//   assessment form its results answer (a published form of the training assessment purpose, People's Forms, P16);
+//   assessment form its results answer (a published form of the training assessment purpose, People's Forms, P16); its place is a
+//   meeting room booked through Maintenance's resource booking (EventRooms.js, People follow-up 3: the room's policy, clashes and
+//   blackouts apply; moved and cancelled with the session) or, off site, a free-text place;
 // - an enrollment (PersonTraining) is a person's place in a session: asked for by the person, it waits for a People approval of
 //   kind PakTraining (PeopleTrainingApproval; the manager by default, never the person or who asked); made by a development
 //   editor of the employer, it is enrolled at once. Its attendance is the trainer's record;
@@ -35,6 +37,7 @@ const development = () => ec.resource.script("component://mr-mantle/service/mant
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
 // the session's room and equipment bookings kept right when it moves or is cancelled (impl-maintenance F356)
 const bookings = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
+const rooms = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/EventRooms.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -222,6 +225,7 @@ function sessionLines(userScope, sessions) {
     )
     const trainerNames = people.personNames(unique(sessions.map(row => row.trainerPartyId).filter(Boolean)))
     const organizationNames = people.organizationNames(unique(sessions.map(row => row.organizationPartyId)))
+    const roomOf = rooms().roomsOf(ids)
     return sessions.map(session => {
         const event = events.get(session.workEffortId)
         const course = courses.get(session.trainingClassId)
@@ -260,6 +264,10 @@ function sessionLines(userScope, sessions) {
                           : timeText(endMs))
                     : ""),
             location: event?.location || "",
+            facilityId: roomOf[session.workEffortId]?.facilityId || null,
+            roomName: roomOf[session.workEffortId]?.roomName || "",
+            roomStatus: roomOf[session.workEffortId]?.roomStatus || null,
+            roomStatusText: roomOf[session.workEffortId]?.roomStatusText || "",
             trainerPartyId: session.trainerPartyId,
             trainerName: trainerNames[session.trainerPartyId] || session.trainerPartyId || "",
             capacity,
@@ -630,7 +638,9 @@ function storeTrainingClass(p) {
 
 // ===== store#Training =====
 // A session scheduled (trainingClassId: a course of an employer the caller administers, not ended) or changed (workEffortId, at
-// its revision), or cancelled (cancel), by a development editor of its employer: its start and end (a new one from now on), place,
+// its revision), or cancelled (cancel), by a development editor of its employer: its start and end (a new one from now on), place
+// (a bookable meeting room, facilityId, booked for it through the resource booking and named its place, or a free-text place off
+// site; People follow-up 3),
 // trainer (who works for the employer now, never one enrolled in it), seats (not fewer than the places taken) and assessment form
 // (a published form of the training assessment purpose of the employer; the course's when none is named; one is needed when the
 // course needs an assessment). The session is a WepTraining event of Commons' calendar (EventServices.create#Event, private),
@@ -640,7 +650,8 @@ function storeTrainingClass(p) {
 // trainer or one not working for the employer (TRAINER_REQUIRED, NOT_EMPLOYED), the trainer enrolled (TRAINER_ENROLLED), seats
 // below 1 or the places taken (CAPACITY_INVALID), a form that is not one of the employer's published assessments
 // (FORM_UNAVAILABLE), no form for a course that needs one (FORM_REQUIRED), a change of a cancelled or ended session
-// (SESSION_CLOSED), a revision other than the one read (REVISION_CHANGED).
+// (SESSION_CLOSED), a revision other than the one read (REVISION_CHANGED), a room that is not bookable or is not free then
+// (ROOM_UNAVAILABLE: a clash, a blackout or outage, its policy; the whole change is refused with it).
 function storeTraining(p) {
     const userScope = trainingScope()
     if (!userScope.capabilities.developEdit || !userScope.developEmployers.length)
@@ -700,7 +711,18 @@ function storeTraining(p) {
     if (!formId && course.assessmentRequired === "Y")
         denied("FORM_REQUIRED", "This course needs an assessment: choose a published training assessment form")
     const workEffortName = ("Training: " + (course.title || course.trainingClassId)).substring(0, 255)
-    const location = given(p.location) ? text(p.location) || null : found?.event?.location || null
+    // the room: one given (empty for none), else the one booked; a room is the place, else the free text given (or kept)
+    const currentRoom = found ? rooms().roomsOf([id])[id] || null : null
+    const facilityId = given(p.facilityId) ? text(p.facilityId) || null : currentRoom?.facilityId || null
+    // a room kept is not asked again whether it is bookable (a change of the policy since leaves its bookings to its administrator)
+    const room = !facilityId ? null : facilityId === currentRoom?.facilityId ? currentRoom : rooms().roomOf(facilityId)
+    const location = room
+        ? room.roomName
+        : given(p.location)
+          ? text(p.location) || null
+          : currentRoom
+            ? null
+            : found?.event?.location || null
     const description = given(p.description) ? text(p.description) || null : found?.event?.description || null
     if (!found) {
         if (!userScope.partyId) denied("PARTY_REQUIRED", "Scheduling needs your own person record")
@@ -726,6 +748,7 @@ function storeTraining(p) {
             createdByUserId: ec.user.userId
         })
         addAttendee(workEffortId, trainerPartyId, false)
+        if (room) rooms().place(workEffortId, room.facilityId, false)
         const created = sessionOf(workEffortId)
         return {workEffortId, revision: stampOf(created.session) + ":" + stampOf(created.event)}
     }
@@ -737,8 +760,8 @@ function storeTraining(p) {
         location,
         description
     })
-    if (startMs !== ms(found.event.estimatedStartDate) || endMs !== ms(found.event.estimatedCompletionDate))
-        bookings().keptEventMoved(id)
+    // the room chosen, and on a move every booking rechecked (keptEventMoved, through place)
+    rooms().place(id, facilityId, startChanged || endMs !== ms(found.event.estimatedCompletionDate))
     const previousTrainer = found.session.trainerPartyId
     call("update#" + SESSION, {workEffortId: id, trainerPartyId, capacity, assessmentFormId: formId})
     if (previousTrainer !== trainerPartyId) {
@@ -748,7 +771,7 @@ function storeTraining(p) {
     const changed = sessionOf(id)
     return {workEffortId: id, revision: stampOf(changed.session) + ":" + stampOf(changed.event)}
 }
-// A session cancelled: its event (WeCancelled) and every place taken (a place waiting for approval superseded).
+// A session cancelled: its event (WeCancelled), its room booking and every place taken (a place waiting for approval superseded).
 function cancelSession(found, reason) {
     const workEffortId = found.session.workEffortId
     call("update#" + WORK, {workEffortId, statusId: "WeCancelled"})
@@ -1252,38 +1275,16 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown training operation " + op)
     return operations[op](p || {})
 }
-// sessionHours: each person's hours in training sessions from fromMs to thruMs, the sessions they are enrolled in or train, not
-// cancelled; sessions that overlap counted once. For Maintenance's dispatch (find#MaintenanceCandidates' free hours,
-// impl-maintenance F360), which checked its own caller; nothing of a session but its time is answered.
+// sessionHours: each person's hours in training sessions from fromMs to thruMs (sessionTimesOf's sessions: as the trainer, or holding
+// a place enrolled or completed and not marked absent; not cancelled), sessions that overlap counted once. For Maintenance's
+// dispatch (find#MaintenanceCandidates' free hours, impl-maintenance F360), which checked its own caller; nothing of a session but
+// its time is answered. One reading of a person's sessions with get#PartyCapacity's (People follow-up 3 review).
 function sessionHours(partyIds, fromMs, thruMs) {
-    const ids = unique(Array.from(partyIds || []).filter(Boolean))
     const hours = {}
-    if (!ids.length || !(thruMs > fromMs)) return hours
-    const sessionsOf = new Map()
-    const add = (partyId, workEffortId) => sessionsOf.set(partyId, (sessionsOf.get(partyId) || []).concat([workEffortId]))
-    for (const row of Array.from(find(ENROLLMENT).condition("partyId", "in", ids).condition("statusEnumId", ENROLLED).list()))
-        add(row.partyId, row.workEffortId)
-    for (const row of Array.from(find(SESSION).condition("trainerPartyId", "in", ids).list()))
-        add(row.trainerPartyId, row.workEffortId)
-    const eventIds = unique([].concat(...Array.from(sessionsOf.values())))
-    if (!eventIds.length) return hours
-    const spans = new Map()
-    for (const event of Array.from(
-        find(WORK)
-            .condition("workEffortId", "in", eventIds)
-            .condition("statusId", "not-equals", "WeCancelled")
-            .condition("estimatedStartDate", "less", stamp(thruMs))
-            .condition("estimatedCompletionDate", "greater", stamp(fromMs))
-            .list()
-    ))
-        spans.set(event.workEffortId, [
-            Math.max(fromMs, ms(event.estimatedStartDate)),
-            Math.min(thruMs, ms(event.estimatedCompletionDate))
-        ])
-    for (const [partyId, sessions] of sessionsOf) {
-        const own = unique(sessions)
-            .map(id => spans.get(id))
-            .filter(Boolean)
+    if (!(thruMs > fromMs)) return hours
+    for (const [partyId, intervals] of Object.entries(sessionTimesOf(partyIds, fromMs, thruMs))) {
+        const own = intervals
+            .map(([start, stop]) => [Math.max(fromMs, start), Math.min(thruMs, stop)])
             .sort((a, b) => a[0] - b[0])
         let total = 0
         let end = -Infinity
@@ -1296,4 +1297,47 @@ function sessionHours(partyIds, fromMs, thruMs) {
     }
     return hours
 }
-;({execute: run, sessionHours})
+
+// ===== capacity =====
+// The training sessions that take people's time, for mantle.work.ResourceServices.get#PartyCapacity (People follow-up 3,
+// impl-maintenance F360): each session not cancelled that overlaps fromMs to thruMs, of each person as its trainer or holding a place
+// enrolled or completed and not marked absent; {partyId: [[startMs, endMs]]}. Times only: no course, employer or result. No access
+// check: its callers answer hours alone, for readers they checked.
+function sessionTimesOf(partyIds, fromMs, thruMs) {
+    const found = {}
+    const ids = unique(Array.from(partyIds || []).filter(Boolean))
+    if (!ids.length) return found
+    const partiesOf = new Map()
+    const add = (workEffortId, partyId) => {
+        if (!partiesOf.has(workEffortId)) partiesOf.set(workEffortId, new Set())
+        partiesOf.get(workEffortId).add(partyId)
+    }
+    for (const row of Array.from(
+        find(SESSION).condition("trainerPartyId", "in", ids).selectField("workEffortId,trainerPartyId").list()
+    ))
+        add(row.workEffortId, row.trainerPartyId)
+    for (const row of Array.from(
+        find(ENROLLMENT)
+            .condition("partyId", "in", ids)
+            .condition("statusEnumId", "in", [ENROLLED, COMPLETED])
+            .selectField("workEffortId,partyId,attendedFlag")
+            .list()
+    ))
+        if (row.attendedFlag !== "N") add(row.workEffortId, row.partyId)
+    if (!partiesOf.size) return found
+    const events = Array.from(
+        find(WORK)
+            .condition("workEffortId", "in", Array.from(partiesOf.keys()))
+            .condition("estimatedStartDate", "less", stamp(thruMs))
+            .condition("estimatedCompletionDate", "greater", stamp(fromMs))
+            .selectField("workEffortId,statusId,estimatedStartDate,estimatedCompletionDate")
+            .list()
+    )
+    for (const event of events) {
+        if (event.statusId === "WeCancelled") continue
+        const interval = [ms(event.estimatedStartDate), ms(event.estimatedCompletionDate)]
+        for (const partyId of partiesOf.get(event.workEffortId)) (found[partyId] = found[partyId] || []).push(interval)
+    }
+    return found
+}
+;({execute: run, sessionHours, sessionTimesOf})

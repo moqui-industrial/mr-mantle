@@ -6,11 +6,13 @@
 // The records (design §4; impl-people §4, F11, F12, F50, F63):
 // - a department is an Organization with the OrgDepartment role and a team one with OrgTeam, never OrgInternal; its parent is a
 //   dated PrtOrgRollup relationship from it to the parent. A unit's employer is the internal organization (OrgInternal) its
-//   rollups reach; a move is a new rollup from a date that ends the one in effect, never across employers, never into a cycle;
+//   rollups reach (a team with none at all, made outside People, its internal owner: UnitEmployers.js, the rule Maintenance reads
+//   too; People follow-up 3); a move is a new rollup from a date that ends the one in effect, never across employers, never into a cycle;
 //   the internal organizations themselves (Mantle's demo departments ORG_ZIZI_HR and ORG_ZIZI_SALES among them, §5 Q6) are
 //   legal organizations, shown in the tree under their parent and kept by Admin's Organizations;
 // - a membership is a dated PrtMember relationship from the person to the unit, from role Assignee for a member (as Mantle's
-//   demo) and Manager for its lead, which BusinessTime's hours access reads (F63); never an employment. A department's members are
+//   demo) and Manager for its lead, which BusinessTime's hours access reads (F63); never an employment. A team's member or lead
+//   may be an agent of its employer (a contractor; People follow-up 3), a department's are employees. A department's members are
 //   its employees' assignments' (P6, the user's call: Employment.js writes the Assignee row with the assignment), so store#Membership
 //   changes a team's members and leads only, and a department's lead through store#Unit; a department is closed with its employees
 //   reassigned to another (store#Unit's close);
@@ -30,7 +32,6 @@ const ROLLUP = "PrtOrgRollup"
 const MEMBER = "PrtMember"
 const MANAGER = "PrtManager"
 const unitKinds = {department: "OrgDepartment", team: "OrgTeam"}
-const kindOfRole = {OrgDepartment: "department", OrgTeam: "team", OrgInternal: "organization"}
 const kindTexts = {organization: "Legal organization", department: "Department", team: "Team"}
 const kindOrder = {organization: 0, department: 1, team: 2}
 // a member and a lead (F63: Assignee as Mantle's demo, Manager as BusinessTime reads a lead)
@@ -63,44 +64,13 @@ const effective = value => (value == null || value === "" ? nowMs() : ec.user.ti
 function relationships(type, conditions) {
     return rows(RELATIONSHIP, Object.assign({relationshipTypeEnumId: type}, conditions))
 }
-// The kinds of the parties (organization, department, team) by their roles: {partyId: kind}, a party of none absent.
-function kindsOf(partyIds) {
-    const found = {}
-    if (!partyIds.length) return found
-    const roles = Array.from(
-        find("mantle.party.PartyRole")
-            .condition("partyId", "in", partyIds)
-            .condition("roleTypeId", "in", Object.keys(kindOfRole))
-            .list()
-    )
-    // a unit role wins over OrgInternal: a department is never one (F11), and a party holding both is shown as the unit
-    for (const roleTypeId of ["OrgInternal", "OrgTeam", "OrgDepartment"])
-        for (const row of roles) if (row.roleTypeId === roleTypeId) found[row.partyId] = kindOfRole[roleTypeId]
-    return found
-}
+// The kinds of the parties (organization, department, team) by their roles, {partyId: kind}, and a unit's employer: UnitEmployers.js,
+// the one rule People and Maintenance read (People follow-up 3: a team with no rollup at all belongs to its internal owner).
+const {kindsOf, employerOf} = ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
 const roleOfKind = kind => (kind === "organization" ? "OrgInternal" : unitKinds[kind])
 // The parent row of a party on the date (its rollup in effect), or null.
 function parentAt(partyId, at) {
     return relationships(ROLLUP, {fromPartyId: partyId}).find(row => openAt(row, at)) || null
-}
-// The parent row nearest the date: the one in effect, else the next to start, else the last one.
-function parentNear(partyId, at) {
-    const found = relationships(ROLLUP, {fromPartyId: partyId}).sort((a, b) => (ms(a.fromDate) ?? 0) - (ms(b.fromDate) ?? 0))
-    return (
-        found.find(row => openAt(row, at)) || found.find(row => (ms(row.fromDate) ?? 0) > at) || found[found.length - 1] || null
-    )
-}
-// The employer of a party: itself when it is an internal organization, else the one its rollups reach (a unit never moves
-// across employers, so any of its rollup periods gives it). null when none is reached.
-function employerOf(partyId, at) {
-    let above = partyId
-    for (let depth = 0; above && depth < maxDepth; depth++) {
-        const kind = kindsOf([above])[above]
-        if (kind === "organization") return above
-        if (!kind && depth > 0) return null
-        above = parentNear(above, at)?.toPartyId || null
-    }
-    return null
 }
 // The children of the parents on the date: {parentPartyId: [rollup row]}.
 function childRowsAt(parentPartyIds, at) {
@@ -159,11 +129,26 @@ function visibleParty(userScope, partyId, at) {
         denied("RECORD_UNAVAILABLE", "Organization " + id + " is not available")
     return {partyId: id, kind, employerPartyId}
 }
+// Whether People keeps the unit: one with a rollup, in its tree. A team with none, read by its internal owner (UnitEmployers.js),
+// was made by another application (a Customer Service service team, whose members are PrtServiceTeam rows): People reads it and
+// changes neither its name, lead nor members (People follow-up 3 review: the owner rule adds no right over another app's teams).
+const keptInPeople = partyId => relationships(ROLLUP, {fromPartyId: partyId}).length > 0
 // A department or team the caller reads; an internal organization is Admin's to change (NOT_A_UNIT).
 function visibleUnit(userScope, partyId, at) {
     const found = visibleParty(userScope, partyId, at)
     if (found.kind === "organization")
         denied("NOT_A_UNIT", people.organizationNames([found.partyId])[found.partyId] + " is a legal organization, kept in Admin")
+    return found
+}
+// A unit the caller changes: as visibleUnit, and kept in People's tree (NOT_A_UNIT for a team another application keeps).
+function changeableUnit(userScope, partyId, at) {
+    const found = visibleUnit(userScope, partyId, at)
+    if (!keptInPeople(found.partyId))
+        denied(
+            "NOT_A_UNIT",
+            people.organizationNames([found.partyId])[found.partyId] +
+                " has no place in the organization (no parent unit); it is kept by the application that made it"
+        )
     return found
 }
 
@@ -352,6 +337,8 @@ function getUnit(p) {
             )
     }
     // a department's members are its assignments' (P6): changed with the employment, its lead with the unit
+    // a team another application keeps (no rollup, read by its owner) is read only here
+    if (found.kind !== "organization" && !parentRows.length) unit.canEdit = false
     unit.membersEditable = found.kind === "team" && unit.canEdit
     return {unit, parents, members, asOfDate: at}
 }
@@ -360,7 +347,7 @@ function getUnit(p) {
 // A new department or team under a parent from a date, or a unit's new name, parent or lead (design §4 EditUnit). Refused: a
 // caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED); a kind other than department or team (KIND_INVALID);
 // no name (NAME_REQUIRED) or parent (PARENT_REQUIRED); a parent or unit outside the scope (RECORD_UNAVAILABLE); an internal
-// organization, which is Admin's (NOT_A_UNIT); a department under a team (PARENT_KIND); a move to another employer
+// organization, which is Admin's, or a team with no parent unit, which another application keeps (NOT_A_UNIT); a department under a team (PARENT_KIND); a move to another employer
 // (EMPLOYER_CHANGE), under itself or a unit below it (PARENT_CYCLE), dated before its parent in effect began (DATE_STALE) or
 // while a later move is set (PARENT_SCHEDULED); a revision other than the one read (REVISION_CHANGED).
 function checkParent(userScope, kind, parentPartyId, at) {
@@ -410,7 +397,7 @@ function storeUnit(p) {
         if (text(p.headPartyId)) addMembership(unit, text(p.headPartyId), "lead", fromMs, reason)
         return {partyId: unit.partyId, revision: unitRevision(unit.partyId)}
     }
-    const unit = visibleUnit(userScope, p.partyId, fromMs)
+    const unit = changeableUnit(userScope, p.partyId, fromMs)
     const revision = unitRevision(unit.partyId)
     if (text(p.expectedRevision) !== revision)
         denied("REVISION_CHANGED", "This unit changed since you read it; open it again (revision " + revision + ")")
@@ -494,22 +481,37 @@ function closeUnit(userScope, unit, p, reason) {
 // ===== store#Membership =====
 // A person joins a unit as a member or its lead from a date, or a membership ends (design §4 TeamMembers): a dated PrtMember row
 // from the person to the unit, never an employment. A person who is a member already in another role changes role from the
-// date (the row ends, a new one starts); a new lead's predecessor stays on as a member. Refused: a person not employed by the
-// unit's employer on the date (NOT_EMPLOYED), a membership in the same role (ALREADY_MEMBER) or one starting later
-// (MEMBERSHIP_SCHEDULED), an unknown role (ROLE_INVALID); an end: a membership not of the unit (RECORD_UNAVAILABLE), already
+// date (the row ends, a new one starts); a new lead's predecessor stays on as a member. A team's member or lead is a person who
+// works for the team's employer on the date, an employee or an agent (a contractor: People follow-up 3, the user's call of Nov 12,
+// 2026); a department's lead is an employee (its members are its employees' assignments'). Refused: a person not employed by (for
+// a team: not working for) the unit's employer on the date (NOT_EMPLOYED), a membership in the same role (ALREADY_MEMBER) or one starting later
+// (MEMBERSHIP_SCHEDULED), an unknown role (ROLE_INVALID), a team with no parent unit (NOT_A_UNIT: another application's); an end: a membership not of the unit (RECORD_UNAVAILABLE), already
 // ended (MEMBERSHIP_ENDED), dated before it starts (DATE_STALE), or at a revision other than the one read (REVISION_CHANGED).
 function addMembership(unit, partyId, memberRole, fromMs, reason) {
     const roleTypeId = memberRoles[memberRole]
     if (!roleTypeId) denied("ROLE_INVALID", "A member's role is member or lead")
-    const employed = people
-        .current(people.employmentFind().condition({fromPartyId: partyId, toPartyId: unit.employerPartyId}), fromMs)
-        .count()
+    // a team takes an agent of the employer too (a contractor); a department an employee alone
+    const employed =
+        people
+            .current(people.employmentFind().condition({fromPartyId: partyId, toPartyId: unit.employerPartyId}), fromMs)
+            .count() > 0 ||
+        (unit.kind === "team" &&
+            people
+                .current(
+                    find(RELATIONSHIP).condition({
+                        relationshipTypeEnumId: "PrtAgent",
+                        fromPartyId: partyId,
+                        toPartyId: unit.employerPartyId
+                    }),
+                    fromMs
+                )
+                .count() > 0)
     const names = people.personNames([partyId])
     if (!employed)
         denied(
             "NOT_EMPLOYED",
             (names[partyId] || partyId) +
-                " is not employed by " +
+                (unit.kind === "team" ? " does not work for " : " is not employed by ") +
                 people.organizationNames([unit.employerPartyId])[unit.employerPartyId] +
                 " on that date"
         )
@@ -548,7 +550,7 @@ function addMembership(unit, partyId, memberRole, fromMs, reason) {
 }
 function storeMembership(p) {
     const userScope = editorScope()
-    const unit = visibleUnit(userScope, p.unitPartyId, nowMs())
+    const unit = changeableUnit(userScope, p.unitPartyId, nowMs())
     if (unit.kind === "department")
         denied(
             "DEPARTMENT_MEMBERSHIP",
@@ -574,6 +576,59 @@ function storeMembership(p) {
     return {
         partyRelationshipId: addMembership(unit, text(p.partyId), text(p.memberRole) || "member", effective(p.fromDate), reason)
     }
+}
+
+// ===== end#AgentMemberships =====
+// An agent's (a contractor's) agency with an employer ended (a PrtAgent row's thruDate set, whoever set it: Admin's Identity,
+// Lifecycle's offboarding, an import; the PartyRelationship EECA AgentEndsMemberships calls this): their memberships and leads of
+// the employer's teams end on the same date, as a separation ends an employee's (Employment.js), unless they still work for the
+// employer then (an employment or another agency). A membership starting later ends on its own start (never in effect). Failure
+// tolerant: a membership that cannot be ended is logged and the others go on, and nothing refuses the agency's end (the user's call
+// of Nov 12, 2026; People follow-up 3 review). No access check: the record's change is the trigger, checked by its own writer.
+function endAgentMemberships(p) {
+    try {
+        return endAgentMembershipsOf(p)
+    } catch (error) {
+        ec.logger.error(
+            `Memberships of ${p.partyId} at ${p.organizationPartyId} not ended with the agency: ${error?.message || error}`
+        )
+        ec.message.clearErrors()
+        return {endedCount: 0}
+    }
+}
+function endAgentMembershipsOf(p) {
+    const partyId = text(p.partyId)
+    const org = text(p.organizationPartyId)
+    const at = ms(p.thruDate)
+    if (!partyId || !org || at == null) return {endedCount: 0}
+    const stillWorks = find(RELATIONSHIP)
+        .condition({fromPartyId: partyId, toPartyId: org})
+        .condition("relationshipTypeEnumId", "in", ["PrtEmployee", "PrtAgent"])
+        .list()
+    if (Array.from(stillWorks).some(row => row.partyRelationshipId !== text(p.partyRelationshipId) && openAt(row, at)))
+        return {endedCount: 0}
+    const kinds = kindsOf(people.unitsUnder([org]))
+    const teams = Object.keys(kinds).filter(id => kinds[id] === "team")
+    if (!teams.length) return {endedCount: 0}
+    let endedCount = 0
+    const reason = text(p.reason) || "The agency ended"
+    for (const row of Array.from(
+        find(RELATIONSHIP)
+            .condition({relationshipTypeEnumId: MEMBER, fromPartyId: partyId})
+            .condition("toPartyId", "in", teams)
+            .list()
+    ).filter(row => (ms(row.thruDate) ?? Infinity) > at)) {
+        try {
+            endRow(row, Math.max(at, ms(row.fromDate) ?? at), reason)
+            endedCount++
+        } catch (error) {
+            ec.logger.error(
+                `Membership ${row.partyRelationshipId} of ${partyId} in ${row.toPartyId} not ended with the agency: ${error?.message || error}`
+            )
+            ec.message.clearErrors()
+        }
+    }
+    return {endedCount}
 }
 
 // ===== get#ReportingTree =====
@@ -883,7 +938,7 @@ function changeAssignedManager(assignment, managerPartyId, fromMs, reason, p, pe
     return {partyRelationshipId: line?.partyRelationshipId || null, organizationPartyId}
 }
 
-const operations = {findUnits, getUnit, storeUnit, storeMembership, reportingTree, changeManager}
+const operations = {findUnits, getUnit, storeUnit, storeMembership, endAgentMemberships, reportingTree, changeManager}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown organization operation " + op)
     return operations[op](p || {})

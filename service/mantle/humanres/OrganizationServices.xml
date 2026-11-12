@@ -81,7 +81,8 @@ along with this software (see the LICENSE.md file). If not, see
             name, a move to another parent from fromDate (the rollup in effect ends then, a new one starts, both kept) and a new
             lead (headPartyId, store#Membership's rules). changeReason is the ended row's audit and the new row's comment. Needs
             PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: KIND_INVALID, NAME_REQUIRED, PARENT_REQUIRED; a parent
-            or unit outside the scope (RECORD_UNAVAILABLE); an internal organization, which is Admin's (NOT_A_UNIT); a department
+            or unit outside the scope (RECORD_UNAVAILABLE); an internal organization, which is Admin's, or a team with no parent
+            unit, which another application keeps and People reads only (NOT_A_UNIT; People follow-up 3 review); a department
             under a team (PARENT_KIND); a move to another legal employer (EMPLOYER_CHANGE), under itself or a unit below it
             (PARENT_CYCLE), on a date when the unit has no parent (DATE_STALE) or while a later move is set (PARENT_SCHEDULED);
             an expectedRevision other than the unit's (REVISION_CHANGED). With close, the unit is closed from thruDate (no earlier
@@ -123,7 +124,9 @@ along with this software (see the LICENSE.md file). If not, see
             DEPARTMENT_MEMBERSHIP; its lead is changed through store#Unit). With partyRelationshipId, that membership ends on
             thruDate (now when empty). changeReason is the ended row's audit and the new row's comment. Needs PEOPLE_HR_VIEW and
             PEOPLE_HR_EDIT (PERMISSION_DENIED) and a unit in the scope (RECORD_UNAVAILABLE; NOT_A_UNIT for an internal
-            organization). Refuses: a person not employed by the unit's employer on the date (NOT_EMPLOYED), a membership in the
+            organization or a team with no parent unit, another application's). Refuses: a person not employed by the unit's
+            employer on the date, for a team neither employed by nor a current agent of it (a contractor; People follow-up 3)
+            (NOT_EMPLOYED), a membership in the
             same role (ALREADY_MEMBER) or one starting later (MEMBERSHIP_SCHEDULED), ROLE_INVALID, PERSON_REQUIRED, a department
             (DEPARTMENT_MEMBERSHIP); for an end, a
             membership not of the unit (RECORD_UNAVAILABLE), one already ended (MEMBERSHIP_ENDED), a date before it starts
@@ -142,6 +145,27 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
             <set field="partyRelationshipId" from="ec.resource.script(module).execute('storeMembership', context).partyRelationshipId"/>
+        </actions>
+    </service>
+
+    <service verb="end" noun="AgentMemberships" allow-remote="false">
+        <description>An agent's (a contractor's) agency with an employer ended on thruDate (the PartyRelationship EECA
+            AgentEndsMemberships, on a PrtAgent row's thruDate set or moved earlier, whoever writes it): their memberships and leads
+            of the employer's teams end on that date, as a separation ends an employee's, unless they still work for the employer
+            then (an employment or another agency); a membership starting later ends on its own start. Failure tolerant per
+            membership (logged) and never refuses (People follow-up 3 review, the user's call of Nov 12, 2026). No permission: the
+            record's change is the trigger.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"><description>The ended agency row</description></parameter>
+            <parameter name="partyId" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="thruDate" type="Timestamp" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="endedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Organization.js"/>
+            <set field="endedCount" from="ec.resource.script(module).execute('endAgentMemberships', context).endedCount"/>
         </actions>
     </service>
 

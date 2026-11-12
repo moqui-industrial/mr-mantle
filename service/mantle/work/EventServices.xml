@@ -2083,6 +2083,10 @@ along with this software (see the LICENSE.md file). If not, see
             booked as before P15 (F172); a recurring booking of a resource with no policy is checked against its outages and blocks
             over its range up to 365 days, its conflicts on the first meeting (F165); a request tells the resource's approvers on the
             ResourceBooking topic (mantle.work.ResourceBookingServices.decide#ResourceBooking decides it).
+
+            A People training session's or interview's room chosen on People's screens is booked by People's own services, as the
+            system after their own check (Mantle humanres/EventRooms.js; impl-people follow-up 3), so a development editor or
+            recruiter who is not its organizer books it too; as the system every clash is named Busy (F358).
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>

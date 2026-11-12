@@ -23,6 +23,8 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const maintenanceWork = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
 const maintenanceStack = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceStack.js")
+// a team's organization, People's rule (its rollups, else its internal owner; impl-people follow-up 3)
+const units = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/UnitEmployers.js")
 const {find, one, denied, call, ms} = lib
 
 const REQUEST = "mantle.request.Request"
@@ -740,13 +742,14 @@ function intakeTeam(message, value, ruleOwnerUserId) {
             .map(row => row.partyId)
     }
     const ownerPartyId = ruleOwnerUserId ? one("moqui.security.UserAccount", {userId: ruleOwnerUserId})?.partyId : null
+    const organizations = units().teamOrganizations(candidates)
     for (const partyId of candidates) {
-        const team = one("mantle.party.Party", {partyId})
-        if (!team?.ownerPartyId || !one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgTeam"})) continue
+        const organizationPartyId = organizations[partyId] || null
+        if (!organizationPartyId) continue
         const member =
             !!ownerPartyId &&
             find("mantle.party.PartyRelationship")
-                .condition({fromPartyId: ownerPartyId, toPartyId: team.ownerPartyId})
+                .condition({fromPartyId: ownerPartyId, toPartyId: organizationPartyId})
                 .condition("relationshipTypeEnumId", "in", memberRelationships)
                 .conditionDate("fromDate", "thruDate", now())
                 .count() > 0
@@ -761,7 +764,7 @@ function intakeTeam(message, value, ruleOwnerUserId) {
             )
             continue
         }
-        return {teamPartyId: partyId, organizationPartyId: team.ownerPartyId}
+        return {teamPartyId: partyId, organizationPartyId}
     }
     return null
 }

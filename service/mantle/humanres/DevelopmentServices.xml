@@ -397,7 +397,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="sessions" type="List"><description>workEffortId, trainingClassId, title, typeText, organizationPartyId,
-                organizationName, startDate, startText, endText, whenText, location, trainerPartyId, trainerName, capacity,
+                organizationName, startDate, startText, endText, whenText, location, facilityId, roomName, roomStatus (booked,
+                requested, refused), roomStatusText, trainerPartyId, trainerName, capacity,
                 enrolledCount, waitingCount, seatsLeft, seatsText, qualificationTypeEnumId, qualificationText, state (scheduled, running,
                 ended, cancelled), stateText, cancelled, myPersonTrainingId, myStatusEnumId, myStatusText, isTrainer, canRequest,
                 canManage, revision</description></parameter>
@@ -485,7 +486,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="Training" allow-remote="false">
         <description>A session of a course scheduled (trainingClassId) or changed (workEffortId, at the revision read), or cancelled
-            (cancel, with a reason), by a development editor of its employer: its start and end, place, description, trainer (a
+            (cancel, with a reason), by a development editor of its employer: its start and end, place (facilityId: a bookable
+            meeting room, booked for it through mantle.work.EventServices.book#Resource as the system and named its place, so its
+            policy, clashes and blackouts apply; moved and cancelled with the session; or location, a free-text place off site;
+            People follow-up 3), description, trainer (a
             person working for the employer now, never one holding a place in it), seats and assessment form (a published form of the
             training assessment purpose of the employer; the course's when none is named; needed when the course needs an
             assessment). The session is a WepTraining event made through Commons' event services (EventServices.create#Event: a
@@ -495,14 +499,15 @@ along with this software (see the LICENSE.md file). If not, see
             the past (DATE_PAST), an end not after the start (DATES_INVALID), no trainer or one not working for the employer
             (TRAINER_REQUIRED, NOT_EMPLOYED), a trainer holding a place (TRAINER_ENROLLED), seats below 1 or the places taken
             (CAPACITY_INVALID), a form not one of the employer's published assessments (FORM_UNAVAILABLE), no form for a course
-            that needs one (FORM_REQUIRED), a change of a cancelled or ended session (SESSION_CLOSED) and a revision other than the
-            one read (REVISION_CHANGED).</description>
+            that needs one (FORM_REQUIRED), a change of a cancelled or ended session (SESSION_CLOSED), a revision other than the
+            one read (REVISION_CHANGED) and a room not bookable or not free then (ROOM_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="workEffortId"/>
             <parameter name="trainingClassId"/>
             <parameter name="startDate" type="Timestamp"/>
             <parameter name="endDate" type="Timestamp"/>
             <parameter name="location"/>
+            <parameter name="facilityId"><description>A bookable meeting room; empty for none, not given to keep it</description></parameter>
             <parameter name="description"/>
             <parameter name="trainerPartyId"/>
             <parameter name="capacity"/>

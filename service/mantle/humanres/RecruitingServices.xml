@@ -204,7 +204,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A recruiter (PEOPLE_RECRUIT_EDIT) schedules an interview of an application before its offer
             (APPLICATION_CLOSED): a private event (WetEvent, WevRestricted) owned by the caller from startDate (DATE_PAST) for
             durationMinutes (10 to 480, DURATION_INVALID), at a location or, with videoCall, on a call link
-            (org.moqui.call.CallServices.create#CallLink, in the event's location); the panel (panelPartyIds: employees of the
+            (org.moqui.call.CallServices.create#CallLink, in the event's location); in a meeting room (facilityId: a bookable room,
+            booked for it through mantle.work.EventServices.book#Resource as the system, so its policy, clashes and blackouts apply,
+            and named its place unless on a video call; ROOM_UNAVAILABLE refuses the interview when the room is not bookable or not
+            free; People follow-up 3); the panel (panelPartyIds: employees of the
             employer with an account, PANEL_REQUIRED, PANEL_INVALID) and with inviteCandidate the applicant (CANDIDATE_NO_EMAIL) as
             attendees; each panel member assigned the scorecard (formId, else the opening's, else the employer's only published
             interview scorecard; SCORECARD_REQUIRED, FORM_UNAVAILABLE) with no link. A received or screening application moves to
@@ -218,6 +221,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="formId"/>
             <parameter name="videoCall" type="Boolean"/>
             <parameter name="location"/>
+            <parameter name="facilityId"><description>A bookable meeting room (FcTpRoom, bookable)</description></parameter>
             <parameter name="inviteCandidate" type="Boolean"/>
             <parameter name="note"/>
         </in-parameters>
@@ -234,8 +238,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="change" noun="Interview" allow-remote="false">
         <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer; another's interview or a missing one is RECORD_UNAVAILABLE)
             changes a scheduled interview: a new startDate (from now on, DATE_PAST), durationMinutes (10 to 480,
-            DURATION_INVALID), location (not of a video interview, whose place is its call link, kept open until a day after the
-            new end) or note; what is not given stays. A cancelled one is not changed (INTERVIEW_CANCELLED). The interview's event
+            DURATION_INVALID), room (facilityId, empty for none: a new one booked, one no longer chosen cancelled, the one kept
+            checked again at a new time, all as the system through the resource booking; ROOM_UNAVAILABLE refuses the change),
+            location (not of a video interview, whose place is its call link, kept open until a day after the new end; a room is
+            the place of any other) or note; what is not given stays. A cancelled one is not changed (INTERVIEW_CANCELLED). The interview's event
             is People's (the EventManager PeopleInterview): this and cancel#Interview are where it changes, never Commons'
             EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026). The attendees whose invitation changed
             are told once it commits (send#InterviewInvitations, by a tx-commit rule); a failure to send is logged and the change
@@ -245,6 +251,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="startDate" type="Timestamp"/>
             <parameter name="durationMinutes" type="Integer"/>
             <parameter name="location"/>
+            <parameter name="facilityId"><description>The meeting room; empty for none, not given to keep it</description></parameter>
             <parameter name="note"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
@@ -255,7 +262,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="cancel" noun="Interview" allow-remote="false">
         <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer; RECORD_UNAVAILABLE otherwise) cancels a scheduled interview
-            (INTERVIEW_CANCELLED when it already is): its event is cancelled, its scorecards stay as they are, and the attendees are
+            (INTERVIEW_CANCELLED when it already is): its event is cancelled, its room booking cancelled (as the system), its
+            scorecards stay as they are, and the attendees are
             told once it commits (send#InterviewInvitations, by a tx-commit rule: the cancel); a failure to send is logged and the
             cancel stays.
             reason is kept as the status change's reason.</description>
