@@ -19,7 +19,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
-            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed.
+            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
+            self-approval and no voice note transcription.
             canEdit says whether the user may change it.</description>
         <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
         <out-parameters>
@@ -36,8 +37,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>An organization's work policy from now (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope),
             ending the row in effect: the approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
-            requests and warranty repairs become managed work, and whether a procedure's last author may approve it
-            (procedureSelfApproval, off by default; impl-maintenance P6).</description>
+            requests and warranty repairs become managed work, whether a procedure's last author may approve it
+            (procedureSelfApproval, off by default; impl-maintenance P6), and whether a checklist step's voice note is transcribed
+            (voiceNoteTranscription, off by default; impl-maintenance P7 review).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="approvalThresholdHours"/>
@@ -47,6 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productionRequestsManaged"/>
             <parameter name="warrantyRepairsManaged"/>
             <parameter name="procedureSelfApproval"/>
+            <parameter name="voiceNoteTranscription"/>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>
