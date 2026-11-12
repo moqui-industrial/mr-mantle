@@ -2,7 +2,8 @@
 // design §8 WorkStatusReport; impl-maintenance P17): over execution roots only (a procedure's template root and a process step are
 // not counted); opened, completed, cancelled in the period and the backlog, overdue and unassigned at the as-of time, each from
 // the root's status audit; an order completed, reopened and completed again counts once, a completion reopened and still open is
-// backlog; overdue is past its required completion, never unscheduled; as of before the work existed nothing counts; another
+// backlog, and completed again after the period's start counts in that period (review R1: by its last completion, not its first);
+// overdue is past its required completion, never unscheduled; as of before the work existed nothing counts; another
 // organization's roots are left out and asked for by name refused; a technician's assigned view reads none of it. Standalone:
 // spec-local organizations, a site, a team, users and work orders made through the work order services as each user.
 // Run: ./moq test mr-mantle --spec MaintenanceReports
@@ -15,6 +16,7 @@ const orgA = prefix + "_A",
 const S = "mantle.work.MaintenanceServices."
 const R = "mantle.work.MaintenanceReportServices.get#MaintenanceStatusReport"
 const WORK = "mantle.work.effort.WorkEffort"
+const {ms} = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const state = {}
 
 // the service's answer as a user, or the reason code it refuses with
@@ -234,5 +236,35 @@ feature("as of before the work existed nothing counts; a group's rows; another o
         named == "ORGANIZATION_DENIED"
         tech == "PERMISSION_DENIED"
         badMeasure == "VALUE_INVALID"
+    }
+})
+
+// Review R1: a completion reopened before the period began and completed again in it counts in the period, by the completion in
+// force at the as-of time; the earlier period, whose end saw the order open, counts none of it
+feature("an order completed, reopened before the period and completed again in it counts in the period", {
+    when() {
+        // the period starts after the reopening of state.reopened (its last status audit) and before its completion
+        const reopenedAt = Math.max(
+            ...Array.from(
+                ec.entity
+                    .find("moqui.entity.EntityAuditLog")
+                    .condition({changedEntityName: WORK, changedFieldName: "statusId", pkPrimaryValue: state.reopened})
+                    .disableAuthz()
+                    .list()
+            ).map(row => ms(row.changedDate))
+        )
+        const periodStart = new Date(reopenedAt + 1)
+        while (Date.now() <= reopenedAt + 5) {
+            // wait for the clock to pass the period's start
+        }
+        complete(state.reopened)
+        return {
+            period: report(state.reader, {fromDate: periodStart, measure: "completed"}),
+            earlier: report(state.reader, {thruDate: periodStart, measure: "completed"})
+        }
+    },
+    then({period, earlier}) {
+        period.statusList.map(row => row.workEffortId).includes(state.reopened)
+        !earlier.statusList.map(row => row.workEffortId).includes(state.reopened)
     }
 })

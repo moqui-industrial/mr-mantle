@@ -131,8 +131,8 @@ along with this software (see the LICENSE.md file). If not, see
             organizations, PERMISSION_DENIED otherwise, ORGANIZATION_DENIED for another organization), over execution roots only
             (procedures and process steps are never counted), at most 2000 (summary.capped): in the period from fromDate (30 days
             before the as-of time unless given) to the as-of time (thruDate, now unless given), the work orders opened (created),
-            completed (first completed in the period and still complete at the as-of time: a completion reopened is not counted,
-            an order completed, reopened and completed again counts once) and cancelled, and at the as-of time the backlog (open),
+            completed (complete at the as-of time by a completion in the period: a completion reopened is not counted, an order
+            completed, reopened and completed again counts once, in the period of its last completion) and cancelled, and at the as-of time the backlog (open),
             the overdue (backlog past its required completion, never unscheduled work) and the unassigned (backlog with no
             technician), each from the status audit of the root. Narrowed to an organization, a facility (with those inside it),
             equipment, a team (at the as-of time), a source or a kind; grouped by state, team, resource, source, kind or none

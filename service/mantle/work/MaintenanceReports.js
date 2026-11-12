@@ -7,9 +7,10 @@
 // - The period runs from fromDate (30 days before the as-of time unless given) to the as-of time (thruDate, now unless given).
 // - A root's history is its status audit (WorkEffort.statusId is audit logged on create and on every change). Its status at a
 //   moment is the last change at or before it; a root with no history (loaded data) stands as it is now and counts no opening.
-// - Opened: created in the period. Completed: first completed (Complete or Closed) in the period and still complete at the as-of
-//   time, so an order completed, reopened and completed again counts once, and a completion reopened and still open is backlog,
-//   not a completion (corrections applied). Cancelled: cancelled in the period and still cancelled at the as-of time.
+// - Opened: created in the period. Completed: complete (Complete or Closed) at the as-of time by a completion in the period (the
+//   last one at or before the as-of time), so an order completed, reopened and completed again counts once, in the period of its
+//   last completion, and a completion reopened and still open is backlog, not a completion (corrections applied). Cancelled:
+//   cancelled in the period and still cancelled at the as-of time.
 // - Backlog: open (in planning, approved, in progress or on hold) at the as-of time. Overdue: backlog past its required
 //   completion (estimatedCompletionDate), never work with no due date. Unassigned: backlog with no technician assigned at the
 //   as-of time.
@@ -162,7 +163,8 @@ function chained(list) {
     }
     return out
 }
-// A root's life from its history: its status at a moment, when it was created, first completed and last cancelled.
+// A root's life from its history: its status at a moment, when it was created, and its completion and cancellation in force at
+// a moment.
 function lifeOf(root, history) {
     const changes = history || []
     const statusAt = at => {
@@ -176,14 +178,19 @@ function lifeOf(root, history) {
         return changes.length ? changes[0].from : root.statusId
     }
     const createdAt = changes.length && changes[0].from == null ? changes[0].at : null
-    const completion = changes.find(change => completeStatuses.includes(change.to) && !completeStatuses.includes(change.from))
-    const completedAt = completion
-        ? completion.at
-        : !changes.length && completeStatuses.includes(root.statusId) && root.actualCompletionDate != null
-          ? ms(root.actualCompletionDate)
-          : null
-    const cancellation = changes.filter(change => change.to === cancelled).pop()
-    return {statusAt, createdAt, completedAt, cancelledAt: cancellation ? cancellation.at : null}
+    // the completion in force at a moment: the last change into Complete or Closed at or before it (review R1: the first one
+    // missed an order completed, reopened across the period's start and completed again in the period)
+    const completedAt = at => {
+        const completion = changes
+            .filter(change => change.at <= at && completeStatuses.includes(change.to) && !completeStatuses.includes(change.from))
+            .pop()
+        if (completion) return completion.at
+        return !changes.length && completeStatuses.includes(root.statusId) && root.actualCompletionDate != null
+            ? ms(root.actualCompletionDate)
+            : null
+    }
+    const cancellation = at => changes.filter(change => change.at <= at && change.to === cancelled).pop()
+    return {statusAt, createdAt, completedAt, cancelledAt: at => cancellation(at)?.at ?? null}
 }
 // The current team and technicians of each root at a moment.
 function partiesAt(rootIds, at) {
@@ -253,8 +260,8 @@ function statusReport(p) {
         const backlog = openStatuses.includes(state)
         const flags = {
             opened: inPeriod(life.createdAt),
-            completed: inPeriod(life.completedAt) && completeStatuses.includes(state),
-            cancelled: state === cancelled && inPeriod(life.cancelledAt),
+            completed: completeStatuses.includes(state) && inPeriod(life.completedAt(at)),
+            cancelled: state === cancelled && inPeriod(life.cancelledAt(at)),
             backlog,
             overdue: backlog && root.estimatedCompletionDate != null && ms(root.estimatedCompletionDate) < at,
             unassigned: backlog && !party.assignees.length
@@ -318,8 +325,8 @@ function statusReport(p) {
         rootCount: counted.length,
         capped,
         noteText:
-            "Work orders only: procedures and their steps are not counted. A completion counts once, when first completed, " +
-            "and only while the order is still complete." +
+            "Work orders only: procedures and their steps are not counted. A completion counts once, in the period of its last " +
+            "completion, and only while the order is still complete." +
             (capped ? " Only the first " + rootCap + " work orders were read: narrow the options." : "")
     }
     for (const {key} of measures) summary[key + "Count"] = counted.filter(row => row.flags[key]).length
