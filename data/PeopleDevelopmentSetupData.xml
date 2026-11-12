@@ -27,4 +27,27 @@ along with this software (see the LICENSE.md file). If not, see
             description="Remind each person once that a verified qualification of theirs expires within thirty days"
             serviceName="mantle.humanres.DevelopmentServices.send#ExpiryReminders" cronExpression="0 45 0 * * ?" paused="N"
             errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <!-- impl-people P19 (design-people §10 TrainingDetail's Enrollment, §12 ApprovalPolicies; F42): a place asked for in a training
+        session by the person (DevelopmentServices.enroll#Training) waits for a People approval of kind PakTraining, sent to the
+        approvers of the step waiting (the person's manager unless a rule says otherwise; never the person or who asked).
+        approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse services as the user, which
+        decide it at the revision in the message (decide#Enrollment over PeopleApprovalServices.record#Decision): the last approval
+        enrolls the person (an attendee of the session's event), a refusal needs its reason. The message holds peopleApprovalId,
+        personTrainingId, workEffortId, sourceRevision, partyId, personName, subjectText (the course and the session's day),
+        organizationName, departmentName and stepText: no reason, result or score. The app that shows them sets the link
+        (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakTraining" description="Training enrollment" sequenceNum="8" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeopleTrainingApproval" inboxEnumId="NinNotifications"
+            description="Training place to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.DevelopmentServices.approve#Enrollment"
+            refuseServiceName="mantle.humanres.DevelopmentServices.refuse#Enrollment" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+    <!-- impl-people P19 review: the person (and who asked for them, when another) is told the outcome of the place they asked for,
+        approved or refused (decide#Enrollment). The message holds personTrainingId, workEffortId, courseText, dayText and
+        outcomeText, never the reason. The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleTrainingDecision" inboxEnumId="NinNotifications"
+            description="Your training place decided" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your place in ${courseText} on ${dayText}: ${outcomeText}"/>
 </entity-facade-xml>

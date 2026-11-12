@@ -62,8 +62,9 @@ along with this software (see the LICENSE.md file). If not, see
     <mantle.party.FormPurpose purposeEnumId="DbfpReview" publicationPurposeEnumId="FppReview"
             editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_DEVELOP_VIEW"
             scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+    <!-- impl-people P19 review: a training assessment is also built by a development editor (the learning administrator) -->
     <mantle.party.FormPurpose purposeEnumId="DbfpTrainingAssessment" publicationPurposeEnumId="FppTrainingAssessment"
-            editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_DEVELOP_VIEW"
+            editPermission="PEOPLE_CONFIGURE,PEOPLE_DEVELOP_EDIT" viewPermission="PEOPLE_DEVELOP_VIEW"
             scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
     <mantle.party.FormPurpose purposeEnumId="DbfpExitInterview" publicationPurposeEnumId="FppExitInterview"
             editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_HR_VIEW"

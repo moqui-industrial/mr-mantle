@@ -106,9 +106,11 @@ const listOf = value =>
 const registrationOf = purposeEnumId => (blank(purposeEnumId) ? null : one(PURPOSE, {purposeEnumId}))
 // The word the messages use for a form of the purpose ("template" for a case template, else "form").
 const nounOf = registration => registration?.formNoun || "form"
-const canEdit = registration => !!registration && !blank(registration.editPermission) && access.has(registration.editPermission)
-const canView = registration =>
-    canEdit(registration) || (!!registration && !blank(registration.viewPermission) && access.has(registration.viewPermission))
+// editPermission and viewPermission may each list several permissions (a comma list), any one of which admits (impl-people P19
+// review: the training assessment is edited by the People administrator or a development editor)
+const holdsAny = permissions => listOf(permissions).some(permission => access.has(permission))
+const canEdit = registration => !!registration && holdsAny(registration.editPermission)
+const canView = registration => canEdit(registration) || (!!registration && holdsAny(registration.viewPermission))
 // The publication access kinds a publication of a form of the purpose may take; none: assigned respondents only, no link.
 const accessKinds = registration => listOf(registration?.accessEnumIds)
 // The organizations the user builds and reads the purpose's forms for: the registered scope service's organizationPartyIds,
@@ -133,7 +135,7 @@ function requireOrganization(registration, organizationPartyId) {
 }
 function requireEdit(registration) {
     if (!registration) denied("PURPOSE_UNAVAILABLE", "This kind of form is not built here")
-    if (!canEdit(registration)) denied("PERMISSION_DENIED", registration.editPermission + " is required")
+    if (!canEdit(registration)) denied("PERMISSION_DENIED", listOf(registration.editPermission).join(" or ") + " is required")
     return registration
 }
 // A form of a registered purpose (of purposes, when given) of one of the user's organizations for it, which the user may edit

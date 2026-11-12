@@ -41,6 +41,8 @@ const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
 const EXPENSE_CLAIM = "mantle.humanres.expense.ExpenseClaim"
 const EMPLOYEE_ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
 const EMPLOYMENT_OFFER = "mantle.humanres.recruitment.EmploymentOffer"
+// P19: a place in a training session
+const PERSON_TRAINING = "mantle.humanres.ability.PersonTraining"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -281,6 +283,36 @@ const kinds = {
                     subjectText: "an offer of " + (positionName || openingTitle || "a position"),
                     organizationName: names[offer.organizationPartyId] || offer.organizationPartyId || "",
                     departmentName: offer.departmentPartyId ? names[offer.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P19: a place in a training session the person asked for (DevelopmentServices.enroll#Training and decide#Enrollment), bound to
+    // the enrollment's last change, so a withdrawal or the session's cancellation supersedes it. The notice names the person, the
+    // course and the session's day, the employer and department; never the reason asked or a result.
+    PakTraining: {
+        topic: "PeopleTrainingApproval",
+        sourceEntityName: PERSON_TRAINING,
+        sourceField: "personTrainingId",
+        describe(sourceId) {
+            const enrollment = one(PERSON_TRAINING, {personTrainingId: sourceId})
+            if (!enrollment) return {label: "training " + sourceId}
+            const personName = people.personNames([enrollment.partyId])[enrollment.partyId] || enrollment.partyId
+            const names = people.organizationNames([enrollment.organizationPartyId, enrollment.departmentPartyId].filter(Boolean))
+            const course = one("mantle.humanres.ability.TrainingClass", {trainingClassId: enrollment.trainingClassId})
+            const event = one("mantle.work.effort.WorkEffort", {workEffortId: enrollment.workEffortId})
+            const courseText = course?.title || enrollment.trainingClassId || ""
+            const dayText = event?.estimatedStartDate ? ec.l10n.format(event.estimatedStartDate, "yyyy-MM-dd") : ""
+            return {
+                label: "training of " + personName + ": " + courseText,
+                message: {
+                    personTrainingId: sourceId,
+                    workEffortId: enrollment.workEffortId,
+                    partyId: enrollment.partyId,
+                    personName,
+                    subjectText: "training for " + personName + " (" + courseText + (dayText ? ", " + dayText : "") + ")",
+                    organizationName: names[enrollment.organizationPartyId] || enrollment.organizationPartyId || "",
+                    departmentName: enrollment.departmentPartyId ? names[enrollment.departmentPartyId] || "" : ""
                 }
             }
         }

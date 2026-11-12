@@ -588,7 +588,10 @@ along with this software (see the LICENSE.md file). If not, see
             WorkEffort.ownerPartyId, is the user's party) or with edit permission on a calendar it is in (not a
             subscription calendar, whose events come from the feed); view as well as an attendee (a current
             WorkEffortParty), with view permission on a calendar it is in, or when it is visible to all users (WevAllUsers).
-            With permission view or edit, an error when the user may not; an event the user may not view is "not found".
+            An event another service keeps (managedBy: People's training session, a WepTraining event with its TrainingSession,
+            changed by mantle.humanres.DevelopmentServices.store#Training; impl-people P19 review) is viewed as any other but
+            changed by no one here. With permission view or edit, an error when the user may not; an event the user may not view
+            is "not found".
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -599,10 +602,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canEdit" type="Boolean"/>
             <parameter name="isOrganizer" type="Boolean"/>
             <parameter name="isAttendee" type="Boolean"/>
+            <parameter name="managedBy"><description>What keeps the event, when another service does: it is changed there</description></parameter>
             <parameter name="workEffort" type="Map"/>
         </out-parameters>
         <actions><script><![CDATA[
-            canView = false; canEdit = false; isOrganizer = false; isAttendee = false; workEffort = null
+            canView = false; canEdit = false; isOrganizer = false; isAttendee = false; workEffort = null; managedBy = null
             const cf = ec.entity.conditionFactory
             const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             const partyId = ec.user.userAccount?.partyId || null
@@ -624,12 +628,17 @@ along with this software (see the LICENSE.md file). If not, see
                         if (['CalpEdit', 'CalpManage'].includes(permissionId) && kinds.get(id) !== 'CalkSubscription') editByCalendar = true
                     }
                 }
-                canEdit = isOrganizer || editByCalendar
-                canView = canEdit || isAttendee || viewByCalendar || row.visibilityEnumId === 'WevAllUsers'
+                // a People training session's event is changed on the session (store#Training checks its dates, trainer and
+                // revision), never by its organizer or a calendar here
+                if (row.purposeEnumId === 'WepTraining' && ec.entity.find('mantle.humanres.ability.TrainingSession')
+                        .condition('workEffortId', workEffortId).disableAuthz().count() > 0) managedBy = 'its People training session'
+                canEdit = !managedBy && (isOrganizer || editByCalendar)
+                canView = isOrganizer || editByCalendar || isAttendee || viewByCalendar || row.visibilityEnumId === 'WevAllUsers'
                 if (canView) workEffort = row.getMap()
             }
             if (permission !== 'view' && permission !== 'edit') return
             if (!canView) { ec.message.addError(`Event ${workEffortId} not found`); return }
+            if (permission === 'edit' && managedBy) { ec.message.addError(`${row.workEffortName || workEffortId} is changed on ${managedBy}`); return }
             if (permission === 'edit' && !canEdit) ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} or an editor of its calendar may change it`)
         ]]></script></actions>
     </service>
