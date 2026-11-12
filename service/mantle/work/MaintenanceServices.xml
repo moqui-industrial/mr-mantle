@@ -726,8 +726,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="InterventionReport" allow-remote="false" read-only="true">
         <description>A customer repair's intervention report as of now for a reader of the work order (NOT_CUSTOMER_REPAIR for
             other work): the customer-safe work done (the work, technicians, start and finish, outcome and the equipment's state),
-            the claim and the customer's equipment, parts and labor only for a reader of maintenance costs (costsShown), and the
-            customer's acknowledgment; printHtml for html-print, with pdf true its PDF, and the stored report when there is one.
+            the claim and the customer's equipment, the parts used with their quantities and the hours worked (never a price,
+            cost or total, whoever reads it: the user's call of Nov 12), and the customer's acknowledgment; printHtml for html-print, with pdf true its PDF, and the stored report when there is one.
             Posts nothing.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -737,7 +737,6 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="printHtml"/>
             <parameter name="pdfBytes" type="Object"/>
             <parameter name="fileName"/>
-            <parameter name="costsShown" type="Boolean"/>
             <parameter name="stored" type="Map"/>
         </out-parameters>
         <actions>
@@ -745,14 +744,13 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="printHtml" from="answer.printHtml"/>
             <set field="pdfBytes" from="answer.pdfBytes"/>
             <set field="fileName" from="answer.fileName"/>
-            <set field="costsShown" from="answer.costsShown"/>
             <set field="stored" from="answer.stored"/>
         </actions>
     </service>
     <service verb="store" noun="InterventionReport">
         <description>A customer repair's intervention report as of now stored on the work order as its WectInterventionReport PDF (a
             new one each time, the earlier kept and never changed), with the customer's acknowledgment file (WectAcknowledgment)
-            first when given; parts and labor only where the user reads maintenance costs. For the work's planner, supervisor or
+            first when given; the parts' quantities and the hours, never an amount (the user's call of Nov 12). For the work's planner, supervisor or
             assigned technician (PERMISSION_DENIED), on completed or closed work (WORK_NOT_DONE); other work is
             NOT_CUSTOMER_REPAIR. Customer Service sends the stored report (WarrantyServices.send#InterventionReport). The same
             operationKey answers the first result.</description>

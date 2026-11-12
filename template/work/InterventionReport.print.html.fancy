@@ -14,9 +14,9 @@ along with this software (see the LICENSE.md file). If not, see
      mantle.work.MaintenanceServices get# and store#InterventionReport, MaintenanceRepairs.js reportValues): printed from WorkOrderDetail,
      stored on the work order and sent by Customer Service. workEffortId, workEffortName, description, organizationName,
      customerName, requestId, requestName, decisionText, equipmentText, placeText, technicianText, statusText, startedText,
-     finishedText, outcomeText, dispositionText, costsShown with partList, laborList (description, quantityText, amountText) and
-     totalList (partsText, laborText, totalText), acknowledgmentText, acknowledgmentDateText, asOfText, printedBy. Parts and labor
-     only where the reader may read costs. -->
+     finishedText, outcomeText, dispositionText, partList (description, quantityText), laborList (description, quantityText: hours),
+     totalHoursText, acknowledgmentText, acknowledgmentDateText, asOfText, printedBy. No price, cost or total, whoever prints or
+     stores it (the user's call of Nov 12, review R6). -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>${ec.l10n.localize('Intervention report')} ${workEffortId}</title>
 <style>
@@ -51,12 +51,11 @@ tbody tr { break-inside: avoid; }
 <p>${workEffortName}</p>
 <#if description><p>${description}</p></#if>
 <#if outcomeText><p><strong>${ec.l10n.localize('Outcome')}:</strong> ${outcomeText}<#if dispositionText> · ${ec.l10n.localize('The equipment is')} ${dispositionText}</#if></p></#if>
-<#if costsShown>
 <h2>${ec.l10n.localize('Parts')}</h2>
 <#if partList.length>
 <table class="lines">
-    <thead><tr><th>${ec.l10n.localize('Part')}</th><th class="amount">${ec.l10n.localize('Quantity')}</th><th class="amount">${ec.l10n.localize('Amount')}</th></tr></thead>
-    <tbody><#list partList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td><td class="amount">${line.amountText}</td></tr></#list></tbody>
+    <thead><tr><th>${ec.l10n.localize('Part')}</th><th class="amount">${ec.l10n.localize('Quantity')}</th></tr></thead>
+    <tbody><#list partList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td></tr></#list></tbody>
 </table>
 <#else>
 <p class="muted">${ec.l10n.localize('No part was used.')}</p>
@@ -64,13 +63,12 @@ tbody tr { break-inside: avoid; }
 <h2>${ec.l10n.localize('Labor')}</h2>
 <#if laborList.length>
 <table class="lines">
-    <thead><tr><th>${ec.l10n.localize('Work')}</th><th class="amount">${ec.l10n.localize('Hours')}</th><th class="amount">${ec.l10n.localize('Amount')}</th></tr></thead>
-    <tbody><#list laborList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td><td class="amount">${line.amountText}</td></tr></#list></tbody>
+    <thead><tr><th>${ec.l10n.localize('Technician')}</th><th class="amount">${ec.l10n.localize('Hours')}</th></tr></thead>
+    <tbody><#list laborList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td></tr></#list></tbody>
 </table>
+<p><strong>${ec.l10n.localize('Total hours')}:</strong> ${totalHoursText}</p>
 <#else>
 <p class="muted">${ec.l10n.localize('No time is recorded.')}</p>
-</#if>
-<#list totalList as total><p><strong>${ec.l10n.localize('Parts')}:</strong> ${total.partsText} · <strong>${ec.l10n.localize('Labor')}:</strong> ${total.laborText}</p></#list>
 </#if>
 <h2>${ec.l10n.localize('Acknowledgment')}</h2>
 <#if acknowledgmentText>

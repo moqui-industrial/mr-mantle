@@ -10,8 +10,8 @@
 // - The customer's asset is read through the repair (the work order's organization and the claim), never by changing its owner
 //   or by Maintenance's equipment scope, which does not cover a customer's asset away from the organization's facilities.
 // - The intervention report (html-print and PDF): the customer-safe work done (the work, its technicians, start and finish,
-//   outcome and the equipment's state after it), parts and labor only where the reader may read costs
-//   (MaintenanceReportServices.get#MaintenanceCosts admits them), and the customer's acknowledgment. Stored on the work order as
+//   outcome and the equipment's state after it), the parts used with their quantities and the hours worked, never a price, cost
+//   or total, whoever prints or stores it (the user's call of Nov 12, review R6), and the customer's acknowledgment. Stored on the work order as
 //   its WectInterventionReport content by the planner, supervisor or assigned technician of completed or closed work; Customer
 //   Service's RepairLinks sends the stored one (send#InterventionReport). Printing and storing post nothing.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -96,9 +96,51 @@ function readRepair(workEffortId) {
 }
 
 // ===== the intervention report =====
+// The parts used and the hours worked on the work order's tree, never a price, cost or total (the user's call of Nov 12, review R6:
+// the report is the customer's whoever prints or stores it; costs stay in the Costs tab and the cost report): each part issued less
+// returned, by product; each person's finished time in hours.
+function workDone(rootId) {
+    const num = value => (value == null ? 0 : typeof value === "number" ? value : Number(String(value)))
+    const treeIds = [rootId].concat(
+        rows(WORK, {rootWorkEffortId: rootId})
+            .map(row => row.workEffortId)
+            .filter(id => id !== rootId)
+    )
+    const inTree = entity => Array.from(find(entity).condition("workEffortId", "in", treeIds).list())
+    const issuances = inTree("mantle.product.issuance.AssetIssuance")
+    const quantities = new Map()
+    const addQuantity = (productId, quantity) => quantities.set(productId, (quantities.get(productId) || 0) + num(quantity))
+    for (const row of issuances) addQuantity(row.productId, row.quantity)
+    const issuanceIds = issuances.map(row => row.assetIssuanceId)
+    if (issuanceIds.length)
+        for (const row of Array.from(
+            find("mantle.product.receipt.AssetReceipt").condition("sourceAssetIssuanceId", "in", issuanceIds).list()
+        )) {
+            const issuance = issuances.find(item => item.assetIssuanceId === row.sourceAssetIssuanceId)
+            addQuantity(issuance.productId, -num(row.quantityAccepted))
+        }
+    const productNames = productId => one("mantle.product.Product", {productId})?.productName || productId
+    const partList = Array.from(quantities.entries())
+        .filter(([, quantity]) => quantity > 0)
+        .map(([productId, quantity]) => ({description: productNames(productId), quantityText: String(quantity)}))
+    // a running timer (no end and no hours) is not yet time
+    const hoursOf = row =>
+        row.hours != null ? num(row.hours) : Math.max(0, (ms(row.thruDate) - ms(row.fromDate)) / 3600000 - num(row.breakHours))
+    const hours = new Map()
+    for (const row of inTree("mantle.work.time.TimeEntry").filter(row => row.thruDate != null || row.hours != null))
+        hours.set(row.partyId, (hours.get(row.partyId) || 0) + hoursOf(row))
+    const names = lib.partyNames(Array.from(hours.keys()))
+    const hoursText = value => String(Math.round(value * 100) / 100)
+    const laborList = Array.from(hours.entries()).map(([partyId, value]) => ({
+        description: names[partyId] || partyId,
+        quantityText: hoursText(value)
+    }))
+    const total = Array.from(hours.values()).reduce((sum, value) => sum + value, 0)
+    return {partList, laborList, totalHoursText: laborList.length ? hoursText(total) : ""}
+}
 // The report's values as of now: the work done for the customer, and parts and labor where the reader may read costs.
 function reportValues(ctx) {
-    const {root, order, organizationPartyId, userScope} = ctx
+    const {root, order, organizationPartyId} = ctx
     const summary = warranty().repairSummary(order.assetMaintenanceId) || {}
     const asset = order.assetId ? one(ASSET, {assetId: order.assetId}) : null
     const facility = root.facilityId ? one(FACILITY, {facilityId: root.facilityId}) : null
@@ -108,38 +150,7 @@ function reportValues(ctx) {
             .list()
     ).map(row => row.partyId)
     const names = lib.partyNames(technicianIds.concat([organizationPartyId]))
-    let partList = [],
-        laborList = [],
-        totalList = [],
-        costsShown = false
-    if (userScope.capabilities.costView) {
-        // the cost reader's own answer for this work order (its permission and scope checked there again)
-        ec.message.pushErrors()
-        try {
-            const costs = call("mantle.work.MaintenanceReportServices.get#MaintenanceCosts", {
-                workEffortId: root.workEffortId
-            }).costs
-            const sources = Array.from(costs?.sourceList || [])
-            const line = row => ({
-                description: row.description || "",
-                quantityText: row.quantityText || "",
-                amountText: row.amountText || ""
-            })
-            partList = sources.filter(row => row.component === "parts").map(line)
-            laborList = sources.filter(row => row.component === "labor").map(line)
-            totalList = Array.from(costs?.totalList || []).map(row => ({
-                partsText: row.partsText,
-                laborText: row.laborText,
-                totalText: row.totalText
-            }))
-            costsShown = true
-        } catch (error) {
-            ec.logger.warn("Work order " + root.workEffortId + ": the report's parts and labor were left out: " + error.message)
-        } finally {
-            ec.message.clearErrors()
-            ec.message.popErrors()
-        }
-    }
+    const {partList, laborList, totalHoursText} = workDone(root.workEffortId)
     const acknowledgment = latest(root.workEffortId, ACKNOWLEDGMENT)
     return {
         workEffortId: root.workEffortId,
@@ -158,10 +169,9 @@ function reportValues(ctx) {
         finishedText: dateText(root.actualCompletionDate),
         outcomeText: enumText(order.outcomeEnumId),
         dispositionText: enumText(order.dispositionEnumId),
-        costsShown,
         partList,
         laborList,
-        totalList,
+        totalHoursText,
         acknowledgmentText: acknowledgment ? acknowledgment.description || fileName(acknowledgment.contentLocation) : "",
         acknowledgmentDateText: acknowledgment ? dateText(acknowledgment.contentDate) : "",
         asOfText: dateText(ec.user.nowTimestamp),
@@ -180,7 +190,6 @@ function getReport(p) {
         pdfBytes:
             p.pdf === true || p.pdf === "true" ? ec.resource.xslFoTransform(printHtml, null, null, "application/pdf") : null,
         fileName: reportFileName(ctx.root.workEffortId),
-        costsShown: values.costsShown,
         stored: stored
             ? {
                   workEffortContentId: stored.workEffortContentId,

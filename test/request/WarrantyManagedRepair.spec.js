@@ -148,6 +148,7 @@ spec({
         state.otherAgent = user("OTHER_AGENT", ["SUPPORT_CASE_EDIT"], otherOrg)
         state.tech = user("TECH", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE", "STOCK_ISSUE"])
         state.supervisor = user("SUPERVISOR", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE"])
+        state.costReader = user("COSTS", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE", "MAINTENANCE_COST_VIEW"])
         // review: the customer's address and the agent's mail account, for a send that goes (the mail capture keeps it)
         const contactMechId = call("create#mantle.party.contact.ContactMech", {
             contactMechTypeEnumId: "CmtEmailAddress",
@@ -379,10 +380,48 @@ feature(
                     )
                 )
             const beforeStore = send(state.agent, {toAddress: "someone@example.com", key: "1"})
+            // R6 (the user's call of Nov 12): a part at a cost of 45 issued, 2 of 3 kept, and 1.5 hours of the technician's
+            const write = (entity, fields) => ec.entity.makeValue(entity).setAll(fields).create()
+            write("mantle.product.asset.Asset", {
+                assetId: prefix + "_PART",
+                assetTypeEnumId: "AstTpInventory",
+                productId: product,
+                ownerPartyId: org,
+                facilityId: facility,
+                acquireCost: 45,
+                acquireCostUomId: "USD"
+            })
+            write("mantle.product.issuance.AssetIssuance", {
+                assetIssuanceId: prefix + "_ISS",
+                assetId: prefix + "_PART",
+                productId: product,
+                workEffortId,
+                quantity: 3,
+                issuedDate: new Date(nowMs() - 3600000)
+            })
+            write("mantle.product.receipt.AssetReceipt", {
+                assetReceiptId: prefix + "_RET",
+                assetId: prefix + "_PART",
+                productId: product,
+                workEffortId,
+                sourceAssetIssuanceId: prefix + "_ISS",
+                quantityAccepted: 1,
+                receivedDate: new Date(nowMs() - 1800000)
+            })
+            write("mantle.work.time.TimeEntry", {
+                timeEntryId: prefix + "_TIME",
+                partyId: state.tech,
+                workEffortId,
+                fromDate: new Date(nowMs() - 7200000),
+                thruDate: new Date(nowMs() - 1800000)
+            })
             const notDone = run(state.tech, M + "store#InterventionReport", {workEffortId: state.covered.workEffortId})
             const stored = run(state.tech, M + "store#InterventionReport", {workEffortId, operationKey: prefix + "-store"})
             const report = run(state.tech, M + "get#InterventionReport", {workEffortId})
+            // the cost reader's print is the same: quantities and hours, no amount
+            const costReport = run(state.costReader, M + "get#InterventionReport", {workEffortId})
             return {
+                costReport,
                 beforeStore,
                 notDone,
                 stored,
@@ -392,15 +431,20 @@ feature(
                 otherAgent: send(state.otherAgent, {toAddress: "someone@example.com"})
             }
         },
-        then({beforeStore, notDone, stored, report, content, stranger, otherAgent}) {
+        then({costReport, beforeStore, notDone, stored, report, content, stranger, otherAgent}) {
             code(beforeStore) == "REPORT_REQUIRED"
             code(notDone) == "WORK_NOT_DONE"
             stored.error == ""
             content.contentTypeEnumId == "WectInterventionReport"
-            report.costsShown == false
             report.printHtml.includes("Managed Repair Customer")
             report.printHtml.includes("Repaired")
-            !report.printHtml.includes("Labor")
+            report.printHtml.includes('Managed repair heater</td><td class="amount">2</td>')
+            report.printHtml.includes('<td class="amount">1.5</td>')
+            costReport.error == ""
+            costReport.printHtml.includes('<td class="amount">1.5</td>')
+            !costReport.printHtml.includes("Amount")
+            !costReport.printHtml.includes("135.00")
+            !costReport.printHtml.includes("USD")
             report.stored.workEffortContentId == stored.workEffortContentId
             code(stranger) == "RECIPIENT_UNCHECKED"
             code(otherAgent) == "RECORD_UNAVAILABLE"
