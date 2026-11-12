@@ -7,7 +7,10 @@
 // failed assessment is kept and the person stays enrolled, the passing one completes the place, grants the qualification once (a
 // completion retried answers the first) and issues the certificate, stored and read back by the person alone of the people; the
 // trainer reads their session's assessments and no other session's, the person their own outcome without the answers; a cancelled
-// session cancels the places and supersedes a waiting approval.
+// session cancels the places and supersedes a waiting approval. P19 review: the session's event is changed on the session alone
+// (Commons' EventServices refuse its organizer, and no one puts it in a calendar); a place is approved before the session starts,
+// and the person is told the decision (PeopleTrainingDecision, no reason); a trainer who left the employer reads the session as
+// anyone else; a development editor builds a training assessment form.
 // Standalone: spec-local organizations, people, employments, a qualification type, an assessment form, groups and users, with
 // artifact authorization disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec Training
@@ -95,8 +98,8 @@ spec({
         state.devB = user("DEVB", orgB, ["PEOPLE_DEVELOP_VIEW", "PEOPLE_DEVELOP_EDIT"])
         state.hr = user("HR", orgA, ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"])
         state.config = user("CONFIG", orgA, ["PEOPLE_CONFIGURE"])
-        // Max manages Ana and Bo: their places go to him
-        for (const report of [state.ana, state.bo])
+        // Max manages Ana, Bo and Cy: their places go to him
+        for (const report of [state.ana, state.bo, state.cy])
             call("create#mantle.party.PartyRelationship", {
                 relationshipTypeEnumId: "PrtManager",
                 fromPartyId: state.max.partyId,
@@ -190,6 +193,37 @@ feature("a course and its session are a development editor's: a WepTraining even
             workEffortId: state.sessionId,
             partyId: state.trainer.partyId
         }).length
+        // P19 review: the organizer (the scheduler) sees the event and changes it only on the session; the trainer (an attendee)
+        // puts it in no calendar
+        out.eventAccess = run(state.dev.userId, "mantle.work.EventServices.check#EventAccess", {workEffortId: state.sessionId})
+        out.eventMoved = run(state.dev.userId, "mantle.work.EventServices.update#EventOccurrence", {
+            workEffortId: state.sessionId,
+            start: at(30),
+            end: at(33)
+        }).error
+        const calendarId = call("create#mantle.work.calendar.Calendar", {
+            calendarName: "Train spec Tia's",
+            calendarKindEnumId: "CalkPersonal",
+            ownerPartyId: state.trainer.partyId
+        }).calendarId
+        out.calendarAdd = run(state.trainer.userId, "mantle.work.CalendarServices.add#CalendarEvent", {
+            calendarId,
+            workEffortId: state.sessionId
+        }).error
+        // P19 review: a development editor builds a training assessment form, not another People purpose's
+        const F = "mantle.party.FormDefinitionServices."
+        out.devForm = run(state.dev.userId, F + "create#Form", {
+            purposeEnumId: "DbfpTrainingAssessment",
+            organizationPartyId: orgA,
+            description: "Train spec development's assessment"
+        })
+        out.devReviewForm = code(
+            run(state.dev.userId, F + "create#Form", {
+                purposeEnumId: "DbfpReview",
+                organizationPartyId: orgA,
+                description: "Train spec review"
+            })
+        )
         out.anaList = run(state.ana.userId, D + "find#Training", {})
         out.devBList = run(state.devB.userId, D + "find#Training", {show: "all"})
         out.devList = run(state.dev.userId, D + "find#Training", {})
@@ -202,6 +236,10 @@ feature("a course and its session are a development editor's: a WepTraining even
         out.otherSession == "RECORD_UNAVAILABLE" && out.scheduled == ""
         out.event.purposeEnumId == "WepTraining" && out.event.visibilityEnumId == "WevRestricted"
         out.event.location == "Room 2" && out.trainerOn == 1
+        out.eventAccess.canView && !out.eventAccess.canEdit && out.eventAccess.managedBy
+        out.eventMoved.includes("is changed on its People training session")
+        out.calendarAdd.includes("not put in a calendar")
+        out.devForm.formId && out.devForm.error == "" && out.devReviewForm == "PERMISSION_DENIED"
         // a self-service employee of the employer sees the session and may ask a place; another employer's development sees nothing
         const anaLine = out.anaList.sessions.find(row => row.workEffortId == state.sessionId)
         anaLine.canRequest &&
@@ -250,6 +288,14 @@ feature(
                 partyId: state.ana.partyId
             })
             out.due = run(state.ana.userId, D + "find#Training", {show: "due"})
+            // P19 review: Ana is told her place was approved, by the course and day, never her reason
+            out.notices = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessage")
+                    .condition({topic: "PeopleTrainingDecision", recordId: state.anaTraining})
+                    .disableAuthz()
+                    .list()
+            ).map(row => String(row.messageJson || "") + " " + String(row.titleText || ""))
             return out
         },
         then(out) {
@@ -263,6 +309,8 @@ feature(
             out.full == "SESSION_FULL"
             out.anaOn == 1 && out.anaReminder.length == 1 && out.anaReminder[0].offsetMinutes == 1440
             out.due.sessions.length == 1 && out.due.sessions[0].myStatusText == "Enrolled"
+            out.notices.length == 1 && out.notices[0].includes("approved") && out.notices[0].includes("Train spec first aid")
+            !out.notices[0].includes("First aider for the floor")
         }
     }
 )
@@ -276,6 +324,21 @@ feature(
                 notStarted: code(run(T, D + "mark#TrainingAttendance", {personTrainingId: state.anaTraining, attended: "Y"}))
             }
             moveSession(state.sessionId, -3, -1)
+            // P19 review: Cy's place, still waiting, is not approved once the session started
+            out.lateApproval = code(run(state.max.userId, D + "decide#Enrollment", {personTrainingId: state.cyTraining}))
+            // a refusal still follows, its reason Max's and Cy's, and Cy is told the outcome alone
+            out.lateRefusal = run(state.max.userId, D + "decide#Enrollment", {
+                personTrainingId: state.cyTraining,
+                decision: "refuse",
+                reason: "Covering the store that day"
+            })
+            out.cyNotice = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessage")
+                    .condition({topic: "PeopleTrainingDecision", recordId: state.cyTraining})
+                    .disableAuthz()
+                    .list()
+            ).map(row => String(row.messageJson || "") + " " + String(row.titleText || ""))
             out.hrMarks = code(
                 run(state.hr.userId, D + "mark#TrainingAttendance", {personTrainingId: state.anaTraining, attended: "Y"})
             )
@@ -322,6 +385,8 @@ feature(
             return out
         },
         then(out) {
+            out.lateApproval == "SESSION_CLOSED" && out.lateRefusal.statusEnumId == "PtsRefused"
+            out.cyNotice.length == 1 && out.cyNotice[0].includes("refused") && !out.cyNotice[0].includes("Covering the store")
             out.notStarted == "SESSION_NOT_STARTED" && out.hrMarks == "RECORD_UNAVAILABLE" && out.tooLong == "HOURS_INVALID"
             out.marked.attendedFlag == "Y" && out.boAbsent.attendedFlag == "N" && out.boAssessed == "ATTENDANCE_REQUIRED"
             out.noAnswers == "ASSESSMENT_REQUIRED" && out.badAnswers == "FORM_VALUES_INVALID"
@@ -376,10 +441,22 @@ feature(
             out.cancelledLine = run(state.ana.userId, D + "find#Training", {show: "past"}).sessions.find(
                 row => row.workEffortId == state.otherSessionId
             )
+            // P19 review: Tia leaves the employer; she no longer reads her session's places and assessments
+            for (const row of read("mantle.party.PartyRelationship", {fromPartyId: state.trainer.partyId, toPartyId: orgA}))
+                call("update#mantle.party.PartyRelationship", {
+                    partyRelationshipId: row.partyRelationshipId,
+                    thruDate: new Date(state.now - hour)
+                })
+            out.trainerLeft = code(get(state.trainer, state.sessionId))
+            out.trainerLeftList = run(state.trainer.userId, D + "find#Training", {show: "training"}).sessions.length
             return out
         },
         then(out) {
             out.trainer.isTrainer && out.trainer.enrollments.length == 3
+            // P19 review: why Cy's place was refused is development's and hers, not the trainer's
+            out.trainer.enrollments.find(row => row.personTrainingId == state.cyTraining).decisionReason == ""
+            out.dev.enrollments.find(row => row.personTrainingId == state.cyTraining).decisionReason ==
+                "Covering the store that day"
             out.trainer.results.length == 2 &&
                 out.trainer.results.some(row => row.answersText.includes("Practise the recovery position"))
             // the trainer of one session reads another's as any employee of the employer: their own place alone, no assessment
@@ -393,6 +470,7 @@ feature(
             out.cancelReader == "PERMISSION_DENIED" && out.cancelled.workEffortId == state.otherSessionId
             out.waiting.statusEnumId == "PtsCancelled" && out.approval.statusId == "PapSuperseded"
             out.cancelledLine.stateText == "Cancelled"
+            out.trainerLeft == "RECORD_UNAVAILABLE" && out.trainerLeftList == 0
         }
     }
 )

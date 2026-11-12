@@ -21,7 +21,8 @@
 // Who reads and does what of a session:
 // - a development reader (PEOPLE_DEVELOP_VIEW) of its employer reads it all; a development editor (PEOPLE_DEVELOP_EDIT) schedules,
 //   changes and cancels it, enrolls people, records their attendance and assesses them;
-// - its trainer reads its enrollments and its assessments alone (no other session's), records the attendance and assesses;
+// - its trainer, while they work for its employer, reads its enrollments and its assessments alone (no other session's), records
+//   the attendance and assesses;
 // - a self-service employee (PEOPLE_SELF_SERVICE) of its employer reads its time, place, seats and their own enrollment, asks for a
 //   place and withdraws their own; the person reads their own result (outcome, score, date, assessor), never the assessor's answers
 //   or evidence, and their own certificate;
@@ -104,15 +105,35 @@ function trainingScope() {
     const caps = userScope.capabilities
     userScope.developEmployers = caps.developView ? userScope.organizationPartyIds.slice() : []
     userScope.ownEmployers = caps.self ? unique((userScope.employments || []).map(row => row.organizationPartyId)) : []
+    // P19 review: the employers the caller works for now (an employee or agent), where they train a session they are the trainer of
+    userScope.workEmployers = userScope.partyId
+        ? unique(
+              Array.from(
+                  people
+                      .current(
+                          find("mantle.party.PartyRelationship")
+                              .condition("relationshipTypeEnumId", "in", ["PrtEmployee", "PrtAgent"])
+                              .condition("fromPartyId", userScope.partyId),
+                          nowMs()
+                      )
+                      .list()
+              ).map(row => row.toPartyId)
+          )
+        : []
     return userScope
 }
+// the session's trainer, while they work for its employer
+const trainsIt = (userScope, session) =>
+    !!userScope.partyId &&
+    session.trainerPartyId === userScope.partyId &&
+    userScope.workEmployers.includes(session.organizationPartyId)
 // How the caller reads a session: a development reader of its employer (developEdit with PEOPLE_DEVELOP_EDIT), its trainer, a
 // self-service employee of its employer (eligible), the person of an enrollment in it (own); assesses: who records attendance and
 // results (a development editor of its employer or its trainer).
 function sessionAccess(userScope, session) {
     const develop = userScope.developEmployers.includes(session.organizationPartyId)
     const developEdit = develop && !!userScope.capabilities.developEdit
-    const trainer = !!userScope.partyId && session.trainerPartyId === userScope.partyId
+    const trainer = trainsIt(userScope, session)
     const eligible = userScope.ownEmployers.includes(session.organizationPartyId)
     const own = userScope.partyId ? rows(ENROLLMENT, {workEffortId: session.workEffortId, partyId: userScope.partyId}) : []
     return {
@@ -212,7 +233,7 @@ function sessionLines(userScope, sessions) {
         const latest = open || mine.sort((a, b) => (ms(b.requestedDate) ?? 0) - (ms(a.requestedDate) ?? 0))[0] || null
         const access = {
             develop: userScope.developEmployers.includes(session.organizationPartyId),
-            trainer: !!userScope.partyId && session.trainerPartyId === userScope.partyId,
+            trainer: trainsIt(userScope, session),
             eligible: userScope.ownEmployers.includes(session.organizationPartyId)
         }
         const {state, stateText} = stateOf(event, at)
@@ -290,7 +311,14 @@ function findTraining(p) {
     const reach = []
     if (show !== "mine" && show !== "training" && show !== "due" && reachOrgs.length)
         reach.push(factory.makeCondition("organizationPartyId", "in", organizationPartyId ? [organizationPartyId] : reachOrgs))
-    if (userScope.partyId && show !== "mine") reach.push(factory.makeCondition("trainerPartyId", "equals", userScope.partyId))
+    if (userScope.partyId && show !== "mine" && userScope.workEmployers.length)
+        reach.push(
+            factory.makeCondition(
+                factory.makeCondition("trainerPartyId", "equals", userScope.partyId),
+                "and",
+                factory.makeCondition("organizationPartyId", "in", userScope.workEmployers)
+            )
+        )
     const ownSessions =
         show === "due"
             ? unique(myEnrollments.filter(row => row.statusEnumId === ENROLLED).map(row => row.workEffortId))
@@ -447,9 +475,10 @@ function getTraining(p) {
                 statusEnumId: row.statusEnumId,
                 statusText: statusTexts[row.statusEnumId] || row.statusEnumId,
                 requestedDateText: dateText(row.requestedDate),
-                // why a place was asked for: development's, the person's and the approver's
+                // why a place was asked for, and why it was refused: development's, the person's and the approver's (P19 review:
+                // not the trainer's)
                 reason: access.develop || own || row.personTrainingId === approverOnly ? row.reason || "" : "",
-                decisionReason: row.decisionReason || "",
+                decisionReason: access.develop || own || row.personTrainingId === approverOnly ? row.decisionReason || "" : "",
                 waitingText: summary?.waitingText || "",
                 peopleApprovalId: summary?.waiting ? summary.peopleApprovalId : null,
                 sourceRevision: summary?.waiting ? summary.sourceRevision : null,
@@ -878,6 +907,9 @@ function decideEnrollment(p) {
         })
     }
     const asked = enrollment.statusEnumId
+    // P19 review: a place is approved before the session starts (a refusal may follow later)
+    if (action === "approve" && asked === REQUESTED && stateOf(event, nowMs()).state !== "scheduled")
+        denied("SESSION_CLOSED", "The session has started; a place is approved before it starts")
     if (action === "approve" && asked === REQUESTED) {
         const others = rows(ENROLLMENT, {workEffortId: session.workEffortId}).filter(
             row => [ENROLLED, COMPLETED].includes(row.statusEnumId) && row.personTrainingId !== enrollment.personTrainingId
@@ -906,8 +938,36 @@ function decideEnrollment(p) {
             decisionReason: decided.complete ? null : reason
         })
         if (decided.complete) addAttendee(session.workEffortId, enrollment.partyId, true)
+        tellPerson(current(), event, decided.complete ? "approved" : "refused")
     }
     return Object.assign(enrollmentAnswer(current()), {repeated: false})
+}
+// P19 review: the decision told to the person (and to who asked, when another): PeopleTrainingDecision, with the course, the
+// session's day and the outcome only, never the reason. A failure is logged and the decision stays.
+function tellPerson(enrollment, event, outcomeText) {
+    try {
+        const userIds = unique(
+            rows("moqui.security.UserAccount", {partyId: enrollment.partyId})
+                .map(row => row.userId)
+                .concat(enrollment.requestedByUserId ? [enrollment.requestedByUserId] : [])
+        ).filter(userId => userId && userId !== ec.user.userId)
+        if (!userIds.length) return
+        const course = courseOf(enrollment.trainingClassId)
+        ec.makeNotificationMessage()
+            .topic("PeopleTrainingDecision")
+            .message({
+                personTrainingId: enrollment.personTrainingId,
+                workEffortId: enrollment.workEffortId,
+                courseText: course?.title || enrollment.trainingClassId || "",
+                dayText: event?.estimatedStartDate ? ec.l10n.format(event.estimatedStartDate, "yyyy-MM-dd") : "",
+                outcomeText
+            })
+            .record(ENROLLMENT, enrollment.personTrainingId)
+            .userIds(userIds)
+            .send()
+    } catch (error) {
+        ec.logger.error("Training decision notice of " + enrollment.personTrainingId + " was not sent: " + error.message)
+    }
 }
 function decideEnrollmentNotice(p, decision) {
     const message = p.message || {}

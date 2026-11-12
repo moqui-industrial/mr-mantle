@@ -422,7 +422,8 @@ along with this software (see the LICENSE.md file). If not, see
             description and assessment form; what they may do; the places they read (development and the trainer every one, an
             approver the one they decide, the person their own), each with its state, attendance, attempts, last result and the
             qualification it granted; and the assessments (development and the trainer every one with the assessor's answers and
-            evidence, the person their own outcome, score, date and assessor alone). The trainer reads no other session's. Refuses
+            evidence, the person their own outcome, score, date and assessor alone). The trainer reads no other session's, and
+            their own only while they work for its employer. Refuses
             a session or place not in reach (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="workEffortId"/>
@@ -550,7 +551,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="decide" noun="Enrollment" allow-remote="false">
         <description>A place waiting decided, under its lock: approve or refuse (with a reason) the step waiting through
             PeopleApprovalServices.record#Decision at the place's revision; the last approval enrolls the person (an attendee of the
-            session's event, reminded a day before), refused when no seat is left (SESSION_FULL). withdraw: the person, who asked
+            session's event, reminded a day before), refused when no seat is left (SESSION_FULL) or once the session has started
+            (SESSION_CLOSED; a refusal may still follow); the person, and who asked for them, is told the outcome
+            (PeopleTrainingDecision: the course, the day and approved or refused, never the reason). withdraw: the person, who asked
             or a development editor of the employer, while the place waits or is enrolled and the session has not ended (NOT_YOURS,
             NOT_PENDING, SESSION_CLOSED), a waiting approval superseded. One who reads nothing of it is answered as for a missing
             one (RECORD_UNAVAILABLE). A decision retried answers the first (repeated). Refuses as record#Decision does

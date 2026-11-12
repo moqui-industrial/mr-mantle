@@ -610,7 +610,9 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="add" noun="CalendarEvent">
         <description>Puts an event in a calendar: needs edit permission on the calendar (not a subscription calendar, whose
-            events come from its feed) and that the user may see the event (mantle.work.EventServices.check#EventAccess).</description>
+            events come from its feed) and that the user may see the event (mantle.work.EventServices.check#EventAccess); an event
+            another service keeps (its managedBy: a People training session) is not put in a calendar, whose editors would change
+            it there (impl-people P19 review).</description>
         <in-parameters>
             <parameter name="calendarId" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -623,8 +625,9 @@ along with this software (see the LICENSE.md file). If not, see
             if (ec.message.hasError()) return
             if (access.calendar.calendarKindEnumId === 'CalkSubscription') {
                 ec.message.addError('The events of a subscription calendar come from its feed'); return }
-            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId}).call()
+            const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId}).call()
             if (ec.message.hasError()) return
+            if (eventAccess?.managedBy) { ec.message.addError(`This event is kept by ${eventAccess.managedBy}; it is not put in a calendar`); return }
             if (ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', calendarId)
                     .condition('workEffortId', workEffortId).one() != null) return
             ec.service.sync().name('create#mantle.work.calendar.CalendarWorkEffort').parameters({calendarId: calendarId,
