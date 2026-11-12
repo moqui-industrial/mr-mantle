@@ -18,9 +18,10 @@
 //   out of the CalDAV Tasks collection and of every task list but its assignee's), and whose assignee reads nothing of the case.
 // - every notice is PeopleCaseUpdate (no push, a title that names nothing), to the case's people.
 //
-// The other modules read the rule through caseIds, hiddenRequestIds, caseEvents, caseTaskIds and protectedTaskIds
-// (CommunicationServices.get#RecordLinkInfo, search#Universal, the task lists and CalDAV, the party timeline, lookup#ById, the
-// record notices) and leave a case out of every other app's lists and screens.
+// The other modules read the rule through caseIds, hiddenRequestIds, caseEvents, hiddenEventIds, caseTaskIds and
+// protectedTaskIds (CommunicationServices.get#RecordLinkInfo, search#Universal, the task lists and CalDAV, the party timeline,
+// lookup#ById, the record notices, a note's edit, delete, reply and link) and leave a case out of every other app's lists and
+// screens.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText, calendarDateText, ms} = lib
 
@@ -160,6 +161,16 @@ function caseEvents(communicationEventIds) {
     }
     return found
 }
+// The communication events among the ids filed on a case the current user is no part of (every one filed on a case, for a call with
+// no user): a reader that finds an event by another way than its case (a party's record, a reply's parent, a link to another
+// record, an edit or a delete) answers such an event as missing (P21 review).
+function hiddenEventIds(communicationEventIds) {
+    const filedOn = caseEvents(communicationEventIds)
+    const ids = Object.keys(filedOn)
+    if (!ids.length) return []
+    const hidden = new Set(hiddenRequestIds(Object.values(filedOn)))
+    return ids.filter(id => hidden.has(filedOn[id]))
+}
 // The tasks among the ids linked to a case (RequestWorkEffort).
 function caseTaskIds(workEffortIds) {
     const ids = unique(listOf(workEffortIds))
@@ -294,6 +305,94 @@ function tellUpdate(p) {
     const requestId = text(p.requestId)
     if (!isCase(requestId)) return {notifiedUserIds: []}
     return {notifiedUserIds: tell(requestId, "updated")}
+}
+
+// ===== a handler who leaves (the user's call of Nov 12, 2026) =====
+// The open cases of an employer whose handlers no longer handle cases there (they left it, or lost PEOPLE_CASE_HANDLE): each such
+// handler is taken off the case (their Assignee row ended, no longer following it), so a leaver reads none of the employer's
+// cases; a case left with no handler goes back to the employer's intake handlers (PeopleCaseIntake, those eligible now, never its
+// employee), who are told on PeopleCaseUpdate with a title that names nothing. A case with no intake handler to go to keeps its
+// employee and waits (logged), and is routed by the next call. Employment.js calls it for the employer of a separation once it is
+// in effect, and the daily job for the employers of the changes come since, naming the leavers (taken off whatever this
+// transaction reads of their employment); each case on its own (a failure is logged and the rest go on).
+function rerouteCases(organizationPartyId, leaverPartyIds = []) {
+    const leavers = listOf(leaverPartyIds)
+    const found = {rerouted: 0, released: 0, waiting: 0}
+    if (!organizationPartyId) return found
+    const requestIds = Array.from(
+        find(CASE).condition("organizationPartyId", organizationPartyId).selectField("requestId").list()
+    ).map(row => row.requestId)
+    if (!requestIds.length) return found
+    const open = Array.from(
+        find(REQUEST)
+            .condition("requestId", "in", requestIds)
+            .condition("requestTypeEnumId", CASE_TYPE)
+            .condition("statusId", "in", openStatuses)
+            .selectField("requestId")
+            .list()
+    ).map(row => row.requestId)
+    let intake = null
+    const intakeOf = () => intake || (intake = intakeHandlers(organizationPartyId))
+    for (const requestId of open) {
+        // in the caller's transaction (a separation's apply, whose ended employment this reads); a failure is logged
+        ec.message.pushErrors()
+        try {
+            rerouteCase(requestId, organizationPartyId, leavers, intakeOf, found)
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        } catch (error) {
+            ec.logger.error(`Case ${requestId} was not routed again: ${error.message}`)
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+    return found
+}
+function rerouteCase(requestId, organizationPartyId, leavers, intakeOf, found) {
+    const people = peopleOf(requestId)
+    const gone = people.handlerPartyIds.filter(
+        partyId => leavers.includes(partyId) || !eligibleHandler(partyId, organizationPartyId)
+    )
+    for (const partyId of gone) {
+        currentOf(find(PARTY).condition({requestId, partyId, roleTypeId: "Assignee"})).updateAll({thruDate: now()})
+        unfollow(requestId, partyId)
+        found.released++
+    }
+    if (people.handlerPartyIds.length > gone.length) return
+    const handlers = intakeOf().filter(partyId => partyId !== people.filerPartyId)
+    if (!handlers.length) {
+        found.waiting++
+        ec.logger.error(`Case ${requestId} of ${organizationPartyId} has no handler and the employer no intake handler`)
+        return
+    }
+    for (const partyId of handlers) call("create#" + PARTY, {requestId, partyId, roleTypeId: "Assignee", fromDate: now()})
+    follow(requestId, handlers)
+    tell(requestId, "assigned", handlers)
+    found.rerouted++
+}
+// For People's lifecycle participant (PeopleApprovalServices.find#OwnedApprovals): the open cases a party handles now, as owned
+// resources that name nothing of the case (no subject, employee or employer), not transferable: when they leave, each goes back to
+// the employer's intake handlers (rerouteCases).
+function ownedCases(partyId) {
+    if (!partyId) return []
+    const handled = Array.from(
+        currentOf(
+            find("mantle.request.RequestAndParty")
+                .condition("partyId", partyId)
+                .condition("roleTypeId", "Assignee")
+                .condition("requestTypeEnumId", CASE_TYPE)
+                .condition("statusId", "in", openStatuses)
+                .selectField("requestId")
+                .distinct(true)
+        ).list()
+    ).map(row => row.requestId)
+    return unique(handled).map(requestId => ({
+        resourceId: "case:" + requestId,
+        resourceName: caseName,
+        resourceKind: "case",
+        transferable: false,
+        note: "Goes back to the employer's case intake handlers when they leave"
+    }))
 }
 
 // ===== the caller's case =====
@@ -654,6 +753,9 @@ const operations = {
     isCase,
     hiddenRequestIds,
     caseEvents,
+    hiddenEventIds,
     caseTaskIds,
-    protectedTaskIds
+    protectedTaskIds,
+    rerouteCases,
+    ownedCases
 })

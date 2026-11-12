@@ -22,12 +22,13 @@
 //   supersedes the changes of it still waiting.
 // A separation ends the employment, its assignment and their projections, the person's lead and team memberships at the employer
 // and the reporting lines they manage there (each report's assignment continues with no manager), leaves another employer's
-// employment alone, and routes again the People decisions waiting on the leaver (Approvals.js reroute). The person's Party owner is
-// left as it is (F59). Pay is never read or written here. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
+// employment alone, and routes again the People decisions waiting on the leaver (Approvals.js reroute) and the confidential cases
+// they handled there (PeopleCases.js rerouteCases, P21). The person's Party owner is left as it is (F59). Pay is never read or written here. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const positions = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Positions.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js")
 const offers = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Offers.js")
 const letters = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Letters.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -570,7 +571,7 @@ function rerouteDueChanges(failedList) {
             .condition("statusId", "EchApplied")
             .condition("reroutedDate", "is-null", null)
             .condition("effectiveDate", "less-equals", ec.user.nowTimestamp)
-            .selectField("employmentChangeId,organizationPartyId")
+            .selectField("employmentChangeId,organizationPartyId,partyId,changeKindEnumId")
             .list()
     )
     const byOrganization = new Map()
@@ -585,6 +586,14 @@ function rerouteDueChanges(failedList) {
         try {
             ec.transaction.runRequireNew(null, "Error routing the People decisions of " + organizationPartyId + " again", () => {
                 approvals().reroute(organizationPartyId)
+                // P21: and the confidential cases whose handler left (PeopleCases.js rerouteCases)
+                cases().rerouteCases(
+                    organizationPartyId,
+                    due
+                        .filter(row => row.organizationPartyId === organizationPartyId)
+                        .filter(row => row.changeKindEnumId === "EckSeparation")
+                        .map(row => row.partyId)
+                )
                 for (const employmentChangeId of changeIds)
                     call("update#" + CHANGE, {employmentChangeId, reroutedDate: ec.user.nowTimestamp})
             })
@@ -1066,6 +1075,9 @@ function applyChange(change) {
     if (kind !== "EckSchedule") supersedeWaiting(change.partyRelationshipId, change.employmentChangeId)
     if (kind === "EckSeparation" || before.managerPartyId !== (change.managerPartyId || null))
         approvals().reroute(employment.organizationPartyId)
+    // P21 (the user's call of Nov 12, 2026): a leaver's confidential cases there go back to the employer's intake handlers, once
+    // the separation is in effect (a later one by the daily job on its date, below)
+    if (kind === "EckSeparation" && at <= nowMs()) cases().rerouteCases(employment.organizationPartyId, [change.partyId])
     // routed again from its date: now for a change in effect, else by the daily job on the date (F134)
     if (at <= nowMs())
         call("update#" + CHANGE, {employmentChangeId: change.employmentChangeId, reroutedDate: ec.user.nowTimestamp})

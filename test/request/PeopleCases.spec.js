@@ -398,3 +398,180 @@ feature(
         }
     }
 )
+
+// P21 review: the paths that reach a note by another way than its case (its author's party, a reply's parent, a link to another
+// record, the request comment services) and a party change of the case
+feature(
+    "a note on a case is missing on every other path: its author's party record (the administrator's delete), a reply, a link to another record, the request comment services; the case's parties change through its own services alone",
+    {
+        when() {
+            const note = run(state.handler, R + "add#RequestComment", {
+                requestId: state.requestId,
+                body: "Case spec: handler note"
+            })
+            const eventId = note.communicationEventId
+            const errorOf = (username, service, parameters) => run(username, service, parameters).error
+            const refused = {
+                adminDeleteByParty: errorOf("john.doe", C + "delete#RecordNote", {
+                    recordEntityName: "mantle.party.Party",
+                    recordId: state.hal,
+                    communicationEventId: eventId
+                }),
+                managerReply: errorOf(state.manager, C + "reply#CommunicationEvent", {
+                    parentCommEventId: eventId,
+                    body: "Case spec: a reply from outside"
+                }),
+                managerLink: errorOf(state.manager, C + "link#CommunicationEventRecord", {
+                    communicationEventId: eventId,
+                    recordEntityName: "mantle.party.Party",
+                    recordId: state.max
+                }),
+                adminDeleteComment: errorOf("john.doe", R + "delete#RequestComment", {
+                    requestId: state.requestId,
+                    communicationEventId: eventId
+                }),
+                hrComment: errorOf(state.hr, R + "add#RequestComment", {requestId: state.requestId, body: "Case spec: HR"}),
+                adminParty: errorOf("john.doe", R + "replace#RequestParty", {
+                    requestId: state.requestId,
+                    roleTypeId: "Assignee",
+                    newPartyId: state.max
+                })
+            }
+            const handlerEdits = errorOf(state.handler, R + "update#RequestComment", {
+                requestId: state.requestId,
+                communicationEventId: eventId,
+                body: "Case spec: handler note, edited"
+            })
+            const event = ec.entity
+                .find("mantle.party.communication.CommunicationEvent")
+                .condition("communicationEventId", eventId)
+                .one()
+            const links = ec.entity
+                .find("mantle.party.communication.CommunicationEventRecord")
+                .condition("communicationEventId", eventId)
+                .count()
+            const replies = ec.entity
+                .find("mantle.party.communication.CommunicationEvent")
+                .condition("parentCommEventId", eventId)
+                .count()
+            const assignees = Array.from(
+                ec.entity
+                    .find("mantle.request.RequestParty")
+                    .condition({requestId: state.requestId, roleTypeId: "Assignee"})
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .list()
+            ).map(row => row.partyId)
+            return {eventId, refused, handlerEdits, body: event?.body, links, replies, assignees}
+        },
+        then({eventId, refused, handlerEdits, body, links, replies, assignees}) {
+            refused.adminDeleteByParty == "Note " + eventId + " not found on Party " + state.hal
+            refused.managerReply == "Communication event " + eventId + " not found"
+            refused.managerLink == "Communication event " + eventId + " not found"
+            refused.adminDeleteComment == "Comment " + eventId + " not found on request " + state.requestId
+            refused.hrComment == "Request " + state.requestId + " not found"
+            refused.adminParty == "Request " + state.requestId + " not found"
+            handlerEdits == ""
+            body == "Case spec: handler note, edited"
+            links == 0 && replies == 0
+            !assignees.includes(state.max)
+        }
+    }
+)
+
+// The user's call of Nov 12, 2026: a handler who leaves is listed with their open cases in People's lifecycle participant by name
+// alone, and, once they have left, is taken off each and a case left with no handler goes back to the employer's intake handlers,
+// who are told on PeopleCaseUpdate (a title naming nothing)
+feature(
+    "a handler who leaves: their open cases in the lifecycle lookup by name alone; once they leave they read none, and a case left without a handler goes back to the intake handlers, who are told",
+    {
+        when() {
+            // Ana's third case, handed from Hal (the intake handler) to Hope alone
+            const requestId = file(state.filer).requestId
+            run(state.handler, R + "assign#PeopleCaseHandler", {requestId, partyId: state.hope})
+            run(state.handler2, R + "assign#PeopleCaseHandler", {requestId, partyId: state.hal, remove: true})
+            const halBefore = code(run(state.handler, R + "get#PeopleCase", {requestId})) || "read"
+            const owned = (
+                run(state.handler2, "mantle.humanres.PeopleApprovalServices.find#OwnedApprovals", {userId: state.handler2})
+                    .resourceList || []
+            ).filter(row => row.resourceKind === "case")
+            const transfer = code(
+                run(state.handler2, "mantle.humanres.PeopleApprovalServices.transfer#ApprovalOwner", {
+                    fromUserId: state.handler2,
+                    toUserId: state.handler,
+                    approvalResourceId: "case:" + requestId
+                })
+            )
+            const assignedNotices = () =>
+                Array.from(
+                    ec.entity.find("moqui.security.user.NotificationMessage").condition("topic", "PeopleCaseUpdate").list()
+                )
+                    .map(row => JSON.parse(row.messageJson || "{}"))
+                    .filter(
+                        message =>
+                            message.requestId == requestId && message.noticeText == "A confidential case was assigned to you"
+                    ).length
+            const before = assignedNotices()
+            // Hope leaves A: her employment ends and the separation is in effect; the daily job routes the employer's work again
+            const employment = ec.entity
+                .find("mantle.party.PartyRelationship")
+                .condition({fromPartyId: state.hope, toPartyId: orgA, relationshipTypeEnumId: "PrtEmployee"})
+                .one()
+            const left = new Date(Date.now() - 60 * 1000)
+            call("update#mantle.party.PartyRelationship", {partyRelationshipId: employment.partyRelationshipId, thruDate: left})
+            call("create#mantle.humanres.employment.EmploymentChange", {
+                partyRelationshipId: employment.partyRelationshipId,
+                partyId: state.hope,
+                organizationPartyId: orgA,
+                changeKindEnumId: "EckSeparation",
+                statusId: "EchApplied",
+                effectiveDate: left,
+                appliedDate: left
+            })
+            const job = run(null, "mantle.humanres.PeopleServices.apply#DueAssignments", {
+                partyRelationshipIds: [employment.partyRelationshipId]
+            })
+            const handlers = Array.from(
+                ec.entity
+                    .find("mantle.request.RequestParty")
+                    .condition({requestId, roleTypeId: "Assignee"})
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .list()
+            ).map(row => row.partyId)
+            const followers = Array.from(
+                ec.entity
+                    .find("mantle.party.communication.RecordFollower")
+                    .condition({recordEntityName: "mantle.request.Request", recordId: requestId})
+                    .list()
+            )
+                .map(row => row.userId)
+                .sort()
+            return {
+                requestId,
+                halBefore,
+                owned,
+                transfer,
+                job: job.error,
+                hope: code(run(state.handler2, R + "get#PeopleCase", {requestId})) || "read",
+                hal: code(run(state.handler, R + "get#PeopleCase", {requestId})) || "read",
+                handlers,
+                followers,
+                told: assignedNotices() - before
+            }
+        },
+        then({requestId, halBefore, owned, transfer, job, hope, hal, handlers, followers, told}) {
+            halBefore == "RECORD_UNAVAILABLE"
+            owned.length == 1
+            owned[0].resourceId == "case:" + requestId &&
+                owned[0].resourceName == "Confidential case" &&
+                owned[0].transferable == false
+            !JSON.stringify(owned).includes("stockroom")
+            transfer == "NOT_TRANSFERABLE"
+            job == ""
+            hope == "RECORD_UNAVAILABLE"
+            hal == "read"
+            handlers == [state.hal]
+            followers == [state.filer, state.handler].sort()
+            told == 1
+        }
+    }
+)

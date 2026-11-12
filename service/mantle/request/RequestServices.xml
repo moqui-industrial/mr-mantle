@@ -302,6 +302,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="newPartyId" required="true"/>
         </in-parameters>
         <actions>
+            <!-- IronStone People P21 review: a confidential case's people change through its own services alone
+                (assign#PeopleCaseHandler), never here, for anyone -->
+            <if condition="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(requestId)">
+                <return error="true" message="Request ${requestId} not found"/></if>
             <entity-find entity-name="mantle.request.RequestParty" list="rpList">
                 <date-filter/><econdition field-name="requestId"/><econdition field-name="roleTypeId"/></entity-find>
             <iterate list="rpList" entry="rpValue">
@@ -386,6 +390,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="communicationEventId"><description>The new comment (Chatter shows it at once)</description></parameter></out-parameters>
         <actions>
+            <!-- IronStone People P21 review: a confidential case is its people's alone (PeopleCases.js): missing to anyone else -->
+            <if condition="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenRequestIds([requestId]).length"><return error="true" message="Request ${requestId} not found"/></if>
             <service-call name="create#mantle.party.communication.CommunicationEvent" out-map="context"
                     in-map="{communicationEventTypeId:'Comment', contactMechTypeEnumId:'CmtWebForm', statusId:'CeSent',
                         fromPartyId:ec.user.userAccount.partyId, entryDate:ec.user.nowTimestamp,
@@ -442,6 +448,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="commEvent" type="Map"/></out-parameters>
         <actions><script><![CDATA[
+            // IronStone People P21 review: a confidential case's comments are its people's alone (ADMIN's delete included)
+            if (ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenRequestIds([requestId]).length) {
+                ec.message.addError(`Comment ${communicationEventId} not found on request ${requestId}`); return }
             const joined = ec.entity.find('mantle.request.RequestCommEvent').condition('requestId', requestId)
                     .condition('communicationEventId', communicationEventId).count() > 0
             const value = joined ? ec.entity.find('mantle.party.communication.CommunicationEvent')
@@ -476,6 +485,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestContent"/>
         </out-parameters>
         <actions>
+            <!-- IronStone People P21 review: a confidential case is its people's alone (PeopleCases.js): missing to anyone else -->
+            <if condition="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenRequestIds([requestId]).length"><return error="true" message="Request ${requestId} not found"/></if>
             <iterate list="contentTypeEnumIdList" entry="contentTypeEnumId">
                 <entity-find entity-name="mantle.request.RequestContent" list="requestContentList">
                     <econdition field-name="requestId"/><econdition field-name="contentTypeEnumId"/>

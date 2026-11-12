@@ -313,6 +313,9 @@ along with this software (see the LICENSE.md file). If not, see
                     .map((id) => String(id).trim()).filter((id) => id)
             const parent = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', parentCommEventId).one()
             if (parent == null) { ec.message.addError(`Communication event ${parentCommEventId} not found`); return }
+            // IronStone People P21 review: a note or message filed on a confidential case is answered only by its people
+            if (ec.user.userId && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenEventIds([parentCommEventId]).length) {
+                ec.message.addError(`Communication event ${parentCommEventId} not found`); return }
             const isMessage = parent.communicationEventTypeId === 'Message'
             communicationEventTypeId = isMessage ? 'Message' : 'Comment'
             rootCommEventId = parent.rootCommEventId || parentCommEventId
@@ -2984,6 +2987,10 @@ along with this software (see the LICENSE.md file). If not, see
             if (!communicationEventId) { ec.message.addError('A communicationEventId or emailMessageId is required'); return }
             const commEvent = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
             if (commEvent == null) { ec.message.addError(`Communication event ${communicationEventId} not found`); return }
+            // IronStone People P21 review: a note or message filed on a confidential case is linked elsewhere only by its people
+            // (else its subject and text would show on the other record's timeline and in its followers' notices)
+            if (ec.user.userId && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenEventIds([communicationEventId]).length) {
+                ec.message.addError(`Communication event ${communicationEventId} not found`); return }
 
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
                     .parameters({recordEntityName: recordEntityName, recordId: recordId,
@@ -3869,6 +3876,9 @@ along with this software (see the LICENSE.md file). If not, see
             const notFound = () => ec.message.addError(`Note ${communicationEventId} not found on ${info.recordTypeName} ${recordId}`)
             const value = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
             if (value == null || value.statusId === 'CeCancelled') { notFound(); return }
+            // IronStone People P21 review: a note filed on a confidential case is its people's alone, missing to anyone else by any
+            // record (its author's party included), ADMIN too
+            if (ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').hiddenEventIds([communicationEventId]).length) { notFound(); return }
             const found = (entityName, keys) => ec.entity.find(entityName).condition(keys).count() > 0
             let on = false
             if (info.isParty) {
