@@ -41,6 +41,8 @@ const outages = ec.resource.script("component://mr-mantle/service/mantle/work/Re
 // P7: the checklist's gate, close and cancel (ProcessChecks.js), and the time services' way through (WorkProcesses.js)
 const checks = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProcessChecks.js")
 const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/work/WorkProcesses.js")
+// P9: the cost centre and project a work order is charged to (MaintenanceMaterials.js)
+const materials = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceMaterials.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -727,6 +729,8 @@ function storeWorkOrder(p) {
     ])
         if (p[field] != null) orderFields[field] = requireEnum(p[field], type, label)
     if (p.offlineIntent != null && p.offlineIntent !== "") orderFields.offlineIntent = flag(p.offlineIntent) ? "Y" : "N"
+    // P9: the cost centre and project (design §3 "Charging a project"), audited on the row
+    Object.assign(orderFields, materials().chargeFields(p, organizationPartyId))
     // the target: equipment work keeps equipment and facility work a facility, of the same organization
     if (!blank(p.assetId) && p.assetId !== order.assetId) {
         if (!order.assetId) denied("TARGET_KIND", "Facility work stays facility work; create equipment work instead")
@@ -1292,6 +1296,8 @@ function getWorkOrder(p) {
             ? one(WORK, {workEffortId: order.procedureWorkEffortId})?.workEffortName || order.procedureWorkEffortId
             : "",
         procedureDateText: dateText(order.procedureDate),
+        // P9: the cost centre and project it is charged to
+        ...materials().chargeOf(order),
         overdue: open && root.estimatedCompletionDate != null && ms(root.estimatedCompletionDate) < now,
         teamPartyId: teams[0]?.partyId || null,
         teamName: teams[0] ? names[teams[0].partyId] || teams[0].partyId : "",

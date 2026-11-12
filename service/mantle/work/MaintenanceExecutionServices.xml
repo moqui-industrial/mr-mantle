@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance parts and stock (IronStone Maintenance design §3 PlannedParts and PartsUsed, §13.2, MT-08; impl-maintenance P9), in
+    MaintenanceMaterials.js: a work order's planned parts (WorkEffortProduct rows of its root or steps), the issue of a part to the
+    root or a step and the return of what was not used. Each checks the maintenance permission and the work order's organization
+    and assignment (MaintenanceAccess.js) and, for stock, Warehouse's posting guard (StockPosting.js: STOCK_ISSUE, the operation key,
+    the stock in the user's facilities, the period), as Production's issue and return do (impl-maintenance F71). The issuance and
+    the return's receipt post through Accounting's maintenance expense routing (AC-24, MaintenanceCostRouting.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="MaintenanceMaterials" allow-remote="false">
+        <description>A work order's parts (MAINTENANCE_VIEW, or the assigned technician's MAINTENANCE_ASSIGNED_VIEW; RECORD_UNAVAILABLE,
+            NOT_ASSIGNED): its planned lines with their step, quantity, unit, required date and source facility, and what was issued,
+            returned, used and is left of each; the issues and the returns once each (a step's are not added again at the root), the
+            parts used net of returns, the equipment model's spare parts not yet planned (for a planner or supervisor), and what the
+            caller may do. With withStock the free stock each line may be issued from (the work organization's available inventory in
+            the caller's facilities). Values only with MAINTENANCE_COST_VIEW.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"><description>The work order's root, or one of its steps</description></parameter>
+            <parameter name="withStock" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="statusId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="stepList" type="List"><description>The nodes a part may be planned on: value and label</description></parameter>
+            <parameter name="plannedList" type="List"/>
+            <parameter name="issuanceList" type="List"/>
+            <parameter name="receiptList" type="List"/>
+            <parameter name="usedList" type="List"/>
+            <parameter name="suggestedList" type="List"/>
+            <parameter name="canPlan" type="Boolean"/>
+            <parameter name="canIssue" type="Boolean"/>
+            <parameter name="stockIssue" type="Boolean"/>
+            <parameter name="costRead" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceMaterials.js').execute('read', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceMaterial" allow-remote="false">
+        <description>A planned part of a work order's root or step (MAINTENANCE_PLAN or _SUPERVISE; open work only, WORK_CLOSED): a
+            WorkEffortProduct row (WeptConsume) with its quantity (QUANTITY_INVALID), unit, required date and source facility (one of
+            the work organization's, VALUE_INVALID); a change ends the open row of the product and starts the next, naming the row it
+            read by fromDate (RECORD_CHANGED); remove ends it. A supplies part is planned as inventory is (its issue posts to the
+            maintenance expense, AC-24). With addSuggested, the equipment model's spare parts (PatSparePart) not yet planned on the
+            work are added to the node at their association's quantity.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="fromDate" type="Timestamp"><description>The line read, when changing or removing one</description></parameter>
+            <parameter name="estimatedQuantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredDate" type="Timestamp"/>
+            <parameter name="sourceFacilityId"/>
+            <parameter name="remove"/>
+            <parameter name="addSuggested"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="productId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="addedProductIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceMaterials.js').execute('store', context))</script>
+        </actions>
+    </service>
+    <service verb="issue" noun="MaintenanceMaterial" allow-remote="false">
+        <description>Issue a part to a work order's root or step (design §3 MaterialIssueReceipt Issue; F71): a new AssetIssuance each
+            time through mantle.product.AssetServices.issue#AssetToWorkEffort, carrying the work's cost centre, project and primary
+            AssetMaintenance; it posts to the maintenance expense of AC-24, never to WIP. Requires STOCK_ISSUE (the stock in a facility
+            of the user's organizations, StockPosting.js) and the maintenance grant: the technician assigned to the work or the step
+            (MAINTENANCE_EXECUTE; NOT_ASSIGNED) or a supervisor; approved or started work (WORK_NOT_STARTED). Issues inventory and
+            supplies (both post to the maintenance expense, supplies by the user's call of Nov 12); refuses equipment (NOT_STOCK),
+            another product than the line's (PRODUCT_MISMATCH), held stock (HELD_STOCK), a customer's or another owner's stock (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), an organization that
+            posts with no maintenance expense mapping (COST_POLICY_MISSING, naming what to map) and a closed period (PERIOD_CLOSED). A
+            retry with the same operation key answers the first.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="workEffortId" required="true"><description>The root or the step the part is issued to</description></parameter>
+            <parameter name="productId"><description>The planned line's product, checked against the asset's</description></parameter>
+            <parameter name="assetId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"><description>In the stock unit</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode ISSUED, workEffortId, rootWorkEffortId, assetId, productId,
+                lotId, quantity, assetIssuanceId, onHandAfter and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceMaterials.js').execute('issue', context)"/>
+        </actions>
+    </service>
+    <service verb="return" noun="MaintenanceMaterial" allow-remote="false">
+        <description>Return unused parts of an issuance (design §3 MaterialIssueReceipt Return unused; F71): a new AssetReceipt through
+            mantle.product.AssetServices.receive#Asset naming its issuance (sourceAssetIssuanceId), into the original asset where it is
+            or a location of a facility of the same owner, at the original asset's acquireCost; its credit goes to the issuance's
+            expense account and dimensions (AC-24), not to WIP, in one transaction. Never cancels or changes the issuance. Requires
+            STOCK_ISSUE and the assigned technician or a supervisor (NOT_ASSIGNED); refuses closed or cancelled work (WORK_CLOSED), no
+            quantity (QUANTITY_INVALID), more than is left of the issuance (QUANTITY_EXCEEDS_ISSUED), a closed or missing location and a
+            closed period. A retry with the same operation key answers the first.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="assetIssuanceId" required="true"/>
+            <parameter name="quantity" type="BigDecimal" required="true"/>
+            <parameter name="toFacilityId"/>
+            <parameter name="toLocationSeqId"><description>Empty returns into the original asset</description></parameter>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"><description>resultCode RETURNED, workEffortId, rootWorkEffortId, assetIssuanceId, assetId,
+                intoOriginal, productId, quantity, facilityId, locationSeqId, assetReceiptId and the operation fields.</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceMaterials.js').execute('returnUnused', context)"/>
+        </actions>
+    </service>
+</services>
