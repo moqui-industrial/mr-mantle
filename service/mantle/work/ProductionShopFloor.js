@@ -1126,21 +1126,16 @@ function positionClassOf(entry) {
     }
     return null
 }
-// The costing rate of an entry (design Y2): a RaprProductionCost RateAmount in effect at its start matching its work type and
-// the person's position class (or naming neither), the most specific first; never a rate of the person or a work effort.
+// The costing rate of an entry (design Y2): the one labor costing purpose's row in effect at its start for its work type and the
+// person's position class (mantle.humanres.RateServices.get#CostingRate, People P10, whose rules are this lookup's of before:
+// matching or naming neither, the most specific first, then the newest; never a rate of the person or a work effort).
 function costingRate(entry) {
-    const at = entry.fromDate || ec.user.nowTimestamp
-    const classId = positionClassOf(entry)
-    const candidates = rows(RATE, {ratePurposeEnumId: "RaprProductionCost"}).filter(
-        row =>
-            lib.active(row, at) &&
-            !row.partyId &&
-            !row.workEffortId &&
-            (!row.workTypeEnumId || row.workTypeEnumId === entry.workTypeEnumId) &&
-            (!row.emplPositionClassId || row.emplPositionClassId === classId)
-    )
-    const rank = row => (row.workTypeEnumId ? 1 : 0) + (row.emplPositionClassId ? 1 : 0)
-    return candidates.sort((a, b) => rank(b) - rank(a) || lib.ms(b.fromDate) - lib.ms(a.fromDate))[0] || null
+    const found = call("mantle.humanres.RateServices.get#CostingRate", {
+        emplPositionClassId: positionClassOf(entry),
+        workTypeEnumId: entry.workTypeEnumId || null,
+        onDate: entry.fromDate || ec.user.nowTimestamp
+    })
+    return found.rateAmountId ? one(RATE, {rateAmountId: found.rateAmountId}) : null
 }
 const laborEventsOf = timeEntryId =>
     rows(EVENT, {sourceEntityName: TIME, sourceId: timeEntryId}).sort(

@@ -849,7 +849,18 @@ function selfService(p) {
         employments,
         emergencyContacts: emergencyContactsOf(partyId),
         openRequestCount: approvals.openRequestCount(),
-        openTaskCount: people.myTaskCount()
+        openTaskCount: people.myTaskCount(),
+        weeksToSubmit: weeksToSubmit()
+    }
+}
+// P10: the caller's own weeks to submit (TimesheetServices.find#WeeksToSubmit, the rule of Projects' Today), for the missing-week
+// card; a failure is logged and the card left out.
+function weeksToSubmit() {
+    try {
+        return Array.from(lib.probe("mantle.work.TimesheetServices.find#WeeksToSubmit", {}).weekList || [])
+    } catch (error) {
+        ec.logger.error("Self-service of " + ec.user.userId + ": the weeks to submit were not read: " + error.message)
+        return []
     }
 }
 // The work location of each employment on the date: its assignment's facility (P6), else the person's PostalWork city.

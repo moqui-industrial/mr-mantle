@@ -990,12 +990,29 @@ const days = Array.from(dayList || []).map(String)
         ]]></script></actions>
     </service>
 
+    <service verb="get" noun="LineReports">
+        <description>The user's live reports (People P10): the persons to whom a current PrtManager relationship runs from the user's
+            party (the manager to the report, impl-people F50), for the missing-time list and the time pickers beside the time
+            keepers of the projects the user manages. Only the user's own: the service takes no person.</description>
+        <out-parameters><parameter name="partyIdList" type="List"/></out-parameters>
+        <actions><script><![CDATA[
+            partyIdList = []
+            const me = ec.user.userAccount?.partyId || null
+            if (!me) return
+            const reports = Array.from(new Set(Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtManager')
+                    .condition('fromPartyId', me).conditionDate('fromDate', 'thruDate', null).selectField('toPartyId').disableAuthz().list()).map((row) => row.toPartyId)))
+            if (!reports.length) return
+            partyIdList = Array.from(ec.entity.find('mantle.party.Person').condition('partyId', 'in', reports).selectField('partyId').disableAuthz().list())
+                    .map((row) => row.partyId).sort()
+        ]]></script></actions>
+    </service>
+
     <service verb="find" noun="Timesheets">
         <description>
             The timesheets the user may see (get#TimesheetAccess canView), for Timesheets (design-projects.md §8). list: toApprove
             (submitted ones the user approves), mine, returned (In-Process with a return or reopen reason), approved, all, or
-            missing (the time keepers of the user's managed projects, all for ADMIN, whose week has no submitted or approved
-            timesheet; a row per person, timesheetId null when there is none). partyId and statusId narrow; the week is
+            missing (the time keepers of the user's managed projects, all for ADMIN, and the user's live reports, get#LineReports,
+            whose week has no submitted or approved timesheet; a row per person, timesheetId null when there is none). partyId and statusId narrow; the week is
             weekDate's (missing: default last week), or every week from fromDate to thruDate (default the last 8 weeks).
             A row: {timesheetId, partyId, personName, weekStart, weekText, statusId, statusLabel, returned, hours, billable,
             expected, difference, submittedDate, approverNames, canApprove, canReturn, canReopen}. counts: the rows of each list
@@ -1114,8 +1131,11 @@ const days = Array.from(dayList || []).map(String)
                         const vis = ec.service.sync().name('mantle.work.ProjectServices.get#VisibleProjectInfo').call() || {}
                         projectIds = Array.from(vis.managedProjectIds || [])
                     }
-                    const keepers = Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#TimeKeepers').parameters(projectIds == null ? {} : {projectIds: projectIds})
-                            .call()?.partyIdList || []).filter((id) => !partyId || id === partyId)
+                    // the time keepers of the user's managed projects, and the user's live reports (People P10: a line manager's)
+                    const keepers = Array.from(new Set(Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#TimeKeepers')
+                            .parameters(projectIds == null ? {} : {projectIds: projectIds}).call()?.partyIdList || [])
+                            .concat(Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#LineReports').call()?.partyIdList || []))))
+                            .filter((id) => !partyId || id === partyId).sort()
                     if (!keepers.length) return []
                     const middle = new Date(Number(String(w.fromDate)) + 3.5 * 86400000)
                     const done = new Set(Array.from(ec.entity.find('mantle.work.time.Timesheet').condition('partyId', 'in', keepers)
@@ -1157,6 +1177,43 @@ const days = Array.from(dayList || []).map(String)
                     }
                 }
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+
+    <service verb="find" noun="WeeksToSubmit">
+        <description>The user's own weeks to submit (Projects' and People's Today, People's self-service): this week's from the
+            last working day of the week (the policy's working days), and any older one of the last eight weeks still In-Process
+            with time on it (overdue; a returned one says so), oldest first. A row: {timesheetId, weekStart, weekText, hours,
+            returned, overdue}. Only the user's own: the service takes no person.</description>
+        <out-parameters><parameter name="weekList" type="List"/></out-parameters>
+        <actions><script><![CDATA[
+            weekList = []
+            const me = ec.user.userAccount?.partyId || null
+            if (!me || !ec.user.userId) return
+            const policy = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').call()?.policy || {}
+            const week = ec.service.sync().name('mantle.work.TimesheetServices.get#WeekRange').parameters({weekStart: policy.weekStart || 1}).call()
+            const workDays = Array.from(policy.workDays || [1, 2, 3, 4, 5]).map(Number)
+            const isoOf = (day) => { const js = new Date(day + 'T12:00:00Z').getUTCDay(); return js === 0 ? 7 : js }
+            const lastWorkDay = Array.from(week.dayList).filter((day) => workDays.includes(isoOf(day))).pop() || week.dayList[6]
+            const today = ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')
+            const thisFrom = Number(String(week.fromDate))
+            const cf = ec.entity.conditionFactory
+            const sheets = Array.from(ec.entity.find('mantle.work.time.Timesheet').condition('partyId', me)
+                    .condition(cf.makeCondition('statusId', 'equals', 'TmshInProcess', true))
+                    .condition('fromDate', 'greater-equals', new Date(thisFrom - 8 * 7 * 86400000 - 86400000))
+                    .condition('fromDate', 'less-than', new Date(thisFrom + 7 * 86400000 - 86400000)).orderBy('fromDate').disableAuthz().list())
+            for (const sheet of sheets) {
+                const middle = Number(String(sheet.fromDate)) + 3.5 * 86400000
+                const isThisWeek = middle >= thisFrom && middle < thisFrom + 7 * 86400000
+                if (isThisWeek && today < lastWorkDay) continue
+                let hours = 0
+                for (const entry of ec.entity.find('mantle.work.time.TimeEntry').condition('timesheetId', sheet.timesheetId).selectField('hours').disableAuthz().list())
+                    hours += Number(String(entry.hours ?? 0))
+                if (!hours) continue
+                weekList.push({timesheetId: sheet.timesheetId, weekStart: ec.l10n.format(String(Number(String(sheet.fromDate)) + 43200000), 'yyyy-MM-dd'),
+                    weekText: ec.l10n.format(String(Number(String(sheet.fromDate)) + 43200000), 'MMM d'), hours: Math.round(hours * 100) / 100,
+                    returned: !!sheet.comments, overdue: !isThisWeek})
+            }
         ]]></script></actions>
     </service>
 

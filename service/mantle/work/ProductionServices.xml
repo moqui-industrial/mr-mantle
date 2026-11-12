@@ -2219,7 +2219,7 @@ along with this software (see the LICENSE.md file). If not, see
             post#WorkEffortCost: for each entry on a production run (the run or one of its operations) whose owner's
             production policy has laborCostSync, the delta between its hours while its timesheet is approved and what its
             labor events recorded, through record#ProductionCostEvent (PcetLabor, awaiting the cost close): an approval values
-            the entry at the costing RateAmount (RaprProductionCost) by position class and work type, else unvalued; a reopen
+            the entry at the labor costing rate (RaprCost, RateServices.get#CostingRate) by position class and work type, else unvalued; a reopen
             or a deletion writes the reversal; an hours change of an approved entry a delta at its rate; a change of its
             work type, position class, date or work effort that no longer fits the recording reverses it and records it
             again. Other entries and runs with the flag off record nothing, so Projects' behavior is unchanged; an entry that

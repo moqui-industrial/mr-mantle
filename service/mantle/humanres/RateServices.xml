@@ -40,6 +40,9 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
             </if>
+            <!-- a labor costing rate (RaprCost) is finance administration's (store#CostingRate, impl-people P10) -->
+            <if condition="ratePurposeEnumId == 'RaprCost' &amp;&amp; !ec.user.hasPermission('ACCOUNTING_ADMIN')">
+                <return error="true" message="PERMISSION_DENIED: Only finance administration (ACCOUNTING_ADMIN) sets labor costing rates"/></if>
             <service-call name="create#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
         </actions>
     </service>
@@ -62,7 +65,115 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
             </if>
+            <if condition="rate?.ratePurposeEnumId == 'RaprCost' &amp;&amp; !ec.user.hasPermission('ACCOUNTING_ADMIN')">
+                <return error="true" message="PERMISSION_DENIED: Only finance administration (ACCOUNTING_ADMIN) sets labor costing rates"/></if>
             <service-call name="update#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+
+    <!-- ========== Labor costing rates (impl-people P10; design-people PE-23; design-accounting §15 LaborCostingRates) ==========
+        The one labor costing purpose RaprCost: the cost of an hour by position class and work type, never of a person
+        (service/mantle/humanres/CostingRates.js). -->
+
+    <service verb="get" noun="CostingRate" allow-remote="false">
+        <description>The labor costing rate of a position class and work type at a date: the RaprCost RateAmount in effect then with
+            no party and no work effort whose work type and class match or are empty, the most specific first, then the newest
+            (Manufacturing's lookup rules before People P10, unchanged: no organization, currency or rate type narrows it). A class
+            not given is the person's (partyId: the class of their position in effect at the date). Never a person's pay rate. No
+            row answers priced false (the hours are unpriced). Reads no pay and checks no permission: a cost reader needs no pay
+            grant.</description>
+        <in-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="partyId"><description>The person whose position class is used when no class is given</description></parameter>
+            <parameter name="onDate" type="Timestamp"><description>Now when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="priced" type="Boolean"/>
+            <parameter name="rateAmountId"/>
+            <parameter name="rateAmount" type="BigDecimal"/>
+            <parameter name="rateCurrencyUomId"/>
+            <parameter name="timePeriodUomId"/>
+            <parameter name="emplPositionClassId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('costingRate', context)"/>
+            <set field="priced" from="found.priced"/>
+            <set field="rateAmountId" from="found.rateAmountId"/>
+            <set field="rateAmount" from="found.rateAmount"/>
+            <set field="rateCurrencyUomId" from="found.rateCurrencyUomId"/>
+            <set field="timePeriodUomId" from="found.timePeriodUomId"/>
+            <set field="emplPositionClassId" from="found.emplPositionClassId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="CostingRates" allow-remote="false">
+        <description>The labor costing rates (Accounting's LaborCostingRates; the read-only Labor costing rows of Rates), current and
+            coming, or with showEnded every one: position class, work type, rate type, from, thru, the amount an hour with its
+            currency, its state, and canChange for finance administration. Requires ACCOUNTING_ADMIN, ACCOUNTING_VIEW,
+            PAYROLL_VIEW or TIME_ENTRY_RATE (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="showEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rateList" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('findRates', context)"/>
+            <set field="rateList" from="found.rateList"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CostingRate" allow-remote="false">
+        <description>Starts a labor costing rate (LaborCostingRates, finance administration): a RaprCost row of a position class and
+            work type (either empty for any), the rate type (Standard when empty), the amount an hour and its currency, from fromDate
+            (now when empty), ending the row of the same scope in effect then. Requires ACCOUNTING_ADMIN (PERMISSION_DENIED);
+            refuses a start before now, an unknown class, work type or rate type, an amount that is not 0 or more, no currency
+            (RATE_INVALID), a later row of the same scope already coming (RATE_COMING), and, with expectedRateAmountId, a row in
+            effect other than the one the form read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="rateTypeEnumId"/>
+            <parameter name="rateAmount" required="true"/>
+            <parameter name="rateCurrencyUomId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="expectedRateAmountId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rateAmountId"/>
+            <parameter name="endedRateAmountId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('storeRate', context)"/>
+            <set field="rateAmountId" from="found.rateAmountId"/>
+            <set field="endedRateAmountId" from="found.endedRateAmountId"/>
+        </actions>
+    </service>
+    <service verb="end" noun="CostingRate" allow-remote="false">
+        <description>Ends a labor costing rate now (a coming one at its start, so it never applies). Requires ACCOUNTING_ADMIN
+            (PERMISSION_DENIED); refuses a row that is not a costing rate (RECORD_UNAVAILABLE) or has ended (RATE_ENDED).</description>
+        <in-parameters><parameter name="rateAmountId" required="true"/></in-parameters>
+        <out-parameters><parameter name="rateAmountId"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('endRate', context)"/>
+            <set field="rateAmountId" from="found.rateAmountId"/>
+        </actions>
+    </service>
+    <service verb="migrate" noun="ProductionCostRates" allow-remote="false">
+        <description>Moves the rows of Manufacturing's own costing purpose before People P10 (RaprProductionCost) to the one labor
+            costing purpose RaprCost and removes the old value; nothing to do once done, or on a new database (a data load calls
+            it: data/ProductionShopFloorData.xml). Each row on its own: a failure is logged and the rest are moved.</description>
+        <out-parameters>
+            <parameter name="movedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('migrate', context)"/>
+            <set field="movedCount" from="found.movedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
         </actions>
     </service>
 </services>

@@ -3196,34 +3196,13 @@ along with this software (see the LICENSE.md file). If not, see
                         recordName: request.repositoryId + (request.authorName ? ' · ' + request.authorName : '')}}))
             })
             part('timesheets', () => {
-                const policy = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').call()?.policy || {}
-                const week = ec.service.sync().name('mantle.work.TimesheetServices.get#WeekRange').parameters({weekStart: policy.weekStart || 1}).call()
-                const workDays = Array.from(policy.workDays || [1, 2, 3, 4, 5]).map(Number)
-                const isoOf = (day) => { const js = new Date(day + 'T12:00:00Z').getUTCDay(); return js === 0 ? 7 : js }
-                const lastWorkDay = Array.from(week.dayList).filter((day) => workDays.includes(isoOf(day))).pop() || week.dayList[6]
-                const today = ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd')
-                const thisFrom = Number(String(week.fromDate))
-                const cf = ec.entity.conditionFactory
-                const sheets = Array.from(ec.entity.find('mantle.work.time.Timesheet').condition('partyId', me)
-                        .condition(cf.makeCondition('statusId', 'equals', 'TmshInProcess', true))
-                        .condition('fromDate', 'greater-equals', new Date(thisFrom - 8 * 7 * 86400000 - 86400000))
-                        .condition('fromDate', 'less-than', new Date(thisFrom + 7 * 86400000 - 86400000)).orderBy('fromDate').disableAuthz().list())
-                for (const sheet of sheets) {
-                    const middle = Number(String(sheet.fromDate)) + 3.5 * 86400000
-                    const isThisWeek = middle >= thisFrom && middle < thisFrom + 7 * 86400000
-                    if (isThisWeek && today < lastWorkDay) continue
-                    let hours = 0
-                    for (const entry of ec.entity.find('mantle.work.time.TimeEntry').condition('timesheetId', sheet.timesheetId).selectField('hours').disableAuthz().list())
-                        hours += Number(String(entry.hours ?? 0))
-                    if (!hours) continue
-                    const weekStart = ec.l10n.format(String(Number(String(sheet.fromDate)) + 43200000), 'yyyy-MM-dd')
-                    const weekText = ec.l10n.format(String(Number(String(sheet.fromDate)) + 43200000), 'MMM d')
-                    const hoursText = ec.l10n.format(Math.round(hours * 100) / 100, '#,##0.##')
-                    items.push(Object.assign({}, base, {kind: 'timesheet', timesheetId: sheet.timesheetId, weekStart: weekStart, hours: Math.round(hours * 100) / 100,
-                        returned: !!sheet.comments, overdue: !isThisWeek,
-                        title: sheet.comments ? L('Returned: fix and submit your week of ${week} (${hours} h)', {week: weekText, hours: hoursText})
-                            : L('Submit your week of ${week} (${hours} h)', {week: weekText, hours: hoursText}),
-                        record: {recordEntityName: 'mantle.work.time.Timesheet', recordId: sheet.timesheetId, recordName: L('Week of ${week}', {week: weekText})}}))
+                for (const week of Array.from(ec.service.sync().name('mantle.work.TimesheetServices.find#WeeksToSubmit').call()?.weekList || [])) {
+                    const hoursText = ec.l10n.format(week.hours, '#,##0.##')
+                    items.push(Object.assign({}, base, {kind: 'timesheet', timesheetId: week.timesheetId, weekStart: week.weekStart, hours: week.hours,
+                        returned: week.returned, overdue: week.overdue,
+                        title: week.returned ? L('Returned: fix and submit your week of ${week} (${hours} h)', {week: week.weekText, hours: hoursText})
+                            : L('Submit your week of ${week} (${hours} h)', {week: week.weekText, hours: hoursText}),
+                        record: {recordEntityName: 'mantle.work.time.Timesheet', recordId: week.timesheetId, recordName: L('Week of ${week}', {week: week.weekText})}}))
                 }
             })
             part('triage', () => {

@@ -13,8 +13,8 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- The shop floor and production time (design-manufacturing §4, §3 ProductionTime, §12 M7; impl-manufacturing P10, F18):
-    the production work types of a person's time, the costing rate purpose of the labor cost event (a RateAmount by
-    position class and work type, design Y2), the machine runtime modes, the instruction step kinds and the labor and
+    the production work types of a person's time, the move of the costing rates of the labor cost event to the one labor
+    costing purpose (a RateAmount by position class and work type, design Y2; People P10), the machine runtime modes, the instruction step kinds and the labor and
     machine cost event types. -->
 <entity-facade-xml type="seed">
     <!-- the production work types (F18): set-up, run and rework time on an operation -->
@@ -22,9 +22,12 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="WktpProductionRun" description="Production run" enumTypeId="WorkType"/>
     <moqui.basic.Enumeration enumId="WktpProductionRework" description="Production rework" enumTypeId="WorkType"/>
 
-    <!-- the costing rate of production time: a RateAmount of this purpose by emplPositionClassId and workTypeEnumId values
-        an approved entry's labor cost event, never the person's own vendor rate (design ProductionTime, review Y2) -->
-    <moqui.basic.Enumeration enumId="RaprProductionCost" description="Production costing" enumTypeId="RatePurpose"/>
+    <!-- the costing rate of production time is the one labor costing purpose, RaprCost (People P10, impl-people §4: seeded with
+        RateAmount in entity/HumanResourcesEntities.xml): a RateAmount by emplPositionClassId and workTypeEnumId values an
+        approved entry's labor cost event (mantle.humanres.RateServices.get#CostingRate), never the person's own vendor rate
+        (design ProductionTime, review Y2). The production costing purpose of before (RaprProductionCost) is moved to it on a
+        load, its rows and then the value (migrate#ProductionCostRates: nothing to do once done, or on a new database). -->
+    <mantle.humanres.RateServices.migrate-ProductionCostRates/>
 
     <moqui.basic.EnumerationType enumTypeId="MachineRuntimeMode" description="Machine Runtime Mode"/>
     <moqui.basic.Enumeration enumId="MrmSetup" description="Set-up" sequenceNum="1" enumTypeId="MachineRuntimeMode"/>

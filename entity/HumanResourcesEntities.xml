@@ -1264,6 +1264,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Rate Purpose" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprClient" description="Client Billing" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprVendor" description="Worker/Vendor Payment" enumTypeId="RatePurpose"/>
+            <!-- the one labor costing purpose (People P10, design-people PE-23): the cost of an hour by position class and work
+                type, never of a person, maintained by finance administration and read by RateServices.get#CostingRate -->
+            <moqui.basic.Enumeration enumId="RaprCost" description="Labor Costing" enumTypeId="RatePurpose"/>
             <!-- Default no charge client rate, always 0 -->
             <mantle.humanres.rate.RateAmount rateAmountId="NoChargeClient" rateTypeEnumId="RatpNoCharge" ratePurposeEnumId="RaprClient"
                     timePeriodUomId="TF_hr" workEffortId="" partyId="" emplPositionClassId=""
