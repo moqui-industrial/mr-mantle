@@ -33,6 +33,17 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="STTS" prefix="status"/>
     </view-entity>
 
+    <view-entity entity-name="WorkEffortOutsideGoals" package="mantle.work.effort">
+        <description>Every work effort but a goal (People's WetGoal type, read and changed through
+            mantle.humanres.ReviewServices alone; impl-people follow-up 2): Mantle's REST resource /workEfforts lists and
+            reads through it.</description>
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort"/>
+        <alias-all entity-alias="WEFF"/>
+        <entity-condition>
+            <econdition entity-alias="WEFF" field-name="workEffortTypeEnumId" operator="not-equals" value="WetGoal" or-null="true"/>
+        </entity-condition>
+    </view-entity>
+
     <view-entity entity-name="ProjectTaskCounts" package="mantle.work.effort">
         <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort"/>
         <alias entity-alias="WEFF" name="rootWorkEffortId"/><!-- specify this -->
