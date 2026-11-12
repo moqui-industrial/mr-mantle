@@ -19,9 +19,10 @@ along with this software (see the LICENSE.md file). If not, see
     the settlement route and its reservation; ExpenseClaimItem adds a line's merchant, tax, receipt and source (a line from mail or
     chat stays to review). Business approval leaves the invoice InvoiceReceived; finance's approve#Payable alone reaches
     InvoiceApproved, and only for a claim whose business state is approved and whose route is not reserved for payroll. An
-    employee advance (EmployeeAdvance) is an approved request for cash that finance pays as a native Payment (a prepayment from
-    the employer to the employee) and applies to the employee's claim invoices; what is outstanding is derived from the delivered
-    payment less its applications, never kept as a balance. Written only by mantle.humanres.ExpenseServices (Expense.js), which
+    employee advance (EmployeeAdvance) is an approved request for cash: its approval makes it a bill from the employee to the
+    employer (ItemAdvancePay, the employee advances account) that finance approves for payment and a payment run pays as any
+    other bill, and finance applies it to the employee's claims through a credit on that account (EmployeeAdvanceApplication); what
+    is outstanding is derived from what delivered payments paid of the bill less what its credits applied, never kept as a balance. Written only by mantle.humanres.ExpenseServices (Expense.js), which
     checks the People scope first, and by mantle.account.InvoiceServices.create#ProjectExpenseInvoice's claim write. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="ExpenseClaim" package="mantle.humanres.expense" cache="never">
@@ -110,10 +111,11 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="EmployeeAdvance" package="mantle.humanres.expense" cache="never">
         <description>An employee's request for cash ahead of their expenses: the employment, the purpose, the amount and currency
             asked, when it is needed and when it should be settled, and its state (EmployeeAdvanceStatus: waiting for approval,
-            approved, refused, withdrawn), a People approval of kind PakAdvance. Approval to advance is not payment: finance pays an
-            approved advance as a native Payment (paymentId: a prepayment from the employer to the employee, delivered) and applies
-            it to the employee's claim invoices; delivered, applied and outstanding are read from that payment and its applications
-            (an undelivered or returned payment delivers nothing).</description>
+            approved, refused, withdrawn), a People approval of kind PakAdvance. Approval to advance is not payment: the last approval
+            makes it a payable (invoiceId: a bill from the employee to the employer of one ItemAdvancePay line, received), which
+            finance approves for payment and a payment run pays as any other bill (the user's call, impl-people §4, Nov 12, 2026);
+            finance applies it to the employee's claims (EmployeeAdvanceApplication). Delivered is what delivered payments paid of
+            the bill (an undelivered or returned payment delivers nothing), applied what its credits settled of claims.</description>
         <field name="employeeAdvanceId" type="id" is-pk="true"/>
         <field name="partyRelationshipId" type="id"><description>The employment</description></field>
         <field name="partyId" type="id"/>
@@ -125,18 +127,18 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="requiredDate" type="date"/>
         <field name="expectedSettlementDate" type="date"/>
         <field name="statusEnumId" type="id" enable-audit-log="true"><description>EmployeeAdvanceStatus</description></field>
-        <field name="paymentId" type="id"><description>The payment finance made for it</description></field>
+        <field name="invoiceId" type="id"><description>Its bill: from the employee to the employer, made when it is approved</description></field>
         <field name="decisionReason" type="text-medium"/>
         <field name="requestedByUserId" type="id"/>
         <field name="requestedDate" type="date-time"/>
         <field name="decidedDate" type="date-time"/>
         <field name="operationKey" type="text-medium"/>
-        <relationship type="one-nofk" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one-nofk" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
         <relationship type="one" title="EmployeeAdvanceStatus" related="moqui.basic.Enumeration" short-alias="status">
             <key-map field-name="statusEnumId" related="enumId"/></relationship>
         <index name="EMP_ADV_PARTY"><index-field name="partyId"/><index-field name="statusEnumId"/></index>
         <index name="EMP_ADV_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
-        <index name="EMP_ADV_PAYMENT"><index-field name="paymentId"/></index>
+        <index name="EMP_ADV_INVOICE"><index-field name="invoiceId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Employee Advance Status" enumTypeId="EmployeeAdvanceStatus"/>
             <moqui.basic.Enumeration enumId="EasRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="EmployeeAdvanceStatus"/>
@@ -144,5 +146,19 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="EasRefused" description="Refused" sequenceNum="3" enumTypeId="EmployeeAdvanceStatus"/>
             <moqui.basic.Enumeration enumId="EasWithdrawn" description="Withdrawn" sequenceNum="4" enumTypeId="EmployeeAdvanceStatus"/>
         </seed-data>
+    </entity>
+    <entity entity-name="EmployeeAdvanceApplication" package="mantle.humanres.expense" cache="never">
+        <description>An advance applied to one of the employee's claims: the credit the employer issued against the claim on the
+            employee advances account (creditInvoiceId, applied to the claim's invoice), by apply#Advance. What it applied is the
+            credit's PaymentApplication, never kept here.</description>
+        <field name="employeeAdvanceId" type="id" is-pk="true"/>
+        <field name="creditInvoiceId" type="id" is-pk="true"><description>The credit applied to the claim</description></field>
+        <field name="invoiceId" type="id"><description>The claim's invoice</description></field>
+        <field name="appliedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <relationship type="one" related="mantle.humanres.expense.EmployeeAdvance" short-alias="advance"/>
+        <relationship type="one-nofk" title="Credit" related="mantle.account.invoice.Invoice" short-alias="credit">
+            <key-map field-name="creditInvoiceId" related="invoiceId"/></relationship>
+        <index name="EMP_ADV_APP_CREDIT"><index-field name="creditInvoiceId"/></index>
     </entity>
 </entities>

@@ -5,7 +5,7 @@
 // A claim is an employee-from Invoice (the claimant to the employer: create#ProjectExpenseInvoice's claim write, createClaim here)
 // whose lines are ItemExpense-family InvoiceItems with their receipts (InvoiceContent), and an ExpenseClaim keyed by the invoice
 // (PeopleExpenseEntities.xml):
-// - a draft (or a claim returned for correction) is changed by the claimant or an HR editor of the employer acting for them;
+// - a draft (or a claim returned for correction) is changed by the claimant or, for them, a holder of PEOPLE_EXPENSE_MANAGE;
 //   a line from mail or chat, or with values read from its receipt, waits for the claimant's review;
 // - submitted, the invoice is InvoiceReceived and the claim waits for a People approval of kind PakExpenseClaim (the claimant's
 //   manager unless a rule says otherwise; never the claimant or who asked); the last approval is its business approval and
@@ -13,15 +13,19 @@
 // - finance's approve#Payable (InvoiceWorkflow.js issue, through financeApproval here) approves only a claim whose business
 //   approval is done and reserves it for accounts payable; a payroll run reserves it for payroll (reserve#ClaimSettlement, P27),
 //   and a claim reserved for one route is refused by the other.
-// An advance (EmployeeAdvance) is asked by the employee (or HR for them) and waits for a People approval of kind PakAdvance;
-// finance pays an approved one as a native prepayment (pay#Advance) and applies it to the employee's finance-approved claim
-// invoices (apply#Advance); delivered, applied and outstanding are read from the payment and its applications.
+// An advance (EmployeeAdvance) is asked by the employee (or for them) and waits for a People approval of kind PakAdvance; its
+// last approval makes it a payable (the user's call, impl-people §4, Nov 12, 2026): a bill from the employee to the employer of
+// one ItemAdvancePay line (the employee advances account), received, which finance approves for payment and a payment run pays
+// like any other bill. Finance applies the paid advance to the employee's finance-approved claim (apply#Advance): a credit the
+// employer issues against the claim on the employee advances account, applied to it. Delivered is what delivered payments paid
+// of the advance's bill, applied what its credits settled of claims, outstanding the difference.
 //
 // Who: the claimant (PEOPLE_SELF_SERVICE) reads and changes their own; a manager (PEOPLE_TEAM_VIEW) reads their live reports' at
-// the line's employers; an HR reader (PEOPLE_HR_VIEW) and a payroll reader (PAYROLL_VIEW) read the employers'; an HR editor
-// (PEOPLE_HR_EDIT) acts for an employee; the approvers of the step waiting read and decide it. Finance acts on advances with
-// PAYMENT_EDIT in the organization and reserves a claim with its own permission. Missing and unauthorized records are refused
-// alike (RECORD_UNAVAILABLE).
+// the line's employers; a holder of PEOPLE_EXPENSE_MANAGE reads every claim and advance of their employers and acts for an
+// employee (the user's call, impl-people §4, Nov 12, 2026: HR and Accounting's payables, in BOSS); the approvers of the step
+// waiting read and decide it. Finance applies advances with PAYMENT_EDIT in the organization and reserves a claim with its own
+// permission; a payroll editor reserves one for payroll (P27). Missing and unauthorized records are refused alike
+// (RECORD_UNAVAILABLE).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
@@ -31,6 +35,7 @@ const invoiceLib = () => ec.resource.script("component://mr-mantle/service/mantl
 const CLAIM = "mantle.humanres.expense.ExpenseClaim"
 const CLAIM_ITEM = "mantle.humanres.expense.ExpenseClaimItem"
 const ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
+const ADVANCE_APPLICATION = "mantle.humanres.expense.EmployeeAdvanceApplication"
 const INVOICE = "mantle.account.invoice.Invoice"
 const LINE = "mantle.account.invoice.InvoiceItem"
 const CONTENT = "mantle.account.invoice.InvoiceContent"
@@ -46,6 +51,10 @@ const listCap = 500
 const exportCap = 2000
 const receiptMaxBytes = 10 * 1024 * 1024
 const receiptTypes = /^(image\/|application\/pdf$|text\/plain$)/
+// a receipt is a photo, a PDF or a text file by its name too: an upload's declared type is the client's word, and a file is sent
+// with the type its name gives, so an html or svg page is never kept as a receipt (nor shown inline from the app's origin)
+const receiptNames = /\.(png|jpe?g|gif|webp|heic|heif|pdf|txt)$/i
+const receiptName = name => receiptNames.test(String(name || ""))
 
 const ms = lib.ms
 const nowMs = () => ms(ec.user.nowTimestamp)
@@ -82,24 +91,28 @@ const sourceTexts = {ElsEntered: "Entered", ElsMail: "By mail", ElsChat: "From c
 const employmentRow = partyRelationshipId =>
     partyRelationshipId ? one(RELATIONSHIP, {partyRelationshipId, relationshipTypeEnumId: "PrtEmployee"}) : null
 const currentAt = (row, atMs) => !!row && (ms(row.fromDate) ?? -Infinity) <= atMs && (ms(row.thruDate) ?? Infinity) > atMs
-const hrEmployers = userScope => (userScope.capabilities.hrView ? userScope.organizationPartyIds : [])
-const payrollEmployers = userScope => (userScope.capabilities.payrollView ? userScope.organizationPartyIds : [])
-const canEditAt = (userScope, organizationPartyId) =>
-    !!(
-        userScope.capabilities.hrView &&
-        userScope.capabilities.hrEdit &&
-        userScope.organizationPartyIds.includes(organizationPartyId)
-    )
+// The caller's People scope with the employers whose claims and advances they manage (PEOPLE_EXPENSE_MANAGE): the internal
+// organizations they work in, or the active one (every internal organization with PEOPLE_ALL_ORGANIZATIONS), read as People's
+// staff reads read theirs. PEOPLE_EXPENSE_MANAGE is no staff read: it opens no person's People record.
+function expenseScope() {
+    const userScope = people.scopeOf()
+    const caps = userScope.capabilities
+    let managed = []
+    if (caps.expenseManage && ec.user.userId) {
+        const info = call("mantle.party.PartyServices.get#PartyOrganizationInfo")
+        managed = people.employers({staff: true, allOrganizations: caps.allOrganizations}, info).organizationPartyIds
+    }
+    return Object.assign(userScope, {expenseOrganizationPartyIds: managed})
+}
+const managedEmployers = userScope => userScope.expenseOrganizationPartyIds || []
 // How the scope admits a person's claims or advances at an employer: self (their own), team (a live report at the line's
-// employer), hr (an HR reader of the employer), hrEdit (an HR editor of it), payroll (a payroll reader of it).
+// employer), manage (PEOPLE_EXPENSE_MANAGE at the employer).
 function accessKinds(userScope, partyId, organizationPartyId) {
     const caps = userScope.capabilities
     const kinds = []
     if (caps.self && partyId === userScope.partyId) kinds.push("self")
     if (caps.team && ((userScope.reportLines || {})[partyId] || []).includes(organizationPartyId)) kinds.push("team")
-    if (hrEmployers(userScope).includes(organizationPartyId)) kinds.push("hr")
-    if (canEditAt(userScope, organizationPartyId)) kinds.push("hrEdit")
-    if (payrollEmployers(userScope).includes(organizationPartyId)) kinds.push("payroll")
+    if (managedEmployers(userScope).includes(organizationPartyId)) kinds.push("manage")
     return kinds
 }
 // whether a party decided a step of a source's approval requests
@@ -119,8 +132,8 @@ function recordAccess(userScope, record, kind, sourceEntityName, sourceId) {
     if (summary?.canDecide || decidedBy(kind, sourceEntityName, sourceId, userScope.partyId)) kinds.push("approver")
     return {kinds, summary}
 }
-// who changes a claim or asks an advance for a person: the person themselves, or an HR editor of the employer
-const changes = kinds => kinds.includes("self") || kinds.includes("hrEdit")
+// who changes a claim or asks an advance for a person: the person themselves, or a holder of PEOPLE_EXPENSE_MANAGE at the employer
+const changes = kinds => kinds.includes("self") || kinds.includes("manage")
 const lockClaim = invoiceId => find(CLAIM, {invoiceId}).forUpdate(true).one()
 const lockAdvance = employeeAdvanceId => find(ADVANCE, {employeeAdvanceId}).forUpdate(true).one()
 function departmentAt(partyRelationshipId, atMs) {
@@ -135,7 +148,7 @@ function readableClaim(userScope, invoiceId) {
     if (!claim || !access.kinds.length) denied("RECORD_UNAVAILABLE", "Expense claim " + text(invoiceId) + " is not available")
     return Object.assign({claim}, access)
 }
-// A claim the caller may change: readable, theirs to change (the claimant or an HR editor of the employer), and a draft or
+// A claim the caller may change: readable, theirs to change (the claimant or a holder of PEOPLE_EXPENSE_MANAGE at the employer), and a draft or
 // returned for correction.
 function changeableClaim(userScope, invoiceId) {
     const found = readableClaim(userScope, invoiceId)
@@ -174,12 +187,12 @@ const stageColors = {
 }
 
 // ===== create#ProjectExpenseInvoice's claim write (F21) =====
-// The claimant (fromPartyId) creates only their own claim (PEOPLE_SELF_SERVICE); anyone else's is an HR editor's of the employer,
-// who is recorded. The employer is that of the claimant's current employment (the one named, else the one with toPartyId, else
+// The claimant (fromPartyId) creates only their own claim (PEOPLE_SELF_SERVICE); anyone else's is made by a holder of
+// PEOPLE_EXPENSE_MANAGE at the employer, who is recorded. The employer is that of the claimant's current employment (the one named, else the one with toPartyId, else
 // their only one); a project is one the claimant works on. The invoice (the claimant to the employer, InvoiceIncoming) and the
 // ExpenseClaim (a draft on the accounts payable route) are written; a retry with the same operation key answers the first.
 function createClaim(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const operationKey = text(p.operationKey) || null
     if (operationKey) {
         const known = first(find(CLAIM, {operationKey, createdByUserId: ec.user.userId}))
@@ -188,8 +201,8 @@ function createClaim(p) {
     const partyId = text(p.fromPartyId)
     const own = !!partyId && partyId === userScope.partyId
     if (own && !userScope.capabilities.self) denied("PERMISSION_DENIED", "Expense claims need PEOPLE_SELF_SERVICE")
-    // another person's claim is HR's: checked before anything of that person is read
-    if (!own && !(userScope.capabilities.hrView && userScope.capabilities.hrEdit))
+    // another person's claim is made for them under PEOPLE_EXPENSE_MANAGE: checked before anything of that person is read
+    if (!own && !userScope.capabilities.expenseManage)
         denied("PERMISSION_DENIED", "You make expense claims for yourself; HR makes them for an employee")
     const now = nowMs()
     let employment
@@ -254,7 +267,7 @@ function checkProject(workEffortId, partyId) {
 // A draft's (or a returned claim's) header: purpose, description, project, the day it is dated and, while it has no line, the
 // currency. revision (the claim's last change, from get#Claim) refuses a stale write.
 function storeClaim(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim} = changeableClaim(userScope, p.invoiceId)
     if (text(p.revision) && text(p.revision) !== String(ms(claim.lastUpdatedStamp) ?? 0))
         denied("REVISION_CHANGED", "The claim changed since you read it; open it again")
@@ -337,14 +350,15 @@ function checkReceiptFile(file) {
     const type = String(file.contentType || "").toLowerCase()
     if (!size) denied("RECEIPT_INVALID", "The receipt file is empty")
     if (size > receiptMaxBytes) denied("RECEIPT_TOO_LARGE", "A receipt is at most 10 MB")
-    if (type && !receiptTypes.test(type)) denied("RECEIPT_INVALID", "A receipt is a photo, a PDF or a text file")
+    if ((type && !receiptTypes.test(type)) || type === "image/svg+xml" || !receiptName(file.fileName || file.name))
+        denied("RECEIPT_INVALID", "A receipt is a photo, a PDF or a text file")
 }
 // A line of a draft (or returned) claim added, changed or removed (remove), by the claimant or HR: the expense type (an
 // ItemExpense-family type), the description, the day, the quantity (1 by default) and the amount (positive, to the currency's
 // precision), the tax it includes (not more than the line), the merchant and a receipt file (a photo, a PDF or a text file, at
 // most 10 MB). Saving a line is its review: a line from mail or chat no longer waits. Answers the line.
 function storeClaimItem(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim} = changeableClaim(userScope, p.invoiceId)
     const invoice = one(INVOICE, {invoiceId: claim.invoiceId})
     const currencyUomId = invoice.currencyUomId || null
@@ -412,7 +426,7 @@ const extractFields = {
     description: "What was bought, in a few words"
 }
 function readReceipt(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim} = changeableClaim(userScope, p.invoiceId)
     let receiptText = text(p.receiptText)
     if (!receiptText && text(p.invoiceItemSeqId)) {
@@ -468,7 +482,7 @@ function readReceipt(p) {
 // claimant's manager unless a rule says otherwise). Lines without a receipt are counted (receiptsMissing), not refused. A
 // retry once it waits answers it (repeated).
 function submitClaim(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const found = readableClaim(userScope, p.invoiceId)
     if (!changes(found.kinds)) denied("PERMISSION_DENIED", "The claimant or HR submits an expense claim")
     let claim = lockClaim(found.claim.invoiceId)
@@ -519,7 +533,7 @@ const claimAnswer = claim => ({
 // the claimant or HR cancels a draft or returned claim (its invoice cancelled). Under the claim's lock; one who reads nothing of it
 // is answered as for a missing one. A decision retried answers the first.
 function decideClaim(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const action = text(p.decision) || "approve"
     if (!["approve", "refuse", "return", "withdraw", "cancel"].includes(action))
         denied("DECISION_INVALID", "Approve, return, refuse, withdraw or cancel")
@@ -595,8 +609,8 @@ function decideClaimNotice(p, decision) {
 }
 
 // ===== find#Claims, get#Claim =====
-// The claims the caller reads, as a query condition: their own (self), their reports' at the line's employers (team), an HR or
-// payroll reader's employers'; with mine their own alone.
+// The claims the caller reads, as a query condition: their own (self), their reports' at the line's employers (team), the
+// employers' of a holder of PEOPLE_EXPENSE_MANAGE; with mine their own alone.
 function reachCondition(userScope, mine) {
     const caps = userScope.capabilities
     const factory = ec.entity.conditionFactory
@@ -611,7 +625,7 @@ function reachCondition(userScope, mine) {
             ))
                 if ((lines[row.fromPartyId] || []).includes(row.toPartyId)) reportIds.push(row.partyRelationshipId)
         if (reportIds.length) parts.push(factory.makeCondition("partyRelationshipId", "in", reportIds))
-        const employers = unique(hrEmployers(userScope).concat(payrollEmployers(userScope)))
+        const employers = managedEmployers(userScope)
         if (employers.length) parts.push(factory.makeCondition("organizationPartyId", "in", employers))
     }
     if (!parts.length) return null
@@ -662,14 +676,14 @@ function projectNames(workEffortIds) {
         ])
     )
 }
-// find#Claims: the claims the caller reads (their own, a manager's reports' at the line's employers, an HR or payroll reader's
-// employers'), or with toDecide those whose step waiting they decide now; narrowed by a person, an employer, a state and the days
+// find#Claims: the claims the caller reads (their own, a manager's reports' at the line's employers, the employers' of
+// PEOPLE_EXPENSE_MANAGE), or with toDecide those whose step waiting they decide now; narrowed by a person, an employer, a state and the days
 // dated. Newest first, paged (an export up to 2000).
 function findClaims(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const caps = userScope.capabilities
-    if (!(caps.self || caps.team || caps.hrView || caps.payrollView || caps.requestApprove))
-        denied("PERMISSION_DENIED", "Expense claims need PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW, PEOPLE_HR_VIEW or PAYROLL_VIEW")
+    if (!(caps.self || caps.team || caps.expenseManage || caps.requestApprove))
+        denied("PERMISSION_DENIED", "Expense claims need PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW or PEOPLE_EXPENSE_MANAGE")
     const toDecide = truthy(p.toDecide)
     const deciding = toDecide || caps.requestApprove ? new Set(toDecideOf(claimKind)) : new Set()
     let query = find(CLAIM)
@@ -712,7 +726,7 @@ function findClaims(p) {
 // each payment applied to it: an advance or a reimbursement, the route and its reservation), the claimant's advances outstanding
 // at the employer, and what the caller may do.
 function getClaim(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim, kinds, summary} = readableClaim(userScope, p.invoiceId)
     const invoice = one(INVOICE, {invoiceId: claim.invoiceId})
     const currencyUomId = invoice?.currencyUomId || null
@@ -747,24 +761,30 @@ function getClaim(p) {
             reviewNeeded: extension.reviewNeeded === "Y"
         }
     })
+    // what settled the claim: payments (a reimbursement) and credits applied to it (an advance's, else another credit)
     const applications = Array.from(find(APPLICATION, {invoiceId: claim.invoiceId}).orderBy("appliedDate").list())
-    const advanceByPayment = Object.fromEntries(
-        applications.length
-            ? Array.from(
-                  find(ADVANCE)
-                      .condition("paymentId", "in", applications.map(row => row.paymentId).filter(Boolean))
-                      .list()
-              ).map(row => [row.paymentId, row.employeeAdvanceId])
+        .filter(row => row.paymentId)
+        .concat(Array.from(find(APPLICATION, {toInvoiceId: claim.invoiceId}).orderBy("appliedDate").list()))
+    const creditIds = applications.filter(row => !row.paymentId && row.invoiceId).map(row => row.invoiceId)
+    const advanceByCredit = Object.fromEntries(
+        creditIds.length
+            ? Array.from(find(ADVANCE_APPLICATION).condition("creditInvoiceId", "in", creditIds).list()).map(row => [
+                  row.creditInvoiceId,
+                  row.employeeAdvanceId
+              ])
             : []
     )
-    const payments = applications.map(row => ({
-        paymentApplicationId: row.paymentApplicationId,
-        paymentId: row.paymentId || null,
-        kindText: advanceByPayment[row.paymentId] ? "Advance " + advanceByPayment[row.paymentId] : "Reimbursement",
-        employeeAdvanceId: advanceByPayment[row.paymentId] || null,
-        amountText: moneyText(row.amountApplied, currencyUomId),
-        appliedDateText: row.appliedDate ? ec.l10n.format(row.appliedDate, "yyyy-MM-dd") : ""
-    }))
+    const payments = applications.map(row => {
+        const advanceId = row.paymentId ? null : advanceByCredit[row.invoiceId] || null
+        return {
+            paymentApplicationId: row.paymentApplicationId,
+            paymentId: row.paymentId || null,
+            kindText: row.paymentId ? "Reimbursement" : advanceId ? "Advance " + advanceId : "Credit " + row.invoiceId,
+            employeeAdvanceId: advanceId,
+            amountText: moneyText(row.amountApplied, currencyUomId),
+            appliedDateText: row.appliedDate ? ec.l10n.format(row.appliedDate, "yyyy-MM-dd") : ""
+        }
+    })
     const editable = editableStatuses.includes(claim.statusEnumId) && changes(kinds)
     const advances = rows(ADVANCE, {
         partyId: claim.partyId,
@@ -789,7 +809,7 @@ function getClaim(p) {
             unpaidText: moneyText(invoice?.unpaidTotal, currencyUomId),
             financeStatusText: financeText(invoice),
             reservedRouteText: routeTexts[claim.reservedRouteEnumId] || "",
-            createdByOther: !!claim.createdByUserId && claim.createdByUserId !== ec.user.userId && !kinds.includes("hrEdit")
+            createdByOther: !!claim.createdByUserId && claim.createdByUserId !== ec.user.userId && !kinds.includes("manage")
         }),
         lines,
         approval: summary,
@@ -817,17 +837,20 @@ function financeText(invoice) {
 }
 // get#ClaimReceipt: a receipt of a claim the caller reads (its location, name and type, for the screen to send).
 function getClaimReceipt(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim} = readableClaim(userScope, p.invoiceId)
     const content = text(p.invoiceContentId) ? one(CONTENT, {invoiceContentId: text(p.invoiceContentId)}) : null
     if (!content || content.invoiceId !== claim.invoiceId || !content.contentLocation)
         denied("RECORD_UNAVAILABLE", "This receipt is not available")
-    return {location: content.contentLocation, fileName: content.description || "receipt"}
+    const fileName = content.description || "receipt"
+    // shown inline only when its name is a photo's, a PDF's or a text file's; anything else (a file kept before this rule) is a
+    // download
+    return {location: content.contentLocation, fileName, inline: receiptName(fileName)}
 }
 // get#ClaimEvidence: the receipts of a claim the caller reads, each a path in the bundle and its location (the screen adds the
 // claim's printed PDF): one entry a receipt, numbered by its line.
 function getClaimEvidence(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const {claim} = readableClaim(userScope, p.invoiceId)
     const byContent = Object.fromEntries(
         rows(CLAIM_ITEM, {invoiceId: claim.invoiceId})
@@ -851,7 +874,7 @@ function getClaimEvidence(p) {
 // get#ClaimOptions: what the caller's new claim or advance offers: their own current employments (employer, its currency) and the
 // projects they work on (self-service), and the expense types (a closed list, for anyone changing a claim).
 function claimOptions() {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const types = expenseTypes().map(row => ({itemTypeEnumId: row.enumId, description: row.description || row.enumId}))
     if (!userScope.capabilities.self || !userScope.partyId) return {employments: [], expenseTypes: types, projects: []}
     const now = nowMs()
@@ -947,9 +970,10 @@ function reserveClaimSettlement(p) {
     const known = text(p.invoiceId) ? one(CLAIM, {invoiceId: text(p.invoiceId)}) : null
     if (!known) denied("RECORD_UNAVAILABLE", "Expense claim " + text(p.invoiceId) + " is not available")
     if (routeEnumId === "EcrPayroll") {
+        // payroll's own route (P27): a payroll editor of the employer, not a reader of every claim
         const userScope = people.scopeOf()
         const caps = userScope.capabilities
-        if (!payrollEmployers(userScope).includes(known.organizationPartyId))
+        if (!(caps.payrollView && userScope.organizationPartyIds.includes(known.organizationPartyId)))
             denied("RECORD_UNAVAILABLE", "Expense claim " + known.invoiceId + " is not available")
         if (!caps.payrollEdit) denied("PERMISSION_DENIED", "A payroll editor reserves a claim for payroll")
     } else invoiceLib().organization(known.organizationPartyId, "INVOICE_APPROVE")
@@ -988,32 +1012,47 @@ const reservationAnswer = (claim, repeated) => ({
 })
 
 // ===== advances =====
-// What an advance's payment delivered (its amount once delivered or confirmed; nothing before, or once returned or voided), what
-// was applied of it to invoices and returned to it, and what is outstanding: delivered less applied and returned.
+// What an advance's bill was paid by delivered (or confirmed) payments (nothing before, or once a payment is returned or voided),
+// what its credits applied to the employee's claims, and what is outstanding: delivered less applied.
+const deliveredStatuses = ["PmntDelivered", "PmntConfirmed"]
 function advanceMoney(advance) {
     const currencyUomId = advance.currencyUomId || null
-    const payment = advance.paymentId ? one(PAYMENT, {paymentId: advance.paymentId}) : null
-    const delivered =
-        payment && ["PmntDelivered", "PmntConfirmed"].includes(payment.statusId) ? decimalOf(payment.amount) : zero()
-    const out = payment ? rows(APPLICATION, {paymentId: payment.paymentId}) : []
-    const applied = sum(out.filter(row => row.invoiceId).map(row => row.amountApplied))
-    const returned = payment
-        ? sum(
-              rows(APPLICATION, {toPaymentId: payment.paymentId})
-                  .map(row => row.amountApplied)
-                  .concat(out.filter(row => row.toPaymentId).map(row => row.amountApplied))
+    const bill = advance.invoiceId ? one(INVOICE, {invoiceId: advance.invoiceId}) : null
+    const paid = bill ? rows(APPLICATION, {invoiceId: bill.invoiceId}).filter(row => row.paymentId) : []
+    const statuses = Object.fromEntries(
+        paid.length
+            ? Array.from(
+                  find(PAYMENT)
+                      .condition("paymentId", "in", unique(paid.map(row => row.paymentId)))
+                      .selectField(["paymentId", "statusId"])
+                      .list()
+              ).map(row => [row.paymentId, row.statusId])
+            : []
+    )
+    const delivered = sum(paid.filter(row => deliveredStatuses.includes(statuses[row.paymentId])).map(row => row.amountApplied))
+    const recoveries = rows(ADVANCE_APPLICATION, {employeeAdvanceId: advance.employeeAdvanceId})
+    const credited = recoveries.length
+        ? Array.from(
+              find(APPLICATION)
+                  .condition(
+                      "invoiceId",
+                      "in",
+                      recoveries.map(row => row.creditInvoiceId)
+                  )
+                  .condition("toInvoiceId", "is-not-null", null)
+                  .list()
           )
-        : zero()
-    const left = delivered.subtract(applied).subtract(returned)
+        : []
+    const applied = sum(credited.map(row => row.amountApplied))
+    const left = delivered.subtract(applied)
     const outstanding = left.compare(0) > 0 ? money(left, currencyUomId) : zero()
     return {
         currencyUomId,
-        payment,
+        bill,
         delivered: money(delivered, currencyUomId),
         applied: money(applied, currencyUomId),
-        returned: money(returned, currencyUomId),
         outstanding,
-        appliedInvoiceIds: unique(out.filter(row => row.invoiceId).map(row => row.invoiceId))
+        appliedInvoiceIds: unique(credited.filter(row => decimalOf(row.amountApplied).compare(0) > 0).map(row => row.toInvoiceId))
     }
 }
 function advanceLine(advance, names, organizations, deciding, callerPartyId = null) {
@@ -1023,8 +1062,15 @@ function advanceLine(advance, names, organizations, deciding, callerPartyId = nu
     let stageText = advanceStatusTexts[advance.statusEnumId] || advance.statusEnumId
     if (advance.statusEnumId === "EasApproved") {
         if (amounts.delivered.isZero()) {
+            // the bill with finance, approved for payment (a payment run pays it), or paid by a payment not yet delivered
+            const billStatus = amounts.bill?.statusId
             stage = "toPay"
-            stageText = advance.paymentId ? "Approved: payment not delivered" : "Approved: to pay"
+            stageText =
+                billStatus === "InvoiceApproved" || billStatus === "InvoicePmtSent"
+                    ? "Approved for payment"
+                    : billStatus === "InvoiceCancelled"
+                      ? "Approved: its bill cancelled"
+                      : "Approved: with finance"
         } else if (amounts.outstanding.compare(0) > 0) {
             stage = "outstanding"
             stageText = "Paid: outstanding"
@@ -1044,10 +1090,10 @@ function advanceLine(advance, names, organizations, deciding, callerPartyId = nu
         amount: money(advance.amount, currencyUomId),
         amountText: moneyText(advance.amount, currencyUomId),
         deliveredText: moneyText(amounts.delivered, currencyUomId),
-        appliedText: moneyText(amounts.applied.add(amounts.returned), currencyUomId),
+        appliedText: moneyText(amounts.applied, currencyUomId),
         outstanding: amounts.outstanding,
         outstandingText: moneyText(amounts.outstanding, currencyUomId),
-        paymentId: advance.paymentId || null,
+        invoiceId: advance.invoiceId || null,
         appliedInvoiceIds: amounts.appliedInvoiceIds,
         requiredDateText: advance.requiredDate ? lib.calendarDateText(advance.requiredDate) : "",
         expectedSettlementDateText: advance.expectedSettlementDate ? lib.calendarDateText(advance.expectedSettlementDate) : "",
@@ -1086,9 +1132,9 @@ function advanceEmployment(userScope, partyRelationshipId) {
     const now = nowMs()
     if (text(partyRelationshipId)) {
         const employment = employmentRow(text(partyRelationshipId))
-        // another person's advance is HR's: refused for the permission before anything of theirs is told
+        // another person's advance is asked under PEOPLE_EXPENSE_MANAGE: refused for the permission before anything of theirs is told
         const own = !!employment && !!userScope.partyId && employment.fromPartyId === userScope.partyId
-        if (!own && !(userScope.capabilities.hrView && userScope.capabilities.hrEdit))
+        if (!own && !userScope.capabilities.expenseManage)
             denied("PERMISSION_DENIED", "You ask advances for yourself; HR asks them for an employee")
         const kinds = employment ? accessKinds(userScope, employment.fromPartyId, employment.toPartyId) : []
         if (!employment || !changes(kinds))
@@ -1106,7 +1152,7 @@ function advanceEmployment(userScope, partyRelationshipId) {
 // (positive, in the employer's currency unless another is named) and when it is needed and should be settled; sent for a People
 // approval of kind PakAdvance. A retry with the same operation key answers the first.
 function requestAdvance(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const operationKey = text(p.operationKey) || null
     const firstOf = () =>
         operationKey ? first(find(ADVANCE).condition({operationKey, requestedByUserId: ec.user.userId})) : null
@@ -1155,7 +1201,7 @@ const advanceAnswer = advance => ({
 // decide#Advance: approve or refuse (with a reason) the step waiting, through record#Decision at the advance's revision; the last
 // approval makes it payable by finance (approval to advance is not payment). withdraw: the person or who asked, while it waits.
 function decideAdvance(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     const action = text(p.decision) || "approve"
     if (!["approve", "refuse", "withdraw"].includes(action)) denied("DECISION_INVALID", "Approve, refuse or withdraw")
     const known = text(p.employeeAdvanceId) ? one(ADVANCE, {employeeAdvanceId: text(p.employeeAdvanceId)}) : null
@@ -1196,6 +1242,7 @@ function decideAdvance(p) {
             decidedDate: ec.user.nowTimestamp,
             decisionReason: decided.complete ? null : reason
         })
+    if (decided.complete && !advance.invoiceId) advanceBill(one(ADVANCE, {employeeAdvanceId: advance.employeeAdvanceId}))
     return Object.assign(advanceAnswer(one(ADVANCE, {employeeAdvanceId: advance.employeeAdvanceId})), {repeated: false})
 }
 function decideAdvanceNotice(p, decision) {
@@ -1217,7 +1264,7 @@ function financeOrganization(organizationPartyId, permission) {
         denied("PERMISSION_DENIED", "Advances in finance need payables read authority")
     return invoiceLib().organization(organizationPartyId, permission || null)
 }
-// find#Advances: the advances the caller reads (their own, a manager's reports', an HR or payroll reader's employers'), or with
+// find#Advances: the advances the caller reads (their own, a manager's reports', the employers' of PEOPLE_EXPENSE_MANAGE), or with
 // toDecide those they decide now; or, with finance and an organization, the organization's approved advances for finance to pay
 // and apply (a finance reader of it). Each with what was asked, delivered, applied and is outstanding. Newest first, paged.
 function findAdvances(p) {
@@ -1228,10 +1275,10 @@ function findAdvances(p) {
         const organizationPartyId = financeOrganization(text(p.organizationPartyId) || null, null)
         query = query.condition({organizationPartyId, statusEnumId: "EasApproved"})
     } else {
-        const userScope = people.scopeOf()
+        const userScope = expenseScope()
         const caps = userScope.capabilities
-        if (!(caps.self || caps.team || caps.hrView || caps.payrollView || caps.requestApprove))
-            denied("PERMISSION_DENIED", "Advances need PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW, PEOPLE_HR_VIEW or PAYROLL_VIEW")
+        if (!(caps.self || caps.team || caps.expenseManage || caps.requestApprove))
+            denied("PERMISSION_DENIED", "Advances need PEOPLE_SELF_SERVICE, PEOPLE_TEAM_VIEW or PEOPLE_EXPENSE_MANAGE")
         const toDecide = truthy(p.toDecide)
         deciding = toDecide || caps.requestApprove ? new Set(toDecideOf(advanceKind)) : new Set()
         if (toDecide) query = query.condition("employeeAdvanceId", "in", deciding.size ? Array.from(deciding) : ["_NA_"])
@@ -1259,34 +1306,43 @@ function findAdvances(p) {
     })
     return Object.assign({}, paged, {advances, rows: undefined})
 }
-// pay#Advance: finance pays an approved advance (PAYMENT_EDIT in its organization): a prepayment (PtPrePayment) from the employer
-// to the employee for the advance's amount, delivered on effectiveDate (now by default) through the instrument named; the
-// payment is the advance's. One paid already answers its payment (repeated).
-function payAdvance(p) {
-    const known = text(p.employeeAdvanceId) ? one(ADVANCE, {employeeAdvanceId: text(p.employeeAdvanceId)}) : null
-    if (!known) denied("RECORD_UNAVAILABLE", "Advance " + text(p.employeeAdvanceId) + " is not available")
-    financeOrganization(known.organizationPartyId, "PAYMENT_EDIT")
-    const advance = lockAdvance(known.employeeAdvanceId)
-    if (advance.paymentId) return {employeeAdvanceId: advance.employeeAdvanceId, paymentId: advance.paymentId, repeated: true}
-    if (advance.statusEnumId !== "EasApproved") denied("NOT_APPROVED", "Only an approved advance is paid")
-    const payment = call("mantle.account.PaymentServices.create#Payment", {
-        paymentTypeEnumId: "PtPrePayment",
-        fromPartyId: advance.organizationPartyId,
-        toPartyId: advance.partyId,
-        amount: advance.amount,
-        amountUomId: advance.currencyUomId,
-        statusId: "PmntDelivered",
-        effectiveDate: p.effectiveDate || ec.user.nowTimestamp,
-        paymentInstrumentEnumId: text(p.paymentInstrumentEnumId) || null,
-        paymentRefNum: text(p.paymentRefNum) || null,
-        comments: "Employee advance " + advance.employeeAdvanceId
+// An approved advance made a payable (the user's call, impl-people §4, Nov 12, 2026): a bill from the employee to the employer
+// of one ItemAdvancePay line (posted to the employee advances account), due when the advance is needed, received for finance's
+// approval in Accounting (Expense posting lists a person's bills); a payment run pays it once approved, as any other bill.
+function advanceBill(advance) {
+    const description = "Employee advance " + advance.employeeAdvanceId + (advance.purpose ? ": " + advance.purpose : "")
+    const created = call("mantle.account.InvoiceServices.create#Invoice", {
+        fromPartyId: advance.partyId,
+        toPartyId: advance.organizationPartyId,
+        invoiceTypeEnumId: "InvoiceSales",
+        invoiceDate: ec.user.nowTimestamp,
+        currencyUomId: advance.currencyUomId || null,
+        description: description.substring(0, 255)
     })
-    call("update#" + ADVANCE, {employeeAdvanceId: advance.employeeAdvanceId, paymentId: payment.paymentId})
-    return {employeeAdvanceId: advance.employeeAdvanceId, paymentId: payment.paymentId, repeated: false}
+    call("create#" + LINE, {
+        invoiceId: created.invoiceId,
+        invoiceItemSeqId: "01",
+        itemTypeEnumId: "ItemAdvancePay",
+        description: description.substring(0, 255),
+        quantity: 1,
+        amount: advance.amount
+    })
+    const dueDate = advance.requiredDate
+        ? ec.l10n.parseTimestamp(lib.calendarDateText(advance.requiredDate) + " 00:00:00", "yyyy-MM-dd HH:mm:ss")
+        : null
+    call(
+        "update#" + INVOICE,
+        Object.assign({invoiceId: created.invoiceId, statusId: "InvoiceReceived"}, dueDate ? {dueDate} : {})
+    )
+    call("update#" + ADVANCE, {employeeAdvanceId: advance.employeeAdvanceId, invoiceId: created.invoiceId})
+    return created.invoiceId
 }
 // apply#Advance: finance applies a paid advance to the employee's claim at the same employer (PAYMENT_EDIT in the organization):
 // the claim's invoice approved for payment (CLAIM_NOT_FINANCE_APPROVED otherwise), at most what is outstanding of the advance and
-// unpaid of the claim (the amount given, else the lesser), through mantle.account.PaymentServices.apply#InvoicePayment.
+// unpaid of the claim (the amount given, else the lesser). The employer issues a credit against the claim on the employee
+// advances account (create#InvoiceCreditMemo, ItemAdvancePay on the account the advance's bill posted to), finalized at once as
+// a payment run's discount credit is, and applies it to the claim (apply#InvoiceToInvoice): the claim's payable settled from the
+// advance, with no cash moved.
 function applyAdvance(p) {
     const known = text(p.employeeAdvanceId) ? one(ADVANCE, {employeeAdvanceId: text(p.employeeAdvanceId)}) : null
     if (!known) denied("RECORD_UNAVAILABLE", "Advance " + text(p.employeeAdvanceId) + " is not available")
@@ -1295,7 +1351,7 @@ function applyAdvance(p) {
     const claim = text(p.invoiceId) ? one(CLAIM, {invoiceId: text(p.invoiceId)}) : null
     if (!claim || claim.partyId !== advance.partyId || claim.organizationPartyId !== advance.organizationPartyId)
         denied("CLAIM_INVALID", "Choose a claim of the same employee and employer")
-    const invoice = one(INVOICE, {invoiceId: claim.invoiceId})
+    const invoice = find(INVOICE, {invoiceId: claim.invoiceId}).forUpdate(true).one()
     if (!["InvoiceApproved", "InvoicePmtSent"].includes(invoice.statusId))
         denied("CLAIM_NOT_FINANCE_APPROVED", "Apply an advance to a claim approved for payment")
     if (invoice.currencyUomId && advance.currencyUomId && invoice.currencyUomId !== advance.currencyUomId)
@@ -1310,19 +1366,64 @@ function applyAdvance(p) {
         if (asked.compare(amount) > 0) denied("AMOUNT_EXCEEDS", "At most " + moneyText(amount, advance.currencyUomId))
         amount = asked
     }
-    const applied = call("mantle.account.PaymentServices.apply#InvoicePayment", {
-        paymentId: advance.paymentId,
+    const glAccountId = call("mantle.ledger.InvoiceAutoPostServices.get#InvoiceItemGlAccount", {
+        organizationPartyId: advance.organizationPartyId,
+        otherPartyId: advance.partyId,
+        itemTypeEnumId: "ItemAdvancePay",
+        direction: "I"
+    }).glAccountId
+    if (!glAccountId) denied("ADVANCE_ACCOUNT_MISSING", "The employer has no employee advances account (ItemAdvancePay)")
+    const description = "Employee advance " + advance.employeeAdvanceId + " applied to claim " + claim.invoiceId
+    const credit = call("mantle.account.InvoiceServices.create#InvoiceCreditMemo", {
+        originalInvoiceId: claim.invoiceId,
+        invoiceDate: ec.user.nowTimestamp,
+        amount,
+        itemTypeEnumId: "ItemAdvancePay",
+        overrideGlAccountId: glAccountId,
+        description
+    })
+    call("update#" + INVOICE, {
+        invoiceId: credit.invoiceId,
+        creditForInvoiceId: claim.invoiceId,
+        description,
+        financeOrganizationPartyId: advance.organizationPartyId,
+        financeDirection: "payable",
+        statusId: "InvoiceFinalized",
+        statusId_changeReason: description
+    })
+    call("create#" + ADVANCE_APPLICATION, {
+        employeeAdvanceId: advance.employeeAdvanceId,
+        creditInvoiceId: credit.invoiceId,
         invoiceId: claim.invoiceId,
-        amount
+        appliedDate: ec.user.nowTimestamp,
+        appliedByUserId: ec.user.userId || null
+    })
+    const applied = call("mantle.account.PaymentServices.apply#InvoiceToInvoice", {
+        invoiceId: credit.invoiceId,
+        toInvoiceId: claim.invoiceId,
+        amount,
+        appliedDate: ec.user.nowTimestamp
     })
     const after = advanceMoney(one(ADVANCE, {employeeAdvanceId: advance.employeeAdvanceId}))
     return {
         employeeAdvanceId: advance.employeeAdvanceId,
         invoiceId: claim.invoiceId,
+        creditInvoiceId: credit.invoiceId,
         paymentApplicationId: applied.paymentApplicationId || null,
         amountApplied: applied.amountApplied ?? zero(),
         outstanding: after.outstanding
     }
+}
+
+// ===== payment runs =====
+// The invoices of a list that are expense claims reserved for payroll (or routed to it): a payment run neither selects nor pays
+// them (PaymentRuns.js), as P27's pay run settles them.
+function payrollReserved(invoiceIds) {
+    const ids = unique(Array.from(invoiceIds || []).filter(Boolean))
+    if (!ids.length) return []
+    return Array.from(find(CLAIM).condition("invoiceId", "in", ids).list())
+        .filter(claim => claim.reservedRouteEnumId === "EcrPayroll" || claim.routeEnumId === "EcrPayroll")
+        .map(claim => claim.invoiceId)
 }
 
 // ===== mail and chat intake =====
@@ -1440,9 +1541,14 @@ function claimLineFromEmail(p) {
     }
     const employment = employmentRow(employments[0].partyRelationshipId)
     const invoiceId = draftFor(employment, "Expenses by mail")
-    const attachments = rows("moqui.basic.email.EmailMessageAttachment", {emailMessageId}).filter(
-        row => row.attachmentLocation && row.isInline !== "Y"
-    )
+    const attachments = rows("moqui.basic.email.EmailMessageAttachment", {emailMessageId}).filter(row => {
+        if (!row.attachmentLocation || row.isInline === "Y") return false
+        if (receiptName(row.fileName)) return true
+        ec.logger.warn(
+            "Expense intake: email " + emailMessageId + " attachment " + row.fileName + " is no receipt file, left out"
+        )
+        return false
+    })
     const receipts = attachments.length
         ? attachments.map(row => ({location: row.attachmentLocation, fileName: row.fileName || "receipt"}))
         : [{text: [message.subject, message.body].filter(Boolean).join("\n\n"), fileName: "message.txt"}]
@@ -1459,7 +1565,7 @@ function claimLineFromEmail(p) {
 // encrypted room) becomes a draft line on their open draft claim, its files the receipts; for the caller's one current employment
 // (PEOPLE_SELF_SERVICE). An event makes one line once.
 function claimLineFromChat(p) {
-    const userScope = people.scopeOf()
+    const userScope = expenseScope()
     if (!userScope.capabilities.self || !userScope.partyId) denied("PERMISSION_DENIED", "Expense claims need PEOPLE_SELF_SERVICE")
     const chatRoomId = text(p.chatRoomId)
     const eventSeq = Number(p.eventSeq)
@@ -1479,7 +1585,9 @@ function claimLineFromChat(p) {
     if (!own.length) denied("NOT_EMPLOYED", "You have no current employment")
     if (own.length > 1) denied("EMPLOYMENT_REQUIRED", "You work for several employers: add the line on your claim")
     const employment = employmentRow(own[0].partyRelationshipId)
-    const attachments = rows("moqui.chat.ChatAttachment", {chatRoomId, eventSeq}).filter(row => row.location)
+    const attachments = rows("moqui.chat.ChatAttachment", {chatRoomId, eventSeq}).filter(
+        row => row.location && receiptName(row.fileName)
+    )
     const invoiceId = draftFor(employment, "Expenses")
     const receipts = attachments.length
         ? attachments.map(row => ({location: row.location, fileName: row.fileName || "receipt"}))
@@ -1515,7 +1623,6 @@ const operations = {
     approveAdvanceNotice: p => decideAdvanceNotice(p, "approve"),
     refuseAdvanceNotice: p => decideAdvanceNotice(p, "refuse"),
     findAdvances,
-    payAdvance,
     applyAdvance,
     claimLineFromEmail,
     claimLineFromChat
@@ -1524,4 +1631,4 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown expense operation " + op)
     return operations[op](p || {})
 }
-;({execute: run, financeApproval})
+;({execute: run, financeApproval, payrollReserved})

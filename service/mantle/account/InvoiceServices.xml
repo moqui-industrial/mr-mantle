@@ -1615,8 +1615,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>An expense invoice from a worker (fromPartyId) to a project's vendor (toPartyId, else the project's Vendor or
             VendorBillFrom party), linked to the project (WorkEffortInvoice), or to toPartyId with no project. With expenseClaim
             (People P15, design-people §9, impl-people F21) it is an employee's expense claim: the claimant (fromPartyId) creates
-            only their own (PEOPLE_SELF_SERVICE), unless an HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) acts for
-            them, who is recorded (PERMISSION_DENIED); the employer is the one of the claimant's current employment
+            only their own (PEOPLE_SELF_SERVICE), unless a holder of PEOPLE_EXPENSE_MANAGE at the employer acts for them (the user's
+            call, impl-people §4, Nov 12, 2026), who is recorded (PERMISSION_DENIED); the employer is the one of the claimant's current employment
             (partyRelationshipId, else the one with toPartyId, else their only one: EMPLOYMENT_REQUIRED, NOT_EMPLOYED); a project
             must be one the claimant works on (PROJECT_UNAVAILABLE); and the claim's record is written (ExpenseClaim: a draft on
             the accounts payable route, with purpose). A retry with the same operationKey answers the first claim. Without

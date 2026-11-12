@@ -14,13 +14,17 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- People's expense claims and employee advances (IronStone People design §9 ExpenseClaims, ExpenseClaimDetail and EmployeeAdvances,
     §16.2 ExpenseServices, PE-13, PE-24; impl-people P15, F21, F65; Expense.js). A claim stays an employee-from Invoice: it is made by
-    mantle.account.InvoiceServices.create#ProjectExpenseInvoice with expenseClaim (the claimant's own, or HR's for them, under the
+    mantle.account.InvoiceServices.create#ProjectExpenseInvoice with expenseClaim (the claimant's own, or made for them under
+    PEOPLE_EXPENSE_MANAGE, under the
     claimant's current employment), its lines are ItemExpense-family invoice lines with their receipts, and ExpenseClaim keeps the
     employment, the business state, the settlement route and its reservation. Submitted, the invoice is received and the claim waits
     for a People approval (PeopleExpenseApproval); business approval leaves the invoice received, and finance's approve#Payable then
     approves it for payment (only once the business approval is done, and never a claim reserved for payroll). An advance is asked
-    and approved (PeopleAdvanceApproval), paid by finance as a prepayment and applied to the employee's claims; what is outstanding is
-    read from that payment and its applications. Receipt values are proposed from the receipt's text by
+    and approved (PeopleAdvanceApproval); its approval makes it a bill to the employee that finance approves for payment and a
+    payment run pays as any other bill, and finance applies it to the employee's claims through a credit on the employee advances
+    account; what is outstanding is read from those payments and credits. PEOPLE_EXPENSE_MANAGE (the user's call, impl-people §4,
+    Nov 12, 2026) reads every claim and advance of the user's employers and acts for an employee; the claimant's own and the
+    approvers' route need no more than their own scope. Receipt values are proposed from the receipt's text by
     org.moqui.agent.AiTaskServices.run#Extract and reviewed before they are saved; a receipt arrives by mail (the mail rule action
     createExpenseLine) or chat ("Add to my claim") as a draft line to review. Each service checks the caller's People scope
     (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group. -->
@@ -28,12 +32,11 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="find" noun="Claims" allow-remote="false">
         <description>The expense claims the caller reads: their own (PEOPLE_SELF_SERVICE; mine for those alone), their live reports'
-            at the line's employers (PEOPLE_TEAM_VIEW), an HR reader's (PEOPLE_HR_VIEW) and a payroll reader's (PAYROLL_VIEW)
-            employers'; with toDecide, the claims whose step waiting the caller decides now (PEOPLE_REQUEST_APPROVE). Narrowed to a
+            at the line's employers (PEOPLE_TEAM_VIEW), the employers' of a holder of PEOPLE_EXPENSE_MANAGE; with toDecide, the claims whose step waiting the caller decides now (PEOPLE_REQUEST_APPROVE). Narrowed to a
             person, an employer, a business state and the days made (fromDate through thruDate). Newest first, paged (an export,
             pageNoLimit, up to 2000); each with the person, employer, project, purpose, day, currency and total, the business state,
             the stage (draft, waiting, returned, approved: with finance, finance approved, paid, refused, cancelled), the route and
-            whether the caller decides it. Refuses a caller with none of the five permissions (PERMISSION_DENIED).</description>
+            whether the caller decides it. Refuses a caller with none of the four permissions (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="partyId"/>
             <parameter name="organizationPartyId"/>
@@ -61,14 +64,14 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="Claim" allow-remote="false">
-        <description>An expense claim the caller reads (the claimant, their manager at the employer, an HR or payroll reader of the
-            employer, an approver of its step; another, or an invoice that is no claim, is refused as missing, RECORD_UNAVAILABLE):
+        <description>An expense claim the caller reads (the claimant, their manager at the employer, a holder of PEOPLE_EXPENSE_MANAGE
+            at the employer, an approver of its step; another, or an invoice that is no claim, is refused as missing, RECORD_UNAVAILABLE):
             the claim as find#Claims shows it with its department, description, revision and the decider's reason when returned or
             refused; its lines (type, description, day, quantity, amount, the tax included, merchant, receipt, source and whether it
             waits for review); its approval (each step with who decides, the decisions); the finance state and settlement (the
             invoice's state, applied and unpaid, each payment applied to it, an advance or a reimbursement, and the route reserved);
             the claimant's approved advances still outstanding at the employer; and what the caller may do: canEdit, canSubmit and
-            canCancel (the claimant or an HR editor, a draft or returned claim), canDecide (an approver of the step waiting),
+            canCancel (the claimant or a holder of PEOPLE_EXPENSE_MANAGE, a draft or returned claim), canDecide (an approver of the step waiting),
             canWithdraw (the claimant or who made it, while it waits).</description>
         <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>
         <out-parameters>
@@ -92,7 +95,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="Claim" allow-remote="false">
-        <description>A draft (or returned) claim's header changed by the claimant or an HR editor of the employer (PERMISSION_DENIED
+        <description>A draft (or returned) claim's header changed by the claimant or a holder of PEOPLE_EXPENSE_MANAGE at the employer (PERMISSION_DENIED
             for another reader; a claim waiting or decided is CLAIM_LOCKED): purpose, description, the day it is dated, a project the
             claimant works on (PROJECT_UNAVAILABLE; empty clears it) and, while it has no line, the currency (CURRENCY_LOCKED).
             revision, the claim's revision read, refuses a stale write (REVISION_CHANGED). A claim is made by
@@ -113,7 +116,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="ClaimItem" allow-remote="false">
         <description>A line of a draft (or returned) claim added (no invoiceItemSeqId), changed or removed (remove) by the claimant or
-            an HR editor: the expense type (an ItemExpense-family type, EXPENSE_TYPE_INVALID), the description (DESCRIPTION_REQUIRED),
+            a holder of PEOPLE_EXPENSE_MANAGE: the expense type (an ItemExpense-family type, EXPENSE_TYPE_INVALID), the description (DESCRIPTION_REQUIRED),
             the day (DATE_FUTURE), the quantity (1 by default, QUANTITY_INVALID), the amount (positive and to the currency's precision,
             AMOUNT_INVALID, CURRENCY_PRECISION), the tax it includes (TAX_INVALID beyond the line), the merchant and a receipt file (a
             photo, a PDF or a text file of at most 10 MB, RECEIPT_INVALID, RECEIPT_TOO_LARGE), kept as the invoice's receipt content.
@@ -165,7 +168,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="submit" noun="Claim" allow-remote="false">
-        <description>A draft (or returned) claim sent for business approval by the claimant or an HR editor: it has lines
+        <description>A draft (or returned) claim sent for business approval by the claimant or a holder of PEOPLE_EXPENSE_MANAGE: it has lines
             (LINES_REQUIRED), none waiting for review (LINES_TO_REVIEW), each with an amount (AMOUNT_INVALID); its invoice is received
             (InvoiceReceived) and a People approval of kind PakExpenseClaim is asked (PeopleExpenseApproval to the first step's
             approvers: the claimant's manager unless a rule says otherwise; never the claimant or who asked; with none it waits).
@@ -321,13 +324,14 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="find" noun="Advances" allow-remote="false">
-        <description>The employee advances the caller reads (as find#Claims: their own, a manager's reports', an HR or payroll
-            reader's employers', or with toDecide those they decide now), narrowed by a person, an employer and a state; or, with
-            finance and organizationPartyId, the organization's approved advances for finance to pay and apply (a finance reader of
+        <description>The employee advances the caller reads (as find#Claims: their own, a manager's reports', the employers' of
+            PEOPLE_EXPENSE_MANAGE, or with toDecide those they decide now), narrowed by a person, an employer and a state; or, with
+            finance and organizationPartyId, the organization's approved advances for finance to follow and apply (a finance reader of
             the organization: ACCOUNTING_VIEW, ACCOUNTING_ADMIN or PAYABLE_VIEW; ORGANIZATION_DENIED, PERMISSION_DENIED). Newest
-            first, paged; each with the person, employer, purpose, the amount asked, delivered (its payment once delivered or
-            confirmed), applied (to claims, or returned) and outstanding (delivered less applied, never a balance kept), the state and
-            stage (waiting, to pay, paid and outstanding, settled, refused, withdrawn), the payment and the claims it was applied to.</description>
+            first, paged; each with the person, employer, purpose, the amount asked, delivered (what delivered or confirmed
+            payments paid of its bill), applied (to claims, by its credits) and outstanding (delivered less applied, never a balance
+            kept), the state and stage (waiting, with finance, approved for payment, paid and outstanding, settled, refused,
+            withdrawn), its bill and the claims it was applied to.</description>
         <in-parameters>
             <parameter name="partyId"/>
             <parameter name="organizationPartyId"/>
@@ -355,7 +359,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="request" noun="Advance" allow-remote="false">
         <description>An advance asked: by the employee for their own current employment (PEOPLE_SELF_SERVICE; the one named, else
-            their only one, EMPLOYMENT_REQUIRED), or by an HR editor of the employer for an employee's (partyRelationshipId; another
+            their only one, EMPLOYMENT_REQUIRED), or by a holder of PEOPLE_EXPENSE_MANAGE at the employer for an employee's (partyRelationshipId; another
             reader PERMISSION_DENIED, another employment RECORD_UNAVAILABLE): the purpose (PURPOSE_REQUIRED), the amount (positive,
             AMOUNT_INVALID) in the employer's currency unless another is named (CURRENCY_REQUIRED), when it is needed and when it
             should be settled (DATES_INVALID). Sent for a People approval of kind PakAdvance (PeopleAdvanceApproval). A retry with the
@@ -382,8 +386,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="decide" noun="Advance" allow-remote="false">
         <description>An advance decided, under its lock: approve or refuse (with a reason) the step waiting, through
-            PeopleApprovalServices.record#Decision at the advance's revision; the last approval makes it payable by finance (approval
-            to advance is not payment). withdraw: the person or who asked, while it waits. One who reads nothing of it is answered as
+            PeopleApprovalServices.record#Decision at the advance's revision; the last approval makes it a payable (approval to advance is
+            not payment): a bill from the employee to the employer of one ItemAdvancePay line, due when the advance is needed,
+            received for finance's approval, which a payment run pays once approved (the user's call, impl-people §4, Nov 12, 2026). withdraw: the person or who asked, while it waits. One who reads nothing of it is answered as
             for a missing one. A decision retried answers the first. Refuses as decide#Claim does.</description>
         <in-parameters>
             <parameter name="employeeAdvanceId" required="true"/>
@@ -436,34 +441,14 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="repeated" from="out.repeated"/>
         </actions>
     </service>
-    <service verb="pay" noun="Advance" allow-remote="false">
-        <description>Finance pays an approved advance (PAYMENT_EDIT in its organization: PERMISSION_DENIED, ORGANIZATION_DENIED;
-            NOT_APPROVED before approval): a prepayment (PtPrePayment) from the employer to the employee for the advance's amount and
-            currency, delivered on effectiveDate (now by default) by the instrument named, through
-            mantle.account.PaymentServices.create#Payment (posted as Accounting posts it); the payment is the advance's. One paid
-            already answers its payment (repeated).</description>
-        <in-parameters>
-            <parameter name="employeeAdvanceId" required="true"/>
-            <parameter name="effectiveDate" type="Timestamp"/>
-            <parameter name="paymentInstrumentEnumId"/>
-            <parameter name="paymentRefNum"/>
-        </in-parameters>
-        <out-parameters>
-            <parameter name="employeeAdvanceId"/>
-            <parameter name="paymentId"/>
-            <parameter name="repeated" type="Boolean"/>
-        </out-parameters>
-        <actions>
-            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('payAdvance', context)"/>
-            <script>ec.context.putAll(out)</script>
-        </actions>
-    </service>
     <service verb="apply" noun="Advance" allow-remote="false">
         <description>Finance applies a paid advance to the employee's claim at the same employer (PAYMENT_EDIT in the organization;
             CLAIM_INVALID for another's): the claim's invoice approved for payment (CLAIM_NOT_FINANCE_APPROVED), in the advance's
             currency (CURRENCY_MISMATCH), at most what is outstanding of the advance and unpaid of the claim (the amount given,
-            AMOUNT_EXCEEDS beyond it, else the lesser; NOTHING_OUTSTANDING, CLAIM_SETTLED), through
-            mantle.account.PaymentServices.apply#InvoicePayment. Answers what was applied and what is outstanding after.</description>
+            AMOUNT_EXCEEDS beyond it, else the lesser; NOTHING_OUTSTANDING, CLAIM_SETTLED), as a
+            credit the employer issues against the claim on the employee advances account (ItemAdvancePay's incoming account;
+            ADVANCE_ACCOUNT_MISSING), finalized at once and applied to the claim through
+            mantle.account.PaymentServices.apply#InvoiceToInvoice (EmployeeAdvanceApplication links it to the advance). Answers what was applied and what is outstanding after.</description>
         <in-parameters>
             <parameter name="employeeAdvanceId" required="true"/>
             <parameter name="invoiceId" required="true"/>
@@ -472,6 +457,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="employeeAdvanceId"/>
             <parameter name="invoiceId"/>
+            <parameter name="creditInvoiceId"/>
             <parameter name="paymentApplicationId"/>
             <parameter name="amountApplied" type="BigDecimal"/>
             <parameter name="outstanding" type="BigDecimal"/>

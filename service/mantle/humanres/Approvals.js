@@ -187,8 +187,9 @@ const kinds = {
         }
     },
     // P15: an expense claim (ExpenseServices.submit#Claim and decide#Claim). The request is bound to the claim's last change, so a
-    // withdrawal or a change of its lines supersedes it. What the notice says: the claim, the person, the employer and department;
-    // no amount, line or purpose (a lock-screen-safe title).
+    // withdrawal or a change of its lines supersedes it. What the notice's title says: the claim, the person, the employer and
+    // department; no amount, line or purpose (a lock-screen-safe title). Its detail shows the approver the claim's total (amount
+    // and currencyUomId, which the notification lists show beside the approval; the user's call, impl-people §4, Nov 12, 2026).
     PakExpenseClaim: {
         topic: "PeopleExpenseApproval",
         sourceEntityName: EXPENSE_CLAIM,
@@ -198,10 +199,18 @@ const kinds = {
             if (!claim) return {label: "expense claim " + sourceId}
             const personName = people.personNames([claim.partyId])[claim.partyId] || claim.partyId
             const names = people.organizationNames([claim.organizationPartyId, claim.departmentPartyId].filter(Boolean))
+            const invoice = one("mantle.account.invoice.Invoice", {invoiceId: sourceId})
+            const currencyUomId = invoice?.currencyUomId || null
             return {
                 label: "expense claim " + sourceId + " of " + personName,
                 message: {
                     invoiceId: sourceId,
+                    summary: "Claim total",
+                    amount: ec.l10n
+                        .roundCurrency(toDecimal(invoice?.invoiceTotal ?? 0), currencyUomId)
+                        .setScale(2, "HALF_UP")
+                        .toString(),
+                    currencyUomId,
                     partyId: claim.partyId,
                     personName,
                     subjectText: "the expense claim " + sourceId + " of " + personName,

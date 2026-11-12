@@ -1,8 +1,10 @@
 // People's expense claims and advances (mantle.humanres.ExpenseServices and create#ProjectExpenseInvoice's claim write; impl-people
 // P15, F21, F65; design-people §9): a claimant creates only their own claim, and HR one for them; a line from mail is made once
 // from the sender's work address and waits for review; the manager's approval leaves the invoice received, and finance approves it
-// for payment only after it; a claim reserved for one settlement route is refused by the other; an advance's outstanding is what was
-// delivered less what was applied to a claim. Standalone: spec-local organizations with their own books, people, employments,
+// for payment only after it; a claim reserved for one settlement route is refused by the other, and a payment run leaves out one
+// reserved for payroll; an approved advance is a bill a payment run pays, and its outstanding is what was delivered less what was
+// applied to a claim; PEOPLE_EXPENSE_MANAGE (the user's call of Nov 12, 2026) reads and acts for an employee where HR view and edit
+// alone do not. Standalone: spec-local organizations with their own books, people, employments,
 // groups and users, with artifact authorization disabled (the rules are the services' own checks).
 // Run: ./moq test mr-mantle --spec ExpenseClaims
 const prefix = "PEOPLE_EXP_SPEC"
@@ -149,11 +151,28 @@ spec({
         state.uAna = user("ANA", ["PEOPLE_SELF_SERVICE", "PEOPLE_REQUEST_APPROVE"], state.ana)
         state.uBob = user("BOB", ["PEOPLE_SELF_SERVICE"], state.bob)
         state.uMgr = user("MAX", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW", "PEOPLE_REQUEST_APPROVE"], state.max)
-        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
-        state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrBParty)
+        state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_EXPENSE_MANAGE"], state.hrParty)
+        state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_EXPENSE_MANAGE"], state.hrBParty)
+        // HR of A without the expense permission: refused what HR is accepted with
+        state.hrOnly = user("HRONLY", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
         state.payroll = user("PAY", ["PAYROLL_VIEW", "PAYROLL_EDIT"], state.payParty)
         state.payrollReader = user("PAYV", ["PAYROLL_VIEW"], state.payParty)
-        state.finance = user("FIN", ["ACCOUNTING_VIEW", "INVOICE_APPROVE", "PAYMENT_EDIT", "PAYABLE_VIEW"], state.finParty)
+        state.finance = user(
+            "FIN",
+            ["ACCOUNTING_VIEW", "INVOICE_APPROVE", "PAYMENT_EDIT", "PAYABLE_VIEW", "PAYABLE_EDIT"],
+            state.finParty
+        )
+        // A's bank account, which a payment run pays from by check
+        state.bank = call("mantle.account.PaymentMethodServices.create#BankAccount", {
+            ownerPartyId: orgA,
+            description: "Operating account",
+            bankName: "Spec Bank",
+            routingNumber: "021000021",
+            accountNumber: "5550001234",
+            typeEnumId: "BatChecking",
+            currencyUomId: "USD",
+            companyNameOnAccount: "People Expense Spec A"
+        }).paymentMethodId
     },
     cleanupSpec() {
         ec.message.clearErrors()
@@ -168,14 +187,23 @@ feature("a claimant creates only their own claim; HR of the employer creates one
         // Bob for Ana, with the parameters Ana's own claim succeeds with
         const forOther = newClaim(state.uBob, state.ana)
         const byHr = newClaim(state.hr, state.ana)
+        const byHrOnly = newClaim(state.hrOnly, state.ana)
         const byOtherHr = newClaim(state.hrB, state.ana)
+        // who reads Ana's claim: HR with the expense permission; HR without it and a payroll reader not (PAYROLL_VIEW reads none)
+        const reads = Object.fromEntries(
+            [
+                ["hr", state.hr],
+                ["hrOnly", state.hrOnly],
+                ["payroll", state.payrollReader]
+            ].map(([name, username]) => [name, code(run(username, E + "get#Claim", {invoiceId: own.invoiceId})) || "accepted"])
+        )
         const project = newClaim(state.uAna, state.ana, {workEffortId: prefix + "_NO_PROJECT"})
         const notEmployed = newClaim(state.uAna, state.ana, {toPartyId: orgB})
         // HR cancels the draft it made: the claim and its invoice cancelled
         const cancelled = run(state.hr, E + "decide#Claim", {invoiceId: byHr.invoiceId, decision: "cancel"})
-        return {own, again, forOther, byHr, byOtherHr, project, notEmployed, cancelled}
+        return {own, again, forOther, byHr, byHrOnly, byOtherHr, reads, project, notEmployed, cancelled}
     },
-    then({own, again, forOther, byHr, byOtherHr, project, notEmployed, cancelled}) {
+    then({own, again, forOther, byHr, byHrOnly, byOtherHr, reads, project, notEmployed, cancelled}) {
         own.error == "" && again.invoiceId == own.invoiceId
         const claim = claimRow(own.invoiceId)
         claim.partyId == state.ana && claim.organizationPartyId == orgA && claim.partyRelationshipId == state.anaEmp
@@ -185,7 +213,9 @@ feature("a claimant creates only their own claim; HR of the employer creates one
         invoice.currencyUomId == "USD"
         code(forOther) == "PERMISSION_DENIED"
         byHr.error == "" && claimRow(byHr.invoiceId).createdByUserId == state.hr && claimRow(byHr.invoiceId).partyId == state.ana
+        code(byHrOnly) == "PERMISSION_DENIED"
         code(byOtherHr) == "PERMISSION_DENIED"
+        reads.hr == "accepted" && reads.hrOnly == "RECORD_UNAVAILABLE" && reads.payroll == "RECORD_UNAVAILABLE"
         code(project) == "PROJECT_UNAVAILABLE"
         code(notEmployed) == "NOT_EMPLOYED"
         cancelled.statusEnumId == "EcsCancelled" && invoiceRow(byHr.invoiceId).statusId == "InvoiceCancelled"
@@ -221,13 +251,31 @@ feature(
             })
             const meal = line(state.uAna, state.claim, "57.50", {taxAmount: "5"})
             const badTax = line(state.uAna, state.claim, "10", {taxAmount: "11"})
+            // a page named as a receipt is refused whatever type its upload declares (it would be sent as html)
+            const page = line(state.uAna, state.claim, "10", {
+                receiptFile: {fileName: "receipt.html", contentType: "text/plain", size: 20}
+            })
             const hrBLine = line(state.hrB, state.claim, "10")
             const submitted = run(state.uAna, E + "submit#Claim", {invoiceId: state.claim})
             const locked = line(state.uAna, state.claim, "1")
             const detail = run(state.uMgr, E + "get#Claim", {invoiceId: state.claim})
-            return {empty, mailed, mailedAgain, stranger, toReview, reviewed, meal, badTax, hrBLine, submitted, locked, detail}
+            return {
+                empty,
+                mailed,
+                mailedAgain,
+                stranger,
+                toReview,
+                reviewed,
+                meal,
+                badTax,
+                page,
+                hrBLine,
+                submitted,
+                locked,
+                detail
+            }
         },
-        then({empty, mailed, mailedAgain, stranger, toReview, reviewed, meal, badTax, hrBLine, submitted, locked, detail}) {
+        then({empty, mailed, mailedAgain, stranger, toReview, reviewed, meal, badTax, page, hrBLine, submitted, locked, detail}) {
             code(empty) == "LINES_REQUIRED"
             mailed.created && mailed.invoiceId == state.claim
             !mailedAgain.created && mailedAgain.invoiceItemSeqId == mailed.invoiceItemSeqId
@@ -235,6 +283,7 @@ feature(
             code(toReview) == "LINES_TO_REVIEW"
             reviewed.error == "" && meal.error == ""
             code(badTax) == "TAX_INVALID"
+            code(page) == "RECEIPT_INVALID"
             code(hrBLine) == "RECORD_UNAVAILABLE"
             submitted.statusEnumId == "EcsSubmitted" && submitted.receiptsMissing == 1
             code(locked) == "CLAIM_LOCKED"
@@ -362,82 +411,211 @@ feature("a claim reserved for one settlement route is refused by the other", {
         code(toPayroll) == "CLAIM_RESERVED"
         // the expenses queue lists no claim reserved for payroll, and none waiting for its business approval
         !queue.some(row => row.invoiceId == payrollClaim)
+        state.payrollClaim = payrollClaim
     }
 })
 
-feature("an advance's outstanding is what was delivered less what was applied to a claim", {
-    when() {
-        const asked = run(state.uAna, E + "request#Advance", {purpose: "Trade fair travel", amount: "40", operationKey: "ADV-1"})
-        const retry = run(state.uAna, E + "request#Advance", {purpose: "Trade fair travel", amount: "40", operationKey: "ADV-1"})
-        const forOther = run(state.uBob, E + "request#Advance", {partyRelationshipId: state.anaEmp, purpose: "x", amount: "40"})
-        const early = run(state.finance, E + "pay#Advance", {employeeAdvanceId: asked.employeeAdvanceId})
-        const approved = run(state.uMgr, E + "decide#Advance", {employeeAdvanceId: asked.employeeAdvanceId, decision: "approve"})
-        const before = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
-        const notFinance = run(state.uMgr, E + "pay#Advance", {employeeAdvanceId: asked.employeeAdvanceId})
-        const paid = run(state.finance, E + "pay#Advance", {employeeAdvanceId: asked.employeeAdvanceId})
-        const delivered = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
-        const tooMuch = run(state.finance, E + "apply#Advance", {
-            employeeAdvanceId: asked.employeeAdvanceId,
-            invoiceId: state.claim,
-            amount: "41"
-        })
-        const applied = run(state.finance, E + "apply#Advance", {
-            employeeAdvanceId: asked.employeeAdvanceId,
-            invoiceId: state.claim
-        })
-        const after = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
-        const financeList = run(state.finance, E + "find#Advances", {finance: true, organizationPartyId: orgA}).advances
-        const claim = run(state.uAna, E + "get#Claim", {invoiceId: state.claim})
-        return {
+feature(
+    "an approved advance is a bill a payment run pays, never a claim reserved for payroll; its outstanding is what was delivered less what was applied to a claim",
+    {
+        when() {
+            const asked = run(state.uAna, E + "request#Advance", {
+                purpose: "Trade fair travel",
+                amount: "40",
+                operationKey: "ADV-1",
+                requiredDate: "2026-03-01"
+            })
+            const retry = run(state.uAna, E + "request#Advance", {
+                purpose: "Trade fair travel",
+                amount: "40",
+                operationKey: "ADV-1"
+            })
+            const forOther = run(state.uBob, E + "request#Advance", {
+                partyRelationshipId: state.anaEmp,
+                purpose: "x",
+                amount: "40"
+            })
+            const advanceRow = () =>
+                ec.entity
+                    .find("mantle.humanres.expense.EmployeeAdvance")
+                    .condition({employeeAdvanceId: asked.employeeAdvanceId})
+                    .disableAuthz()
+                    .one()
+            const unbilled = advanceRow().invoiceId
+            const approved = run(state.uMgr, E + "decide#Advance", {
+                employeeAdvanceId: asked.employeeAdvanceId,
+                decision: "approve"
+            })
+            const bill = advanceRow().invoiceId
+            const billLines = Array.from(
+                ec.entity.find("mantle.account.invoice.InvoiceItem").condition({invoiceId: bill}).disableAuthz().list()
+            )
+            const before = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
+            const queue = run(state.finance, "mantle.account.InvoiceServices.find#Payables", {
+                organizationPartyId: orgA,
+                queue: "expenses"
+            }).records.map(row => row.invoiceId)
+            const billApproved = Object.assign(payable(bill), {billStatus: invoiceRow(bill).statusId})
+            const forPayment = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
+            // the payroll-reserved claim approved for payment as P27's route would: no payment run takes it
+            ec.entity
+                .find("mantle.account.invoice.Invoice")
+                .condition({invoiceId: state.payrollClaim})
+                .disableAuthz()
+                .updateAll({statusId: "InvoiceApproved"})
+            const today = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd")
+            const made = run(state.finance, "mantle.account.PaymentRunServices.create#Run", {
+                organizationPartyId: orgA,
+                paymentMethodId: state.bank,
+                paymentInstrumentEnumId: "PiCompanyCheck",
+                dueThroughDate: "2099-12-31",
+                payDate: today
+            })
+            const runBills = Array.from(
+                ec.entity
+                    .find("mantle.account.payment.PaymentRunItem")
+                    .condition({paymentRunId: made.paymentRunId})
+                    .disableAuthz()
+                    .list()
+            ).map(row => row.invoiceId)
+            run(state.finance, "mantle.account.PaymentRunServices.cancel#Run", {paymentRunId: made.paymentRunId})
+            // the run's check to Ana, delivered and applied to the advance's bill, as paySupplier does
+            const payment = call("mantle.account.PaymentServices.create#Payment", {
+                paymentTypeEnumId: "PtInvoicePayment",
+                fromPartyId: orgA,
+                toPartyId: state.ana,
+                amount: "40",
+                amountUomId: "USD",
+                paymentInstrumentEnumId: "PiCompanyCheck",
+                statusId: "PmntDelivered",
+                effectiveDate: ec.user.nowTimestamp
+            })
+            call("mantle.account.PaymentServices.apply#InvoicePayment", {paymentId: payment.paymentId, invoiceId: bill})
+            ec.message.clearErrors()
+            const delivered = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
+            const tooMuch = run(state.finance, E + "apply#Advance", {
+                employeeAdvanceId: asked.employeeAdvanceId,
+                invoiceId: state.claim,
+                amount: "41"
+            })
+            const notFinance = run(state.uMgr, E + "apply#Advance", {
+                employeeAdvanceId: asked.employeeAdvanceId,
+                invoiceId: state.claim
+            })
+            const applied = run(state.finance, E + "apply#Advance", {
+                employeeAdvanceId: asked.employeeAdvanceId,
+                invoiceId: state.claim
+            })
+            const after = run(state.uAna, E + "find#Advances", {mine: true}).advances[0]
+            const financeList = run(state.finance, E + "find#Advances", {finance: true, organizationPartyId: orgA}).advances
+            const claim = run(state.uAna, E + "get#Claim", {invoiceId: state.claim})
+            const credit = applied.creditInvoiceId ? invoiceRow(applied.creditInvoiceId) : null
+            // the credit's posting: the employee advances account credited (where the advance's bill debited it)
+            const ledger = invoiceId =>
+                Array.from(
+                    ec.entity.find("mantle.ledger.transaction.AcctgTrans").condition({invoiceId}).disableAuthz().list()
+                ).flatMap(trans =>
+                    Array.from(
+                        ec.entity
+                            .find("mantle.ledger.transaction.AcctgTransEntry")
+                            .condition({acctgTransId: trans.acctgTransId})
+                            .disableAuthz()
+                            .list()
+                    ).map(
+                        entry =>
+                            entry.glAccountId +
+                            ":" +
+                            entry.debitCreditFlag +
+                            ":" +
+                            toDecimal(entry.amount).setScale(2, "HALF_UP").toString()
+                    )
+                )
+            const advanceAccount = {bill: ledger(bill), credit: credit ? ledger(credit.invoiceId) : []}
+            return {
+                advanceAccount,
+                asked,
+                retry,
+                forOther,
+                unbilled,
+                approved,
+                bill,
+                billLines,
+                before,
+                queue,
+                billApproved,
+                forPayment,
+                made,
+                runBills,
+                delivered,
+                tooMuch,
+                notFinance,
+                applied,
+                after,
+                financeList,
+                claim,
+                credit
+            }
+        },
+        then({
+            advanceAccount,
             asked,
             retry,
             forOther,
-            early,
+            unbilled,
             approved,
+            bill,
+            billLines,
             before,
-            notFinance,
-            paid,
+            queue,
+            billApproved,
+            forPayment,
+            made,
+            runBills,
             delivered,
             tooMuch,
+            notFinance,
             applied,
             after,
             financeList,
-            claim
+            claim,
+            credit
+        }) {
+            asked.statusEnumId == "EasRequested" && retry.repeated && retry.employeeAdvanceId == asked.employeeAdvanceId
+            code(forOther) == "PERMISSION_DENIED"
+            // approval to advance is not payment: the last approval makes the advance a bill, received for finance
+            !unbilled && approved.statusEnumId == "EasApproved" && bill
+            const billRow = invoiceRow(bill)
+            billRow.fromPartyId == state.ana && billRow.toPartyId == orgA && billRow.invoiceTotal.compare(40) == 0
+            billLines.length == 1 && billLines[0].itemTypeEnumId == "ItemAdvancePay"
+            ec.l10n.format(billRow.dueDate, "yyyy-MM-dd") == "2026-03-01"
+            before.stageText == "Approved: with finance" && before.outstanding.compare(0) == 0 && before.invoiceId == bill
+            queue.includes(bill)
+            billApproved.error == "" &&
+                billApproved.billStatus == "InvoiceApproved" &&
+                invoiceRow(bill).statusId == "InvoicePmtSent"
+            forPayment.stageText == "Approved for payment"
+            // a payment run pays the advance's bill and the claim finance approved, and leaves out the claim reserved for payroll
+            made.error == "" &&
+                runBills.includes(bill) &&
+                runBills.includes(state.claim) &&
+                !runBills.includes(state.payrollClaim)
+            delivered.stageText == "Paid: outstanding" && delivered.outstanding.compare(40) == 0
+            code(tooMuch) == "AMOUNT_EXCEEDS"
+            code(notFinance) == "PERMISSION_DENIED"
+            applied.amountApplied.compare(40) == 0 && applied.outstanding.compare(0) == 0
+            // the employer's credit on the claim: issued and posted, from the employer to Ana, linked to the claim, all of it applied
+            credit.statusId == "InvoicePmtRecvd" && credit.acctgTransResultEnumId == "AtrSuccess"
+            credit.fromPartyId == orgA && credit.toPartyId == state.ana
+            credit.creditForInvoiceId == state.claim
+            advanceAccount.bill.includes("151400000:D:40.00") && advanceAccount.credit.includes("151400000:C:40.00")
+            after.stageText == "Settled" && after.appliedInvoiceIds.includes(state.claim)
+            financeList.some(row => row.employeeAdvanceId == asked.employeeAdvanceId)
+            // the claim of 100 shows the advance applied and 60 left to reimburse
+            claim.payments.length == 1 && claim.payments[0].employeeAdvanceId == asked.employeeAdvanceId
+            claim.claim.unpaidTotal.compare(60) == 0
         }
-    },
-    then({
-        asked,
-        retry,
-        forOther,
-        early,
-        approved,
-        before,
-        notFinance,
-        paid,
-        delivered,
-        tooMuch,
-        applied,
-        after,
-        financeList,
-        claim
-    }) {
-        asked.statusEnumId == "EasRequested" && retry.repeated && retry.employeeAdvanceId == asked.employeeAdvanceId
-        code(forOther) == "PERMISSION_DENIED"
-        code(early) == "NOT_APPROVED"
-        approved.statusEnumId == "EasApproved"
-        before.stageText == "Approved: to pay" && before.outstanding.compare(0) == 0
-        code(notFinance) == "PERMISSION_DENIED"
-        paid.error == "" && paid.paymentId
-        delivered.stageText == "Paid: outstanding" && delivered.outstanding.compare(40) == 0
-        code(tooMuch) == "AMOUNT_EXCEEDS"
-        applied.amountApplied.compare(40) == 0 && applied.outstanding.compare(0) == 0
-        after.stageText == "Settled" && after.appliedInvoiceIds.includes(state.claim)
-        financeList.some(row => row.employeeAdvanceId == asked.employeeAdvanceId)
-        // the claim of 100 shows the advance applied and 60 left to reimburse
-        claim.payments.length == 1 && claim.payments[0].employeeAdvanceId == asked.employeeAdvanceId
-        claim.claim.unpaidTotal.compare(60) == 0
     }
-})
+)
 
 feature(
     "Add to my claim: the caller's own chat message is a draft line made once; another's message and a room not read are refused",
