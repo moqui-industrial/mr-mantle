@@ -2028,12 +2028,17 @@ function previewRequest(p) {
 function submitRequest(p) {
     const userScope = people.scopeOf()
     const operationKey = text(p.operationKey) || null
-    if (operationKey) {
-        const first = Array.from(find(REQUEST).condition({operationKey, requestedByUserId: ec.user.userId}).limit(1).list())[0]
-        if (first) return Object.assign(requestAnswer(first), {repeated: true})
-    }
+    const firstOf = () =>
+        operationKey
+            ? Array.from(find(REQUEST).condition({operationKey, requestedByUserId: ec.user.userId}).limit(1).list())[0]
+            : null
+    let first = firstOf()
+    if (first) return Object.assign(requestAnswer(first), {repeated: true})
     const employment = requestEmployment(userScope, p.partyRelationshipId)
     lockEmployment(employment.row.partyRelationshipId)
+    // a retry that waited on the lock answers the first too
+    first = firstOf()
+    if (first) return Object.assign(requestAnswer(first), {repeated: true})
     const found = assess(userScope, Object.assign({}, p, {partyRelationshipId: employment.row.partyRelationshipId}))
     if (found.problems.length) denied(found.problems[0].code, found.problems.map(item => item.message).join("; "))
     const reason = text(p.reason) || null
@@ -2144,15 +2149,27 @@ function getRequest(p) {
         .sort((a, b) => (ms(a.decisionDate) || 0) - (ms(b.decisionDate) || 0))
     const last = decided[decided.length - 1] || null
     const names = people.personNames(unique(decided.map(row => row.decidedByPartyId).filter(Boolean)))
+    // HR's cancellation at once is its own notice (who, when and why); the others are the last decision's
+    const hrName = () => {
+        const partyId = one("moqui.security.UserAccount", {userId: request.cancelledByUserId})?.partyId
+        return (partyId && people.personNames([partyId])[partyId]) || request.cancelledByUserId
+    }
     const notice =
-        ["LrsApproved", "LrsRefused", "LrsCancelled"].includes(status) && last
+        status === "LrsCancelled" && request.cancelledByUserId
             ? {
-                  outcomeText: requestStatusTexts[status],
-                  decidedByName: names[last.decidedByPartyId] || last.decidedByUserId || "",
-                  decidedDateText: dateText(last.decisionDate),
-                  reason: last.decisionEnumId === "PpdRefused" ? last.reason || "" : ""
+                  outcomeText: "Cancelled",
+                  decidedByName: hrName(),
+                  decidedDateText: dateText(request.cancelledDate),
+                  reason: request.cancelReason || ""
               }
-            : null
+            : ["LrsApproved", "LrsRefused", "LrsCancelled"].includes(status) && last
+              ? {
+                    outcomeText: requestStatusTexts[status],
+                    decidedByName: names[last.decidedByPartyId] || last.decidedByUserId || "",
+                    decidedDateText: dateText(last.decisionDate),
+                    reason: last.decisionEnumId === "PpdRefused" ? last.reason || "" : ""
+                }
+              : null
     const charged = num(request.chargedAmount) || 0
     // the balance statement: the posted balance (with this leave once taken), the other reservations, and what is left
     const statement = {
@@ -2206,7 +2223,10 @@ function getRequest(p) {
         canDecide: !!summary?.canDecide && ["LrsRequested", "LrsCancelRequested"].includes(status),
         canWithdraw: own && status === "LrsRequested",
         canAskCancel: kinds.includes("self") && status === "LrsApproved",
-        canCancel: kinds.includes("hrEdit") && ["LrsApproved", "LrsCancelRequested"].includes(status)
+        canCancel:
+            kinds.includes("hrEdit") &&
+            request.partyId !== userScope.partyId &&
+            ["LrsApproved", "LrsCancelRequested"].includes(status)
     }
 }
 
@@ -2224,10 +2244,11 @@ function decideRequest(p) {
     if (!request) denied("RECORD_UNAVAILABLE", "Leave request " + text(p.leaveRequestId) + " is not available")
     lockEmployment(request.partyRelationshipId)
     request = requestRow(request.leaveRequestId)
-    if (action === "approve" || action === "refuse") return decideApproval(userScope, request, action, p)
+    // one who reads no part of it is answered as for a missing request, whatever they ask
     const summary = approvals().sourceSummary(leaveKind, request.leaveRequestId)
     const kinds = requestAccess(userScope, request, summary && summaryDeciders(request, summary))
     if (!kinds.length) denied("RECORD_UNAVAILABLE", "Leave request " + request.leaveRequestId + " is not available")
+    if (action === "approve" || action === "refuse") return decideApproval(userScope, request, action, p)
     if (text(p.expectedRevision) && text(p.expectedRevision) !== String(stampOf(request)))
         denied("REVISION_CHANGED", "This request changed since you read it; open it again")
     if (action === "withdraw") {
@@ -2243,10 +2264,11 @@ function decideRequest(p) {
         return decideRequest(Object.assign({}, p, {decision: "withdraw"}))
     if (!["LrsApproved", "LrsCancelRequested"].includes(request.statusEnumId))
         denied("NOT_APPROVED", "Only approved leave is cancelled")
-    if (kinds.includes("hrEdit")) {
+    // HR cancels another person's leave at once, never their own (which they ask to cancel, as anyone does: no self-approval)
+    if (kinds.includes("hrEdit") && request.partyId !== userScope.partyId) {
         const reason = text(p.reason)
         if (!reason) denied("REASON_REQUIRED", "Give the reason for cancelling")
-        cancelTaken(request)
+        cancelTaken(request, {cancelledByUserId: ec.user.userId || null, cancelReason: reason})
         if (request.statusEnumId === "LrsCancelRequested") approvals().sourceChanged(leaveKind, request.leaveRequestId)
         tellPerson(requestRow(request.leaveRequestId), "Cancelled by HR")
         return Object.assign(requestAnswer(requestRow(request.leaveRequestId)), {repeated: false})
@@ -2326,7 +2348,7 @@ function takeLeave(request, found) {
     project(requestRow(request.leaveRequestId), found.days)
 }
 // A cancellation of approved leave: the reversal of what was taken posted once (leave-reversal:<id>), the projection cancelled.
-function cancelTaken(request) {
+function cancelTaken(request, values = {}) {
     const entries = entriesOf(request.partyRelationshipId, request.leaveTypeEnumId)
     const sourceKey = "leave-reversal:" + request.leaveRequestId
     let reversalEntryId = null
@@ -2350,7 +2372,10 @@ function cancelTaken(request) {
             description: "Leave cancelled " + datesTextOf(fromDay, lib.calendarDateText(request.thruDay))
         })
     }
-    setStatus(request, {statusEnumId: "LrsCancelled", cancelledDate: ec.user.nowTimestamp, reversalEntryId})
+    setStatus(
+        request,
+        Object.assign({statusEnumId: "LrsCancelled", cancelledDate: ec.user.nowTimestamp, reversalEntryId}, values)
+    )
     for (const segment of segmentsOf(request.leaveRequestId)) {
         if (!segment.workEffortId) continue
         const effort = one(WORK_EFFORT, {workEffortId: segment.workEffortId})
@@ -2539,16 +2564,69 @@ function findRequests(p) {
 }
 
 // ===== absences (the team calendar and its projected collection) =====
-// The approved leave of the people the caller sees in People, from start through end (days): their own, a manager's live reports
-// at the line's employers, an HR reader's employers' employees; each segment as "Out" with its days (a morning or an afternoon
-// said so), the person, never the leave type or the reason; openable: whether the caller reads the request (the person, HR, the
-// manager or an approver), which the calendar then links.
+// An employee's colleagues (the user's call of Nov 11, 2026): the people who now share a department or team with them (a current
+// PrtMember of the same unit, as member or lead) or a manager (a live line of the same manager at the employer), each with the
+// employers that employ both now, where their approved leave is shown as days alone: {partyId: [organizationPartyId]}.
+const unitRoleIds = ["OrgDepartment", "OrgTeam"]
+function colleaguesOf(userScope) {
+    const me = userScope.partyId
+    const mine = unique((userScope.employments || []).map(row => row.organizationPartyId))
+    const out = {}
+    if (!me || !mine.length) return out
+    const add = (partyId, organizationPartyIds) => {
+        if (partyId === me) return
+        const shared = organizationPartyIds.filter(organizationPartyId => mine.includes(organizationPartyId))
+        if (shared.length) out[partyId] = unique((out[partyId] || []).concat(shared))
+    }
+    const member = () => people.current(find(RELATIONSHIP).condition("relationshipTypeEnumId", "PrtMember"), null)
+    // the units: a department's members are its employees' assignments' rows, a team's its members'
+    const unitIds = unique(Array.from(member().condition("fromPartyId", me).list()).map(row => row.toPartyId))
+    const units = unitIds.length
+        ? unique(
+              Array.from(
+                  find("mantle.party.PartyRole")
+                      .condition("partyId", "in", unitIds)
+                      .condition("roleTypeId", "in", unitRoleIds)
+                      .list()
+              ).map(row => row.partyId)
+          )
+        : []
+    if (units.length) {
+        const mates = unique(Array.from(member().condition("toPartyId", "in", units).list()).map(row => row.fromPartyId)).filter(
+            partyId => partyId !== me
+        )
+        const employed = people.employersOfParties(mates, null)
+        for (const partyId of mates) add(partyId, employed[partyId] || [])
+    }
+    // the manager: the other reports of my managers, at the employers where the line is mine too
+    const managers = people.managersByEmployment([me], null)
+    const myLines = {}
+    for (const [key, managerPartyIds] of Object.entries(managers))
+        for (const managerPartyId of managerPartyIds)
+            (myLines[managerPartyId] || (myLines[managerPartyId] = [])).push(key.split("/")[0])
+    const managerIds = Object.keys(myLines)
+    if (managerIds.length)
+        for (const line of people.linesOf({managerPartyIds: managerIds}, null))
+            add(
+                line.partyId,
+                line.organizationPartyIds.filter(organizationPartyId =>
+                    myLines[line.managerPartyId].includes(organizationPartyId)
+                )
+            )
+    return out
+}
+// The approved leave of the people the caller sees, from start through end (days): their own, a manager's live reports at the
+// line's employers, an HR reader's employers' employees, and an employee's colleagues (colleaguesOf); each segment as "Out" with
+// its days (a morning or an afternoon said so), the person, never the leave type or the reason; openable: whether the caller reads
+// the request (the person, HR or the manager; never a colleague), which the calendar then links.
 function absences(userScope, startDay, endDay) {
     const caps = userScope.capabilities
     const factory = ec.entity.conditionFactory
     const reach = []
     if (caps.self && userScope.partyId) reach.push(factory.makeCondition("partyId", "equals", userScope.partyId))
-    for (const [partyId, organizationPartyIds] of Object.entries(userScope.reportLines || {}))
+    const lineReach = Object.entries(userScope.reportLines || {})
+    if (caps.self) lineReach.push(...Object.entries(colleaguesOf(userScope)))
+    for (const [partyId, organizationPartyIds] of lineReach)
         if (organizationPartyIds.length)
             reach.push(
                 factory.makeCondition(

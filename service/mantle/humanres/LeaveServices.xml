@@ -736,10 +736,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="TeamAbsences" allow-remote="false">
         <description>The team calendar's items from start through end (yyyy-MM-dd; a month from today when empty), as Commons'
             Calendar.qvue takes them: the approved leave (and leave whose cancellation waits) of the people the caller sees, their
-            own (PEOPLE_SELF_SERVICE), their live reports' at the line's employers (PEOPLE_TEAM_VIEW) and an HR reader's employers'
-            (PEOPLE_HR_VIEW), each segment as "{person} · Out" (a morning or an afternoon said so), kind absence, read only, with its
-            leaveRequestId and whether the caller opens the request (openable); never the leave type, the reason or a refused
-            request. Refuses a caller with none of the three permissions (PERMISSION_DENIED).</description>
+            own and their colleagues' (PEOPLE_SELF_SERVICE: the people who share a department, a team or a manager with them, at an
+            employer of both; the user's call of Nov 11, 2026), their live reports' at the line's employers (PEOPLE_TEAM_VIEW) and an
+            HR reader's employers' (PEOPLE_HR_VIEW), each segment as "{person} · Out" (a morning or an afternoon said so), kind
+            absence, read only, with its leaveRequestId and whether the caller opens the request (openable, never for a colleague);
+            never the leave type, the reason, a waiting or a refused request. Refuses a caller with none of the three permissions (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="start"/>
             <parameter name="end"/>

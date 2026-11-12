@@ -4,7 +4,9 @@
 // approval the balance cannot hold, with the other reservations, is refused and records nothing, while another is approved and
 // posts the leave taken once (a retry posts nothing); a cancellation asked by the person and approved reverses once, and HR's
 // cancellation at once too; a blocked day is refused and one an approver may override is a warning; the reason is read on the
-// request by the person, the approver and HR, and never in a list, a notice or the team calendar; another employer's HR is refused.
+// request by the person, the approver and HR, and never in a list, a notice or the team calendar; a colleague (a shared manager or
+// team) sees the day on the team calendar, never the type, the reason or a waiting request, and does not open the request; another
+// employer's HR is refused.
 // Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules are
 // the services' own checks). Days of March 2027 (Monday the 1st) in America/Chicago.
 // Run: ./moq test mr-mantle --spec LeaveRequests
@@ -94,10 +96,45 @@ spec({
             fromDate: since
         })
         state.hrParty = person("HR")
-        employ(state.hrParty, orgA)
+        state.hrEmp = employ(state.hrParty, orgA)
+        // Max manages HR too, who takes leave under the same policy
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtManager",
+            fromPartyId: state.max,
+            toPartyId: state.hrParty,
+            fromDate: since
+        })
         state.hrBParty = person("HRB")
         employ(state.hrBParty, orgB)
+        // Col shares Max with Ana; Tea shares a team with her; Out works for A with neither
+        state.col = person("COL")
+        employ(state.col, orgA)
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtManager",
+            fromPartyId: state.max,
+            toPartyId: state.col,
+            fromDate: since
+        })
+        state.tea = person("TEA")
+        employ(state.tea, orgA)
+        const team = prefix + "_TEAM"
+        call("create#mantle.party.Party", {partyId: team, partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.Organization", {partyId: team, organizationName: "People Leave Requests Spec team"})
+        call("create#mantle.party.PartyRole", {partyId: team, roleTypeId: "OrgTeam"})
+        for (const partyId of [state.ana, state.tea])
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtMember",
+                fromPartyId: partyId,
+                fromRoleTypeId: "Assignee",
+                toPartyId: team,
+                fromDate: since
+            })
+        state.out = person("OUT")
+        employ(state.out, orgA)
         state.uAna = user("ANA", ["PEOPLE_SELF_SERVICE"], state.ana)
+        state.uCol = user("COL", ["PEOPLE_SELF_SERVICE"], state.col)
+        state.uTea = user("TEA", ["PEOPLE_SELF_SERVICE"], state.tea)
+        state.uOut = user("OUT", ["PEOPLE_SELF_SERVICE"], state.out)
         state.uMgr = user("MAX", ["PEOPLE_SELF_SERVICE", "PEOPLE_TEAM_VIEW", "PEOPLE_REQUEST_APPROVE"], state.max)
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrBParty)
@@ -124,13 +161,13 @@ spec({
             policy.error,
             run(state.hr, L + "assign#Policy", {
                 leavePolicyId: state.policy,
-                partyRelationshipIds: [state.anaEmp],
+                partyRelationshipIds: [state.anaEmp, state.hrEmp],
                 fromDate: "2026-01-01",
                 reason: "Spec"
             }).error,
             run(state.hr, L + "allocate#Leave", {
                 leavePolicyId: state.policy,
-                partyRelationshipIds: [state.anaEmp],
+                partyRelationshipIds: [state.anaEmp, state.hrEmp],
                 amount: "3",
                 periodFromDate: "2026-01-01",
                 periodThruDate: "2026-12-31",
@@ -218,6 +255,11 @@ feature(
                 run(state.uMgr, L + "get#Request", {leaveRequestId: state.long}).approval?.decisions || []
             ).length
             out.selfApprove = code(decide(state.am, "approve", state.uAna))
+            // one who reads nothing of it is answered as for a missing request
+            out.outsiderDecide = [
+                code(decide(state.long, "approve", state.uOut)),
+                code(decide(prefix + "_NONE", "approve", state.uOut))
+            ].join()
             // refused (a reason needed), its reservation goes; then the morning fits and is approved
             out.refusedNoReason = code(decide(state.long, "refuse"))
             out.refused = decide(state.long, "refuse", state.uMgr, {reason: "Busy week"}).statusEnumId
@@ -256,6 +298,7 @@ feature(
             longStatus,
             longDecisions,
             selfApprove,
+            outsiderDecide,
             approved,
             retry,
             taken,
@@ -269,6 +312,7 @@ feature(
             longStatus == "LrsRequested" && longDecisions == 0
             // the person decides nothing (no PEOPLE_REQUEST_APPROVE; with it, record#Decision refuses their own request)
             selfApprove == "PERMISSION_DENIED"
+            outsiderDecide == "RECORD_UNAVAILABLE,RECORD_UNAVAILABLE"
             approved == "LrsApproved" && retry
             taken.length == 1 && total(taken) == -0.5
             // the projection: the person's time off, no type and no reason, and a reminder a day before
@@ -283,6 +327,12 @@ feature(
 feature("the reason is read on the request by the person, the approver and HR, never in a list, a notice or the team calendar", {
     when() {
         const out = {}
+        // the colleagues' team calendar: Ana's approved morning as a day, not her afternoon waiting; not the outsider's
+        const month = {start: "2027-03-01", end: "2027-03-31"}
+        out.colleague = run(state.uCol, L + "get#TeamAbsences", month).eventList || []
+        out.teammate = run(state.uTea, L + "get#TeamAbsences", month).eventList || []
+        out.outsider = run(state.uOut, L + "get#TeamAbsences", month).eventList || []
+        out.colleagueRequest = code(run(state.uCol, L + "get#Request", {leaveRequestId: state.am}))
         out.own = run(state.uAna, L + "get#Request", {leaveRequestId: state.am}).request?.reason
         out.approver = run(state.uMgr, L + "get#Request", {leaveRequestId: state.am}).request?.reason
         out.hr = run(state.hr, L + "get#Request", {leaveRequestId: state.am}).request?.reason
@@ -331,7 +381,29 @@ feature("the reason is read on the request by the person, the approver and HR, n
         ).map(row => String(row.messageJson || "") + String(row.titleText || ""))
         return out
     },
-    then({own, approver, hr, hrB, list, calendar, projection, collection, objects, put, notices}) {
+    then({
+        own,
+        approver,
+        hr,
+        hrB,
+        list,
+        calendar,
+        projection,
+        collection,
+        objects,
+        put,
+        notices,
+        colleague,
+        teammate,
+        outsider,
+        colleagueRequest
+    }) {
+        // a colleague by the manager and one by the team see the day, never the type or reason, and do not open the request
+        colleague.length == 1 && colleague[0].title == "Leave ANA · Out (morning)" && !colleague[0].openable
+        teammate.length == 1 && teammate[0].leaveRequestId == state.am && !teammate[0].openable
+        ![colleague, teammate].some(items => /Dentist|Annual/.test(JSON.stringify(items)))
+        outsider.length == 0
+        colleagueRequest == "RECORD_UNAVAILABLE"
         own == "Dentist, private" && approver == "Dentist, private" && hr == "Dentist, private"
         hrB == "RECORD_UNAVAILABLE"
         list.includes(state.am) && !list.includes("Dentist")
@@ -372,7 +444,14 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
         out.hrNoReason = code(decide(state.pm, "cancel", state.hr))
         out.hrCancel = decide(state.pm, "cancel", state.hr, {reason: "Shop closed"}).statusEnumId
         out.pmReversals = entries({sourceKey: "leave-reversal:" + state.pm})
+        // the person's notice names who cancelled it and why (not the approval before it)
+        out.pmNotice = run(state.uAna, L + "get#Request", {leaveRequestId: state.pm}).notice || {}
         out.balance = (run(state.uAna, L + "get#MyBalances").balances || [])[0] || {}
+        // an HR editor does not cancel their own approved leave at once
+        const own = submit({partyRelationshipId: state.hrEmp, fromDate: "2027-03-04"}, state.hr)
+        out.hrOwnMade = [own.error, decide(own.leaveRequestId, "approve").statusEnumId].join("|")
+        out.hrOwnCancel = code(decide(own.leaveRequestId, "cancel", state.hr, {reason: "Mine"}))
+        out.hrOwnCan = run(state.hr, L + "get#Request", {leaveRequestId: own.leaveRequestId}).canCancel
         // only the person (or who asked) withdraws, and only a request that waits
         out.withdrawOther = code(decide(state.long, "withdraw", state.uMgr))
         out.withdrawRefused = code(decide(state.long, "withdraw", state.uAna))
@@ -387,6 +466,10 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
         hrNoReason,
         hrCancel,
         pmReversals,
+        pmNotice,
+        hrOwnMade,
+        hrOwnCancel,
+        hrOwnCan,
         balance,
         withdrawOther,
         withdrawRefused
@@ -395,6 +478,8 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
         reversals.length == 1 && total(reversals) == 0.5
         effortStatus == "WeCancelled"
         hrNoReason == "REASON_REQUIRED" && hrCancel == "LrsCancelled" && pmReversals.length == 1
+        pmNotice.outcomeText == "Cancelled" && pmNotice.decidedByName == "Leave HR" && pmNotice.reason == "Shop closed"
+        hrOwnMade == "|LrsApproved" && hrOwnCancel == "NOT_YOURS" && hrOwnCan === false
         // 3 granted, 1 taken back, the half days taken and given back: 2, nothing pending
         balance.balance == 2 && balance.pending == 0 && balance.available == 2
         withdrawOther == "NOT_YOURS" && withdrawRefused == "NOT_PENDING"

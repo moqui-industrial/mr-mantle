@@ -240,6 +240,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="requestedDate" type="date-time"/>
         <field name="decidedDate" type="date-time"/>
         <field name="cancelledDate" type="date-time"/>
+        <field name="cancelledByUserId" type="id"><description>An HR editor who cancelled approved leave at once (none when the
+            person's cancellation was approved, which its approval records)</description></field>
+        <field name="cancelReason" type="text-medium"><description>Why HR cancelled it at once, told to the person on the
+            request's decision notice</description></field>
         <field name="consumptionEntryId" type="id"/>
         <field name="reversalEntryId" type="id"/>
         <field name="operationKey" type="text-medium"/>

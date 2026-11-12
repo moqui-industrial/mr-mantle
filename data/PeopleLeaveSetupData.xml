@@ -30,8 +30,8 @@ along with this software (see the LICENSE.md file). If not, see
             titleTemplate="Your leave ${datesText}: ${outcomeText}"/>
     <!-- impl-people P12 (CX-SYNC, PE-24; F22, F67): Team absence, the first projected CalDAV collection
         (mantle.work.CalendarDavServices: collectionId projected-PeopleTeamAbsence, read only), answered by
-        LeaveServices.get#AbsenceProjection: the approved leave of the people the user's People scope shows (their own, a manager's
-        reports, an HR reader's employers'), each as "Out" with its days, never its type or reason -->
+        LeaveServices.get#AbsenceProjection: the approved leave of the people the user's People scope shows (their own and their
+        colleagues', a manager's reports, an HR reader's employers'), each as "Out" with its days, never its type or reason -->
     <mantle.work.calendar.CalendarProjection projectionId="PeopleTeamAbsence" title="Team absence"
             description="Who is out: approved leave of you and the people you see in People" sequenceNum="10"
             ownerServiceName="mantle.humanres.LeaveServices.get#AbsenceProjection"/>
