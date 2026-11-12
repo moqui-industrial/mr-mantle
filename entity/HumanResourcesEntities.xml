@@ -193,58 +193,8 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
 
-    <!-- the review sketches stay off until their phase (impl-people P20; F6); the training sketch is refined below (P19):
-    <entity entity-name="PerformanceReview" package="mantle.humanres.ability" use="nontransactional">
-        <field name="performanceReviewId" type="id" is-pk="true"/>
-        <field name="employeePartyId" type="id"/>
-        <field name="managerPartyId" type="id"/>
-        <field name="paymentId" type="id"/>
-        <field name="emplPositionId" type="id"/>
-        <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="comments" type="text-medium"/>
-        <relationship type="one" title="Employee" related="mantle.party.Party">
-            <key-map field-name="employeePartyId"/></relationship>
-        <relationship type="one" title="Manager" related="mantle.party.Party">
-            <key-map field-name="managerPartyId"/></relationship>
-        <relationship type="one" related="mantle.account.payment.Payment"/>
-        <relationship type="one" related="mantle.humanres.position.EmplPosition"/>
-    </entity>
-    <entity entity-name="PerformanceReviewItem" package="mantle.humanres.ability" use="nontransactional">
-        <field name="performanceReviewId" type="id" is-pk="true"/>
-        <field name="performanceReviewItemSeqId" type="id" is-pk="true"/>
-        <field name="reviewItemTypeEnumId" type="id"/>
-        <field name="reviewRatingEnumId" type="id"/>
-        <field name="comments" type="text-medium"/>
-        <relationship type="one" related="PerformanceReview"/>
-        <relationship type="one" title="PerformanceReviewItemType" related="moqui.basic.Enumeration">
-            <key-map field-name="reviewItemTypeEnumId"/></relationship>
-        <relationship type="one" title="PerformanceReviewRating" related="moqui.basic.Enumeration">
-            <key-map field-name="reviewRatingEnumId"/></relationship>
-        <seed-data>
-            <moqui.basic.EnumerationType description="Performance Review Item Type" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritTechnical" description="Technical skills" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritResponsibility" description="Responsibility" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritAttitude" description="Attitude" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritComm" description="Communication skills" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritJobSat" description="Job Satisfaction" enumTypeId="PerformanceReviewItemType"/>
-
-            <moqui.basic.EnumerationType description="Performance Review Rating" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFail" sequenceNum="1" description="Fails to Meet Expectations" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtInconsistent" sequenceNum="2" description="Inconsistently Fulfills" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFulfill" sequenceNum="3" description="Fulfilled Expectations" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFreqExceed" sequenceNum="4" description="Frequently Exceeds" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtConsExceed" sequenceNum="5" description="Consistently Exceeds" enumTypeId="PerformanceReviewRating"/>
-        </seed-data>
-    </entity>
-    <entity entity-name="PerformanceNote" package="mantle.humanres.ability" use="nontransactional">
-        <field name="employeePartyId" type="id" is-pk="true"/>
-        <field name="noteDate" type="date-time" is-pk="true"/>
-        <field name="noteText" type="text-very-long"/>
-        <relationship type="one" title="Employee" related="mantle.party.Party">
-            <key-map field-name="employeePartyId"/></relationship>
-    </entity>
-    -->
+    <!-- the review sketches (PerformanceReview, PerformanceReviewItem, PerformanceNote) are refined in PeopleReviewEntities.xml
+        (impl-people P20; F6); the training sketch is refined below (P19) -->
 
     <!-- training (IronStone People design §10 Training and TrainingDetail, §15 the completion certificate, PE-14, PE-15;
         impl-people P19; refined from the commented PersonTraining and TrainingClass sketches, F6): a course of an employer, its

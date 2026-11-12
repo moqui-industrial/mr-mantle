@@ -224,6 +224,8 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- WorkEffort -->
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId" from="lookupId"/></entity-find-one>
+            <!-- IronStone People P20: a performance goal is no lookup result for anyone (read in People alone) -->
+            <if condition="workEffort?.workEffortTypeEnumId == 'WetGoal'"><set field="workEffort" from="null"/></if>
             <if condition="workEffort != null"><set field="workEffortId" from="workEffort.workEffortId"/></if>
 
             <!-- AcctgTrans -->

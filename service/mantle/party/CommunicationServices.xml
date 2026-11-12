@@ -2109,6 +2109,12 @@ along with this software (see the LICENSE.md file). If not, see
             its files (PartyQualificationContent) are seen only by the person and an HR reader of an employer of theirs in People's
             scope (mantle.humanres.DevelopmentServices.check#QualificationAccess), for every caller, authorization disabled or not;
             a call with no user sees none.
+
+            A review (mantle.humanres.ability.PerformanceReview, IronStone People's review content host, P20) and its files
+            (PerformanceReviewContent) are seen only by its reviewer and a development reader of its employer, and by its person
+            once released (mantle.humanres.ReviewServices.check#ReviewAccess); a goal (a WorkEffort of the WetGoal type) only by
+            its person, their manager, the reviewer of its review and a development reader of its employer (Reviews.js
+            goalVisible); both for every caller, authorization disabled or not; a call with no user sees none.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2188,7 +2194,11 @@ along with this software (see the LICENSE.md file). If not, see
                 // People's qualification content host (IronStone People PE-01, impl-people P18): a certificate's or document's
                 // files, the person's and HR's
                 'mantle.humanres.ability.PartyQualification': content('mantle.humanres.ability.PartyQualificationContent',
-                        'partyQualificationId', 'contentTypeEnumId')}
+                        'partyQualificationId', 'contentTypeEnumId'),
+                // People's review content host (IronStone People PE-01, impl-people P20): a review's files, its reviewer's,
+                // development's and, once released, its person's
+                'mantle.humanres.ability.PerformanceReview': content('mantle.humanres.ability.PerformanceReviewContent',
+                        'performanceReviewId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2642,6 +2652,16 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.humanres.ability.PartyQualification' || entityName === 'mantle.humanres.ability.PartyQualificationContent')
                     return !!ec.service.sync().name('mantle.humanres.DevelopmentServices.check#QualificationAccess')
                             .parameter('partyQualificationId', value.partyQualificationId).disableAuthz().call()?.recordVisible
+                // P20: a review and its files, its reviewer's and a development reader's of its employer, and its person's once
+                // released (mantle.humanres.ReviewServices.check#ReviewAccess), whatever the entity filters and authorization
+                if (entityName === 'mantle.humanres.ability.PerformanceReview' || entityName === 'mantle.humanres.ability.PerformanceReviewContent')
+                    return !!ec.service.sync().name('mantle.humanres.ReviewServices.check#ReviewAccess')
+                            .parameter('performanceReviewId', value.performanceReviewId).disableAuthz().call()?.recordVisible
+                // P20: a goal (a WetGoal work effort: by its type, which no task takes, not its purpose, which a work item may
+                // name), its person's, their manager's, its review's reviewer's and a development reader's of its employer
+                // (Reviews.js goalVisible), whatever the entity filters and authorization
+                if (entityName === WORK_EFFORT && value.workEffortTypeEnumId === 'WetGoal')
+                    return ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').goalVisible(value.workEffortId)
                 if (financeEntity(entityName)) return false
                 // Catalog record mounts/drive links also enforce owner scope without an active-org filter. A catalog
                 // user's internal file/room callback retains this rule even when artifact authorization is disabled.
@@ -2959,7 +2979,9 @@ along with this software (see the LICENSE.md file). If not, see
             created when there is none. With notifyFollowers a new link notifies the record's followers of messages (of
             notes for a Comment). The record must be one the user sees (get#RecordLinkInfo); an internal caller
             (authorization disabled) that checked it before, as file#SentEmail for the records send#EmailDraft checked,
-            passes checkRecord false.
+            passes checkRecord false. Nothing is filed on an IronStone People review (PerformanceReview) before it is released
+            (REVIEW_NOT_RELEASED): its notes become its person's at release, so a note written before would reach them then; the
+            reviewer's private notes are their own record (ReviewServices store#ReviewNote).
         </description>
         <in-parameters>
             <parameter name="communicationEventId"/>
@@ -2997,6 +3019,13 @@ along with this software (see the LICENSE.md file). If not, see
                         checkRecord: checkRecord !== false || !ec.artifactExecution.authzDisabled()}).call()
             if (ec.message.hasError()) return
             recordEntityName = info.recordEntityName
+            // IronStone People P20 review: a review's notes and messages are its person's once it is released, so none is filed on it
+            // before (it would reach the person at release); the reviewer keeps private notes of their own (store#ReviewNote)
+            if (recordEntityName === 'mantle.humanres.ability.PerformanceReview' && !['PrvReleased', 'PrvAcknowledged'].includes(
+                    ec.entity.find(recordEntityName).condition('performanceReviewId', recordId).disableAuthz().one()?.statusEnumId)) {
+                ec.message.addError('REVIEW_NOT_RELEASED: Notes open on a review once it is released; keep your private notes on the review')
+                return
+            }
 
             const createRow = (entityName, fields) => {
                 ec.service.sync().name('create#' + entityName).parameters(fields).call()
