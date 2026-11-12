@@ -167,6 +167,20 @@ const kinds = {
         id: "productMaintenanceId"
     }
 }
+// A maintenance default's work template (impl-maintenance P6, an owner contract with Maintenance): a maintenance procedure the
+// process applicability check admits for the model (not retired, of the model or of any). Empty is no template.
+function maintenanceTemplate(data) {
+    const templateId = String(data.templateWorkEffortId || "").trim()
+    if (!templateId) return
+    const checked = ec.service
+        .sync()
+        .name("mantle.work.ProcessServices.check#ProcessApplicability")
+        .parameters({templateWorkEffortId: templateId, productId: data.productId})
+        .disableAuthz()
+        .call()
+    if (!checked?.applicable)
+        throw new Error("Work template " + templateId + " cannot be used: " + (checked?.message || "not a maintenance procedure"))
+}
 function storeRow(p) {
     const product = record(p.productId, "catalogEdit")
     if (["category", "feature"].includes(p.kind) && !p.operation) {
@@ -275,6 +289,7 @@ function storeRow(p) {
         if (product.assetTypeEnumId !== "AstTpEquipment") throw new Error("Equipment templates require an equipment product")
         if (p.kind === "maintenance" && toDecimal(data.intervalQuantity || 0).compare(0) <= 0)
             throw new Error("Maintenance interval must be positive")
+        if (p.kind === "maintenance") maintenanceTemplate(data)
         if (
             data.intervalProductMeterId &&
             one(P + "maintenance.ProductMeter", {productMeterId: data.intervalProductMeterId})?.productId !== p.productId
@@ -375,6 +390,7 @@ function prepareRow(p) {
         if (product.assetTypeEnumId !== "AstTpEquipment") throw new Error("Equipment templates require an equipment product")
         if (p.kind === "maintenance" && toDecimal(data.intervalQuantity || 0).compare(0) <= 0)
             throw new Error("Maintenance interval must be positive")
+        if (p.kind === "maintenance") maintenanceTemplate(data)
         if (
             data.intervalProductMeterId &&
             one(P + "maintenance.ProductMeter", {productMeterId: data.intervalProductMeterId})?.productId !== p.productId

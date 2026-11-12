@@ -1730,7 +1730,8 @@ along with this software (see the LICENSE.md file). If not, see
             Each row is planned: the person, the item (a task or project the user sees), the work type, billable, the time (hours
             rounded to the person's policy's smallest entry, a warning when that changed; rows with hours only stack from 9:00 on
             their person's day), and what it will do: create, skip (an entry of the person on the item starting at the same moment
-            is there already) or fail with its problems (no date, no person found, a work item not found or not visible, no hours,
+            is there already) or fail with its problems (no date, no person found, a work item not found or not visible (managed
+            maintenance work and a procedure among them, impl-maintenance F111), no hours,
             a work item required by the policy, a future day the policy refuses, a week the user may not change, or one submitted
             and locked). preview true plans only (previewList, the first maxRows); otherwise each row to create goes through
             store#TimeEntry in its own transaction: a row that fails is logged and named with its reason, the others are imported.
@@ -1854,6 +1855,8 @@ along with this software (see the LICENSE.md file). If not, see
                 cache.person[key] = ids.length === 1 ? {partyId: ids[0]} : {error: ids.length ? L('${name} matches several people', {name: text}) : L('No person ${name}', {name: text})}
                 return cache.person[key]
             }
+            const processes = ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+            const managedItem = (workEffortId) => !!processes.managedReason([workEffortId])
             const itemOf = (value) => {
                 const text = String(value || '').trim()
                 if (!text) return null
@@ -1870,6 +1873,9 @@ along with this software (see the LICENSE.md file). If not, see
                             && !vis.allProjects && !managed.has(root) && !restricted.has(item.workEffortId)
                     if (!root || !seen || hidden) result = {error: L('Work item ${key} is not available', {key: text})}
                     else if (rootItem?.isTemplate === 'Y') result = {error: L('${key} is in a template', {key: text})}
+                    // impl-maintenance P6 (F111): managed work (a work order's tree, a procedure's) takes time only through its own
+                    // entry points (MaintenanceServices' time, which check the assignment); an every-project reader's import too
+                    else if (managedItem(item.workEffortId)) result = {error: L('Work item ${key} is not available', {key: text})}
                     else result = {workEffortId: item.workEffortId, name: item.workEffortName || item.workEffortId, rootWorkEffortId: root,
                         projectName: rootItem?.workEffortName || root, closed: ['WeComplete', 'WeClosed', 'WeCancelled'].includes(item.statusId)}
                 }

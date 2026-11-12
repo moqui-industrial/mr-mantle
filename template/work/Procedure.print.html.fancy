@@ -1,0 +1,61 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A maintenance procedure as approved, printed to PDF and stored as its content by mantle.work.ProcessServices.approve#WorkProcess
+     (MaintenanceProcedures.js storeDocument; design-maintenance §12 "Published procedure"): workEffortId, workEffortName,
+     description, organizationName, effectiveText, approvedText, approvedBy, applicabilityText, rootInstruction and steps (name,
+     indentMm, description, required, response, instruction, requirements). No cost. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Procedure')} ${workEffortId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 6mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 35mm; font-weight: bold; }
+.steps { margin-top: 6mm; }
+.steps th { border-bottom: 1px solid #20252b; }
+.steps td { border-bottom: 1px solid #ddd; }
+.muted { color: #5b636b; }
+.instruction { white-space: pre-wrap; }
+</style></head>
+<body>
+<h1>${workEffortName}</h1>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Procedure')}</th><td>${workEffortId}</td></tr>
+    <tr><th>${ec.l10n.localize('Organization')}</th><td>${organizationName}</td></tr>
+    <tr><th>${ec.l10n.localize('Applies to')}</th><td>${applicabilityText}</td></tr>
+    <tr><th>${ec.l10n.localize('Effective')}</th><td>${effectiveText}</td></tr>
+    <tr><th>${ec.l10n.localize('Approved')}</th><td>${approvedText} ${ec.l10n.localize('by')} ${approvedBy}</td></tr>
+    <#if description><tr><th>${ec.l10n.localize('Description')}</th><td>${description}</td></tr></#if>
+    <#if rootInstruction><tr><th>${ec.l10n.localize('Instructions')}</th><td class="instruction">${rootInstruction}</td></tr></#if>
+</tbody></table>
+<table class="steps">
+    <thead><tr>
+        <th>${ec.l10n.localize('Step')}</th>
+        <th>${ec.l10n.localize('Response')}</th>
+        <th>${ec.l10n.localize('Instruction and requirements')}</th>
+    </tr></thead>
+    <tbody>
+    <#list steps as step>
+        <tr>
+            <td style="padding-left: ${step.indentMm}mm">${step.name}<#if step.description><br><span class="muted">${step.description}</span></#if></td>
+            <td>${step.required}<#if step.response><br>${step.response}</#if></td>
+            <td><#if step.instruction><span class="instruction">${step.instruction}</span></#if><#if step.requirements><br><span class="muted">${step.requirements}</span></#if></td>
+        </tr>
+    </#list>
+    </tbody>
+</table>
+</body></html>
