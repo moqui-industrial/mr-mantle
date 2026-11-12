@@ -1,0 +1,318 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's working schedules and holiday calendars (IronStone People design §6 WorkingSchedules and WorkingScheduleDetail, §7
+    HolidayCalendars, §16.2, PE-06; impl-people P9; Schedules.js, and Employment.js for assign#Schedule): an employer's dated
+    working week in a time zone with its weekly intervals, an employment following one from a date through its assignment, and
+    the holiday calendars (WorkEffortCategory WcatHoliday, an employer's or shared) whose WepHoliday events take a schedule's
+    days. mantle.work.ResourceServices.get#PartyCapacity reads a person's schedule before their own working hours and the
+    timesheet policy, so Projects' capacity and timesheets' expected hours follow it (F23). Each service checks the caller's People
+    scope (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application
+    group. Reads need a staff read of the employer (a manager reads the schedules their reports follow); changes PEOPLE_HR_VIEW
+    and PEOPLE_HR_EDIT, a shared calendar PEOPLE_ALL_ORGANIZATIONS too. Rows are ended, never deleted. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Schedules" allow-remote="false">
+        <description>The working schedules the caller reads (a staff reader the schedules of their employers, a manager those their
+            live reports follow now or later), by name or id (term, ignoring case), of an employer (organizationPartyId;
+            ORGANIZATION_DENIED outside the scope), those in effect on asOfDate (now when empty) unless includeEnded. Each with its
+            employer, zone, holiday calendar, weekly hours (the lines in effect, by the clock), dates and state, how many employments
+            follow it now or later (for an HR reader), whether the caller may change it and its revision. Paged. Refuses a caller
+            who reads no employer or team (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schedules" type="List"><description>workingScheduleId, scheduleName, organizationPartyId,
+                organizationName, timeZone, holidayCategoryId, holidayCalendarName, description, weeklyHours, fromDateText,
+                thruDateText, state, stateText, assignedCount, canEdit, revision</description></parameter>
+            <parameter name="schedulesCount" type="Integer"/>
+            <parameter name="schedulesPageIndex" type="Integer"/>
+            <parameter name="schedulesPageSize" type="Integer"/>
+            <parameter name="schedulesPageMaxIndex" type="Integer"/>
+            <parameter name="schedulesPageRangeLow" type="Integer"/>
+            <parameter name="schedulesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('findSchedules', context)"/>
+            <set field="schedules" from="found.schedules"/>
+            <set field="schedulesCount" from="found.schedulesCount || 0"/>
+            <set field="schedulesPageIndex" from="found.schedulesPageIndex || 0"/>
+            <set field="schedulesPageSize" from="found.schedulesPageSize || 20"/>
+            <set field="schedulesPageMaxIndex" from="found.schedulesPageMaxIndex || 0"/>
+            <set field="schedulesPageRangeLow" from="found.schedulesPageRangeLow || 0"/>
+            <set field="schedulesPageRangeHigh" from="found.schedulesPageRangeHigh || 0"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Schedule" allow-remote="false">
+        <description>One working schedule the caller reads: its row as find#Schedules gives it with whether anyone has followed it
+            (assignedEver: its zone no longer changes) and whether the caller assigns it; its lines (every dated line, those in effect
+            on asOfDate first: now, or the schedule's start when it starts later), each with its day, local start and end (nextDay
+            when it ends the next day), break, hours, dates and state; and who follows it now or later (assignmentsShown: an HR
+            reader of its employer sees every one, a manager their reports), each with the person, the employment, the dates, the
+            holiday calendar in place of the schedule's and the employment's revision. Refuses one outside the scope as missing
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workingScheduleId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="schedule" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="assignments" type="List"/>
+            <parameter name="assignmentsShown" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('getSchedule', context)"/>
+            <set field="schedule" from="found.schedule"/>
+            <set field="lines" from="found.lines"/>
+            <set field="assignments" from="found.assignments"/>
+            <set field="assignmentsShown" from="found.assignmentsShown"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Schedule" allow-remote="false">
+        <description>A new working schedule of an employer (organizationPartyId, an HR editor's) from fromDate (today when empty):
+            its name, time zone (an IANA name), holiday calendar (the employer's or a shared one) and description; with
+            copyFromScheduleId (a schedule the caller reads), a copy: a new schedule with that one's zone, calendar and the lines it
+            has in effect on the new one's start unless given. Or a change of one at its revision (expectedRevision): its name,
+            description and holiday calendar (holidayCategoryId_changeReason is changeReason), its zone while no one has followed it,
+            and with end, its end from thruDate (today or later). Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED).
+            Refuses: ORGANIZATION_REQUIRED, ORGANIZATION_DENIED, NAME_REQUIRED, ZONE_INVALID, CALENDAR_UNAVAILABLE, a schedule
+            outside the scope (RECORD_UNAVAILABLE), REVISION_CHANGED, another employer (OWNER_CHANGE), a zone change once followed
+            (ZONE_IN_USE), an end before today (DATE_PAST) or while an employment follows it after the end
+            (SCHEDULE_ASSIGNED).</description>
+        <in-parameters>
+            <parameter name="workingScheduleId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="scheduleName"/>
+            <parameter name="timeZone"/>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="copyFromScheduleId"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workingScheduleId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('storeSchedule', context)"/>
+            <set field="workingScheduleId" from="found.workingScheduleId"/>
+            <set field="revision" from="found.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="ScheduleLine" allow-remote="false">
+        <description>A weekly interval of a schedule at its revision (expectedRevision): added from fromDate (empty: today, or the
+            schedule's start when later), changed from fromDate (before the line's start in place; after it the line ends then and
+            another starts with the new values, so a past week keeps its hours) or, with end, ended from fromDate (on or before its
+            start, it never took effect). isoDay is 1 Monday to 7 Sunday; startTime and endTime are HH:mm local times in the
+            schedule's zone, an end at or before the start ending the next day; breakMinutes is the unpaid break. Needs
+            PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the schedule's employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope).
+            Refuses: REVISION_CHANGED, DAY_INVALID, TIME_INVALID, BREAK_INVALID (not shorter than the interval), OVERLAP (another
+            line in effect then overlaps it, across midnight and the week's end too), DATE_OUTSIDE (the schedule has ended),
+            DATE_PAST (a date before today on a schedule anyone has followed: the weeks planned by it stay as they were),
+            LINE_ENDED.</description>
+        <in-parameters>
+            <parameter name="workingScheduleId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="workingScheduleLineId"/>
+            <parameter name="isoDay"/>
+            <parameter name="startTime"/>
+            <parameter name="endTime"/>
+            <parameter name="breakMinutes"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workingScheduleLineId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('storeScheduleLine', context)"/>
+            <set field="workingScheduleLineId" from="found.workingScheduleLineId"/>
+            <set field="revision" from="found.revision"/>
+        </actions>
+    </service>
+
+    <service verb="assign" noun="Schedule" allow-remote="false">
+        <description>An employment follows a working schedule from fromDate (the start of today when empty, or of the employment or
+            its assignment when either began later today), with holidayCategoryId in place of the schedule's holiday calendar when
+            given; an empty workingScheduleId ends the following of one. Applied at
+            once by an HR editor of the employer, a change of its own (EmploymentChange of kind EckSchedule, with its reason and
+            operation key, a retry answering the first): the assignment in effect ends on the date and the next starts with the
+            other terms as they were (an employment written before People's assignments gets its first; from the day the
+            assignment in effect starts, a hire's first day, that assignment's schedule changes in place), so a later transfer
+            carries the schedule; a transfer or separation of the employment waiting for approval stays waiting with its approval
+            (the approvers notified again) and takes the schedule in effect on its date; withdrawn by withdraw#EmploymentChange
+            while its date is to come. expectedRevision, when given, is the employment's. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses: an employment outside the scope
+            (RECORD_UNAVAILABLE), REVISION_CHANGED, DATE_OUTSIDE, ASSIGNMENT_SCHEDULED (a later change is set; choose a later date),
+            CHANGE_WAITING (a transfer or separation from that date or earlier waits for approval),
+            a schedule of another employer (SCHEDULE_OUTSIDE) or not in effect on the date (SCHEDULE_NOT_IN_EFFECT),
+            CALENDAR_UNAVAILABLE, SCHEDULE_REQUIRED (a calendar with no schedule), NOTHING_CHANGES.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="workingScheduleId"/>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="employmentAssignmentId"/>
+            <parameter name="statusId"/>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employment.js"/>
+            <set field="found" from="ec.resource.script(module).execute('assignSchedule', context)"/>
+            <set field="employmentChangeId" from="found.employmentChangeId"/>
+            <set field="employmentAssignmentId" from="found.employmentAssignmentId"/>
+            <set field="statusId" from="found.statusId"/>
+            <set field="applied" from="!!found.applied"/>
+            <set field="repeated" from="!!found.repeated"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Holidays" allow-remote="false">
+        <description>The holiday calendars a staff reader reads (shared ones, and their employers' own; organizationPartyId narrows
+            to that employer's and the shared ones, ORGANIZATION_DENIED outside the scope), each with its employer (or Shared), the
+            number of its holidays from fromDate through thruDate (this year when empty), whether the caller may change it and its
+            revision; and the holidays of those days of holidayCategoryId (RECORD_UNAVAILABLE when not read) or of every calendar
+            listed, by day, each with its name, calendar, whether it has passed, whether the caller may change it and its
+            revision. Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="calendars" type="List"/>
+            <parameter name="holidays" type="List"/>
+            <parameter name="fromDay"/>
+            <parameter name="thruDay"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('getHolidays', context)"/>
+            <set field="calendars" from="found.calendars"/>
+            <set field="holidays" from="found.holidays"/>
+            <set field="fromDay" from="found.fromDay"/>
+            <set field="thruDay" from="found.thruDay"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="HolidayCalendar" allow-remote="false">
+        <description>A new holiday calendar (a WorkEffortCategory of type WcatHoliday) of an employer (organizationPartyId) or, with
+            none, shared by every employer, or a calendar's new name at its revision (expectedRevision). No employer follows a
+            calendar until a schedule (or an assignment) names it. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer
+            (PERMISSION_DENIED, ORGANIZATION_DENIED); a shared calendar PEOPLE_ALL_ORGANIZATIONS too. Refuses NAME_REQUIRED, a
+            calendar the caller does not change (RECORD_UNAVAILABLE), REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="calendarName"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="holidayCategoryId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('storeHolidayCalendar', context)"/>
+            <set field="holidayCategoryId" from="found.holidayCategoryId"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Holiday" allow-remote="false">
+        <description>A holiday added to a calendar the caller changes (holidayCategoryId): an all-day WepHoliday WorkEffort named
+            workEffortName on holidayDate, in the calendar, with no owner (so only the schedules that name the calendar take the
+            day, not every employee of an organization); or a holiday's new name or day at its revision (expectedRevision); or with
+            remove, a holiday removed. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the calendar's employer (a shared calendar
+            PEOPLE_ALL_ORGANIZATIONS too). Refuses: a calendar or holiday the caller does not change (RECORD_UNAVAILABLE),
+            NAME_REQUIRED, DATE_REQUIRED, DAY_TAKEN (the calendar has a holiday that day), REVISION_CHANGED, HOLIDAY_PAST (a holiday
+            whose day has passed stays as it was, and none is added on or moves to a past day).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="holidayCategoryId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="holidayDate" type="Timestamp"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('storeHoliday', context)"/>
+            <set field="workEffortId" from="found.workEffortId"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="CapacityPreview" allow-remote="false">
+        <description>A person's capacity from fromDate through thruDate (today and the next 13 days when empty; at most 62 days) as
+            Projects and timesheets read it (mantle.work.ResourceServices.get#PartyCapacity): where the hours come from (source:
+            schedule, available or policy, and sourceText), each day's planned hours, holiday, leave, capacity and the schedule that
+            planned it, and the weeks. For an HR reader of an employer of the person or their manager; anyone else is refused alike
+            (RECORD_UNAVAILABLE). Refuses DATES_INVALID.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="source"/>
+            <parameter name="sourceText"/>
+            <parameter name="base" type="BigDecimal"/>
+            <parameter name="capacity" type="BigDecimal"/>
+            <parameter name="days" type="List"><description>day, weekdayText, base, holiday, leave, capacity, scheduleName</description></parameter>
+            <parameter name="weeks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Schedules.js"/>
+            <set field="found" from="ec.resource.script(module).execute('capacityPreview', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="personName" from="found.personName"/>
+            <set field="source" from="found.source"/>
+            <set field="sourceText" from="found.sourceText"/>
+            <set field="base" from="found.base"/>
+            <set field="capacity" from="found.capacity"/>
+            <set field="days" from="found.days"/>
+            <set field="weeks" from="found.weeks"/>
+        </actions>
+    </service>
+</services>

@@ -19,9 +19,12 @@ along with this software (see the LICENSE.md file). If not, see
     calendar settings write, expanded by mantle.work.EventServices.get#FullCalendarData), or with none the timesheet policy's
     hours of a working day on its working days (TimesheetServices.get#TimesheetPolicy dh and wd); a holiday of the policy's
     organization (a WorkEffort of purpose WepHoliday owned by it, on its allDayStart) takes the whole day, leave (WetTimeOff
-    events the person is on, an all-day one the whole day) its hours. People's working-schedule record, when it exists,
-    replaces the WetAvailable source in get#PartyCapacity and nothing else changes. Days are the session's time zone's; weeks
-    start on weekStart (ISO, 1 Monday).
+    events the person is on, an all-day one the whole day) its hours. People's working schedule, when the person follows one
+    (impl-people P9, F23: their employment assignment's workingScheduleId, mantle.humanres.Schedules.js scheduledDays), replaces
+    the WetAvailable and policy source for the days it plans, and nothing else changes: its intervals are the day's hours by
+    their actual instants (a shift across midnight or a daylight saving change has its true length, on the day it starts in the
+    schedule's zone), and a holiday of its calendar (the assignment's, else the schedule's) takes the day beside the policy
+    organization's. Other days are the session's time zone's; weeks start on weekStart (ISO, 1 Monday).
 
     Allocations (WorkEffortAllocation): hours a week, or a percent of the person's capacity, of a person or of a placeholder (a
     project role and skill with no person yet) on a project, from one day to another. An allocation's hours fall on the
@@ -40,12 +43,14 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="PartyCapacity">
         <description>The capacity of people from fromDate to thruDate (days, inclusive; at most 400 days), each {partyId, source
-            (available: their WetAvailable working hours; policy: the timesheet policy's), organizationPartyId, dayList [{day, isoDay,
-            weekStart, base (the working hours before holidays and leave), holiday (its name or null), leave (hours), capacity}],
-            weekList [{weekStart, base, holidayHours, leaveHours, capacity, workDays}], base, capacity}. With no partyId and no
-            partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
+            (schedule: a People working schedule plans some day, impl-people P9; available: their WetAvailable working hours; policy:
+            the timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
+            and leave), holiday (its name or null), leave (hours), capacity, workingScheduleId (the schedule that planned the day, or
+            null)}], weekList [{weekStart, base, holidayHours, leaveHours, capacity, workDays}], base, capacity}. With no partyId and
+            no partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
             placeholder is planned. policy with organizationPartyId (as get#WeekDays passes them) apply to every party with no
-            working hours of their own. A person whose working hours or leave do not read is logged and planned by the policy.</description>
+            working hours of their own on the days no schedule plans. A person whose schedule, working hours or leave do not read is
+            logged and planned by the policy.</description>
         <in-parameters>
             <parameter name="partyId"/>
             <parameter name="partyIdList" type="List"/>
@@ -133,6 +138,9 @@ capacityList = []
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                 return Array.from(out?.eventList || [])
             }
+            // People's working schedules (impl-people P9): the days each person's schedule plans, read once for every party
+            const schedules = ec.resource.script('component://mr-mantle/service/mantle/humanres/Schedules.js')
+            let plannedByParty = {}
             const entryOf = (person) => {
                 const {policy: thePolicy, organizationPartyId: orgId} = policyOf(person)
                 const workDays = Array.from(thePolicy.workDays || [1, 2, 3, 4, 5]).map(Number)
@@ -140,7 +148,9 @@ capacityList = []
                 let base = days.map((day) => workDays.includes(isoDayOf(day)) ? dayHours : 0)
                 let source = 'policy'
                 const leave = days.map(() => 0)
-                if (person) {
+                const planned = (person && plannedByParty[person]) || null
+                const unplanned = !planned || days.some((day) => !planned[day])
+                if (person && unplanned) {
                     ec.message.pushErrors()
                     try {
                         const cf = ec.entity.conditionFactory
@@ -160,6 +170,12 @@ capacityList = []
                     } catch (err) {
                         ec.logger.error(`Capacity of ${person}: the working hours were not read, the policy's apply: ${err && err.message ? err.message : err}`)
                     } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                }
+                if (planned) {
+                    base = days.map((day, i) => planned[day] ? planned[day].hours : base[i])
+                    source = 'schedule'
+                }
+                if (person) {
                     ec.message.pushErrors()
                     try {
                         for (const event of calendar(person, 'WetTimeOff')) {
@@ -180,11 +196,19 @@ capacityList = []
                     } finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
                 const holidays = holidaysOf(orgId)
+                // a planned day's holiday of its schedule's calendar (the assignment's, else the schedule's), beside the organization's
+                let calendarHolidays = {}
+                if (planned) {
+                    try {
+                        calendarHolidays = schedules.holidaysOf(Array.from(new Set(Object.values(planned).flatMap((entry) => entry.holidayCategoryIds))), days)
+                    } catch (err) { ec.logger.error(`Capacity of ${person}: the holidays of the schedule's calendar were not read, none marked: ${err}`) }
+                }
                 const dayList = days.map((day, i) => {
-                    const holiday = holidays[day] || null
+                    const plannedDay = planned ? planned[day] : null
+                    const holiday = holidays[day] || (plannedDay ? plannedDay.holidayCategoryIds.map((id) => calendarHolidays[id]?.[day]).find((name) => name) : null) || null
                     const off = holiday ? base[i] : Math.min(base[i], round(leave[i]))
                     return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: holiday ? 0 : off,
-                        capacity: round(Math.max(0, base[i] - off))}
+                        capacity: round(Math.max(0, base[i] - off)), workingScheduleId: plannedDay ? plannedDay.workingScheduleId : null}
                 })
                 const weeks = new Map()
                 for (const entry of dayList) {
@@ -204,6 +228,9 @@ capacityList = []
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
                 if (!parties.length) { capacityList.push(entryOf(null)); return }
+                try { plannedByParty = schedules.scheduledDays(parties, days) } catch (err) {
+                    ec.logger.error(`Capacity: the working schedules were not read, each person's own hours or the policy's apply: ${err && err.message ? err.message : err}`)
+                }
                 for (const person of parties) {
                     try { capacityList.push(entryOf(person)) } catch (err) {
                         ec.logger.error(`Capacity of ${person} not computed: ${err && err.message ? err.message : err}`)

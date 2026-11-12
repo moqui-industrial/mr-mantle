@@ -614,6 +614,29 @@ function supersede(approval) {
     })
     clearNotices(approval)
 }
+// Work on the sources' subject that leaves what was asked as it was (P9: a working schedule assigned to an employment whose
+// transfer or separation waits): the requests waiting at the sources' revision before the work are bound to the revision after it,
+// so the work neither supersedes them nor leaves them stale, and their step is sent again (the earlier notices, which name the
+// earlier revision, read). A request already stale before the work stays so. Answers what the work answers.
+function keepWaiting(approvalKindEnumId, sourceIds, work) {
+    const kind = kindOf(approvalKindEnumId)
+    const kept = []
+    for (const sourceId of unique(sourceIds || [])) {
+        const revision = revisionOf(kind, sourceId)
+        for (const approval of rows(APPROVAL, {sourceEntityName: kind.sourceEntityName, sourceId, statusId: "PapPending"}))
+            if (approval.sourceRevision === revision) kept.push(approval)
+    }
+    const result = work()
+    for (const approval of kept) {
+        call("update#" + APPROVAL, {
+            peopleApprovalId: approval.peopleApprovalId,
+            sourceRevision: revisionOf(kind, approval.sourceId)
+        })
+        clearNotices(approval)
+        notify(one(APPROVAL, {peopleApprovalId: approval.peopleApprovalId}))
+    }
+    return result
+}
 // A source changed (new terms): its requests waiting at an earlier revision are superseded and their notices read; the change
 // is asked for again.
 function sourceChanged(approvalKindEnumId, sourceId) {
@@ -1386,6 +1409,8 @@ function run(op, p) {
     request,
     sourceChanged,
     sourceSummary,
+    // P9: a change beside a waiting request that leaves what was asked as it was (a working schedule assigned)
+    keepWaiting,
     // for P6's separation and manager change (People's employment changes): an employer's waiting requests routed again
     reroute,
     // P8: the decisions waiting on the caller (find#DueWork, the Today source, MyTeam) and their own open requests (get#SelfService)
