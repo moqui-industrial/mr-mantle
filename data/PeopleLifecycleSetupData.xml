@@ -60,9 +60,9 @@ along with this software (see the LICENSE.md file). If not, see
         parent, in relationshipName), with the contact's own phone. It is private contact data (People design §1.1): read and
         changed only through mantle.humanres.PeopleServices (the person and HR of their employer), never in a directory, a contact
         book, the palette, a contact list or search. Every such reader hides a personal contact (Party.privateOwnerUserId) from
-        everyone but its owner, so the contact party is held by this account, which no one signs in as and which belongs to no group:
-        no user is its owner, and no reader shows it. -->
+        everyone but its owner, so the contact party is held by the account _PEOPLE_PRIVATE_ (disabled, no password, no group: no one
+        signs in as it, no user is its owner, and no reader shows it). The account is made with the first contact
+        (Employees.js privateHolderId), not seeded here: a fresh install offers its first administrator only while no account but the
+        framework's own exists (org.moqui.impl.UserServices.create#InitialAdminAccount, the Login screen). -->
     <moqui.basic.Enumeration enumId="PrtEmergencyContact" description="Emergency Contact" enumTypeId="PartyRelationshipType"/>
-    <moqui.security.UserAccount userId="_PEOPLE_PRIVATE_" username="_people_private_" userFullName="People private contacts"
-            disabled="Y"/>
 </entity-facade-xml>

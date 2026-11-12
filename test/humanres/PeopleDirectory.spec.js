@@ -429,7 +429,26 @@ feature(
             const store = (user, parameters) =>
                 run(user, S + "store#EmergencyContact", Object.assign({partyId: state.REPORT}, parameters))
             const contactsAs = user => run(user, S + "get#Employee360", {partyId: state.REPORT}).personalInfo?.emergencyContacts
+            // a PrtEmergencyContact row another writer made (Commons' relationships take any type) to a directory person is no
+            // emergency contact: not listed, and the person may not change that party through it
+            const foreignPartyId = person("EMERGENCY_FOREIGN")
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtEmergencyContact",
+                fromPartyId: state.REPORT,
+                toPartyId: foreignPartyId,
+                fromDate: since
+            })
+            const foreign = store(state.self, {
+                contactPartyId: foreignPartyId,
+                firstName: "Taken",
+                lastName: "Over",
+                phone: "555 0111"
+            })
+            const foreignName = ec.entity.find("mantle.party.Person").condition("partyId", foreignPartyId).one().lastName
             const added = store(state.self, {firstName: "Sam", lastName: "Rivera", relationshipName: "Spouse", phone: "555 0101"})
+            // the account that holds the contact parties, made with the first contact: disabled, no password, no group
+            const holder = ec.entity.find("moqui.security.UserAccount").condition("userId", "_PEOPLE_PRIVATE_").one()
+            const holderGroups = ec.entity.find("moqui.security.UserGroupMember").condition("userId", "_PEOPLE_PRIVATE_").count()
             const noPhone = store(state.self, {firstName: "Ann", lastName: "Other"})
             const first = (contactsAs(state.hr) || [])[0] || {}
             // HR of A changes the phone at the revision read; the same revision again is stale
@@ -472,6 +491,10 @@ feature(
                 .list()
             const shown = afterChange.map(row => [row.name, row.relationshipName, row.phone].join(" | "))
             return {
+                foreign,
+                foreignName,
+                holder,
+                holderGroups,
                 added,
                 noPhone,
                 changed,
@@ -488,8 +511,31 @@ feature(
                 kept
             }
         },
-        then({added, noPhone, changed, stale, reader, readerSees, shown, searched, linked, party, ended, afterEnd, kept}) {
+        then({
+            foreign,
+            foreignName,
+            holder,
+            holderGroups,
+            added,
+            noPhone,
+            changed,
+            stale,
+            reader,
+            readerSees,
+            shown,
+            searched,
+            linked,
+            party,
+            ended,
+            afterEnd,
+            kept
+        }) {
+            code(foreign) == "RECORD_UNAVAILABLE"
+            foreignName == "EMERGENCY_FOREIGN"
             added.error == ""
+            holder.disabled == "Y"
+            holder.currentPassword == null
+            holderGroups == 0
             code(noPhone) == "PHONE_REQUIRED"
             changed.error == ""
             code(stale) == "REVISION_CHANGED"

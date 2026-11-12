@@ -661,8 +661,11 @@ const contactPurposes = {phone: "PhonePrimary"}
 // the most current emergency contacts a person keeps
 const emergencyContactCap = 5
 const text = value => String(value ?? "").trim()
+// The person's current emergency contact links. Only a contact party this service made is one (held by privateHolder and owned
+// by the person): a PrtEmergencyContact row another writer made (Commons' relationships take any type) to a directory party or
+// someone's personal contact names no party this service shows or changes.
 function emergencyLinks(partyId) {
-    return Array.from(
+    const links = Array.from(
         people
             .current(
                 find("mantle.party.PartyRelationship").condition({relationshipTypeEnumId: EMERGENCY, fromPartyId: partyId}),
@@ -671,6 +674,36 @@ function emergencyLinks(partyId) {
             .orderBy("fromDate")
             .list()
     )
+    if (!links.length) return []
+    const held = new Set(
+        Array.from(
+            find("mantle.party.Party", {privateOwnerUserId: privateHolder, ownerPartyId: partyId})
+                .condition("partyId", "in", people.unique(links.map(row => row.toPartyId)))
+                .selectField("partyId")
+                .list()
+        ).map(row => row.partyId)
+    )
+    return links.filter(row => held.has(row.toPartyId))
+}
+// The account that holds every emergency contact party (Party.privateOwnerUserId): disabled, with no password and no group, so
+// no one signs in as it. Made with the first contact, in its own transaction, rather than seeded: a fresh install offers its
+// first administrator only while no account but the framework's own exists (UserServices.create#InitialAdminAccount).
+function privateHolderId() {
+    if (one("moqui.security.UserAccount", {userId: privateHolder})) return privateHolder
+    try {
+        lib.probe("create#moqui.security.UserAccount", {
+            userId: privateHolder,
+            username: "_people_private_",
+            userFullName: "People private contacts",
+            disabled: "Y"
+        })
+    } catch (error) {
+        // made meanwhile by another first contact: read again below
+        ec.logger.warn("People private contacts account not made here: " + error.message)
+    }
+    if (!one("moqui.security.UserAccount", {userId: privateHolder}))
+        throw new Error("The account that holds emergency contacts could not be made")
+    return privateHolder
 }
 // The person's current emergency contacts: contactPartyId, the names, the relation, the phone, since when, and the revision a
 // change names.
@@ -733,7 +766,7 @@ function storeEmergencyContact(p) {
             denied("CONTACT_LIMIT", "A person keeps at most " + emergencyContactCap + " emergency contacts; end one first")
         partyId = call("create#mantle.party.Party", {
             partyTypeEnumId: "PtyPerson",
-            privateOwnerUserId: privateHolder,
+            privateOwnerUserId: privateHolderId(),
             ownerPartyId: p.partyId
         }).partyId
         call("create#mantle.party.Person", {partyId, firstName: firstName || null, lastName: lastName || null})
