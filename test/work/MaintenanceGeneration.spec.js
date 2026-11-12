@@ -5,7 +5,9 @@
 // failing plan in a batch named and the others generated, a retired procedure blocking its plan; a cancelled order counted as no
 // completion (the obligation open again and made again); missed due dates coalesced into one catch-up, not on time; a reopened
 // order making no second next order; a meter plan's work completed only with its reading, which becomes the baseline, and a stale
-// meter blocked until a reading; a skip and a correction with their reasons; a reader and another organization refused.
+// meter blocked until a reading; a skip and a correction with their reasons; a reader and another organization refused. Review:
+// the job's scope is the job's alone (a person who runs it generates as themselves); obligations stay under the term they fell in
+// when the interval changes (F186); a plan's work reminds its assignees of its due date.
 // Standalone: spec-local organizations, facilities, an equipment model with a counting meter, a procedure, groups and users; the
 // services called as each user with the artifact check aside (their own permission and scope checks decide).
 // Run: ./moq test mr-mantle --spec MaintenanceGeneration
@@ -184,8 +186,12 @@ spec({
         state.planner = user("PLANNER", ["MAINTENANCE_VIEW", "MAINTENANCE_PLAN"])
         state.otherPlanner = user("PLANNER2", ["MAINTENANCE_VIEW", "MAINTENANCE_PLAN"])
         state.reader = user("READER", ["MAINTENANCE_VIEW"])
-        state.supervisor = user("SUPER", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE", "MAINTENANCE_RESOURCE_EDIT"])
+        // the supervisor holds no resource edit: the reading a meter plan's Complete asks for is the completer's (review R2)
+        state.supervisor = user("SUPER", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE"])
         state.foreign = user("FOREIGN", ["MAINTENANCE_VIEW", "MAINTENANCE_PLAN"], orgB)
+        // review: another organization's maintenance administrator and planner, and a technician of A
+        state.foreignAdmin = user("FADMIN", ["MAINTENANCE_VIEW", "MAINTENANCE_PLAN", "MAINTENANCE_SETTINGS_EDIT"], orgB)
+        state.tech = user("TECH", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE"])
     },
     cleanupSpec() {
         ec.message.clearErrors()
@@ -239,6 +245,7 @@ feature(
                 firstDueLocal: localDay(-1) + " 09:00",
                 estimatedWorkTime: 1
             })
+            state.keyedPlan = keyed
             const operationKey = key()
             const first = generate(state.planner, {maintenanceScheduleId: keyed, operationKey})
             const retry = generate(state.planner, {maintenanceScheduleId: keyed, operationKey})
@@ -564,5 +571,90 @@ feature("a skip and a correction keep their reasons; a reader and another organi
         reader == "PERMISSION_DENIED"
         foreign.results[0].outcome == "failed" && foreign.results[0].code == "RECORD_UNAVAILABLE"
         foreignReconcile == "RECORD_UNAVAILABLE"
+    }
+})
+
+// P14 review R1: the job's scope (every organization) is the job's alone. A person who runs it (ec.service.job(...).run() as
+// themselves) generates as a planner of their own organizations: another organization's administrator, who holds
+// MAINTENANCE_SETTINGS_EDIT (the job's manage permission), reaches none of A's plans; a reader is refused.
+feature("a person who runs the generation job generates in their own scope, never the job's", {
+    when() {
+        const before = ec.entity.find(OCCURRENCE).disableAuthz().count()
+        const foreignAdmin = as(state.foreignAdmin, S + "run#MaintenanceGeneration", {batchSize: 2})
+        const foreign = as(state.foreign, S + "run#MaintenanceGeneration", {})
+        const reader = as(state.reader, S + "run#MaintenanceGeneration", {})
+        return {before, after: ec.entity.find(OCCURRENCE).disableAuthz().count(), foreignAdmin, foreign, reader}
+    },
+    then({before, after, foreignAdmin, foreign, reader}) {
+        foreignAdmin.scheduleCount == 0
+        foreign.scheduleCount == 0
+        reader == "PERMISSION_DENIED"
+        after == before
+    }
+})
+
+// P14 review (F186): a change of a calendar plan's interval leaves the obligations before it where they fell. Monthly from about
+// three months ago, changed to weekly from a minute ahead: four days later the four monthly due dates and the first weekly one,
+// three days ahead, are the missed ones (the weekly cadence read back over the months would make fourteen); compliance counts five.
+feature("a change of a calendar plan's interval leaves the earlier obligations under their own term", {
+    when() {
+        const id = activePlan({
+            facilityId: prefix + "_ROOM3",
+            intervalQuantity: 1,
+            intervalUomId: "TF_mon",
+            firstDueLocal: localDay(-95) + " 08:00",
+            estimatedWorkTime: 1
+        })
+        const stored = as(state.planner, S + "get#MaintenanceSchedule", {maintenanceScheduleId: id})
+        const changed = as(
+            state.planner,
+            S + "store#MaintenanceSchedule",
+            Object.assign({}, stored.storedTerm, {
+                maintenanceScheduleId: id,
+                intervalUomId: "TF_wk",
+                changeReason: "Weekly from now",
+                effectiveDate: new Date(Date.now() + 60 * 1000)
+            })
+        )
+        const asOfDate = new Date(Date.now() + 4 * dayMs)
+        const later = as(state.planner, S + "get#MaintenanceDue", {maintenanceScheduleId: id, asOfDate}).due
+        const report = as(state.planner, "mantle.work.MaintenanceReportServices.get#MaintenanceCompliance", {
+            maintenanceScheduleId: id,
+            fromDate: new Date(Date.now() - 100 * dayMs),
+            asOfDate
+        })
+        return {changed, later, report}
+    },
+    then({changed, later, report}) {
+        changed.statusId == "MschActive"
+        later.overdueCount == 5
+        later.obligationKey == localDay(-95) + " 08:00"
+        later.missed.slice(0, 4).every(row => Number(row.termFromDate) == Number(later.missed[0].termFromDate))
+        later.missed[4].obligationKey == localDay(3) + " 08:00"
+        Number(later.missed[4].termFromDate) != Number(later.missed[0].termFromDate)
+        report.summary.dueCount == 5
+        report.summary.outstandingCount == 5
+    }
+})
+
+// P14 review: a plan's work reminds the person assigned to it a day before its due date (written for the assignee, not the
+// planner who assigns), and a person taken off it keeps no reminder of it
+feature("a plan's work reminds its assignee of its due date; taken off it, they have none", {
+    when() {
+        const workEffortId = orders(state.keyedPlan)[0].workEffortId
+        const techParty = prefix + "_P_TECH"
+        const reminders = () =>
+            Array.from(ec.entity.find("mantle.work.effort.WorkEffortReminder").condition({workEffortId}).disableAuthz().list())
+        const assigned = as(state.planner, W + "schedule#MaintenanceWorkOrder", {workEffortId, assigneePartyIds: [techParty]})
+        const set = reminders()
+        as(state.planner, W + "schedule#MaintenanceWorkOrder", {workEffortId, assigneePartyIds: []})
+        return {assigned, set, cleared: reminders(), techParty}
+    },
+    then({assigned, set, cleared, techParty}) {
+        assigned.addedPartyIds.includes(techParty)
+        set.length == 1
+        set[0].partyId == techParty
+        Number(String(set[0].offsetMinutes)) == 1440
+        cleared.length == 0
     }
 })

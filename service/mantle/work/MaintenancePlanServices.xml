@@ -318,8 +318,10 @@ along with this software (see the LICENSE.md file). If not, see
             outside the schedule Admin's recovery): the generation of generate#MaintenanceWorkOrders for every active plan of
             every organization, as a planner who is no supervisor, in batches of batchSize plans by id (100 unless set, at most
             1000), at most 5000 a run (capped), each plan in a transaction of its own; a failing plan is logged by its id and the
-            rest go on, and a repeat is safe (the obligation's key). Granted to no group; a signed-in caller (the job run as a
-            person) needs MAINTENANCE_SETTINGS_EDIT.</description>
+            rest go on, and a repeat is safe (the obligation's key). Granted to no group. The job's scope is the job's alone: with no
+            user (the scheduler, which also starts Admin's run outside the schedule) or for a system administrator; a person who runs
+            it otherwise generates as themselves, a planner or supervisor of their own organizations' plans (PERMISSION_DENIED
+            without MAINTENANCE_PLAN or MAINTENANCE_SUPERVISE; impl-maintenance P14 review R1).</description>
         <in-parameters>
             <parameter name="batchSize" type="Integer"/>
         </in-parameters>

@@ -55,6 +55,7 @@ const ORDER_VIEW = "mantle.work.maintenance.MaintenanceWorkOrderDetail"
 const POLICY = "mantle.work.maintenance.MaintenancePolicy"
 const MAINTENANCE = "mantle.product.maintenance.AssetMaintenance"
 const PARTY = "mantle.work.effort.WorkEffortParty"
+const REMINDER = "mantle.work.effort.WorkEffortReminder"
 const TIME = "mantle.work.time.TimeEntry"
 const ASSET = "mantle.product.asset.Asset"
 const FACILITY = "mantle.facility.Facility"
@@ -66,6 +67,8 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const highPriority = 3
 const teamRole = "OrgTeam"
 const assigneeRole = "Assignee"
+// a plan's work reminds its assignees a day before its due date (P14 review)
+const dueReminderMinutes = 1440
 // the relationships that make a person one of an organization's people for assignment
 const memberRelationships = ["PrtEmployee", "PrtAgent"]
 const facilityDepth = 12
@@ -902,7 +905,28 @@ function scheduleWorkOrder(p) {
     const revision = bump(order)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     if (added.length) notifyAssigned(root.workEffortId, added)
+    // P14 review: a plan's work reminds the people assigned to it a day before its due date
+    if (order.maintenanceScheduleId) remindAssignees(root.workEffortId, added, removed)
     return {workEffortId: root.workEffortId, revision, addedPartyIds: added, removedPartyIds: removed}
+}
+// The due reminders of a plan's work order (design §5.1, impl-maintenance P14 review): each person newly assigned to its root gets
+// a reminder a day before its due date (the root's planned finish; the reminder job, EventServices send#DueReminders, sends it on
+// the WorkEffortReminder topic) unless they have one on it already, and a person taken off it keeps none. Written here for the
+// assignee, as People's leave writes the person's (store#WorkEffortReminders sets only the caller's own).
+function remindAssignees(workEffortId, added, removed) {
+    for (const partyId of new Set(removed))
+        if (!added.includes(partyId))
+            for (const row of Array.from(find(REMINDER, {workEffortId, partyId}).list()))
+                call("delete#" + REMINDER, {workEffortId, partyId, reminderSeqId: row.reminderSeqId})
+    for (const partyId of new Set(added))
+        if (!removed.includes(partyId) && find(REMINDER, {workEffortId, partyId}).count() === 0)
+            call("create#" + REMINDER, {
+                workEffortId,
+                partyId,
+                reminderSeqId: "01",
+                offsetMinutes: dueReminderMinutes,
+                methodEnumId: "WermNotification"
+            })
 }
 // The new assignees are told on MaintenanceWork (the work order and its target, never a cost); a failure is logged.
 function notifyAssigned(workEffortId, partyIds) {

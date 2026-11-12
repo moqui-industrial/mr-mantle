@@ -148,7 +148,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="record" noun="MaintenanceMeter" allow-remote="false">
         <description>A meter reading of one piece of the user's equipment, the one meter writer (design §5.1, impl-maintenance
             F19, F70): MAINTENANCE_RESOURCE_EDIT, or MAINTENANCE_EXECUTE with the work (workEffortId, the step it was taken in)
-            assigned to the user. The meter is one of the equipment model's (productMeterId, or productMeterTypeId) or a meter
+            assigned to the user, or MAINTENANCE_SUPERVISE with work of the user's organizations (the supervisor who completes it;
+            impl-maintenance P14 review). The meter is one of the equipment model's (productMeterId, or productMeterTypeId) or a meter
             type for equipment whose model has none (METER_UNAVAILABLE), in its unit (UNIT_MISMATCH). The reading time is now
             or earlier (DATE_FUTURE) and no other reading of the equipment has it (READING_EXISTS: a reading is never
             overwritten). On a cumulative meter a reading below the one before or above the one after is READING_DECREASING

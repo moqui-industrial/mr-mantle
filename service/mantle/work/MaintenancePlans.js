@@ -1631,13 +1631,13 @@ function scopedActive(userScope, p) {
     return query
 }
 // The generate_MaintenanceWorkOrders job (seeded paused): every active plan of every organization, in batches of batchSize (100
-// unless set, at most 1000) by id, at most 5000 plans a run (capped), each plan on its own with its outcome. A signed-in caller
-// (the job run as a person, from Tools) needs MAINTENANCE_SETTINGS_EDIT. Admin's run outside the schedule marks the job due and
-// the scheduler runs it as any run: the obligation's key makes a repeat safe.
+// unless set, at most 1000) by id, at most 5000 plans a run (capped), each plan on its own with its outcome. Only the job itself
+// (no user: the scheduler, and Admin's run outside the schedule, which marks the job due for the scheduler) or a system
+// administrator has the job's scope; anyone else who runs it (ec.service.job(...).run() as a person) generates as themselves, a
+// planner or supervisor of their own organizations, and never borrows the job's (P14 review R1). The obligation's key makes a
+// repeat safe.
 function runJob(p) {
-    if (ec.user.userId && !ec.user.hasPermission("MAINTENANCE_SETTINGS_EDIT") && !lib.access.systemAdmin())
-        denied("PERMISSION_DENIED", "The preventive generation job runs on its schedule")
-    const userScope = systemScope()
+    const userScope = !ec.user.userId || lib.access.systemAdmin() ? systemScope() : writeScope()
     const batchSize = Math.min(1000, Math.max(1, Math.floor(Number(p.batchSize)) || defaultBatchSize))
     const at = nowMs()
     const results = []
@@ -1648,6 +1648,8 @@ function runJob(p) {
             .orderBy("maintenanceScheduleId")
             .limit(Math.min(batchSize, jobPlanCap - results.length))
         if (after) query = query.condition("maintenanceScheduleId", "greater", after)
+        if (userScope.organizationPartyIds != null)
+            query = query.condition("organizationPartyId", "in", Array.from(userScope.organizationPartyIds).concat(["_NA_"]))
         const batch = Array.from(query.list()).map(row => row.maintenanceScheduleId)
         for (const id of batch) results.push(generateOne(userScope, id, at, {}))
         if (batch.length < batchSize) break
