@@ -1125,7 +1125,10 @@ const L = (text) => ec.l10n.localize(text)
             user sees, they are on), costRate and costCurrencyUomId (the person's current vendor rate, RateAmount RaprVendor, only
             withRates for ADMIN and holders of TIME_ENTRY_RATE; an employee's is the employee's pay, null for one without
             PAYROLL_VIEW: mantle.humanres.EmploymentServices.get#PayRateAccess)}. The allocation itself is not counted against its
-            own person.
+            own person. IronStone People (impl-people P18, its SkillsMatrix's FindAvailable; an owner contract with Projects, whose
+            callers pass neither): partyIdList bounds the people to those given (the people of the caller's People scope), and
+            each candidate's skillSelfDeclared says the skill's level is the person's own claim (PartySkill sourceEnumId
+            SksSelfDeclared), which People labels and no requirement takes.
         </description>
         <in-parameters>
             <parameter name="workEffortAllocationId"/>
@@ -1137,6 +1140,7 @@ const L = (text) => ec.l10n.localize(text)
             <parameter name="skillTypeEnumId"/>
             <parameter name="limit" type="Integer" default="20"/>
             <parameter name="withRates" type="Boolean" default="false"/>
+            <parameter name="partyIdList" type="List"><description>Only these people (IronStone People's scope, P18)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="candidateList" type="List"/>
@@ -1180,6 +1184,9 @@ candidateList = []
                 const roleHolders = new Set()
                 if (role) for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('roleTypeId', role).conditionDate('fromDate', 'thruDate', null)
                         .selectField('partyId').list()) { roleHolders.add(row.partyId); pool.add(row.partyId) }
+                // People's FindAvailable bounds the pool to the people of its scope (impl-people P18)
+                const bounded = partyIdList != null ? new Set(Array.from(partyIdList).map(String)) : null
+                if (bounded) for (const id of Array.from(pool)) if (!bounded.has(id)) pool.delete(id)
                 let people = pool.size ? Array.from(ec.entity.find('mantle.party.Person').condition('partyId', 'in', Array.from(pool)).selectField('partyId').list()).map((row) => row.partyId) : []
                 if (allocation.partyId) people = people.filter((id) => id !== allocation.partyId || allocation.statusId === 'WealRequested')
                 if (!people.length) return
@@ -1224,7 +1231,8 @@ candidateList = []
                                 .list()).filter((row) => row.isTemplate !== 'Y' && (all || visible.has(row.workEffortId))).map((row) => row.workEffortName || row.workEffortId))).sort()
                         const skillRow = skillRows[person]
                         const rating = skillRow ? Number(String(skillRow.rating ?? skillRow.skillLevel ?? 0)) : null
-                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating, hasRole: roleHolders.has(person),
+                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating,
+                            skillSelfDeclared: skillRow?.sourceEnumId === 'SksSelfDeclared', hasRole: roleHolders.has(person),
                             fits: shortWeeks === 0 && needHours > 0, shortWeeks: shortWeeks, freeHours: round(freeHours), needHours: round(needHours),
                             minFreeWeek: minFree == null ? null : round(minFree), currentProjects: projects, costRate: null, costCurrencyUomId: null}
                         if (showRates && !payHidden.has(person)) {

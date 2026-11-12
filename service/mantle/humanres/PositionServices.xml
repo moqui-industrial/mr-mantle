@@ -132,7 +132,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="emplPositionClassId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="jobClass" type="Map"/>
-            <parameter name="skills" type="List"><description>skillTypeEnumId, skillName</description></parameter>
+            <parameter name="skills" type="List"><description>The requirements in effect: skillTypeEnumId, skillName,
+                minimumLevel and minimumLevelText, qualificationTypeEnumId and qualificationTypeName, requiredFlag and requiredText,
+                fromDateText, revision (P18)</description></parameter>
             <parameter name="workTypes" type="List"><description>workTypeEnumId, workTypeName</description></parameter>
         </out-parameters>
         <actions>
@@ -167,14 +169,25 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="JobRequirement" allow-remote="false">
-        <description>A skill a job class requires (EmplPositionClassSkill), added, or removed with remove; class and skill only
-            until P18 adds levels and dates. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a
-            missing class (RECORD_UNAVAILABLE) or an ended one (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a
-            SkillType (SKILL_INVALID), a skill required already (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED,
-            People's lookups; P5) and, to remove, one not required (RECORD_UNAVAILABLE).</description>
+        <description>A skill a job class requires (EmplPositionClassSkill), added, changed with change (its terms, at the revision
+            read) or removed with remove (ended, never deleted; required again, its row opens from the new date). P18: a
+            requirement's least level (minimumLevel, a SkillLevel value's number; empty for any), the qualification type a verified,
+            valid qualification of which proves it, required or desired (requiredFlag N) and the date it is required from;
+            mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix read them. Refuses a caller without
+            PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a missing class (RECORD_UNAVAILABLE) or an ended one
+            (CLASS_ENDED), no skill (SKILL_REQUIRED) or one that is not a SkillType (SKILL_INVALID), a skill required already
+            (ALREADY_REQUIRED), an ended skill type added (VALUE_ENDED, People's lookups; P5), to change or remove one not
+            required (RECORD_UNAVAILABLE), a level that is not one (LEVEL_INVALID), a qualification type that is not one or ended
+            (TYPE_INVALID, VALUE_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
         <in-parameters>
             <parameter name="emplPositionClassId" required="true"/>
             <parameter name="skillTypeEnumId"/>
+            <parameter name="minimumLevel"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="requiredFlag"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="change" type="Boolean"/>
+            <parameter name="expectedRevision"/>
             <parameter name="remove" type="Boolean"/>
         </in-parameters>
         <out-parameters>

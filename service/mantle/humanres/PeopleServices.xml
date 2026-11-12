@@ -359,7 +359,7 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- P5: People's HR vocabularies (design §12 Lookups, PE-03; Lookups.js) -->
     <service verb="find" noun="Lookups" allow-remote="false">
         <description>People's HR vocabularies, a whitelist of Enumeration families (termination reasons and types, skill types and
-            levels; later phases add theirs), each with its value count; with enumTypeId, its values in order, current unless
+            levels, leave types, P18's qualification types; later phases add theirs), each with its value count; with enumTypeId, its values in order, current unless
             includeEnded, each with how many records hold it (useCount), whether it has ended and whether the caller may change
             it. Read by the People administrator and an HR reader (PEOPLE_CONFIGURE or PEOPLE_HR_VIEW; PERMISSION_DENIED
             otherwise); refuses another family (FAMILY_INVALID).</description>
