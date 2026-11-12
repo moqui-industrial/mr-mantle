@@ -34,6 +34,10 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- an internal stock request (impl-warehouse P15 WH-REQUEST): with the operation policy's inventoryRequestCheck
                 it names the facility the stock is for, one of the user's organizations' (FACILITY_REQUIRED,
                 RECORD_UNAVAILABLE), and that organization is its OrgInternal party; without it nothing changes -->
+            <!-- IronStone People P21: a confidential case is filed through create#PeopleCase alone, never as a request of another
+                path (CASE_TYPE_RESERVED) -->
+            <if condition="requestTypeEnumId == 'RqtHrCase'"><return error="true"
+                    message="CASE_TYPE_RESERVED: A confidential case is filed in People's Grievances"/></if>
             <set field="inventoryRequest" from="null"/>
             <if condition="requestTypeEnumId == 'RqtInventory'">
                 <set field="inventoryRequests" value="component://mr-mantle/service/mantle/request/InventoryRequests.js"/>
@@ -146,6 +150,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="clientPartyId"><description>Retained for backward compatibility, uses Customer role just like customerPartyId</description></parameter>
         </in-parameters>
         <actions>
+            <!-- IronStone People P21: a confidential case changes through People's case services alone, and no request becomes one;
+                a case is not available here (as to every reader but its people in People) -->
+            <entity-find-one entity-name="mantle.request.Request" value-field="caseRequest" disable-authz="true">
+                <field-map field-name="requestId"/></entity-find-one>
+            <if condition="caseRequest?.requestTypeEnumId == 'RqtHrCase'"><return error="true" message="Request ${requestId} not found"/></if>
+            <if condition="requestTypeEnumId == 'RqtHrCase'"><return error="true"
+                    message="CASE_TYPE_RESERVED: A confidential case is filed in People's Grievances"/></if>
             <!-- a request made a stock request, or a stock request moved to another facility: the same check as create#Request
                 (impl-warehouse P15 review B3) -->
             <if condition="requestTypeEnumId == 'RqtInventory' || facilityId">
@@ -523,7 +534,12 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else>
                 <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
             </else></if>
-            <set field="contentLocation" value="${contentRoot}/request/${requestId}/content_${requestContentId}/${filename}"/>
+            <!-- IronStone People P21: a confidential case's files are kept outside the Records drive's request folder (an unmapped
+                folder, as an employment's files), so the drive never lists them -->
+            <entity-find-one entity-name="mantle.request.Request" value-field="contentRequest" disable-authz="true">
+                <field-map field-name="requestId"/></entity-find-one>
+            <set field="contentFolder" from="contentRequest?.requestTypeEnumId == 'RqtHrCase' ? 'peoplecase' : 'request'"/>
+            <set field="contentLocation" value="${contentRoot}/${contentFolder}/${requestId}/content_${requestContentId}/${filename}"/>
 
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>
@@ -1410,6 +1426,8 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const request = ec.entity.find('mantle.request.Request').condition('requestId', requestId).one()
                 if (request == null || request.statusId !== 'ReqSubmitted') return
+                // a confidential case (IronStone People P21, F20) is never triaged: no name or filer reaches a triager
+                if (request.requestTypeEnumId === 'RqtHrCase') return
                 // once per request and project
                 try {
                     const told = ec.cache.getCache('mantle.request.triage.notified')
@@ -1530,6 +1548,8 @@ along with this software (see the LICENSE.md file). If not, see
                         // CX-REQUEST (R-XC-40, impl-purchasing P10): a purchase, purchase RFQ or stock request follows its
                         // sourcing or its movements (get#PurchaseRequestProgress, get#InventoryRequestProgress), never its work
                         if (['RqtPurchaseRfq', 'RqtInventory'].includes(request.requestTypeEnumId)) continue
+                        // a confidential case (IronStone People P21, F20) is decided by its handlers alone, never by its work
+                        if (request.requestTypeEnumId === 'RqtHrCase') continue
                         // a purchase request is Purchasing's when it names its organization (an OrgInternal RequestParty);
                         // a Commons or Projects request of the Purchase type, with none, follows its work as before
                         if (request.requestTypeEnumId === 'RqtPurchase' && ec.entity.find('mantle.request.RequestParty')
@@ -1634,4 +1654,14 @@ along with this software (see the LICENSE.md file). If not, see
     <service-include verb="preview" noun="PurchaseSourcing" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="convert" noun="PurchaseSourcing" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
     <service-include verb="convert" noun="PurchaseSourcingGroup" location="component://mr-mantle/service/mantle/request/PurchaseRequestServices.xml"/>
+    <!-- IronStone People P21: the confidential cases (grievances), over PeopleCases.js -->
+    <service-include verb="create" noun="PeopleCase" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="find" noun="PeopleCases" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="get" noun="PeopleCase" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="change" noun="PeopleCase" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="assign" noun="PeopleCaseHandler" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="add" noun="PeopleCaseTask" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="check" noun="PeopleCaseAccess" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="notify" noun="PeopleCaseUpdate" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
+    <service-include verb="get" noun="CaseDocumentData" location="component://mr-mantle/service/mantle/request/PeopleCaseServices.xml"/>
 </services>

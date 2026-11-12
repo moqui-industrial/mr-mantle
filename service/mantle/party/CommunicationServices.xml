@@ -78,6 +78,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="statusId"/><select-field field-name="fromPartyId"/><select-field field-name="toPartyId"/>
                 <select-field field-name="subject"/><select-field field-name="communicationEventTypeId"/>
             </entity-find>
+            <!-- IronStone People P21: a note or message filed on a confidential case is its people's, read on the case in People
+                alone, never on a party's timeline (PeopleCases.js caseEvents) -->
+            <script><![CDATA[
+                const listedIds = Array.from(commEventList).map((row) => row.communicationEventId)
+                const onCase = listedIds.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').caseEvents(listedIds) : {}
+                if (Object.keys(onCase).length) commEventList = Array.from(commEventList).filter((row) => !onCase[row.communicationEventId])
+            ]]></script>
         </actions>
     </service>
     <service verb="create" noun="Message">
@@ -2088,6 +2095,13 @@ along with this software (see the LICENSE.md file). If not, see
             files (EmploymentApplicationContent) the same, by mantle.humanres.RecruitingServices.check#ApplicationAccess: a
             recruiter of its employer or a panel member of the application.
 
+            A confidential case (a Request of the type RqtHrCase, IronStone People's grievances, P21), its files (RequestContent), and
+            a communication event filed on one (the event or the root of its thread, by RequestCommEvent or a
+            CommunicationEventRecord) are seen only by the case's people: the employee who filed it and its handlers (an Assignee
+            holding PEOPLE_CASE_HANDLE; mantle.request.PeopleCases.js), for every caller, authorization disabled or not, ADMIN and
+            an entity authorization for requests included; a call with no user sees none. A task linked to a case is reached only
+            by a current assignee of it, for every caller too (Checklists.js hiddenTaskIds).
+
             A qualification (mantle.humanres.ability.PartyQualification, IronStone People's qualification content host, P18) and
             its files (PartyQualificationContent) are seen only by the person and an HR reader of an employer of theirs in People's
             scope (mantle.humanres.DevelopmentServices.check#QualificationAccess), for every caller, authorization disabled or not;
@@ -2290,8 +2304,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             // a protected People task (offboarding, an equipment return; ChecklistStep isProtected) is reached only by a current
             // assignee of it who is not the person it is about (People's Checklists.js hiddenTaskIds; impl-people P7 review, F22)
-            const protectedHidden = (workEffortId, partyId) => ec.entity.find('mantle.humanres.checklist.ChecklistStep')
-                    .condition('workEffortId', workEffortId).condition('isProtected', 'Y').disableAuthz().count() > 0
+            // P21: a task linked to a confidential case too (PeopleCases.js protectedTaskIds)
+            const peopleCases = () => ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+            const protectedHidden = (workEffortId, partyId) => peopleCases().protectedTaskIds([workEffortId]).length > 0
                     && ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                         .hiddenTaskIds([workEffortId], partyId).length > 0
             const workEffortVisible = (workEffort, s) => {
@@ -2502,6 +2517,22 @@ along with this software (see the LICENSE.md file). If not, see
                 // under the user's entity filters
                 const value = ec.entity.find(entityName).condition(keyField, id).one()
                 if (value == null) return false
+                // People's confidential cases (IronStone People P21, PE-01): a case, its files, and a message or note filed on one
+                // (the event or the root of its thread) are its people's alone (the employee who filed it and its handlers;
+                // PeopleCases.js), for every caller, authorization disabled or not, staff and ADMIN included; a call with no
+                // user sees none
+                if (entityName === REQUEST && value.requestTypeEnumId === 'RqtHrCase')
+                    return peopleCases().hiddenRequestIds([id]).length === 0
+                if (entityName === 'mantle.request.RequestContent' && peopleCases().isCase(value.requestId))
+                    return peopleCases().hiddenRequestIds([value.requestId]).length === 0
+                if (entityName === COMM_EVENT || entityName === 'mantle.party.communication.CommunicationEventContent') {
+                    const filedOn = peopleCases().caseEvents([value.communicationEventId])[value.communicationEventId]
+                    if (filedOn) return peopleCases().hiddenRequestIds([filedOn]).length === 0
+                }
+                // a task linked to a case: its current assignee alone, for every caller too (Checklists.js hiddenTaskIds)
+                if (entityName === WORK_EFFORT && peopleCases().caseTaskIds([id]).length > 0)
+                    return ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
+                            .hiddenTaskIds([id], ec.user.userId ? ec.user.userAccount?.partyId || null : null).length === 0
                 if (isClientUser()) return clientVisible(entityName, id)
                 if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
                 // An account's or a security group's notes (Admin's "Log as note", impl-admin F75): neither record has an
@@ -4090,6 +4121,12 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             notifiedUserIds = []
+            // IronStone People P21: a note on a confidential case tells its people alone, on PeopleCaseUpdate (no name, no text)
+            if (recordEntityName === 'mantle.request.Request' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(recordId)) {
+                notifiedUserIds = Array.from(ec.service.sync().name('mantle.request.RequestServices.notify#PeopleCaseUpdate')
+                        .parameter('requestId', recordId).disableAuthz().call()?.notifiedUserIds || [])
+                return
+            }
             const userIds = new Set(mentionUserIds ? Array.from(mentionUserIds) : [])
             if (mentionPartyIds?.length) for (const account of ec.entity.find('moqui.security.UserAccount')
                     .condition('partyId', 'in', Array.from(mentionPartyIds)).disableAuthz().list()) userIds.add(account.userId)
@@ -4139,6 +4176,12 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             notifiedUserIds = []
+            // IronStone People P21: a note or message on a confidential case tells its people alone, on PeopleCaseUpdate
+            if (recordEntityName === 'mantle.request.Request' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(recordId)) {
+                notifiedUserIds = Array.from(ec.service.sync().name('mantle.request.RequestServices.notify#PeopleCaseUpdate')
+                        .parameter('requestId', recordId).disableAuthz().call()?.notifiedUserIds || [])
+                return
+            }
             const flagFields = {messages: 'notifyMessages', notes: 'notifyNotes', activities: 'notifyActivities', changes: 'notifyChanges'}
             const flagField = flagFields[kind]
             if (!flagField) { ec.message.addError(`Follower kind ${kind} is not one of messages, notes, activities, changes`); return }
@@ -4210,6 +4253,15 @@ along with this software (see the LICENSE.md file). If not, see
             const info = ec.service.sync().name('mantle.party.CommunicationServices.get#RecordLinkInfo')
                     .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
             if (ec.message.hasError()) return
+            // IronStone People P21: a confidential case is followed by its people alone (its filer and handlers follow it from the
+            // filing), never by another user someone adds
+            if (info.recordEntityName === 'mantle.request.Request' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').isCase(recordId)) {
+                const followerPartyId = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).disableAuthz().one()?.partyId
+                const onCase = !!followerPartyId && ec.entity.find('mantle.request.RequestParty').condition('requestId', recordId)
+                        .condition('partyId', followerPartyId).condition('roleTypeId', 'in', ['Reporter', 'Assignee'])
+                        .conditionDate('fromDate', 'thruDate', ec.user.nowTimestamp).disableAuthz().count() > 0
+                if (!onCase) { ec.message.addError(`Request ${recordId} not found`); return }
+            }
             const flagFields = {messages: 'notifyMessages', notes: 'notifyNotes', activities: 'notifyActivities', changes: 'notifyChanges'}
             const keys = {recordEntityName: info.recordEntityName, recordId: recordId, userId: userId}
             const existing = ec.entity.find('mantle.party.communication.RecordFollower').condition(keys).one()

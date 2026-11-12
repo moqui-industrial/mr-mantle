@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P21 (design-people §4 Grievances, §1.4 notification topics): a confidential case filed with a handler, assigned to
+        one, or changed (a move, a note, a message) is told to its people on this topic. The message holds requestId and one of a few
+        fixed sentences (noticeText), never a person, the employer or what the case is about, so neither a lock screen nor an inbox
+        shows anything of it; no push. The app that shows it sets the link (IronStone People: BossSetupData.xml). Sent by its owning
+        services, mantle.request.RequestServices' case services and notify#PeopleCaseUpdate, which the record notices of a case
+        (notify#RecordMention, notify#RecordFollowers) hand to it. -->
+    <moqui.security.user.NotificationTopic topic="PeopleCaseUpdate" inboxEnumId="NinNotifications"
+            description="Confidential case" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" pushNotifications="N" emailTemplateId="NOTIFICATION" titleTemplate="${noticeText}"/>
+    <!-- an employer's designated intake handlers: the parties a new case goes to (comma-separated party ids), each with an account
+        holding PEOPLE_CASE_HANDLE and working for the employer (create#PeopleCase skips, and logs, one who does not) -->
+    <mantle.party.PartySettingType partySettingTypeId="PeopleCaseIntake" description="People - Confidential case intake handlers"
+            validRegexp="^[A-Za-z0-9_-]+(,[A-Za-z0-9_-]+)*$"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+</entity-facade-xml>
