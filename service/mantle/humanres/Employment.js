@@ -64,8 +64,9 @@ const statusTexts = {
     EchSuperseded: "Superseded",
     EchWithdrawn: "Withdrawn"
 }
-// the kinds of applied change HR may withdraw while their date is still to come (P7, F131): not a hire, not a separation
-const withdrawableKinds = ["EckTransfer", "EckManager", "EckLeave", "EckReturn", "EckReorganization"]
+// the kinds of applied change HR may withdraw while their date is still to come (P7, F131): not a hire; a separation set for a
+// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation)
+const withdrawableKinds = ["EckTransfer", "EckManager", "EckLeave", "EckReturn", "EckReorganization", "EckSeparation"]
 const stateTexts = {EasActive: "Working", EasLeave: "On leave of absence"}
 const termFields = ["departmentPartyId", "emplPositionId", "managerPartyId", "facilityId"]
 // the most people a match search answers, and the shortest name it searches by
@@ -760,6 +761,92 @@ function restoreProjections(employment, withdrawn, before, at, endMs, reason) {
                 })
     }
 }
+// ===== a separation set for a later date withdrawn (the user's call, Nov 11) =====
+// Before its date, as the other scheduled changes: the employment's end goes back to what it was (priorThruDate), its termination
+// reason and type are cleared, the assignment it ended continues, and so do the department membership, the seat and the line it
+// ended on its date, and the person's memberships of the employer's units ended then; each report's manager change it made
+// (causedByChangeId) is withdrawn, so their assignments keep the manager, and a line it ended goes on. Nothing of the access end
+// is done (Admin's operation is Withdrawn: its waiting steps skipped, what it ended at the date continued) and its checklists' and
+// equipment return's work is cancelled. The scheduled changes it withdrew when applied stay withdrawn (made again if wanted).
+// Refuses one in effect (CHANGE_IN_EFFECT) and one whose employment changed its end since (NOT_WITHDRAWABLE).
+function withdrawSeparation(change, employment, reason) {
+    const now = nowMs()
+    const at = ms(change.effectiveDate)
+    if (at == null || at <= now) denied("CHANGE_IN_EFFECT", "This separation is in effect already; hire the person again instead")
+    if (employment.thruMs !== at)
+        denied("NOT_WITHDRAWABLE", "The employment's end changed since the separation; change it from the employment")
+    const why = "Withdrawn: " + reason
+    const priorMs = ms(change.priorThruDate) ?? null
+    const ended = assignmentsOf(employment.partyRelationshipId)
+        .filter(row => ms(row.thruDate) === at)
+        .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0]
+    const before = ended ? termsOfRow(ended) : termsOfRow(termsAt(employment, at - 1))
+    call("update#" + RELATIONSHIP, {
+        partyRelationshipId: employment.partyRelationshipId,
+        thruDate: stamp(priorMs),
+        thruDate_changeReason: why
+    })
+    call("update#" + EMPLOYMENT, {
+        partyRelationshipId: employment.partyRelationshipId,
+        terminationReasonEnumId: null,
+        terminationTypeEnumId: null,
+        terminationReasonEnumId_changeReason: why,
+        terminationTypeEnumId_changeReason: why
+    })
+    if (ended)
+        call("update#" + ASSIGNMENT, {
+            employmentAssignmentId: ended.employmentAssignmentId,
+            thruDate: stamp(priorMs),
+            thruDate_changeReason: why
+        })
+    restoreProjections(
+        Object.assign({}, employment, {thruMs: priorMs}),
+        {departmentPartyId: null, emplPositionId: null, managerPartyId: null},
+        before,
+        at,
+        priorMs,
+        why
+    )
+    // the person's memberships of the employer's units it ended on its date go on
+    const org = employment.organizationPartyId
+    const units = people.unitsUnder([org])
+    if (units.length)
+        for (const row of Array.from(
+            find(RELATIONSHIP)
+                .condition({relationshipTypeEnumId: "PrtMember", fromPartyId: employment.partyId})
+                .condition("toPartyId", "in", units)
+                .list()
+        ).filter(row => ms(row.thruDate) === at && (ms(row.fromDate) ?? -Infinity) < at))
+            call("update#" + RELATIONSHIP, {
+                partyRelationshipId: row.partyRelationshipId,
+                thruDate: null,
+                thruDate_changeReason: why
+            })
+    // the reports: their manager changes made by the separation withdrawn, and a line it ended (a report with no assignment) on
+    for (const report of rows(CHANGE, {causedByChangeId: change.employmentChangeId, statusId: "EchApplied"}))
+        withdrawScheduled(report, reason)
+    for (const line of rows(RELATIONSHIP, {relationshipTypeEnumId: "PrtManager", fromPartyId: employment.partyId}).filter(
+        row => ms(row.thruDate) === at && (ms(row.fromDate) ?? -Infinity) < at
+    ))
+        call("update#" + RELATIONSHIP, {
+            partyRelationshipId: line.partyRelationshipId,
+            thruDate: null,
+            thruDate_changeReason: why
+        })
+    call("update#" + CHANGE, {
+        employmentChangeId: change.employmentChangeId,
+        statusId: "EchWithdrawn",
+        withdrawnDate: ec.user.nowTimestamp,
+        withdrawnByUserId: ec.user.userId || null,
+        withdrawReason: reason
+    })
+    // no access end and no offboarding work: Admin's operation withdrawn, the checklists' and return's tasks cancelled
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/Lifecycle.js")
+        .withdrawAccessEnd(change.employmentChangeId, reason)
+    ec.resource.script("component://mr-mantle/service/mantle/humanres/Checklists.js").cancelChecklists(change.employmentChangeId)
+    return {employmentChangeId: change.employmentChangeId, whole: true}
+}
 // withdraw#EmploymentChange: an applied change of an employment in the caller's scope whose date is still to come (a transfer, a
 // manager change, a leave of absence or its return date, a return, a reorganization) withdrawn by an HR editor with a reason, at
 // the employment's revision read when given; the employment's waiting changes superseded (asked at the revision before).
@@ -768,12 +855,18 @@ function withdrawEmploymentChange(p) {
     const change = changeOf(text(p.employmentChangeId))
     if (!change) denied("RECORD_UNAVAILABLE", "Employment change " + text(p.employmentChangeId) + " is not available")
     const employment = employmentIn(userScope, change.partyRelationshipId)
-    if (change.statusId !== "EchApplied" || !withdrawableKinds.includes(change.changeKindEnumId))
-        denied("NOT_WITHDRAWABLE", "Only a transfer, manager change, leave or return set for a later date is withdrawn")
+    if (change.statusId !== "EchApplied" || !withdrawableKinds.includes(change.changeKindEnumId) || change.causedByChangeId)
+        denied(
+            "NOT_WITHDRAWABLE",
+            "Only a transfer, manager change, leave, return or separation set for a later date is withdrawn"
+        )
     if (text(p.expectedRevision) && text(p.expectedRevision) !== people.employmentRevision(employment.partyRelationshipId))
         denied("REVISION_CHANGED", "This employment changed since you read it; open it again")
     if (!text(p.reason)) denied("REASON_REQUIRED", "Say why")
-    const done = withdrawScheduled(change, text(p.reason))
+    const done =
+        change.changeKindEnumId === "EckSeparation"
+            ? withdrawSeparation(change, employment, text(p.reason))
+            : withdrawScheduled(change, text(p.reason))
     supersedeWaiting(employment.partyRelationshipId)
     const after = changeOf(change.employmentChangeId)
     return {
@@ -846,6 +939,8 @@ function applyChange(change) {
     let assignmentId = null
     if (kind === "EckSeparation") {
         refuseErrors(findings)
+        // the employment's end before it, given back if a separation set for later is withdrawn (the user's call, Nov 11)
+        call("update#" + CHANGE, {employmentChangeId: change.employmentChangeId, priorThruDate: stamp(employment.thruMs ?? null)})
         separate(employment, change, before, at, reason)
     } else if (kind === "EckLeave" || kind === "EckReturn") {
         if (kind === "EckLeave" && before.stateEnumId === "EasLeave")
@@ -945,7 +1040,9 @@ function separate(employment, change, before, at, reason) {
             managerPartyId: null,
             facilityId: row.facilityId,
             reason: "The manager left",
-            appliedDate: ec.user.nowTimestamp
+            appliedDate: ec.user.nowTimestamp,
+            // withdrawn with the separation (the user's call, Nov 11)
+            causedByChangeId: change.employmentChangeId
         })
         const assignmentId = startAssignment(
             reportEmployment,
@@ -1848,10 +1945,13 @@ function changeRow(row, approval, hrEdit = false) {
     const scheduled =
         row.statusId === "EchApplied" &&
         withdrawableKinds.includes(row.changeKindEnumId) &&
-        assignmentsOf(row.partyRelationshipId).some(
-            assignment =>
-                assignment.employmentChangeId === row.employmentChangeId && (ms(assignment.fromDate) ?? -Infinity) > nowMs()
-        )
+        !row.causedByChangeId &&
+        (row.changeKindEnumId === "EckSeparation"
+            ? (ms(row.effectiveDate) ?? -Infinity) > nowMs()
+            : assignmentsOf(row.partyRelationshipId).some(
+                  assignment =>
+                      assignment.employmentChangeId === row.employmentChangeId && (ms(assignment.fromDate) ?? -Infinity) > nowMs()
+              ))
     const partial = scheduled && row.changeKindEnumId === "EckLeave" && (ms(row.effectiveDate) ?? Infinity) <= nowMs()
     return Object.assign(
         {

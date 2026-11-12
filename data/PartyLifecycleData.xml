@@ -28,6 +28,18 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.StatusItem statusId="UlopCompleted" statusTypeId="UserLifecycleOperation" description="Completed" sequenceNum="1"/>
     <moqui.basic.StatusItem statusId="UlopScheduled" statusTypeId="UserLifecycleOperation" description="Scheduled" sequenceNum="2"/>
     <moqui.basic.StatusItem statusId="UlopAttention" statusTypeId="UserLifecycleOperation" description="Needs attention" sequenceNum="3"/>
+    <!-- impl-people P7 review (the user's call, Nov 11): a People access end whose separation was withdrawn before its date
+        (PeopleServices.withdraw#EmploymentChange): its waiting steps skipped, the memberships and relationships it ended at the date
+        continued; nothing more runs -->
+    <moqui.basic.StatusItem statusId="UlopWithdrawn" statusTypeId="UserLifecycleOperation" description="Withdrawn" sequenceNum="4"/>
+    <!-- impl-people P7 review (the user's call, Nov 11): a People provisioning or access end whose steps wait for an identity operator
+        (IdentityServices.request#Provisioning and request#AccessEnd, Lifecycle.js notifyOperators) tells the employer's identity
+        operators, who act from the tray or LifecycleOperations. The message holds operationId, kind, actionText, personName,
+        organizationName and dateText: the person and employer an operator reads on the operation, no email, reason or terms. The app
+        that shows it sets the link (IronStone: BossSetupData.xml, LifecycleDetail). -->
+    <moqui.security.user.NotificationTopic topic="IdentityOperatorRequest" inboxEnumId="NinNotifications"
+            description="Account request waiting for an identity operator" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" titleTemplate="${actionText}: ${personName} (${organizationName})"/>
     <moqui.basic.StatusType statusTypeId="UserLifecycleStep" description="Account lifecycle step"/>
     <moqui.basic.StatusItem statusId="UlstDone" statusTypeId="UserLifecycleStep" description="Done" sequenceNum="1"/>
     <moqui.basic.StatusItem statusId="UlstWaiting" statusTypeId="UserLifecycleStep" description="Waiting for a new owner" sequenceNum="2"/>

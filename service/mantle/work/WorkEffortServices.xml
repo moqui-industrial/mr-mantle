@@ -641,6 +641,12 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const [taskId, parentId] of parentIds) if (runParents.has(parentId)) runIds.add(taskId)
                 }
                 for (const id of runIds) byId.delete(id)
+                // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
+                // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds)
+                if (taskIds.length && ec.entity.find('mantle.humanres.checklist.ChecklistStep').condition('workEffortId', 'in', taskIds)
+                        .condition('isProtected', 'Y').disableAuthz().count() > 0)
+                    for (const id of ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').hiddenTaskIds(taskIds, partyId))
+                        byId.delete(id)
                 for (const entry of byId.values()) {
                     if (entry.snoozedThru != null && entry.snoozedThru > nowMillis) continue
                     const workEffort = entry.workEffort

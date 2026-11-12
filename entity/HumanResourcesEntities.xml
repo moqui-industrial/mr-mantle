@@ -469,6 +469,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="withdrawnByUserId" type="id"/>
         <field name="withdrawReason" type="text-long"/>
         <field name="supersededByChangeId" type="id"><description>The separation that withdrew it</description></field>
+        <field name="priorThruDate" type="date-time"><description>A separation's: the employment's end before it (empty: open),
+            which a separation set for a later date and withdrawn before it gives back (the user's call, Nov 11)</description></field>
+        <field name="causedByChangeId" type="id"><description>A report's manager change made by its manager's separation, withdrawn
+            with it</description></field>
         <field name="reroutedDate" type="date-time"><description>A separation's or manager change's: when the employer's waiting
             People decisions were routed again on or after its date (at once for one in effect, else by the daily job,
             F134)</description></field>

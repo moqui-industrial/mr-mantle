@@ -52,7 +52,12 @@ const kindNames = {
 // the kinds an operation is listed by: start#Lifecycle's, and People's provisioning (request#Provisioning; impl-people P7)
 const kindFilters = Object.assign({provision: "UlkProvision"}, kinds)
 const kindOf = enumId => Object.keys(kindFilters).find(key => kindFilters[key] === enumId)
-const statusNames = {UlopCompleted: "Completed", UlopScheduled: "Scheduled", UlopAttention: "Needs attention"}
+const statusNames = {
+    UlopCompleted: "Completed",
+    UlopScheduled: "Scheduled",
+    UlopAttention: "Needs attention",
+    UlopWithdrawn: "Withdrawn"
+}
 const stepNames = {UlstDone: "Done", UlstWaiting: "Waiting for a new owner", UlstFailed: "Failed", UlstSkipped: "Skipped"}
 const stepTitles = {
     revokeAccess: "Sessions, keys, app passwords, SSH keys and phones revoked",
@@ -1048,6 +1053,81 @@ function earlierAnswer(change, operationKey) {
     recordWrite(() => recordOnChange(change, earlier.operationId))
     return {applied: true, retried: true, operationId: earlier.operationId, statusId: earlier.statusId}
 }
+// ===== the identity operators told (the user's call, Nov 11) =====
+// A People request whose steps wait for an identity operator (OPERATOR_REQUIRED) notifies the employer's operators on the
+// IdentityOperatorRequest topic (data/PartyLifecycleData.xml), so they act from the tray or LifecycleOperations: each user holding
+// ADMIN_IDENTITY_MANAGE through a group granted it (not ADMIN's every permission), whose account is usable and whose organizations
+// (PartyServices.get#PartyInternalOrgIds, as the MANTLE_USER_ORG filter has them) include the employer, never the requester or the
+// person. The title names the person and the employer only, which an operator reads on the operation; no email, reason or terms.
+// A failure is logged and never the request's.
+const OPERATOR_TOPIC = "IdentityOperatorRequest"
+function identityOperators(organizationPartyId, exceptUserIds) {
+    const at = nowMs()
+    const groupIds = Array.from(
+        new Set(
+            rows("moqui.security.UserGroupPermission", {userPermissionId: MANAGE})
+                .filter(row => openAt(row, at) && row.userGroupId !== "ADMIN")
+                .map(row => row.userGroupId)
+        )
+    )
+    if (!groupIds.length) return []
+    const userIds = Array.from(
+        new Set(
+            Array.from(find(MEMBER).condition("userGroupId", "in", groupIds).list())
+                .filter(row => openAt(row, at))
+                .map(row => row.userId)
+        )
+    ).filter(userId => !exceptUserIds.includes(userId))
+    if (!userIds.length) return []
+    const operators = []
+    for (const account of Array.from(find(ACCOUNT).condition("userId", "in", userIds).list())) {
+        if (account.disabled === "Y" || !account.partyId) continue
+        if ((ms(account.terminateDate) ?? Infinity) <= at) continue
+        const orgIds = Array.from(
+            ec.service
+                .sync()
+                .name("mantle.party.PartyServices.get#PartyInternalOrgIds")
+                .parameters({partyId: account.partyId})
+                .disableAuthz()
+                .call()?.userOrgIds || []
+        )
+        if (orgIds.includes(organizationPartyId)) operators.push(account.userId)
+    }
+    return operators
+}
+function notifyOperators(operationId, kind) {
+    try {
+        const operation = one(OPERATION, {operationId})
+        const waiting = rows(STEP, {operationId}).some(
+            step => step.statusId === "UlstWaiting" && step.reasonCode === "OPERATOR_REQUIRED"
+        )
+        if (!operation || !waiting) return 0
+        const person = operation.partyId ? one(ACCOUNT, {partyId: operation.partyId}) : null
+        const userIds = identityOperators(
+            operation.organizationPartyId,
+            [ec.user.userId, operation.userId, person?.userId].filter(Boolean)
+        )
+        if (!userIds.length) return 0
+        ec.makeNotificationMessage()
+            .topic(OPERATOR_TOPIC)
+            .message({
+                operationId,
+                kind,
+                actionText: kind === "provision" ? "An account to set up" : "Access to end",
+                personName: partyName(operation.partyId),
+                organizationName: partyName(operation.organizationPartyId),
+                dateText: operation.effectiveDate ? timeText(ms(operation.effectiveDate)) : ""
+            })
+            .actorUserId(ec.user.userId)
+            .userIds(userIds)
+            .send()
+        return userIds.length
+    } catch (error) {
+        ec.logger.error("The identity operators were not told of operation " + operationId + ": " + error.message)
+        return 0
+    }
+}
+
 // request#Provisioning: a hire HR asked an account for.
 function requestProvisioning(p) {
     const change = peopleChange(p, ["EckHire"])
@@ -1063,9 +1143,18 @@ function requestProvisioning(p) {
         )
     )
     if (!ids.length) throw new Error("Name the access the account is proposed")
+    // each a registered bundle the caller may give, by Admin's delegation rule (its delegable permission held; never ADMIN or a
+    // privileged group, which an invitation never gives), so a direct call proposes no more than the app's own entry (P7 review)
+    const privileged = new Set(Array.from(UserSecurityChecks.privilegedGroups()))
     for (const groupId of ids) {
         const bundle = one("moqui.security.CapabilityBundle", {userGroupId: groupId})
         if (!bundle || bundle.disabled === "Y") return refused("GRANT_INVALID", groupId + " is not a registered bundle")
+        if (
+            groupId === "ADMIN" ||
+            privileged.has(groupId) ||
+            (bundle.delegablePermissionId && !ec.user.hasPermission(bundle.delegablePermissionId))
+        )
+            return refused("GRANT_NOT_YOURS", (bundle.description || groupId) + " is not yours to give")
     }
     const org = change.organizationPartyId
     const account = one(ACCOUNT, {partyId: change.partyId})
@@ -1146,6 +1235,7 @@ function requestProvisioning(p) {
     }
     const statusId = recordWrite(() => refreshStatus(operationId))
     recordWrite(() => recordOnChange(change, operationId))
+    notifyOperators(operationId, "provision")
     ec.logger.info("Provisioning " + operationId + " of " + partyName(change.partyId) + " (" + statusId + ") for a People hire")
     return {applied: true, reasonCode: null, reason: null, operationId, statusId, retried: false}
 }
@@ -1234,10 +1324,95 @@ function requestAccessEnd(p) {
     }
     const statusId = recordWrite(() => refreshStatus(operationId))
     recordWrite(() => recordOnChange(change, operationId))
+    notifyOperators(operationId, "accessEnd")
     ec.logger.warn(
         "Access end " + operationId + " of " + userName(account.userId) + " (" + statusId + ") for a People separation"
     )
     return {applied: true, reasonCode: null, reason: null, operationId, statusId, retried: false}
+}
+
+// ===== an access end withdrawn (the user's call, Nov 11) =====
+// A separation set for a later date withdrawn by HR before its date (PeopleServices.withdraw#EmploymentChange, after its own
+// check): its access end does nothing. The operation's steps still waiting or failed are skipped; a step done ahead of the date
+// (the employer's other relationships, the account's memberships, each ended at the date) is undone for the rows it ended at that
+// date, never a privileged group's (the access end refuses those, so none is there; a later one is left as it is); the operation
+// is Withdrawn. One in effect already (its date come) is left: People refuses withdrawing a separation in effect. Its records are
+// written with authorization off: the caller is People's checked HR editor, who holds no identity permission.
+function withdrawAccessEnd(employmentChangeId, reasonText) {
+    const found = rows(OPERATION, {sourceReference: peopleSource(employmentChangeId), kindEnumId: "UlkOrgRemoval"})
+    const now = nowMs()
+    let withdrawn = 0
+    for (const operation of found) {
+        const at = ms(operation.effectiveDate) ?? now
+        if (operation.statusId === "UlopWithdrawn" || at <= now) continue
+        const why = "The separation was withdrawn" + (text(reasonText) ? ": " + text(reasonText).slice(0, 200) : "")
+        const endedAtDate = row => {
+            const thru = ms(row.thruDate)
+            return thru != null && thru === Math.max(at, ms(row.fromDate) ?? at)
+        }
+        recordWrite(() => {
+            for (const step of rows(STEP, {operationId: operation.operationId})) {
+                let undone = ""
+                if (step.statusId === "UlstDone" && step.stepKind === "endMemberships" && operation.userId) {
+                    const privileged = new Set(Array.from(UserSecurityChecks.privilegedGroups()))
+                    let count = 0
+                    for (const row of rows(MEMBER, {userId: operation.userId}).filter(
+                        row => endedAtDate(row) && row.userGroupId !== "ADMIN" && !privileged.has(row.userGroupId)
+                    )) {
+                        const value = ec.entity.makeValue(MEMBER)
+                        value.setFields(
+                            {userGroupId: row.userGroupId, userId: row.userId, fromDate: row.fromDate, thruDate: null},
+                            true,
+                            null,
+                            null
+                        )
+                        value.update()
+                        count++
+                    }
+                    undone = "; " + count + " membership(s) continue"
+                } else if (step.statusId === "UlstDone" && step.stepKind === "endRelationships" && operation.partyId) {
+                    const change = one("mantle.humanres.employment.EmploymentChange", {employmentChangeId})
+                    let count = 0
+                    for (const row of rows(RELATIONSHIP, {
+                        fromPartyId: operation.partyId,
+                        toPartyId: operation.organizationPartyId
+                    }).filter(
+                        row =>
+                            membershipRelationships.includes(row.relationshipTypeEnumId) &&
+                            row.partyRelationshipId !== change?.partyRelationshipId &&
+                            endedAtDate(row)
+                    )) {
+                        ec.context.putAll({thruDate_changeReason: why})
+                        const value = ec.entity.makeValue(RELATIONSHIP)
+                        value.setFields({partyRelationshipId: row.partyRelationshipId, thruDate: null}, true, null, null)
+                        value.update()
+                        count++
+                    }
+                    undone = "; " + count + " relationship(s) continue"
+                } else if (step.statusId === "UlstDone" || step.statusId === "UlstSkipped") continue
+                const value = ec.entity.makeValue(STEP)
+                value.setFields(
+                    {
+                        operationId: step.operationId,
+                        stepSeqId: step.stepSeqId,
+                        statusId: "UlstSkipped",
+                        reasonCode: "WITHDRAWN",
+                        reason: (why + undone).slice(0, 1000),
+                        completedDate: null
+                    },
+                    true,
+                    null,
+                    null
+                )
+                value.update()
+            }
+            const value = ec.entity.makeValue(OPERATION)
+            value.setFields({operationId: operation.operationId, statusId: "UlopWithdrawn"}, true, null, null)
+            value.update()
+        })
+        withdrawn++
+    }
+    return {withdrawn}
 }
 
 const operations = {
@@ -1253,5 +1428,7 @@ const operations = {
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown lifecycle operation " + op)
         return operations[op](parameters)
-    }
+    },
+    // for People's withdraw#EmploymentChange, after its own check (Employment.js)
+    withdrawAccessEnd
 })

@@ -270,9 +270,20 @@ feature(
                 })
             )
             out.name = one("mantle.work.effort.WorkEffort", {workEffortId: task}).workEffortName
+            // nor is a task added under it
+            out.added = code(
+                run(state.hr, "mantle.work.TaskServices.create#Task", {
+                    workEffortName: "Extra step",
+                    parentWorkEffortId: task,
+                    rootWorkEffortId: made.workEffortId
+                })
+            )
+            out.children = rows("mantle.work.effort.WorkEffort", {parentWorkEffortId: task}).length
             return out
         },
         then(out) {
+            out.added === "MANAGED_WORK"
+            out.children === 0
             out.complete === ""
             out.status === "WeComplete"
             out.check === ""
@@ -406,6 +417,10 @@ feature(
             out.names = task
                 ? [
                       rows("mantle.work.effort.WorkEffortParty", {workEffortId: task, partyId, roleTypeId: "Custodian"}).length,
+                      // the leaver's manager does it (the user's call, Nov 11)
+                      rows("mantle.work.effort.WorkEffortParty", {workEffortId: task, roleTypeId: "Assignee"})
+                          .map(row => row.partyId === state.mgr)
+                          .join(","),
                       rows("mantle.humanres.checklist.ChecklistStep", {workEffortId: task})[0].isProtected,
                       one("mantle.work.effort.WorkEffort", {workEffortId: task}).statusId
                   ].join("|")
@@ -423,7 +438,7 @@ feature(
             out.asked.join("|") === "|EchRequested"
             out.decided.join("|") === "|true"
             out.task === true
-            out.names === "1|Y|WeInPlanning"
+            out.names === "1|true|Y|WeInPlanning"
             out.done === "WeComplete"
         }
     }

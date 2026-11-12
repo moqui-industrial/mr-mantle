@@ -40,7 +40,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="priority"/><order-by field-name="workEffortId"/>
             </entity-find>
             <set field="projectNames" from="{}"/>
+            <!-- a protected People task (offboarding, an equipment return; ChecklistStep isProtected) stays in the app, as CalDAV
+                leaves it out (impl-people P7 review, F22) -->
+            <set field="protectedIds" from="assignedList.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
+                    .condition('workEffortId', 'in', Array.from(assignedList).map((row) => row.workEffortId)).condition('isProtected', 'Y')
+                    .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : []"/>
             <iterate list="assignedList" entry="assigned">
+                <if condition="protectedIds.includes(assigned.workEffortId)"><continue/></if>
                 <if condition="taskList.some((task) => task.workEffortId == assigned.workEffortId)"><continue/></if>
                 <if condition="assigned.rootWorkEffortId &amp;&amp; projectNames[assigned.rootWorkEffortId] == null">
                     <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project">
@@ -112,7 +118,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="estimatedStartDate,estimatedCompletionDate,estimatedWorkTime,estimatedWorkDuration"/>
             </entity-find>
 
+            <!-- a protected People task stays out of a calendar (impl-people P7 review, F22) -->
+            <set field="protectedIds" from="workEffortList.length ? Array.from(ec.entity.find('mantle.humanres.checklist.ChecklistStep')
+                    .condition('workEffortId', 'in', Array.from(workEffortList).map((row) => row.workEffortId)).condition('isProtected', 'Y')
+                    .selectField('workEffortId').disableAuthz().list()).map((row) => row.workEffortId) : []"/>
             <iterate list="workEffortList" entry="workEffortDef">
+                <if condition="protectedIds.includes(workEffortDef.workEffortId)"><continue/></if>
                 <set field="workEffort" from="workEffortDef"/><!-- put it in the context -->
                 <set field="title" from="ec.resource.expand(titleGString, '')"/>
 
@@ -161,6 +172,12 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- no task added to managed work (a process whose policy guards execution, a work order's tree; impl-people P7 review) -->
+            <if condition="parentWorkEffortId || rootWorkEffortId">
+                <service-call name="mantle.work.ProcessServices.check#ManagedWork"
+                        in-map="{workEffortIdList:[parentWorkEffortId, rootWorkEffortId].filter((id) => !!id)}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <if condition="!workEffortId &amp;&amp; rootWorkEffortId">
                 <!-- a bank of 1: the numbers have no gaps (create#Project starts them at 1) -->
                 <set field="seqName" value="Project_${rootWorkEffortId}"/>

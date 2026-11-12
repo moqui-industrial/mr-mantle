@@ -239,7 +239,8 @@ function storeChecklist(p) {
         purposeEnumId: "WepPrOrgMgmt",
         isTemplate: "Y",
         statusId: "WeInPlanning",
-        ownerPartyId: organizationPartyId,
+        // no owner: an owning organization makes work visible to everyone of it (get#RecordLinkInfo); the template row names the
+        // employer (P7 review)
         workEffortName: name,
         description: text(p.description) || null
     }).workEffortId
@@ -349,14 +350,23 @@ function startChecklists(p) {
         })
     return {started, failed}
 }
+// The work's owner cleared (a template written with its employer as owner, as the demo's are).
+function clearOwners(workEffortIds) {
+    if (!workEffortIds.length) return
+    for (const row of Array.from(
+        find(WORK).condition("workEffortId", "in", workEffortIds).condition("ownerPartyId", "is-not-null", null).list()
+    ))
+        call("update#" + WORK, {workEffortId: row.workEffortId, ownerPartyId: null})
+}
 function appliedChange(employmentChangeId) {
     const change = text(employmentChangeId) ? one(CHANGE, {employmentChangeId: text(employmentChangeId)}) : null
     return change && change.statusId === "EchApplied" ? change : null
 }
-// The parties of a change's roles: the employee, their manager at the employer on the change's date and the HR officer who
-// asked for it.
+// The parties of a change's roles: the employee, their manager at the employer on the change's date (a separation's: the manager
+// of the assignment it ended, the instant before its date; the user's call, Nov 11) and the HR officer who asked for it.
 function roleParties(change) {
-    const at = ms(change.effectiveDate) ?? nowMs()
+    const effective = ms(change.effectiveDate) ?? nowMs()
+    const at = change.changeKindEnumId === "EckSeparation" ? effective - 1 : effective
     const assigned = people.assignmentsAt([change.partyId], at)[change.organizationPartyId + "/" + change.partyId]
     const manager =
         assigned?.managerPartyId ||
@@ -367,7 +377,7 @@ function roleParties(change) {
     const requester = change.requestedByUserId ? one("moqui.security.UserAccount", {userId: change.requestedByUserId}) : null
     return {
         Employee: change.partyId,
-        Manager: change.changeKindEnumId === "EckSeparation" ? null : manager,
+        Manager: manager !== change.partyId ? manager : null,
         HumanResourcesManager: requester?.partyId || null
     }
 }
@@ -406,10 +416,12 @@ function startChecklist(p) {
         startDate: change.effectiveDate,
         roleParties: parties,
         rootFields: {
-            workEffortName: (root.workEffortName || kindTexts[template.lifecycleKindEnumId]) + ": " + personName,
-            ownerPartyId: change.organizationPartyId
+            workEffortName: (root.workEffortName || kindTexts[template.lifecycleKindEnumId]) + ": " + personName
         }
     })
+    // a checklist's work has no owner, whatever its template has: an owning organization would make it visible to everyone of the
+    // employer (get#RecordLinkInfo's work effort rule); its people and People's own rules read it (P7 review)
+    clearOwners(Object.values(made.idMap || {}))
     const protectedKind = template.lifecycleKindEnumId === "ClkOffboarding"
     for (const [templateStepId, taskId] of Object.entries(made.idMap || {})) {
         if (templateStepId === template.workEffortId) continue
@@ -444,8 +456,8 @@ function startChecklist(p) {
     return {workEffortId: made.workEffortId, repeated: false}
 }
 // A separation's equipment return (its own transaction): one task per AssetPartyAssignment the person holds on the separation's
-// date, under a root of its own (People's policy, protected, due on the date, assigned to the HR officer who asked for the
-// separation), each naming its assignment by a WorkEffortAssetAssign of the asset and a WorkEffortParty of the holder in the
+// date, under a root of its own (People's policy, protected, due on the date, assigned to the leaver's manager of that employment,
+// from its assignment, else the HR officer who asked for the separation; the user's call, Nov 11), each naming its assignment by a WorkEffortAssetAssign of the asset and a WorkEffortParty of the holder in the
 // assignment's role. An assignment with an open return task already is left (a retry makes none again).
 function startEquipmentReturn(p) {
     const change = appliedChange(p.employmentChangeId)
@@ -457,7 +469,8 @@ function startEquipmentReturn(p) {
     const pending = held.filter(row => !openReturnTasks(row.assetId, row.partyId, row.roleTypeId).length)
     if (!pending.length) return {workEffortId: null, taskCount: 0}
     const personName = people.personNames([change.partyId])[change.partyId] || change.partyId
-    const receiver = roleParties(change).HumanResourcesManager
+    const parties = roleParties(change)
+    const receiver = parties.Manager || parties.HumanResourcesManager
     let rootId = rows(RUN, {employmentChangeId: change.employmentChangeId}).find(row => !row.templateWorkEffortId)?.workEffortId
     if (!rootId) {
         rootId = call("create#" + WORK, {
@@ -465,7 +478,6 @@ function startEquipmentReturn(p) {
             purposeEnumId: "WepPrOrgMgmt",
             statusId: "WeInPlanning",
             resolutionEnumId: "WerUnresolved",
-            ownerPartyId: change.organizationPartyId,
             workEffortName: "Equipment return: " + personName,
             estimatedCompletionDate: stamp(at)
         }).workEffortId
@@ -502,7 +514,6 @@ function startEquipmentReturn(p) {
             resolutionEnumId: "WerUnresolved",
             parentWorkEffortId: rootId,
             rootWorkEffortId: rootId,
-            ownerPartyId: change.organizationPartyId,
             workEffortName: "Return " + (asset.assetName || assignment.assetId),
             description:
                 "Return " +
@@ -564,19 +575,33 @@ function openReturnTasks(assetId, partyId, roleTypeId) {
     ).map(row => row.workEffortId)
 }
 // complete#ReturnTasks (Mantle's rule on an AssetPartyAssignment ended, whoever ends it): the open return tasks of the asset,
-// holder and role completed through set#TaskStatus. Never refuses: a failure is logged and the custody change stands.
+// holder and role completed through set#TaskStatus, each in a transaction and error frame of its own, so a task that cannot be
+// completed never marks the custody change's transaction for rollback nor touches its caller's messages (P7 review). Never
+// refuses: a failure is logged by task and the custody change stands.
 function completeReturnTasks(p) {
     let completed = 0
+    let taskIds = []
     try {
-        for (const workEffortId of openReturnTasks(text(p.assetId), text(p.partyId), text(p.roleTypeId))) {
-            call("mantle.work.TaskServices.set#TaskStatus", {workEffortId, statusId: "WeComplete"})
-            completed++
-        }
+        taskIds = openReturnTasks(text(p.assetId), text(p.partyId), text(p.roleTypeId))
     } catch (error) {
-        ec.message.clearErrors()
-        ec.logger.error(
-            "The return tasks of asset " + p.assetId + " held by " + p.partyId + " were not completed: " + error.message
-        )
+        ec.logger.error("The return tasks of asset " + p.assetId + " held by " + p.partyId + " were not read: " + error.message)
+    }
+    for (const workEffortId of taskIds) {
+        try {
+            lib.probe("mantle.work.TaskServices.set#TaskStatus", {workEffortId, statusId: "WeComplete"})
+            completed++
+        } catch (error) {
+            ec.logger.error(
+                "The return task " +
+                    workEffortId +
+                    " of asset " +
+                    p.assetId +
+                    " held by " +
+                    p.partyId +
+                    " was not completed: " +
+                    error.message
+            )
+        }
     }
     return {completed}
 }
@@ -595,7 +620,12 @@ function getChecklistTask(p) {
     if (!task || !run) unavailable()
     const fact = one(STEP, {workEffortId}) || {}
     const partyId = ec.user.userAccount?.partyId || null
-    const isParty = !!partyId && rows(PARTY, {workEffortId, partyId}).some(row => (ms(row.thruDate) ?? Infinity) > nowMs())
+    // a protected task (offboarding, an equipment return) is reached only by a current assignee who is not the person it is about
+    // (hiddenTaskIds): never by the holder of a return task's equipment, a party of it in the holding's role (P7 review, F22)
+    const isParty =
+        fact.isProtected === "Y"
+            ? !!partyId && !hiddenTaskIds([workEffortId], partyId).length
+            : !!partyId && rows(PARTY, {workEffortId, partyId}).some(row => (ms(row.thruDate) ?? Infinity) > nowMs())
     const hr = !!userScope.capabilities.hrView && userScope.organizationPartyIds.includes(run.organizationPartyId)
     const employee = partyId === run.partyId && fact.visibilityEnumId === "ChvEmployee"
     if (!isParty && !hr && !employee) unavailable()
@@ -803,6 +833,63 @@ function protectedTaskIds(workEffortIds) {
     )
 }
 
+// A change withdrawn before its date (a separation set for later; the user's call, Nov 11): its checklists' and its equipment
+// return's open work cancelled (WeCancelled; the rows and their history stay), so no one does it. For withdraw#EmploymentChange,
+// after its own check.
+function cancelChecklists(employmentChangeId) {
+    const roots = rows(RUN, {employmentChangeId: text(employmentChangeId)}).map(row => row.workEffortId)
+    if (!roots.length) return {cancelled: 0}
+    const open = Array.from(
+        find(WORK)
+            .condition("statusId", "in", openStatuses)
+            .condition(
+                ec.entity.conditionFactory.makeCondition(
+                    ec.entity.conditionFactory.makeCondition("workEffortId", "in", roots),
+                    "or",
+                    ec.entity.conditionFactory.makeCondition("rootWorkEffortId", "in", roots)
+                )
+            )
+            .list()
+    )
+    for (const row of open) call("update#" + WORK, {workEffortId: row.workEffortId, statusId: "WeCancelled"})
+    return {cancelled: open.length}
+}
+
+// The protected tasks of the ids a party may not reach through a generic listing or record rule (Commons' Tasks and Today, a
+// contact's tasks, get#RecordLinkInfo; P7 review, F22): a protected task is the work of its assignees, so it is reached only by a
+// current Assignee of it, and never by the person it is about (the leaver, the holder of a return task's equipment) unless its step
+// is visible to the employee. People's own screens read it by People's rules (get#ChecklistTask: its people and HR).
+function hiddenTaskIds(workEffortIds, partyId) {
+    const protectedIds = protectedTaskIds(workEffortIds)
+    if (!protectedIds.length) return []
+    if (!partyId) return protectedIds
+    const at = nowMs()
+    const assigned = new Set(
+        Array.from(find(PARTY).condition("workEffortId", "in", protectedIds).condition({partyId, roleTypeId: "Assignee"}).list())
+            .filter(row => openAt(row, at) && !["WeptDeclined", "WeptUnassigned"].includes(row.statusId))
+            .map(row => row.workEffortId)
+    )
+    if (!assigned.size) return protectedIds
+    const tasks = Array.from(find(WORK).condition("workEffortId", "in", Array.from(assigned)).list())
+    const roots = unique(tasks.map(row => row.rootWorkEffortId || row.workEffortId))
+    const subjects = new Map(
+        Array.from(find(RUN).condition("workEffortId", "in", roots).list()).map(row => [row.workEffortId, row.partyId])
+    )
+    const facts = new Map(
+        Array.from(find(STEP).condition("workEffortId", "in", Array.from(assigned)).list()).map(row => [row.workEffortId, row])
+    )
+    const reached = new Set(
+        tasks
+            .filter(
+                row =>
+                    subjects.get(row.rootWorkEffortId || row.workEffortId) !== partyId ||
+                    facts.get(row.workEffortId)?.visibilityEnumId === "ChvEmployee"
+            )
+            .map(row => row.workEffortId)
+    )
+    return protectedIds.filter(id => !reached.has(id))
+}
+
 const operations = {
     findChecklists,
     storeChecklist,
@@ -823,5 +910,9 @@ const operations = {
     },
     // for CalendarDavServices.get#TaskObjectTags and Employees.js
     protectedTaskIds,
+    // for the generic task listings and get#RecordLinkInfo (P7 review)
+    hiddenTaskIds,
+    // for withdraw#EmploymentChange (a separation withdrawn before its date)
+    cancelChecklists,
     equipmentRows
 })

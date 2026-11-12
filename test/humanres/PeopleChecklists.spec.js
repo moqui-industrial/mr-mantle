@@ -95,6 +95,51 @@ function phoneTasks(username) {
     }
 }
 
+// whether the user sees the task through get#RecordLinkInfo, with authorization on (the record rule under MANTLE_USER_ORG)
+function sees(username, workEffortId) {
+    login(username)
+    ec.artifactExecution.enableAuthz()
+    ec.message.pushErrors()
+    try {
+        const out =
+            ec.service
+                .sync()
+                .name("mantle.party.CommunicationServices.get#RecordLinkInfo")
+                .parameters({recordEntityName: "mantle.work.effort.WorkEffort", recordId: workEffortId, checkOnly: true})
+                .requireNewTransaction(true)
+                .call() || {}
+        return ec.message.hasError() ? "error: " + ec.message.getErrorsString() : out.recordVisible === true
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+    }
+}
+// the record rule's service opened to the spec's users, filtered by their organizations
+function linkInfoFor(userGroupIds) {
+    const groupId = prefix + "_RLI"
+    call("create#moqui.security.ArtifactGroup", {artifactGroupId: groupId, description: "People checklist record links"})
+    call("create#moqui.security.ArtifactGroupMember", {
+        artifactGroupId: groupId,
+        artifactTypeEnumId: "AT_SERVICE",
+        artifactName: "mantle.party.CommunicationServices.get#RecordLinkInfo",
+        nameIsPattern: "N",
+        inheritAuthz: "Y"
+    })
+    for (const userGroupId of userGroupIds) {
+        const artifactAuthzId = prefix + "_RLI_" + userGroupId.slice(-8)
+        call("create#moqui.security.ArtifactAuthz", {
+            artifactAuthzId,
+            userGroupId,
+            artifactGroupId: groupId,
+            authzTypeEnumId: "AUTHZT_ALLOW",
+            authzActionEnumId: "AUTHZA_ALL"
+        })
+        call("create#moqui.security.ArtifactAuthzFilter", {artifactAuthzId, entityFilterSetId: "MANTLE_USER_ORG"})
+    }
+}
+
 spec({
     setupSpec() {
         login("john.doe")
@@ -329,10 +374,25 @@ feature(
             out.reader = code(run(state.reader, P + "get#AssignedEquipment", {partyId: holder}))
             out.hrB = code(run(state.hrB, P + "get#AssignedEquipment", {partyId: holder}))
             // a return task of the holding (as a separation raises one)
+            const rootId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTask",
+                statusId: "WeInPlanning",
+                workEffortName: "Equipment return: Chkl HOLDER"
+            }).workEffortId
+            call("create#mantle.humanres.checklist.EmploymentChecklist", {
+                workEffortId: rootId,
+                partyRelationshipId: employment,
+                partyId: holder,
+                organizationPartyId: orgA,
+                lifecycleKindEnumId: "ClkOffboarding",
+                startedDate: ec.user.nowTimestamp
+            })
             const taskId = call("create#mantle.work.effort.WorkEffort", {
                 workEffortTypeEnumId: "WetTask",
                 statusId: "WeInPlanning",
-                workEffortName: "Return Chkl phone"
+                workEffortName: "Return Chkl phone",
+                parentWorkEffortId: rootId,
+                rootWorkEffortId: rootId
             }).workEffortId
             call("create#mantle.work.effort.WorkEffortAssetAssign", {
                 workEffortId: taskId,
@@ -351,6 +411,23 @@ feature(
                 sourceLinkEnumId: "ClsEquipmentReturn",
                 isProtected: "Y"
             })
+            // the manager does it: the protected task is theirs to reach, never its holder's or a colleague's (P7 review, F22)
+            call("create#mantle.work.effort.WorkEffortParty", {
+                workEffortId: taskId,
+                partyId: state.mgr,
+                roleTypeId: "Assignee",
+                fromDate: since,
+                statusId: "WeptAssigned"
+            })
+            linkInfoFor([state.uMgr, uHolder, state.reader])
+            out.reach = [sees(state.uMgr, taskId), sees(uHolder, taskId), sees(state.reader, taskId)]
+            const myTasks = username =>
+                Array.from(run(username, "mantle.work.TaskServices.get#MyTasks", {}).taskList || []).map(row => row.workEffortId)
+            out.myTasks = [myTasks(state.uMgr).includes(taskId), myTasks(uHolder).includes(taskId)]
+            out.context = [
+                code(run(state.uMgr, P + "get#ChecklistTask", {workEffortId: taskId})),
+                code(run(uHolder, P + "get#ChecklistTask", {workEffortId: taskId}))
+            ]
             out.listed = run(state.hr, P + "get#AssignedEquipment", {partyId: holder}).equipmentList[0].returnTaskId === taskId
             const returning = {assetId, partyId: holder, roleTypeId: "Custodian"}
             out.outside = code(run(state.hr, P + "return#Equipment", Object.assign({newPartyId: state.outsider}, returning)))
@@ -370,6 +447,9 @@ feature(
         },
         then(out) {
             out.hr.join("|") === "|true|Chkl phone/SN-77/Custodian"
+            out.reach.join("|") === "true|false|false"
+            out.myTasks.join("|") === "false|false"
+            out.context.join("|") === "|RECORD_UNAVAILABLE"
             out.self === 1
             out.reader === "RECORD_UNAVAILABLE"
             out.hrB === "RECORD_UNAVAILABLE"

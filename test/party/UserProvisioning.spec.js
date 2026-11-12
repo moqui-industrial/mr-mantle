@@ -124,6 +124,14 @@ spec({
             appName: "Spec",
             description: "Spec staff"
         })
+        // a bundle only an identity operator may give (its delegable permission)
+        group(prefix + "_KEYS", [])
+        call("create#moqui.security.CapabilityBundle", {
+            userGroupId: prefix + "_KEYS",
+            appName: "Spec",
+            description: "Spec keys",
+            delegablePermissionId: "ADMIN_IDENTITY_MANAGE"
+        })
         state.operator = person("Operator", [state.orgA, state.orgB], "uprov.operator", "PrtAgent")
         member(prefix + "_OPERATORS", state.operator.userId)
         state.hr = person("Hr", [state.orgA], "uprov.hr", "PrtAgent")
@@ -157,6 +165,13 @@ feature(
             out.unregistered = code(
                 as(state.hr.username, S + "request#Provisioning", {employmentChangeId: changeId, bundleGroupIdList: ["ADMIN"]})
             )
+            // a bundle the HR officer may not give, even by Mantle's service directly (P7 review)
+            out.notYours = code(
+                as(state.hr.username, S + "request#Provisioning", {
+                    employmentChangeId: changeId,
+                    bundleGroupIdList: [prefix + "_STAFF", prefix + "_KEYS"]
+                })
+            )
             const first = as(
                 state.hr.username,
                 S + "request#Provisioning",
@@ -176,6 +191,26 @@ feature(
                 operation.statusId
             ]
             out.steps = steps(first.operationId)
+            // the employer's identity operators are told, on the IdentityOperatorRequest topic (the user's call, Nov 11): the
+            // operator of A, not the HR officer who asked; the title names the person and employer only
+            const told = userId =>
+                Array.from(
+                    ec.entity
+                        .find("moqui.security.user.NotificationMessageUser")
+                        .condition("userId", userId)
+                        .disableAuthz()
+                        .list()
+                )
+                    .map(row =>
+                        one("moqui.security.user.NotificationMessage", {notificationMessageId: row.notificationMessageId})
+                    )
+                    .filter(
+                        message =>
+                            message?.topic === "IdentityOperatorRequest" &&
+                            String(message.messageJson || "").includes(first.operationId)
+                    )
+            const notices = told(state.operator.userId)
+            out.told = [notices.length, notices[0]?.titleText || "", told(state.hr.userId).length]
             out.recorded =
                 one("mantle.humanres.employment.EmploymentChange", {employmentChangeId: changeId}).accessOperationId ===
                 first.operationId
@@ -210,6 +245,8 @@ feature(
             out.reader === "RECORD_UNAVAILABLE"
             out.notAsked === "NOT_REQUESTED"
             out.unregistered === "GRANT_INVALID"
+            out.notYours === "GRANT_NOT_YOURS"
+            out.told.join("|") === "1|An account to set up: Hired Provision (Provision Spec A)|0"
             out.once.join("|") === "|false|true|true"
             out.operation.join("|") === "UlkProvision|true||UlopAttention"
             out.steps === "membership:Done,invite:Waiting(operator),grants:Skipped,notify:Waiting"

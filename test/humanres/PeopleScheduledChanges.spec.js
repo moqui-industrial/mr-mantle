@@ -355,3 +355,163 @@ feature(
         }
     }
 )
+
+feature(
+    "a separation set for a later date is withdrawn by HR: the employment, its terms and a report's manager go on, its access end is withdrawn, and its offboarding and return tasks, the manager's, are cancelled",
+    {
+        when() {
+            const out = {}
+            const hire = (firstName, managerPartyId, key) =>
+                run(state.hr, P + "hire#Employee", {
+                    organizationPartyId: orgA,
+                    firstName,
+                    lastName: "Sched",
+                    workEmail: firstName.toLowerCase() + "@sched.example",
+                    confirmNewPerson: true,
+                    fromDate: dayText(-30),
+                    departmentPartyId: state.office,
+                    emplPositionId: firstName === "Dee" ? state.seatOffice : null,
+                    managerPartyId,
+                    operationKey: key
+                })
+            const dee = hire("Dee", state.mgr, "SCHED-DEE")
+            const eve = hire("Eve", dee.partyId, "SCHED-EVE")
+            out.hires = [dee.error, eve.error]
+            if (dee.error || eve.error) return out
+            const employment = dee.partyRelationshipId
+            // an offboarding checklist with a step of the manager's, a laptop held and an account
+            const template = run(state.hr, P + "store#Checklist", {
+                organizationPartyId: orgA,
+                lifecycleKindEnumId: "ClkOffboarding",
+                workEffortName: "Leaving"
+            }).workEffortId
+            run(state.hr, P + "store#ChecklistStep", {
+                templateWorkEffortId: template,
+                workEffortName: "Exit talk",
+                roleTypeId: "Manager"
+            })
+            const assetId = call("create#mantle.product.asset.Asset", {
+                assetTypeEnumId: "AstTpEquipment",
+                assetName: "Sched laptop",
+                ownerPartyId: orgA
+            }).assetId
+            call("create#mantle.product.asset.AssetPartyAssignment", {
+                assetId,
+                partyId: dee.partyId,
+                roleTypeId: "Custodian",
+                fromDate: since
+            })
+            call("create#moqui.security.UserAccount", {
+                userId: prefix + "_U_DEE",
+                username: prefix + "_U_DEE",
+                partyId: dee.partyId,
+                currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+                passwordHashType: "SHA"
+            })
+            const before = terms(employment, dee.partyId)
+            const eveBefore = terms(eve.partyRelationshipId, eve.partyId)
+            const separation = applied(employment, {changeKind: "separation", effectiveDate: dayText(8), reason: "Leaving"})
+            out.separation = [separation.error, separation.applied]
+            const runs = () =>
+                rows("mantle.humanres.checklist.EmploymentChecklist", {employmentChangeId: separation.employmentChangeId})
+            const waitFor = read => {
+                const end = Date.now() + 5000
+                let value = read()
+                while (!value && Date.now() < end) value = read()
+                return value
+            }
+            waitFor(() => runs().length >= 2)
+            const roots = runs().map(row => row.workEffortId)
+            const tasks = () =>
+                roots.length
+                    ? Array.from(
+                          ec.entity
+                              .find("mantle.work.effort.WorkEffort")
+                              .condition("rootWorkEffortId", "in", roots)
+                              .disableAuthz()
+                              .list()
+                      )
+                    : []
+            // the exit talk and the laptop's return are the leaver's manager's (the user's call, Nov 11)
+            out.assignees = tasks()
+                .map(
+                    task =>
+                        task.workEffortName +
+                        "=" +
+                        (rows("mantle.work.effort.WorkEffortParty", {workEffortId: task.workEffortId, roleTypeId: "Assignee"})[0]
+                            ?.partyId ===
+                            state.mgr)
+                )
+                .sort()
+                .join(",")
+            out.scheduled = terms(employment, dee.partyId) !== before
+            // the access end waits for an identity operator
+            waitFor(
+                () =>
+                    rows("mantle.party.UserLifecycleOperation", {
+                        sourceReference: "EmploymentChange:" + separation.employmentChangeId
+                    }).length
+            )
+            const accessEnd = run(state.hr, "mantle.party.IdentityServices.request#AccessEnd", {
+                employmentChangeId: separation.employmentChangeId
+            })
+            out.accessEnd = [accessEnd.error, accessEnd.statusId]
+            out.listed = run(state.hr, P + "find#EmploymentChanges", {partyId: dee.partyId, includeDone: true}).changes.find(
+                row => row.employmentChangeId === separation.employmentChangeId
+            )?.canWithdraw
+            const withdraw = parameters =>
+                run(
+                    state.hr,
+                    P + "withdraw#EmploymentChange",
+                    Object.assign({employmentChangeId: separation.employmentChangeId}, parameters)
+                )
+            out.reader = code(
+                run(state.reader, P + "withdraw#EmploymentChange", {
+                    employmentChangeId: separation.employmentChangeId,
+                    reason: "No"
+                })
+            )
+            const done = withdraw({reason: "She stays"})
+            out.done = [done.error, done.statusId]
+            out.after = terms(employment, dee.partyId) === before
+            out.relationship = [
+                one("mantle.party.PartyRelationship", {partyRelationshipId: employment}).thruDate == null,
+                one("mantle.humanres.employment.Employment", {partyRelationshipId: employment}).terminationReasonEnumId == null
+            ]
+            out.eve = terms(eve.partyRelationshipId, eve.partyId) === eveBefore
+            const operation = one("mantle.party.UserLifecycleOperation", {operationId: accessEnd.operationId})
+            out.operation = [
+                operation?.statusId,
+                rows("mantle.party.UserLifecycleOperationStep", {operationId: accessEnd.operationId}).every(
+                    step => step.statusId === "UlstSkipped" || step.statusId === "UlstDone"
+                )
+            ]
+            out.cancelled = tasks().every(task => task.statusId === "WeCancelled")
+            out.again = code(withdraw({reason: "Again"}))
+            out.noAccessEnd = code(
+                run(state.hr, "mantle.party.IdentityServices.request#AccessEnd", {
+                    employmentChangeId: separation.employmentChangeId,
+                    operationKey: "SCHED-DEE-AGAIN"
+                })
+            )
+            return out
+        },
+        then(out) {
+            out.hires.join("|") === "|"
+            out.separation.join("|") === "|true"
+            out.assignees === "Exit talk=true,Return Sched laptop=true"
+            out.scheduled === true
+            out.accessEnd.join("|") === "|UlopAttention"
+            out.listed === true
+            out.reader === "PERMISSION_DENIED"
+            out.done.join("|") === "|EchWithdrawn"
+            out.after === true
+            out.relationship.join("|") === "true|true"
+            out.eve === true
+            out.operation.join("|") === "UlopWithdrawn|true"
+            out.cancelled === true
+            out.again === "NOT_WITHDRAWABLE"
+            out.noAccessEnd === "RECORD_UNAVAILABLE"
+        }
+    }
+)

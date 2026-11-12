@@ -142,14 +142,15 @@ function visiblePosition(reach, emplPositionId) {
 
 // ===== holders =====
 // The holders of the positions: {emplPositionId: [holder]}, each {partyId, fromMs, thruMs, source, comments}: the dated
-// occupancy rows, and an employment naming the position for a person with no occupancy row of it (source employment).
+// occupancy rows, and an employment naming the position for a person with no occupancy row of it (source employment). A row that
+// ends on its own start (a withdrawn change's seat, P7) never held it and is left out (P7 review).
 function holdersOf(positionIds) {
     const found = {}
     if (!positionIds.length) return found
     const listOf = emplPositionId => found[emplPositionId] || (found[emplPositionId] = [])
     for (const row of Array.from(
         find(HOLDER).condition("emplPositionId", "in", positionIds).condition("roleTypeId", holderRole).list()
-    ))
+    ).filter(row => row.thruDate == null || ms(row.thruDate) > (ms(row.fromDate) ?? -Infinity)))
         listOf(row.emplPositionId).push({
             partyId: row.partyId,
             fromMs: ms(row.fromDate),
