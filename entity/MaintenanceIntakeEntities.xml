@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance intake (IronStone Maintenance design §3 Requests, MT-02, MT-15; impl-maintenance P4). A reported problem is a
+    Request of type RqtMaintenance with its organization as its OrgInternal party (as Manufacturing's maintenance request has it,
+    ProductionDowntime.js), its one target (an Asset or a Facility) as a RequestRecord and its work order by RequestWorkEffort; no
+    record of its own. This view is the scoped list of mantle.work.MaintenanceServices.find#MaintenanceRequests: the scope (the
+    organization, or the reporter), the filters, the order and the page are in the query. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <view-entity entity-name="MaintenanceRequestDetail" package="mantle.work.maintenance">
+        <description>A request with its organization (an OrgInternal RequestParty; the query names roleTypeId OrgInternal and a
+            current row), for find#MaintenanceRequests.</description>
+        <member-entity entity-alias="REQ" entity-name="mantle.request.Request"/>
+        <member-entity entity-alias="RPTY" entity-name="mantle.request.RequestParty" join-from-alias="REQ">
+            <key-map field-name="requestId"/></member-entity>
+        <alias-all entity-alias="REQ"/>
+        <alias entity-alias="RPTY" name="organizationPartyId" field="partyId"/>
+        <alias entity-alias="RPTY" name="organizationRoleTypeId" field="roleTypeId"/>
+        <alias entity-alias="RPTY" name="organizationThruDate" field="thruDate"/>
+    </view-entity>
+</entities>

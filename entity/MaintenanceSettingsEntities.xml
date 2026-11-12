@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance's lookups (IronStone Maintenance design §9 Lookups FailureModes; impl-maintenance P18): a failure mode (an
+    Enumeration of MaintenanceFailureMode, ended by People's Enumeration.thruDate) applies to every piece of equipment, or, once it
+    has applicability rows in effect, to the equipment of those asset classes and models alone. A row is dated and ended, never
+    deleted (mantle.work.MaintenanceSettingsServices.store#MaintenanceLookup). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="MaintenanceLookupApplicability" package="mantle.work.maintenance" cache="never">
+        <description>Where a maintenance lookup value applies, from fromDate to thruDate: equipment of an asset class (classEnumId,
+            AssetClass) or of a model (productId), one of the two. A value with no row in effect applies everywhere.</description>
+        <field name="applicabilityId" type="id" is-pk="true"/>
+        <field name="enumId" type="id"/>
+        <field name="classEnumId" type="id"/>
+        <field name="productId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="moqui.basic.Enumeration" short-alias="value"/>
+        <relationship type="one" title="AssetClass" related="moqui.basic.Enumeration" short-alias="assetClass">
+            <key-map field-name="classEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="mantle.product.Product" short-alias="product"/>
+        <index name="MNT_LKP_APPL_ENUM"><index-field name="enumId"/></index>
+    </entity>
+
+    <!-- impl-maintenance P8 (design-maintenance §9 Teams TeamDefaults, review Y4): a team is People's (an OrgTeam Organization with
+        dated PrtMember rows, written by mantle.humanres.OrganizationServices); Maintenance owns only its dispatch defaults. -->
+    <entity entity-name="MaintenanceTeamDefaults" package="mantle.work.maintenance" cache="never">
+        <description>A maintenance team's dispatch and intake defaults from fromDate (mantle.work.MaintenanceSettingsServices
+            .store#MaintenanceTeamDefaults; a change ends the row in effect and starts the next, nothing is deleted): the resource
+            scope (a facility and those under it whose work the team takes by default), the default assignee (a member of the team),
+            and the project its work is charged to by default (the plus-tag of its intake address is the team's PartySetting
+            MntIntakePlusTag, which the mail intake reads, impl-maintenance P4). The defaults grant nothing: membership and these
+            rows give no permission and move no custody.</description>
+        <field name="teamPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="organizationPartyId" type="id"><description>The team's organization (its ownerPartyId when written)</description></field>
+        <field name="facilityId" type="id"><description>The resource scope: this facility and those under it</description></field>
+        <field name="defaultAssigneePartyId" type="id"/>
+        <field name="projectWorkEffortId" type="id"/>
+        <field name="changedByUserId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" title="DefaultAssignee" related="mantle.party.Party" short-alias="defaultAssignee">
+            <key-map field-name="defaultAssigneePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Project" related="mantle.work.effort.WorkEffort" short-alias="project">
+            <key-map field-name="projectWorkEffortId" related="workEffortId"/></relationship>
+        <index name="MNT_TEAM_DEF_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+</entities>

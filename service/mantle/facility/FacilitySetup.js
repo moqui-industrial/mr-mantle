@@ -26,12 +26,13 @@ function scope() {
     return facilityScope.scope()
 }
 const ownedBy = (userScope, partyId) => facilityScope.owns(userScope, partyId)
-// A facility of the user's, locked for update when asked; a missing one and another organization's are refused alike.
+// A facility of the user's (by its owner, or its nearest owning ancestor when it names none: FacilityScope.facilityOrganization),
+// locked for update when asked; a missing one and another organization's are refused alike.
 function facilityOf(userScope, facilityId, lock = false) {
     let query = find(facilityEntity, {facilityId: facilityId || "_NA_"})
     if (lock) query = query.forUpdate(true)
     const facility = blank(facilityId) ? null : query.one()
-    if (!facility || !ownedBy(userScope, facility.ownerPartyId))
+    if (!facility || !facilityScope.ownsFacility(userScope, facility))
         denied("FACILITY_UNAVAILABLE", "Facility " + (facilityId || "") + " is not available")
     return facility
 }
@@ -57,10 +58,14 @@ function storeFacility(p) {
     if (existing) facilityOf(userScope, existing.facilityId)
     const has = name => Object.prototype.hasOwnProperty.call(p, name) && p[name] !== undefined
     const ownerPartyId = has("ownerPartyId") && !blank(p.ownerPartyId) ? p.ownerPartyId : existing?.ownerPartyId
-    if (!ownerPartyId) denied("OWNER_REQUIRED", "Choose the organization that owns the facility")
-    if (!one("mantle.party.PartyRole", {partyId: ownerPartyId, roleTypeId: "OrgInternal"}) || !ownedBy(userScope, ownerPartyId))
+    // a stored facility that names no owner keeps none and stays its nearest owning ancestor's (facilityOf checked it); a new
+    // facility names its owner
+    const inherited = existing && !existing.ownerPartyId ? facilityScope.facilityOrganization(existing) : null
+    if (!ownerPartyId && !inherited) denied("OWNER_REQUIRED", "Choose the organization that owns the facility")
+    if (ownerPartyId && (!one("mantle.party.PartyRole", {partyId: ownerPartyId, roleTypeId: "OrgInternal"}) || !ownedBy(userScope, ownerPartyId)))
         denied("OWNER_UNAVAILABLE", "Organization " + ownerPartyId + " is not available")
-    if (existing && existing.ownerPartyId !== ownerPartyId && blank(p.changeReason))
+    // a change of the facility's organization needs a reason; naming the organization it already takes from its ancestor does not
+    if (existing && ownerPartyId && (existing.ownerPartyId || inherited) !== ownerPartyId && blank(p.changeReason))
         denied("REASON_REQUIRED", "Give a reason for the change of owner")
     const facilityName = has("facilityName") ? text(p.facilityName) : existing?.facilityName
     if (!facilityName) denied("NAME_REQUIRED", "Give the facility a name")
@@ -85,8 +90,24 @@ function storeFacility(p) {
     }
     if (!blank(p.openedDate) && !blank(p.closedDate) && ms(p.closedDate) < ms(p.openedDate))
         denied("DATES_INVALID", "The facility cannot close before it opens")
+    // a room's people capacity and booking, and the facility's time zone (impl-maintenance P2, F16)
+    if (!blank(p.bookable) && !["Y", "N"].includes(String(p.bookable))) denied("VALUE_INVALID", "Bookable is Y or N")
+    if (!blank(p.capacity)) {
+        let capacity
+        try {
+            capacity = toDecimal(p.capacity)
+        } catch (_) {
+            capacity = null
+        }
+        if (capacity == null || capacity.compare(0) <= 0) denied("VALUE_INVALID", "Capacity is a number above zero")
+    }
+    if (!blank(p.capacityUomId) && !one("moqui.basic.Uom", {uomId: p.capacityUomId}))
+        denied("VALUE_INVALID", "Choose a valid capacity unit")
+    if (!blank(p.timeZone) && !Array.from(ec.l10n.getAvailableTimeZones() || []).includes(String(p.timeZone)))
+        denied("VALUE_INVALID", "Choose a valid time zone")
     const values = Object.assign({}, p, {ownerPartyId, facilityName})
-    for (const name of ["facilityId", "facilityTypeEnumId", "description"]) if (has(name) && blank(p[name])) values[name] = null
+    for (const name of ["facilityId", "facilityTypeEnumId", "description", "bookable", "capacity", "capacityUomId", "timeZone"])
+        if (has(name) && blank(p[name])) values[name] = null
     // the parent: the new one, none when the user removed it, else as stored
     if (parentChanged) values.parentFacilityId = p.parentFacilityId
     else if (clearParent && blank(p.parentFacilityId)) values.parentFacilityId = null
@@ -96,7 +117,7 @@ function storeFacility(p) {
     if (existing) {
         // a new owner first, through the entity's own update, so the audit log keeps it with its reason
         if (existing.ownerPartyId !== ownerPartyId) {
-            ec.context.putAll({ownerPartyId_changeReason: String(p.changeReason).trim()})
+            ec.context.putAll({ownerPartyId_changeReason: text(p.changeReason)})
             call("update#" + facilityEntity, {facilityId: existing.facilityId, ownerPartyId})
         }
         call("mantle.facility.FacilityServices.update#Facility", values)
@@ -322,7 +343,44 @@ function checkOpen(p) {
     return {locationTypeEnumId: location.locationTypeEnumId || null}
 }
 
-const operations = {storeFacility, storeLocation, storeLocationType, blockers, closeLocation, reopenLocation, checkOpen}
+// store#FacilityFeature: a room feature of one of the user's facilities from a date, or the end of the one in effect; rows are
+// ended, never deleted, so the features on a past day stay readable (impl-maintenance P2).
+function storeFeature(p) {
+    const userScope = scope()
+    const facility = facilityOf(userScope, p.facilityId, true)
+    enumOf(p.featureEnumId, "RoomFeature", "room feature")
+    const now = ms(ec.user.nowTimestamp)
+    const rows = Array.from(
+        find("mantle.facility.FacilityFeature", {facilityId: facility.facilityId, featureEnumId: p.featureEnumId}).forUpdate(true).list()
+    )
+    const open = rows.filter(row => row.thruDate == null || ms(row.thruDate) > now)
+    if (p.end === true || p.end === "true" || p.end === "Y") {
+        const current = open.find(row => ms(row.fromDate) <= now) || open[0]
+        if (!current) denied("RECORD_UNAVAILABLE", "The room has no such feature in effect")
+        const thruDate = blank(p.thruDate) ? ec.user.nowTimestamp : p.thruDate
+        if (ms(thruDate) < ms(current.fromDate)) denied("DATES_INVALID", "A feature cannot end before it starts")
+        call("update#mantle.facility.FacilityFeature", {
+            facilityId: facility.facilityId,
+            featureEnumId: p.featureEnumId,
+            fromDate: current.fromDate,
+            thruDate
+        })
+        return {facilityId: facility.facilityId, featureEnumId: p.featureEnumId, fromDate: current.fromDate}
+    }
+    if (open.length) denied("FEATURE_EXISTS", "The room already has this feature")
+    const fromDate = blank(p.fromDate) ? ec.user.nowTimestamp : p.fromDate
+    if (!blank(p.thruDate) && ms(p.thruDate) < ms(fromDate)) denied("DATES_INVALID", "A feature cannot end before it starts")
+    call("create#mantle.facility.FacilityFeature", {
+        facilityId: facility.facilityId,
+        featureEnumId: p.featureEnumId,
+        fromDate,
+        thruDate: blank(p.thruDate) ? null : p.thruDate,
+        comments: text(p.comments)
+    })
+    return {facilityId: facility.facilityId, featureEnumId: p.featureEnumId, fromDate}
+}
+
+const operations = {storeFacility, storeLocation, storeLocationType, blockers, closeLocation, reopenLocation, checkOpen, storeFeature}
 function execute(op, parameters) {
     if (!operations[op]) throw new Error("Unknown facility operation " + op)
     return operations[op](parameters)

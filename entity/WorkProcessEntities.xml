@@ -18,9 +18,10 @@ along with this software (see the LICENSE.md file). If not, see
     the policy using it and whether that policy guards execution (the generic task and work-effort services refuse work whose
     policy guards it: mantle.work.ProcessServices.check#ManagedWork); a step's policy holds whether it is required, the role it
     is assigned by and its due offset. mantle.work.ProcessServices store#ProcessStep and instantiate#WorkProcess (WorkProcesses.js)
-    write them; an instantiated execution gets a copy of each, so the same rule reads the execution. Maintenance's P6 adds
+    write them; an instantiated execution gets a copy of each, so the same rule reads the execution. Maintenance's P6 added
     publication, approval and applicability to the first and the response kind, measurement, evidence and waiver fields to the
-    second. -->
+    second (impl-maintenance P6; MaintenanceProcedures.js writes and checks them for its policy, WppMaintenanceProcedure, whose
+    policy guards execution; People's checklists leave them empty). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="WorkEffortProcessPolicy" package="mantle.work.effort" cache="never">
         <description>The policy of a process root (a template or an execution of one) from fromDate: the policy that uses it
@@ -37,6 +38,31 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="operationKey" type="text-medium"><description>An execution's: the key instantiate#WorkProcess was
             called with</description></field>
         <field name="comments" type="text-medium"/>
+        <!-- impl-maintenance P6: publication, approval, effectivity and applicability (a template's; an execution's copy keeps the
+            source's publication for provenance). Effectivity is separate from the template's status (Draft WeInPlanning, Approved
+            WeApproved, Retired WeClosed): new work is made only from an approved template whose effective window holds the
+            creation time. -->
+        <field name="effectiveFromDate" type="date-time" enable-audit-log="update"><description>The approved definition takes
+            effect for new work from this time</description></field>
+        <field name="effectiveThruDate" type="date-time" enable-audit-log="update"><description>Retired: no new work from this
+            time</description></field>
+        <field name="approvedByUserId" type="id"/>
+        <field name="approvedDate" type="date-time"/>
+        <field name="lastAuthorUserId" type="id"><description>Who last changed the definition: the approver is not this user
+            unless the organization's policy allows self-approval</description></field>
+        <field name="lastAuthoredDate" type="date-time"/>
+        <field name="maintenanceTypeEnumId" type="id"><description>Applicability: the maintenance type of work made from
+            it</description></field>
+        <field name="applicableProductId" type="id"><description>Applicability: the equipment model (Product) it is for;
+            empty for any</description></field>
+        <field name="applicableAssetClassEnumId" type="id"><description>Applicability: the equipment class (Asset.classEnumId);
+            empty for any</description></field>
+        <field name="applicableFacilityTypeEnumId" type="id"><description>Applicability: the facility type for facility work;
+            empty for any</description></field>
+        <field name="sourceWorkEffortId" type="id"><description>The template this draft was cloned from (a new identity; no
+            approval is copied)</description></field>
+        <field name="publishedContentId" type="id"><description>The stored PDF of the definition as last approved
+            (WorkEffortContent WectPublishedProcedure)</description></field>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <relationship type="one" title="WorkProcessPolicy" related="moqui.basic.Enumeration" short-alias="policy">
             <key-map field-name="processPolicyEnumId" related="enumId"/></relationship>
@@ -45,6 +71,20 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Work Process Policy" enumTypeId="WorkProcessPolicy"/>
             <moqui.basic.Enumeration enumId="WppPeopleChecklist" description="People lifecycle checklist" sequenceNum="1"
                     enumTypeId="WorkProcessPolicy"/>
+            <!-- impl-maintenance P6: a maintenance procedure, whose policy guards execution -->
+            <moqui.basic.Enumeration enumId="WppMaintenanceProcedure" description="Maintenance procedure" sequenceNum="2"
+                    enumTypeId="WorkProcessPolicy"/>
+            <!-- the content of a procedure: a draft step instruction (WectInstruction rows are written from it at approval,
+                impl-maintenance F68) and the stored print of an approved definition -->
+            <moqui.basic.Enumeration enumId="WectProcedureDraft" description="Procedure instruction (draft)"
+                    enumTypeId="WorkEffortContentType"/>
+            <moqui.basic.Enumeration enumId="WectPublishedProcedure" description="Published procedure"
+                    enumTypeId="WorkEffortContentType"/>
+            <!-- a step's response kind (design-maintenance §4.3) -->
+            <moqui.basic.EnumerationType description="Work Step Response Kind" enumTypeId="WorkStepResponseKind"/>
+            <moqui.basic.Enumeration enumId="WsrCheckOff" description="Check off" sequenceNum="1" enumTypeId="WorkStepResponseKind"/>
+            <moqui.basic.Enumeration enumId="WsrPassFail" description="Pass or fail" sequenceNum="2" enumTypeId="WorkStepResponseKind"/>
+            <moqui.basic.Enumeration enumId="WsrReading" description="Reading" sequenceNum="3" enumTypeId="WorkStepResponseKind"/>
         </seed-data>
     </entity>
     <entity entity-name="WorkEffortStepPolicy" package="mantle.work.effort" cache="never">
@@ -59,7 +99,141 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="roleTypeId" type="id"><description>The role the step is assigned by</description></field>
         <field name="dueOffsetDays" type="number-integer"><description>Due this many days after the execution's start
             (negative: before it)</description></field>
+        <!-- impl-maintenance P6 (design-maintenance §4.1, §4.3): what a response to the step must be; a structural group (a step
+            with steps under it) has none. People's checklist steps leave them empty. -->
+        <field name="responseKindEnumId" type="id"><description>WorkStepResponseKind: check off, pass or fail, or a
+            reading</description></field>
+        <field name="measurementTypeId" type="id"><description>A reading's measurement type</description></field>
+        <field name="measurementUomId" type="id"><description>A reading's unit, of the measurement type's kind</description></field>
+        <field name="minimumValue" type="number-decimal"/>
+        <field name="maximumValue" type="number-decimal"/>
+        <field name="evidenceRequired" type="text-indicator"/>
+        <field name="commentRequired" type="text-indicator"/>
+        <field name="waiverAllowed" type="text-indicator"/>
+        <field name="changeReason" type="text-medium"/>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <relationship type="one-nofk" related="mantle.party.RoleType" short-alias="roleType"/>
+        <relationship type="one" title="WorkStepResponseKind" related="moqui.basic.Enumeration" short-alias="responseKind">
+            <key-map field-name="responseKindEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.measurement.MeasurementType" short-alias="measurementType"/>
+        <relationship type="one-nofk" title="Measurement" related="moqui.basic.Uom" short-alias="measurementUom">
+            <key-map field-name="measurementUomId" related="uomId"/></relationship>
+    </entity>
+    <!-- impl-maintenance P7 (design-maintenance §4.3, StepResponse, ExecutionAmendment, §12 the completed checklist): the facts of
+        executing a process's steps, each its own record. A check is one response to a step (check off, pass or fail, a reading), with
+        its observed outcome, the reading's Measurement, the observer and time, notes and the evidence files it names; a recheck appends
+        a check and a correction names the check it supersedes, so a failure stays visible. A waiver is a supervisor's reasoned decision
+        that completes a step the execution's policy lets be waived; the failed check stays. An amendment changes an open execution's
+        step policies or dependencies with a reason, and invalidates the acceptances it affects. mantle.work.ProcessServices
+        record#ProcessStep, waive#ProcessStep and amend#ProcessExecution (ProcessChecks.js) write them; nothing else does. -->
+    <entity entity-name="WorkEffortCheck" package="mantle.work.effort" cache="never">
+        <description>One response to an execution step (workEffortId; rootWorkEffortId its root): the step policy's response kind,
+            the observed outcome (WorkCheckOutcome: done, pass, fail, skipped), a reading's Measurement and value as entered, the
+            observed time, who recorded it and when, the notes and a voice note's transcript, and its state (WorkCheckStatus:
+            accepted, which completes the step; unresolved, with the findings that keep the step open; superseded by a correction;
+            invalidated by an amendment). A correction names the check it supersedes and why.</description>
+        <field name="workEffortCheckId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id"/>
+        <field name="rootWorkEffortId" type="id"/>
+        <field name="responseKindEnumId" type="id"/>
+        <field name="outcomeEnumId" type="id"/>
+        <field name="checkStatusEnumId" type="id"/>
+        <field name="findings" type="text-long"><description>Why the check does not complete the step, one finding a line</description></field>
+        <field name="measurementId" type="id"/>
+        <field name="measurementValue" type="number-decimal"/>
+        <field name="measurementUomId" type="id"/>
+        <field name="observedDate" type="date-time"/>
+        <field name="recordedDate" type="date-time"/>
+        <field name="userId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="comments" type="text-long"/>
+        <field name="transcript" type="text-long"><description>A voice note's transcript (SpeechServices.transcribe#Audio)</description></field>
+        <field name="supersededCheckId" type="id"/>
+        <field name="correctionReason" type="text-medium"/>
+        <field name="invalidatedDate" type="date-time"/>
+        <field name="executionAmendmentId" type="id"><description>The amendment that invalidated it</description></field>
+        <field name="operationKey" type="text-medium"/>
+        <field name="operationHash" type="text-medium"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="WorkCheckOutcome" related="moqui.basic.Enumeration" short-alias="outcome">
+            <key-map field-name="outcomeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="WorkCheckStatus" related="moqui.basic.Enumeration" short-alias="checkStatus">
+            <key-map field-name="checkStatusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.measurement.Measurement" short-alias="measurement"/>
+        <index name="WE_CHECK_STEP"><index-field name="workEffortId"/></index>
+        <index name="WE_CHECK_ROOT"><index-field name="rootWorkEffortId"/></index>
+        <index name="WE_CHECK_OPKEY"><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Work Check Outcome" enumTypeId="WorkCheckOutcome"/>
+            <moqui.basic.Enumeration enumId="WcoDone" description="Done" sequenceNum="1" enumTypeId="WorkCheckOutcome"/>
+            <moqui.basic.Enumeration enumId="WcoPass" description="Pass" sequenceNum="2" enumTypeId="WorkCheckOutcome"/>
+            <moqui.basic.Enumeration enumId="WcoFail" description="Fail" sequenceNum="3" enumTypeId="WorkCheckOutcome"/>
+            <moqui.basic.Enumeration enumId="WcoSkipped" description="Skipped" sequenceNum="4" enumTypeId="WorkCheckOutcome"/>
+            <moqui.basic.EnumerationType description="Work Check Status" enumTypeId="WorkCheckStatus"/>
+            <moqui.basic.Enumeration enumId="WcsAccepted" description="Accepted" sequenceNum="1" enumTypeId="WorkCheckStatus"/>
+            <moqui.basic.Enumeration enumId="WcsUnresolved" description="Unresolved" sequenceNum="2" enumTypeId="WorkCheckStatus"/>
+            <moqui.basic.Enumeration enumId="WcsSuperseded" description="Superseded" sequenceNum="3" enumTypeId="WorkCheckStatus"/>
+            <moqui.basic.Enumeration enumId="WcsInvalidated" description="Invalidated" sequenceNum="4" enumTypeId="WorkCheckStatus"/>
+            <!-- the content of an execution: a check's evidence and voice note (on the work order's root, named for the step) and
+                the completed checklist stored at close -->
+            <moqui.basic.Enumeration enumId="WectCheckEvidence" description="Check evidence" enumTypeId="WorkEffortContentType"/>
+            <moqui.basic.Enumeration enumId="WectVoiceNote" description="Voice note" enumTypeId="WorkEffortContentType"/>
+            <moqui.basic.Enumeration enumId="WectCompletedChecklist" description="Completed checklist" enumTypeId="WorkEffortContentType"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="WorkEffortCheckEvidence" package="mantle.work.effort" cache="never">
+        <description>A file a check names as its evidence (a WorkEffortContent row). Evidence a check names is protected: the content
+            services refuse to remove it or write a new version of it (get#EvidencePolicy, check#EvidenceChange).</description>
+        <field name="workEffortCheckId" type="id" is-pk="true"/>
+        <field name="workEffortContentId" type="id" is-pk="true"/>
+        <field name="evidenceKindEnumId" type="id"><description>WorkCheckEvidenceKind: a file or a voice note</description></field>
+        <field name="fromDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffortCheck" short-alias="check"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffortContent" short-alias="content"/>
+        <relationship type="one" title="WorkCheckEvidenceKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="evidenceKindEnumId" related="enumId"/></relationship>
+        <index name="WE_CHECK_EVID_CONTENT"><index-field name="workEffortContentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Work Check Evidence Kind" enumTypeId="WorkCheckEvidenceKind"/>
+            <moqui.basic.Enumeration enumId="WceFile" description="File" sequenceNum="1" enumTypeId="WorkCheckEvidenceKind"/>
+            <moqui.basic.Enumeration enumId="WceVoiceNote" description="Voice note" sequenceNum="2" enumTypeId="WorkCheckEvidenceKind"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="WorkEffortWaiver" package="mantle.work.effort" cache="never">
+        <description>A supervisor's decision that a step whose execution policy allows it is complete without an accepted check
+            (workEffortCheckId: the failed check it answers, which stays), with the reason; ended (thruDate) by an amendment that
+            invalidates it.</description>
+        <field name="workEffortWaiverId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id"/>
+        <field name="rootWorkEffortId" type="id"/>
+        <field name="workEffortCheckId" type="id"/>
+        <field name="reason" type="text-medium"/>
+        <field name="userId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="waivedDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="executionAmendmentId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffortCheck" short-alias="check"/>
+        <index name="WE_WAIVER_STEP"><index-field name="workEffortId"/></index>
+        <index name="WE_WAIVER_ROOT"><index-field name="rootWorkEffortId"/></index>
+    </entity>
+    <entity entity-name="WorkEffortExecutionAmendment" package="mantle.work.effort" cache="never">
+        <description>A supervisor's reasoned change of an open execution (rootWorkEffortId): its step policies or dependencies
+            from effectiveDate, with what changed and the acceptances it invalidated (changeText), and the operation key it was made
+            with (a retry answers the first).</description>
+        <field name="executionAmendmentId" type="id" is-pk="true"/>
+        <field name="rootWorkEffortId" type="id"/>
+        <field name="reason" type="text-medium"/>
+        <field name="effectiveDate" type="date-time"/>
+        <field name="userId" type="id"/>
+        <field name="amendedDate" type="date-time"/>
+        <field name="changeText" type="text-very-long"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="operationHash" type="text-medium"/>
+        <relationship type="one" title="Root" related="mantle.work.effort.WorkEffort" short-alias="root">
+            <key-map field-name="rootWorkEffortId" related="workEffortId"/></relationship>
+        <index name="WE_AMEND_ROOT"><index-field name="rootWorkEffortId"/></index>
+        <index name="WE_AMEND_OPKEY"><index-field name="operationKey"/></index>
     </entity>
 </entities>

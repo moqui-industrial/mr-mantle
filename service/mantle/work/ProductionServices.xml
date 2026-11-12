@@ -867,7 +867,7 @@ along with this software (see the LICENSE.md file). If not, see
             ends the current one now (a future one at its start). The revision counts up. Requires PRODUCTION_PLAN; refuses a
             run outside the user's organizations (RECORD_UNAVAILABLE), a run done or cancelled (RUN_CLOSED), a changed revision
             (REVISION_CHANGED, REVISION_REQUIRED), equipment not at a facility of the run's owner (RECORD_UNAVAILABLE), stock
-            (EQUIPMENT_INVALID), equipment deactivated, on hold, delivered or in maintenance now (EQUIPMENT_BLOCKED), equipment
+            (EQUIPMENT_INVALID), equipment deactivated, on hold, delivered or in maintenance (an AssetMaintenance in process, not a planned one; EQUIPMENT_BLOCKED), equipment
             another open run holds over the same time (EQUIPMENT_OVERLAP), dates out of order (DATES_INVALID), a second
             assignment (ALREADY_ASSIGNED) and an end of none (NOT_ASSIGNED).</description>
         <in-parameters>
@@ -1239,8 +1239,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="result" type="Map"><description>resultCode MAINTENANCE_REQUESTED, productionDowntimeId,
-                assetId, organizationPartyId, assetMaintenanceId, requestId (when createRequest), and the operation
-                fields.</description></parameter>
+                assetId, organizationPartyId, assetMaintenanceId, requestId (when createRequest), workEffortId (the managed
+                work order, when the organization's MaintenancePolicy manages production requests; impl-maintenance P4), and the
+                operation fields.</description></parameter>
         </out-parameters>
         <actions>
             <set field="posting" from="ec.resource.script('component://mr-mantle/service/mantle/shipment/StockPosting.js')"/>
@@ -1261,6 +1262,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="result"><return/></if>
             <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProductionDowntime.js')
                     .requestMaintenance(posting.scope(), context)"/>
+            <!-- impl-maintenance P4 (Maintenance's owner contract): with the organization's MaintenancePolicy managing production
+                requests, the maintenance is adopted into a work order and its request linked (workEffortId); otherwise unchanged -->
+            <set field="requested" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js')
+                    .productionHandoff(requested)"/>
             <set field="result" from="posting.complete(begun.op, requested.organizationPartyId,
                     'mantle.product.maintenance.AssetMaintenance', requested.assetMaintenanceId, requested)"/>
         </actions>

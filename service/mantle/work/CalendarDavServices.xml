@@ -103,7 +103,11 @@ along with this software (see the LICENSE.md file). If not, see
             now, not cancelled, and completed or closed ones only for 30 days after they were completed, each named by its
             UID (universalId, else workEffortId) with .ics, an entity tag over the task and the user's assignment, and the
             collection's ctag. A protected task (People's offboarding and separation tasks, ChecklistStep isProtected, and the
-            tasks linked to a confidential case, P21; IronStone People design §12, F22) is left out, so a phone never lists, reads or changes it.</description>
+            tasks linked to a confidential case, P21; IronStone People design §12, F22) is left out, so a phone never lists, reads or
+            changes it. A template and a step of managed work (a maintenance work order's, or of a process whose policy guards
+            execution) are left out too, and a managed root (a maintenance work order) is listed read only (readOnly): a PUT or
+            DELETE of it is refused (403) before anything changes, and its status changes only through its own lifecycle (IronStone
+            Maintenance design §13.3; impl-maintenance P3, F63).</description>
         <out-parameters>
             <parameter name="objectList" type="List"/>
             <parameter name="ctag"/>
@@ -129,13 +133,20 @@ along with this software (see the LICENSE.md file). If not, see
             // P21: and the tasks linked to a confidential case (PeopleCases.js protectedTaskIds)
             const protectedIds = new Set(tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
                     .protectedTaskIds(tasks.map((task) => task.workEffortId)) : [])
+            // a template and the steps of managed work are left out, and a managed root is read only (impl-maintenance P3, F63)
+            const managed = new Set(tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+                    .managedIds(tasks.map((task) => task.workEffortId)) : [])
             for (const task of tasks) {
                 if (protectedIds.has(task.workEffortId)) continue
+                if (task.isTemplate === 'Y') continue
+                const isRoot = !task.rootWorkEffortId || task.rootWorkEffortId === task.workEffortId
+                if (managed.has(task.workEffortId) && !isRoot) continue
                 const done = ['WeComplete', 'WeClosed'].includes(task.statusId)
                 if (done && (millis(task.actualCompletionDate) ?? millis(task.lastUpdatedStamp) ?? 0) < since) continue
                 const uid = task.universalId || null
                 const name = uid && /^[A-Za-z0-9@._:+-]+$/.test(uid) ? `${uid}.ics` : `${task.workEffortId}.ics`
                 objectList.push({workEffortId: task.workEffortId, name: name, uid: uid || `mantle-task-${task.workEffortId}`,
+                    readOnly: managed.has(task.workEffortId),
                     etag: hash([task.workEffortId, task.workEffortName, task.description, task.statusId, task.priority, task.percentComplete,
                         millis(task.estimatedStartDate), millis(task.estimatedCompletionDate), millis(task.actualCompletionDate),
                         millis(task.lastUpdatedStamp), millis(assigned.get(task.workEffortId).lastUpdatedStamp)].map((part) => String(part ?? '')).join('|'))})
@@ -356,7 +367,8 @@ along with this software (see the LICENSE.md file). If not, see
             refused with status 409 and nothing changes. A new start or end of an event that holds a meeting room or equipment
             (a current booking) is checked first as a move on the screens is (EventServices.check#ResourceBookings with the
             new time and checkOnly): a clash with another booking of it is refused with 409 and nothing changes; once stored,
-            a booking of a resource with approvers is asked again (check#ResourceBookings). ifMatch and ifNoneMatch are the
+            a booking of a resource with approvers is asked again (check#ResourceBookings), and a series booking a managed resource
+            (impl-maintenance P15) is checked again over its stored range (a rule changed with no new time). ifMatch and ifNoneMatch are the
             client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change or an event of it
             the user may not change (EventServices.check#EventAccess: one the calendar only shows, put there by an attendee, or one
             an application keeps; Commons calendar editors, Nov 12, 2026), 400 for text that holds no event or to-do (or several
@@ -395,6 +407,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 const existing = Array.from(tags.objectList || []).find((object) => object.name === objectName)
                 if (failsPreconditions(existing)) { status = 412; return }
+                // a maintenance work order is changed only through its lifecycle (impl-maintenance P3, F63)
+                if (existing?.readOnly) { status = 403; return }
                 const statusOf = {'NEEDS-ACTION': null, 'IN-PROCESS': 'WeInProgress', COMPLETED: 'WeComplete', CANCELLED: 'WeCancelled'}
                 const due = todo.dueDate ? ec.l10n.parseTimestamp(`${todo.dueDate} 00:00:00.000`, 'yyyy-MM-dd HH:mm:ss.SSS') : toDate(todo.due)
                 const fields = {workEffortName: todo.summary || ec.l10n.localize('(no title)'), description: todo.description ?? null,
@@ -527,6 +541,19 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: workEffortId, allowConflicts: true}).call()
                 if (ec.message.hasError()) return
             }
+            // a series of a managed resource (impl-maintenance P15) is checked again over its stored range, whose rule the client may
+            // have changed with no new time: one past the horizon, overlapping itself or clashing is an error, and the change rolls back
+            if (seriesRow != null && !moved.includes(seriesRow.workEffortId)) {
+                const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
+                const managed = Array.from(ec.entity.find('mantle.work.effort.WorkEffortFacility').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId && booking.statusId !== 'WefRequestDenied' && policies.policyAt({facilityId: booking.facilityId}))
+                    || Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssetAssign').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId !== 'WeaaRequestDenied' && booking.thruDate == null && policies.policyAt({assetId: booking.assetId}))
+                if (managed) {
+                    ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: seriesRow.workEffortId, reapprove: false}).call()
+                    if (ec.message.hasError()) return
+                }
+            }
             const after = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
             const object = after.find((candidate) => candidate.uid === uid)
             if (object == null) { status = 409; return }
@@ -569,6 +596,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .find((candidate) => candidate.name === objectName)
                 if (object == null) { status = 404; return }
                 if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
+                // a maintenance work order's assignments are its schedule's (impl-maintenance P3, F63)
+                if (object.readOnly) { status = 403; return }
                 const partyId = ec.user.userAccount?.partyId
                 for (const row of Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', object.workEffortId)
                         .condition('partyId', partyId).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())) {

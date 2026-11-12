@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Preventive maintenance plans (IronStone Maintenance design §5.1, Plans and PlanDetail, MT-05; impl-maintenance P13). A plan
+    (MaintenanceSchedule) names one piece of equipment or one facility, optionally the equipment model's maintenance default
+    (ProductMaintenance) it follows, and its organization (the target's, kept for the scoped list). Its dated terms
+    (MaintenanceScheduleTerm) carry one trigger, calendar or meter, and what the due projection reads; a change of an active
+    plan's terms ends the term in effect and starts the next, so earlier terms and the work done under them stay as they were. A
+    term field left empty takes the model default's value (the plan shows the origin of each). Only
+    mantle.work.MaintenancePlanServices writes these; P14 adds the occurrences and sets a generated work order's plan. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="MaintenanceSchedule" package="mantle.work.maintenance" cache="never">
+        <description>A preventive maintenance plan of one piece of equipment (assetId) or one facility (facilityId), never both:
+            its name, the equipment model's maintenance default it follows (productMaintenanceId, equipment only), its
+            organization (the target's when the plan was made), its state (draft, active, ended; activation checks the time zone
+            and a named procedure, an end needs a reason), a revision every write increments (a stale write is refused naming the
+            current one) and the operation key and request it was created with (a retry answers the first plan).</description>
+        <field name="maintenanceScheduleId" type="id" is-pk="true"/>
+        <field name="scheduleName" type="text-medium"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="assetId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="productMaintenanceId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time"><description>When the plan was activated</description></field>
+        <field name="thruDate" type="date-time"><description>When the plan was ended</description></field>
+        <field name="endReason" type="text-medium"/>
+        <field name="revision" type="number-integer"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="operationHash" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.product.maintenance.ProductMaintenance" short-alias="productMaintenance"/>
+        <relationship type="one" title="MaintenanceSchedule" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="many" related="mantle.work.maintenance.MaintenanceScheduleTerm" short-alias="terms">
+            <key-map field-name="maintenanceScheduleId"/></relationship>
+        <index name="MNT_SCH_ORG"><index-field name="organizationPartyId"/></index>
+        <index name="MNT_SCH_ASSET"><index-field name="assetId"/></index>
+        <index name="MNT_SCH_FACILITY"><index-field name="facilityId"/></index>
+        <index name="MNT_SCH_OPKEY"><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="MaintenanceSchedule" description="Maintenance Plan Status"/>
+            <moqui.basic.StatusItem statusId="MschDraft" statusTypeId="MaintenanceSchedule" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="MschActive" statusTypeId="MaintenanceSchedule" sequenceNum="2" description="Active"/>
+            <moqui.basic.StatusItem statusId="MschEnded" statusTypeId="MaintenanceSchedule" sequenceNum="3" description="Ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MschDraft" toStatusId="MschActive" transitionName="Activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MschDraft" toStatusId="MschEnded" transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MschActive" toStatusId="MschEnded" transitionName="End"/>
+
+            <moqui.basic.EnumerationType enumTypeId="MaintenanceScheduleTrigger" description="Maintenance Plan Trigger"/>
+            <moqui.basic.Enumeration enumId="MstCalendar" enumTypeId="MaintenanceScheduleTrigger" sequenceNum="1" description="Calendar"/>
+            <moqui.basic.Enumeration enumId="MstMeter" enumTypeId="MaintenanceScheduleTrigger" sequenceNum="2" description="Meter"/>
+            <moqui.basic.EnumerationType enumTypeId="MaintenanceScheduleCadence" description="Maintenance Plan Calendar Cadence"/>
+            <moqui.basic.Enumeration enumId="MscFixed" enumTypeId="MaintenanceScheduleCadence" sequenceNum="1"
+                    description="Fixed dates from the first due date"/>
+            <moqui.basic.Enumeration enumId="MscCompletion" enumTypeId="MaintenanceScheduleCadence" sequenceNum="2"
+                    description="From the last completion"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="MaintenanceScheduleTerm" package="mantle.work.maintenance" cache="never">
+        <description>A plan's terms from fromDate (the one in effect has no thruDate in the past). One trigger: a calendar
+            (intervalQuantity of intervalUomId: days, weeks, months or years; a fixed cadence from firstDueLocal, the first
+            obligation's local date and time in the target's time zone, or from the last completion; a due date that falls on a weekend or
+            holiday is planned on the next business day when businessDaysOnly, the due date kept; holidays of the organization
+            and of holidayCategoryId, a People holiday calendar) or a meter (productMeterId, a counting meter of the equipment's
+            model, every intervalQuantity of its unit from the baseline reading baselineValue at baselineDate; a reading older
+            than maxReadingAgeDays leaves the due unknown). The procedure (templateWorkEffortId; optional: with none the work is
+            an ad hoc work order with the plan's name and estimatedWorkTime, hours), the maintenance type, the lead days before
+            the due date and the team. A draft's terms are changed in place; from activation they are dated rows. A field left empty takes the plan's model default's value. The trigger fields
+            are audit-logged, and a change starts a new row with its reason.</description>
+        <field name="maintenanceScheduleId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="triggerEnumId" type="id" enable-audit-log="update"/>
+        <field name="cadenceEnumId" type="id" enable-audit-log="update"/>
+        <field name="intervalQuantity" type="number-decimal" enable-audit-log="update"/>
+        <field name="intervalUomId" type="id" enable-audit-log="update"/>
+        <field name="firstDueLocal" type="text-short" enable-audit-log="update"><description>The first obligation as a local date
+            and time in the target's time zone (yyyy-MM-dd HH:mm), not an instant: its wall time holds across a daylight-saving
+            change and a move of the zone</description></field>
+        <field name="productMeterId" type="id" enable-audit-log="update"/>
+        <field name="baselineValue" type="number-decimal" enable-audit-log="update"/>
+        <field name="baselineDate" type="date-time" enable-audit-log="update"/>
+        <field name="maxReadingAgeDays" type="number-integer"/>
+        <field name="businessDaysOnly" type="text-indicator"/>
+        <field name="holidayCategoryId" type="id"/>
+        <field name="leadDays" type="number-integer"/>
+        <field name="templateWorkEffortId" type="id"/>
+        <field name="maintenanceTypeEnumId" type="id"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="estimatedWorkTime" type="number-decimal"><description>The hours the work takes: P14's ad hoc work order of a
+            plan with no procedure carries it (the user's call, Nov 12)</description></field>
+        <field name="changeReason" type="text-medium"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.maintenance.MaintenanceSchedule" short-alias="schedule"/>
+        <relationship type="one" title="MaintenanceScheduleTrigger" related="moqui.basic.Enumeration" short-alias="trigger">
+            <key-map field-name="triggerEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceScheduleCadence" related="moqui.basic.Enumeration" short-alias="cadence">
+            <key-map field-name="cadenceEnumId"/></relationship>
+        <relationship type="one" title="Interval" related="moqui.basic.Uom" short-alias="intervalUom">
+            <key-map field-name="intervalUomId" related="uomId"/></relationship>
+        <relationship type="one" related="mantle.product.maintenance.ProductMeter" short-alias="meter"/>
+        <relationship type="one-nofk" title="HolidayCalendar" related="mantle.work.effort.WorkEffortCategory" short-alias="holidayCalendar">
+            <key-map field-name="holidayCategoryId" related="workEffortCategoryId"/></relationship>
+        <relationship type="one" title="Template" related="mantle.work.effort.WorkEffort" short-alias="procedure">
+            <key-map field-name="templateWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="MaintenanceType" related="moqui.basic.Enumeration" short-alias="maintenanceType">
+            <key-map field-name="maintenanceTypeEnumId"/></relationship>
+        <relationship type="one" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+    </entity>
+
+    <!-- the plan a work order executes (P14's generation sets it): its completion is what advances the plan's due projection -->
+    <extend-entity entity-name="MaintenanceWorkOrder" package="mantle.work.maintenance">
+        <field name="maintenanceScheduleId" type="id"><description>The preventive plan this work executes (impl-maintenance
+            P13): its completion (complete or closed, never cancelled) counts for the plan</description></field>
+        <relationship type="one-nofk" related="mantle.work.maintenance.MaintenanceSchedule" short-alias="schedule"/>
+        <index name="MNT_WO_SCHEDULE"><index-field name="maintenanceScheduleId"/></index>
+    </extend-entity>
+
+    <!-- P14 (design §5.1 occurrences, DueMaintenance, PlanDetail's Due history, §8 PreventiveComplianceReport): an obligation of a
+        plan has its own identity, apart from the work that executes it -->
+    <entity entity-name="MaintenanceOccurrence" package="mantle.work.maintenance" cache="never">
+        <description>One obligation of a plan, kept once it is acted on: generated (work made for it), completed (that work
+            complete or closed), skipped (with a reason), coalesced into a catch-up (coveredByOccurrenceId, whose work counts for it),
+            or open again (its work cancelled: a cancellation is no completion). obligationKey names the obligation within its plan
+            (a calendar plan's local due date and time in the target's zone, "yyyy-MM-dd HH:mm"; a meter plan's "meter" and its
+            threshold) and is unique with the plan, so a planner's and the job's generation of the same obligation make one row
+            and one work order (impl-maintenance F52, F112: a real unique key). dueDate (a calendar obligation's instant) or
+            dueThreshold (a meter's) and termFromDate (the term it fell under, impl-maintenance F186) are fixed when it is
+            recorded. A completion is counted once (completedDate); a correction leaves its work order as it was, opens the
+            obligation again and names the work no longer counted (uncountedWorkEffortId, with its reason). Only mantle.work.MaintenancePlanServices and the work order's lifecycle
+            write these.</description>
+        <field name="maintenanceOccurrenceId" type="id" is-pk="true"/>
+        <field name="maintenanceScheduleId" type="id"/>
+        <field name="obligationKey" type="text-short"/>
+        <field name="dueDate" type="date-time"/>
+        <field name="dueLocal" type="text-short"><description>The calendar obligation as its local date and time in the target's
+            zone (yyyy-MM-dd HH:mm)</description></field>
+        <field name="dueThreshold" type="number-decimal"/>
+        <field name="termFromDate" type="date-time"/>
+        <field name="statusId" type="id" enable-audit-log="update"/>
+        <field name="workEffortId" type="id" enable-audit-log="update"><description>The work order made for it (none once that
+            work is cancelled; the audit log keeps which it was)</description></field>
+        <field name="catchUp" type="text-indicator"><description>Y: the catch-up of missed obligations coalesced into it</description></field>
+        <field name="coveredByOccurrenceId" type="id"/>
+        <field name="generatedDate" type="date-time"/>
+        <field name="generatedByUserId" type="id"><description>Empty when the scheduled job made it</description></field>
+        <field name="operationKey" type="text-medium"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="uncountedWorkEffortId" type="id" enable-audit-log="update"><description>A completion corrected as not
+            counted for this obligation: its work order stays as it was and no longer advances the plan</description></field>
+        <field name="decisionReason" type="text-medium"/>
+        <field name="decidedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.work.maintenance.MaintenanceSchedule" short-alias="schedule"/>
+        <relationship type="one" title="MaintenanceOccurrence" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" title="CoveredBy" related="mantle.work.maintenance.MaintenanceOccurrence" short-alias="coveredBy">
+            <key-map field-name="coveredByOccurrenceId" related="maintenanceOccurrenceId"/></relationship>
+        <index name="MNT_OCC_KEY" unique="true"><index-field name="maintenanceScheduleId"/><index-field name="obligationKey"/></index>
+        <index name="MNT_OCC_WORK"><index-field name="workEffortId"/></index>
+        <index name="MNT_OCC_DUE"><index-field name="dueDate"/></index>
+        <seed-data>
+            <moqui.basic.StatusType statusTypeId="MaintenanceOccurrence" description="Maintenance Obligation Status"/>
+            <moqui.basic.StatusItem statusId="MocOpen" statusTypeId="MaintenanceOccurrence" sequenceNum="1" description="Open"/>
+            <moqui.basic.StatusItem statusId="MocGenerated" statusTypeId="MaintenanceOccurrence" sequenceNum="2" description="Work made"/>
+            <moqui.basic.StatusItem statusId="MocCompleted" statusTypeId="MaintenanceOccurrence" sequenceNum="3" description="Completed"/>
+            <moqui.basic.StatusItem statusId="MocSkipped" statusTypeId="MaintenanceOccurrence" sequenceNum="4" description="Skipped"/>
+            <moqui.basic.StatusItem statusId="MocCoalesced" statusTypeId="MaintenanceOccurrence" sequenceNum="5" description="Coalesced"/>
+            <!-- generated, skipped or coalesced from open; completed, or open again (cancelled), from generated; open again from
+                completed (a correction) and from coalesced (its catch-up cancelled or corrected) -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocOpen" toStatusId="MocGenerated" transitionName="Generate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocOpen" toStatusId="MocSkipped" transitionName="Skip"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocOpen" toStatusId="MocCoalesced" transitionName="Coalesce"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocGenerated" toStatusId="MocCompleted" transitionName="Complete"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocGenerated" toStatusId="MocOpen" transitionName="Reopen"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocCompleted" toStatusId="MocOpen" transitionName="Correct"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MocCoalesced" toStatusId="MocOpen" transitionName="Reopen"/>
+        </seed-data>
+    </entity>
+
+    <!-- P14 (design §9 MaintenanceSettings "due job/lead defaults"): the days ahead a plan's work is made when its terms name none -->
+    <extend-entity entity-name="MaintenancePolicy" package="mantle.work.maintenance">
+        <field name="pmLeadDays" type="number-integer"><description>The days before a due date its preventive work is made, for a
+            plan whose terms name none (zero when empty: on the day)</description></field>
+    </extend-entity>
+</entities>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Maintenance purchases (IronStone Maintenance design §3 PurchaseLinks and CompleteWork; impl-maintenance P10): a work order's
+        file attached to the purchase order line its outside service was accepted on (mantle.work.MaintenanceServices
+        accept#MaintenanceService; Purchasing's accept#ServiceItem names it as the acceptance's evidence) -->
+    <moqui.basic.Enumeration enumId="OctServiceEvidence" description="Service acceptance evidence" enumTypeId="OrderContentType"/>
+</entity-facade-xml>

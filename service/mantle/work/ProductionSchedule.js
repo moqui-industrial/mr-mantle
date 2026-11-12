@@ -17,8 +17,8 @@
 // same rechecks or refuses it. Each applied change notifies the run's people (ProductionScheduleChange). Writes take an operation
 // key (CX-POSTING), and a retry answers the first result.
 //
-// An offline change records a planned block of a work center (a ResourceUnavailability RukPlanned of the facility, the minimal
-// record Maintenance MT-07 extends) and previews the open operations it overlaps with where each would move: forward to the
+// An offline change records a planned block of a work center (a ResourceUnavailability RukPlanned of the facility, written by
+// mantle.work.ResourceBookingServices.record#ResourceUnavailability since impl-maintenance P15, reason RurOffline) and previews the open operations it overlaps with where each would move: forward to the
 // center's next free time after the block, after its moved predecessors, within its slots. With moveOperations the moves are
 // applied, each its own schedule#ProductionOperation (one that fails is named and the others go on); posted labor and machine
 // facts are never changed.
@@ -272,7 +272,10 @@ function evaluate(ctx, userScope, operation, run, target) {
         if (blockedEquipment.includes(asset.statusId))
             conflicts.push(conflict("EQUIPMENT", label + " is " + statusText(asset.statusId)))
         const outage = Array.from(
-            find(OUTAGE, {assetId: asset.assetId}).condition("fromDate", "less", new Date(target.thruMs)).list()
+            find(OUTAGE, {assetId: asset.assetId})
+                .condition("fromDate", "less", new Date(target.thruMs))
+                .condition("supersededByUnavailabilityId", "is-null", null)
+                .list()
         ).find(row => row.thruDate == null || ms(row.thruDate) > target.fromMs)
         if (outage) conflicts.push(conflict("EQUIPMENT", label + " is out of service from " + wall(ms(outage.fromDate))))
         const clash = rows(ASSIGN, {assetId: asset.assetId}).find(row => {
@@ -1005,9 +1008,14 @@ function offline(p) {
     const settled = posting.settled(begun.op)
     if (settled) return settled
     if (action === "withdraw") {
-        const outage = blank(p.resourceUnavailabilityId)
-            ? null
-            : find(OUTAGE, {resourceUnavailabilityId: p.resourceUnavailabilityId}).forUpdate(true).one()
+        // the row in force of the block named: Maintenance may have corrected it (impl-maintenance P15), so a superseded row is
+        // followed to its correction
+        let named = blank(p.resourceUnavailabilityId) ? null : one(OUTAGE, {resourceUnavailabilityId: p.resourceUnavailabilityId})
+        for (let guard = 0; named?.supersededByUnavailabilityId && guard < 50; guard++)
+            named = one(OUTAGE, {resourceUnavailabilityId: named.supersededByUnavailabilityId})
+        const outage = named
+            ? find(OUTAGE, {resourceUnavailabilityId: named.resourceUnavailabilityId}).forUpdate(true).one()
+            : null
         if (!outage || outage.facilityId !== center.facilityId || outage.unavailabilityKindEnumId !== "RukPlanned")
             denied("RECORD_UNAVAILABLE", "Planned offline time " + (p.resourceUnavailabilityId || "") + " is not available")
         const now = ms(ec.user.nowTimestamp)
@@ -1024,15 +1032,14 @@ function offline(p) {
     if (blank(p.reason)) denied("REASON_REQUIRED", "Give the reason the work center is offline")
     const move = yes(p.moveOperations)
     if (move && !canSchedule()) denied("PERMISSION_DENIED", "PRODUCTION_SCHEDULE is required to move the operations")
-    const created = call("create#" + OUTAGE, {
+    // the one writer of planned blocks (impl-maintenance P15, F14), which admits a scheduler of the work center by data
+    const created = call("mantle.work.ResourceBookingServices.record#ResourceUnavailability", {
         unavailabilityKindEnumId: "RukPlanned",
+        unavailabilityReasonEnumId: "RurOffline",
         facilityId: center.facilityId,
-        organizationPartyId: center.organizationPartyId,
         fromDate: new Date(fromMs),
         thruDate: new Date(thruMs),
-        description: str(p.reason),
-        createdByUserId: ec.user.userId,
-        createdDate: ec.user.nowTimestamp
+        description: str(p.reason)
     })
     const moveResults = []
     if (move) {

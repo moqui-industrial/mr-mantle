@@ -186,8 +186,8 @@ along with this software (see the LICENSE.md file). If not, see
             - apply: records the block with its reason (REASON_REQUIRED) and, with moveOperations (PRODUCTION_SCHEDULE),
               applies each move through schedule#ProductionOperation in its own transaction, one that fails named with its
               reason and the others going on (moveResults);
-            - withdraw a planned block of the center by resourceUnavailabilityId: one not started ends at its start, one
-              started ends now (OFFLINE_ENDED).
+            - withdraw a planned block of the center by resourceUnavailabilityId (the row in force when Maintenance corrected
+              it): one not started ends at its start, one started ends now (OFFLINE_ENDED).
             Posted labor and machine facts are never changed. DATES_REQUIRED, DATES_INVALID, RECORD_UNAVAILABLE. Writes take an
             operationKey, and a retry answers the first result.</description>
         <in-parameters>

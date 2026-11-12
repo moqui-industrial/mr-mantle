@@ -223,8 +223,11 @@ along with this software (see the LICENSE.md file). If not, see
             project's estimate unit, beside the hours of estimatedWorkTime</description></field>
         <field name="healthEnumId" type="id"><description>For a project: on track, at risk or off track, from its latest
             status update (WorkEffortUpdate)</description></field>
-        <field name="isTemplate" type="text-indicator"><description>Y for a project kept as a template to copy
-            (ProjectServices.clone#Project), left out of the lists of projects and work</description></field>
+        <field name="isTemplate" type="text-indicator"><description>Y for a work effort kept as a definition to copy, never
+            done itself, and left out of the lists of projects and work: a project template (ProjectServices.clone#Project), a
+            routing or operation template (Manufacturing), or a process template and its steps (ProcessServices: People's
+            checklists, Maintenance's procedures, each with a WorkEffortProcessPolicy; a list of one kind filters on its type,
+            purpose and policy too)</description></field>
 
         <field name="methodDraft" type="text-indicator" enable-audit-log="true"/>
         <field name="methodRemoved" type="text-indicator" enable-audit-log="true"/>
@@ -1097,7 +1100,12 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="minimumSkillLevel" type="number-integer"><description>The least level of the skill the work needs, a
             SkillLevel value's number (IronStone People PE-14, impl-people P18, F7): mantle.humanres.DevelopmentServices
             .check#Qualifications reads it for a work effort; shared with Maintenance's step requirements (MT-03)</description></field>
+        <field name="qualificationTypeEnumId" type="id"><description>A QualificationType a verified, valid qualification of which
+            must prove the skill for this work (impl-maintenance P8, design-maintenance §4.1: a step's required qualification, as a
+            job class requirement's): check#Qualifications reads it with the level</description></field>
         <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration">
             <key-map field-name="skillTypeEnumId"/></relationship>
     </entity>

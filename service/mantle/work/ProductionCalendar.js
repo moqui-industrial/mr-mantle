@@ -137,10 +137,22 @@ function offlineOf(ctx, center, fromMs, thruMs) {
     const assetIds = Array.from(
         find("mantle.product.asset.Asset", {facilityId: center.facilityId}).selectField("assetId").list()
     ).map(row => row.assetId)
-    const resourceConditions = [factory.makeCondition("facilityId", "equals", center.facilityId)]
+    // the center and the facilities above it: a blackout of its plant or building covers it (the one availability read,
+    // impl-maintenance P15; design-maintenance §7.1 "facility blocks include descendants")
+    const centerAndAbove = [center.facilityId]
+    for (let row = center.facility; row?.parentFacilityId && centerAndAbove.length < 12;) {
+        if (centerAndAbove.includes(row.parentFacilityId)) break
+        centerAndAbove.push(row.parentFacilityId)
+        row = one(FACILITY, {facilityId: row.parentFacilityId})
+    }
+    const resourceConditions = [factory.makeCondition("facilityId", "in", centerAndAbove)]
     if (assetIds.length) resourceConditions.push(factory.makeCondition("assetId", "in", assetIds))
     for (const outage of Array.from(
-        overlapping(find(OUTAGE)).condition(factory.makeCondition(resourceConditions, "or")).list()
+        // the outages in force: a corrected row is history (impl-maintenance P5)
+        overlapping(find(OUTAGE))
+            .condition(factory.makeCondition(resourceConditions, "or"))
+            .condition("supersededByUnavailabilityId", "is-null", null)
+            .list()
     )) {
         // a stop's outage is the stop's interval already when it is the same; an outage still open runs to the range's end
         const open = outage.thruDate == null

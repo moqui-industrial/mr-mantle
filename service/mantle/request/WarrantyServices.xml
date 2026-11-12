@@ -248,7 +248,9 @@ along with this software (see the LICENSE.md file). If not, see
             (ASSET_REQUIRED: a replacement goes through a return). Refuses no required work (WORK_REQUIRED), an assignee who
             does not work for the organization (ASSIGNEE_UNAVAILABLE), another serial's or a closed maintenance
             (MAINTENANCE_UNAVAILABLE) and a closed or merged case. Requires SUPPORT_CASE_EDIT. The same operation key answers
-            the first result.</description>
+            the first result. impl-maintenance P12: when the organization's MaintenancePolicy manages warranty repairs, the repair
+            is also made a managed work order once (its task the root, workEffortId; a refused adoption is logged and the repair
+            stays Customer Service's); with the policy off nothing else changes.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="assetMaintenanceId"/>
@@ -261,6 +263,7 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="assetMaintenanceId"/>
             <parameter name="taskWorkEffortId"/>
+            <parameter name="workEffortId"><description>The managed work order (impl-maintenance P12), when the policy made one</description></parameter>
             <parameter name="alreadyApplied" type="Boolean"/>
         </out-parameters>
         <actions>
@@ -273,16 +276,75 @@ along with this software (see the LICENSE.md file). If not, see
             started), through the AssetMaintenance status flow, its task following (In progress, Complete, Cancelled). Its
             completion tells the claim's agent (the WarrantyWorkFinished rule) and leaves the case as it is. Refuses a
             maintenance the claim does not link (MAINTENANCE_UNAVAILABLE) and a move its status does not allow
-            (STATUS_INVALID). Requires SUPPORT_CASE_EDIT and a claim of the user's organizations.</description>
+            (STATUS_INVALID). Requires SUPPORT_CASE_EDIT and a claim of the user's organizations. impl-maintenance P12: a repair
+            that is a managed work order moves through transition#MaintenanceWorkOrder instead (in process: Start; finished: Start
+            and Complete, with the outcome and the equipment's state; cancelled: Cancel with its reason), which checks the caller's
+            maintenance permission and the work's gates.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="assetMaintenanceId" required="true"/>
             <parameter name="statusId" required="true"/>
             <parameter name="comments"/>
+            <parameter name="outcomeEnumId"><description>A managed repair finished: MaintenanceOutcome</description></parameter>
+            <parameter name="dispositionEnumId"><description>A managed repair finished: MaintenanceDisposition</description></parameter>
+            <parameter name="cancelReasonEnumId"><description>A managed repair cancelled: MaintenanceCancelReason</description></parameter>
         </in-parameters>
-        <out-parameters><parameter name="statusId"/></out-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="workEffortId"><description>A managed repair's work order</description></parameter>
+        </out-parameters>
         <actions>
             <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('updateWork', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="check" noun="WarrantyRepair" allow-remote="false" read-only="true">
+        <description>impl-maintenance P12: whether the warranty claims linking a repair still allow it, for Maintenance's Start
+            and parts issue of a customer repair: an open case whose current decision covers the claim (covered, partial,
+            goodwill) or is a chargeable repair whose customer consent is recorded, as link#WarrantyWork requires. A changed claim
+            supersedes its decision (NOT_DECIDED), a new decision without the consent withdraws it (CONSENT_REQUIRED), a rejection
+            is NOT_APPROVED and a closed case CASE_CLOSED; a repair no claim links is allowed. Answers no case detail, so it needs
+            no Customer Service permission; Maintenance checks the caller's work first.</description>
+        <in-parameters><parameter name="assetMaintenanceId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+            <parameter name="requestId"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('checkRepair', context)"/>
+            <script>ec.context.putAll(warrantyOut)</script>
+        </actions>
+    </service>
+    <service verb="send" noun="InterventionReport" allow-remote="false">
+        <description>impl-maintenance P12 (F57, Customer Service's RepairLinks): the intervention report Maintenance stored on a
+            claim's managed repair (the work order's latest WectInterventionReport content, REPORT_REQUIRED before; NOT_MANAGED
+            for a repair that is no work order), with the customer's acknowledgment when one is stored, mailed to a checked
+            recipient, an address of the case's customer or of a current contact of it (RECIPIENT_REQUIRED,
+            RECIPIENT_UNCHECKED), with the note when given, as a mail client draft of an account the user sends from
+            (SEND_ACCOUNT_REQUIRED) sent through send#EmailDraft and filed on the case. Refuses a maintenance the claim does not
+            link (MAINTENANCE_UNAVAILABLE) and a merged case. The same operationKey answers the first result. Needs
+            SUPPORT_CASE_EDIT and a claim of the user's organizations; the case is left as it is.</description>
+        <in-parameters>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="requestId" required="true"/>
+            <parameter name="assetMaintenanceId" required="true"/>
+            <parameter name="toAddress"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="subject"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortContentId"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="recipient"/>
+            <parameter name="status"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="warrantyOut" from="ec.resource.script('component://mr-mantle/service/mantle/request/Warranty.js').execute('sendReport', context)"/>
             <script>ec.context.putAll(warrantyOut)</script>
         </actions>
     </service>

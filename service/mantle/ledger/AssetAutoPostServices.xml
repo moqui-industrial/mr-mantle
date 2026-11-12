@@ -125,6 +125,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="assetGlAccountTypeEnumId" from="assetGlAccount?.glAccountTypeEnumId"/>
             </if>
 
+            <!-- AC-24 (impl-maintenance P9, F71): a receipt to managed maintenance work is never credited to WIP: a return naming its
+                issuance (sourceAssetIssuanceId) is credited to the account and dimensions the issuance was debited with, and one that
+                names none yet (receive#Asset posts before return#MaintenanceMaterial names it) to the policy's expense; inventory
+                and supplies alike (MaintenanceCostRouting.js) -->
+            <set field="maintenanceRoute" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/MaintenanceCostRouting.js').receipt(assetReceipt, asset)"/>
+            <if condition="maintenanceRoute">
+                <set field="receiptGlAccountId" from="maintenanceRoute.glAccountId"/>
+                <set field="receiptGlAccountTypeEnumId" from="maintenanceRoute.glAccountTypeEnumId || receiptGlAccountTypeEnumId"/>
+            </if>
+
             <!-- set the amount -->
             <set field="amount" from="toDecimal(assetReceipt.quantityAccepted).multiply(asset.acquireCost)"/>
 
@@ -139,14 +149,16 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.ledger.LedgerServices.create#AcctgTrans" out-map="context"
                     in-map="{acctgTransTypeEnumId:acctgTransTypeEnumId, organizationPartyId:organizationPartyId,
                         otherPartyId:otherPartyId, amountUomId:asset.acquireCostUomId, assetReceiptId:assetReceiptId,
-                        assetId:asset.assetId, shipmentId:assetReceipt.shipmentId, transactionDate:assetReceipt.receivedDate}"/>
+                        assetId:asset.assetId, shipmentId:assetReceipt.shipmentId, transactionDate:assetReceipt.receivedDate,
+                        workEffortId:maintenanceRoute?.projectWorkEffortId || null}"/>
             <!-- note: could populate invoiceId, etc... but should we? for now no -->
 
             <!-- Credit to GatUnreceivedInventory or GatUnreceivedFixedAsset (look for assetTypeEnumId=AstTpFixed or parentEnumId=AstTpFixed) -->
             <if condition="!receiptGlAccountId"><set field="useErrorJournal" from="true"/></if>
             <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
                     in-map="{acctgTransId:acctgTransId, debitCreditFlag:'C', glAccountTypeEnumId:receiptGlAccountTypeEnumId,
-                        glAccountId:receiptGlAccountId, amount:amount, productId:asset.productId, assetId:asset.assetId}"/>
+                        glAccountId:receiptGlAccountId, amount:amount, productId:asset.productId, assetId:asset.assetId,
+                        facilityId:maintenanceRoute?.facilityId || null, costCenterId:maintenanceRoute?.costCenterId || null}"/>
 
             <!-- Debit to GatInventory or GatFixedAsset -->
             <if condition="!assetGlAccountId"><set field="useErrorJournal" from="true"/></if>
@@ -173,9 +185,13 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="assetReceipt.acctgTransResultEnumId"
                     from="postedTrans?.isPosted == 'Y' ? 'AtrSuccess' : 'AtrPostingFailed'"/>
-            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; maintenanceRoute?.failureCode">
                 <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
-                        postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                        postingFailureCode:maintenanceRoute.failureCode, postingFailureMessage:maintenanceRoute.message}"/>
+                <else-if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+                    <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
+                            postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                </else-if>
             </if>
             <entity-update value-field="assetReceipt"/>
         </actions>
@@ -329,6 +345,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="issuanceGlAccountTypeEnumId" from="issuanceGlAccount?.glAccountTypeEnumId"/>
             </if>
 
+            <!-- AC-24 (impl-maintenance P9): stock issued to a managed maintenance work order or step posts to the expense
+                account of the organization's MaintenanceCostPolicy with the facility, cost centre and project, never the
+                same-owner WIP account (supplies too, in place of the fixed-asset debit: the user's call of Nov 12); no policy row leaves the account empty, so the transaction goes to the error journal
+                named MAINTENANCE_COST_UNMAPPED (MaintenanceCostRouting.js) -->
+            <set field="maintenanceRoute" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/MaintenanceCostRouting.js').issuance(assetIssuance, asset)"/>
+            <if condition="maintenanceRoute">
+                <set field="issuanceGlAccountId" from="maintenanceRoute.glAccountId"/>
+                <set field="issuanceGlAccountTypeEnumId" from="maintenanceRoute.glAccountTypeEnumId || issuanceGlAccountTypeEnumId"/>
+            </if>
+
             <!-- set the amount -->
             <set field="amount" from="toDecimal(assetIssuance.quantity).multiply(asset.acquireCost)"/>
 
@@ -336,7 +362,8 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.ledger.LedgerServices.create#AcctgTrans" out-map="context"
                     in-map="{acctgTransTypeEnumId:acctgTransTypeEnumId, organizationPartyId:organizationPartyId,
                         otherPartyId:null, amountUomId:asset.acquireCostUomId, assetIssuanceId:assetIssuanceId,
-                        assetId:asset.assetId, shipmentId:assetIssuance.shipmentId, transactionDate:assetIssuance.issuedDate}"/>
+                        assetId:asset.assetId, shipmentId:assetIssuance.shipmentId, transactionDate:assetIssuance.issuedDate,
+                        workEffortId:maintenanceRoute?.projectWorkEffortId || null}"/>
             <!-- note: could populate invoiceId, etc... but should we? for now no -->
 
             <set field="useErrorJournal" from="false"/>
@@ -349,7 +376,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!issuanceGlAccountId"><set field="useErrorJournal" from="true"/></if>
             <service-call name="mantle.ledger.LedgerServices.create#AcctgTransEntry"
                     in-map="{acctgTransId:acctgTransId, debitCreditFlag:'D', glAccountTypeEnumId:issuanceGlAccountTypeEnumId,
-                        glAccountId:issuanceGlAccountId, amount:amount, productId:asset.productId, assetId:asset.assetId}"/>
+                        glAccountId:issuanceGlAccountId, amount:amount, productId:asset.productId, assetId:asset.assetId,
+                        facilityId:maintenanceRoute?.facilityId || null, costCenterId:maintenanceRoute?.costCenterId || null}"/>
 
             <if condition="useErrorJournal"><then>
                 <!-- put in the error journal for the org -->
@@ -370,9 +398,13 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="assetIssuance.acctgTransResultEnumId"
                     from="postedTrans?.isPosted == 'Y' ? 'AtrSuccess' : 'AtrPostingFailed'"/>
-            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; maintenanceRoute?.failureCode">
                 <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
-                        postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                        postingFailureCode:maintenanceRoute.failureCode, postingFailureMessage:maintenanceRoute.message}"/>
+                <else-if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+                    <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
+                            postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                </else-if>
             </if>
             <entity-update value-field="assetIssuance"/>
         </actions>

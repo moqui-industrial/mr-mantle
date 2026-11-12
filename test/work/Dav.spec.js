@@ -323,6 +323,39 @@ feature("a phone moves a booked event: into a clash with the room's other bookin
     },
 })
 
+// a phone's new rule for a series that books a managed room, with no new time, is checked over its range (impl-maintenance P15): an
+// unbounded one runs past the room's horizon, the change is refused and the event keeps no rule
+feature("a phone makes a booked event of a managed room repeat without end: refused, the event as it was", {
+    when() {
+        const path = `/dav/calendars/dv.ana/${s.calendarId}/phone-event-2.ics`
+        const row = ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", s.calendarId)
+                .condition("universalId", "phone-event-2@example.com").one()
+        call("create#mantle.work.effort.ResourceBookingPolicy", { facilityId: "DV_ROOM", fromDate: new Date(Date.now() - hour), bookable: "Y",
+                approvalModeEnumId: "RbamAutomatic", bookingHorizonDays: 400, revision: 1 })
+        // in a transaction of its own: check#ResourceBookings refuses ("… booked at most 400 days ahead", which the server answers 409)
+        // and the change rolls back
+        let refusal = ""
+        ec.message.pushErrors()
+        try {
+            ec.service.sync().name(DAV).parameters({ method: "PUT", path, body: ics("phone-event-2@example.com", "Standup moved", "20270614T190000Z",
+                "20270614T200000Z", ["RRULE:FREQ=DAILY"]), headers: { Authorization: `Basic ${base64(`dv.ana:${s.password}`)}` } })
+                .requireNewTransaction(true).call()
+            refusal = ec.message.getErrorsString()
+        } catch (error) {
+            refusal = String(error.message)
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+        const rule = ec.entity.find("mantle.work.effort.WorkEffortRecurrence").condition("workEffortId", row.workEffortId).one()
+        return { refusal, rule }
+    },
+    then({ refusal, rule }) {
+        refusal.includes("check#ResourceBookings")
+        rule == null
+    },
+})
+
 // Commons calendar editors (Nov 12, 2026): an invitation an attendee puts in a calendar of their own is there to be seen. The
 // attendee's phone reads it and is refused (403) a change, under its name or another with its UID; its delete takes it out of
 // the attendee's calendar and leaves the event as it was (the review's fix: it was refused); the organizer's delete still

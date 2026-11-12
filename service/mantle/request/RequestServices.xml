@@ -568,7 +568,8 @@ along with this software (see the LICENSE.md file). If not, see
             Puts a request on a record, its full entity name and single primary key value. The link is the record's own
             join when it has one (mantle.request.RequestWorkEffort for a work effort, mantle.request.WikiPageRequest for
             a wiki page), else a RequestRecord. Linking again changes nothing. The record must be one the user sees
-            (get#RecordLinkInfo).
+            (get#RecordLinkInfo). A maintenance request (RqtMaintenance) has at most one Asset or Facility target: another is
+            ONE_TARGET (IronStone Maintenance design §3 Requests; MaintenanceIntake.js checkTargetLink).
         </description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
@@ -588,6 +589,9 @@ along with this software (see the LICENSE.md file). If not, see
                     .parameters({recordEntityName: recordEntityName, recordId: recordId}).call()
             if (ec.message.hasError()) return
             recordEntityName = info.recordEntityName
+            // a maintenance request's one target (impl-maintenance P4)
+            if (request.requestTypeEnumId === 'RqtMaintenance') ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js')
+                    .checkTargetLink(requestId, recordEntityName, recordId)
 
             let keys
             if (info.requestJoin) {
@@ -1422,7 +1426,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="notify" noun="RequestTriage" authenticate="anonymous-all" allow-remote="false">
         <description>Tells the triagers of a request that it is new to them, on the topic RequestTriage: the project's triage
             assignee (WstTriageParty), else its managers (ProjectManager, Manager); for a request with no project, of a type
-            Projects triages, the triage assignee of the organizations whose intake settings name one. Not the user who made
+            Projects triages, the triage assignee of the organizations whose intake settings name one; for a maintenance request
+            (RqtMaintenance) the maintenance planners of its organization, the title naming its target only. Not the user who made
             the change. Run by the Request rule of entity/Request.eecas.xml (a request Submitted, or given a project); a
             failure is logged, not the request's. A request is told once for its project (a request made and given its
             project in one change runs this twice); force tells again.</description>
@@ -1446,6 +1451,19 @@ along with this software (see the LICENSE.md file). If not, see
                     if (told.get(key) && !force) return
                     told.put(key, true)
                 } catch (err) { /* no cache: told again at worst */ }
+                // a maintenance request (impl-maintenance P4, design-maintenance §13.3 RequestTriageNotice): its organization's
+                // maintenance planners, named by its target only; never Projects' triage
+                const maintenance = ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').triageNotice(request)
+                if (maintenance) {
+                    userIdList = maintenance.userIds.filter((userId) => userId !== ec.user.userId)
+                    if (!userIdList.length) return
+                    const nm = ec.makeNotificationMessage().topic('RequestTriage').userIds(userIdList).message({requestId: requestId,
+                        requestName: maintenance.requestName, typeLabel: 'Maintenance', rootWorkEffortId: null, projectName: '', projectSuffix: '',
+                        channelLabel: '', fromName: '', recordEntityName: 'mantle.request.Request', recordId: requestId})
+                    if (typeof nm.record === 'function') nm.record('mantle.request.Request', requestId)
+                    nm.send()
+                    return
+                }
                 const partyIds = new Set()
                 let project = null
                 if (request.rootWorkEffortId) {

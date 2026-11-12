@@ -35,6 +35,7 @@ const enumText = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.d
 const statusText = statusId => (statusId ? one("moqui.basic.StatusItem", {statusId})?.description || statusId : "")
 const facilityName = facility => (facility ? facility.facilityName || facility.facilityId : "")
 const nowMs = () => ms(ec.user.nowTimestamp)
+const outages = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 const canReport = () => reportPermissions.some(access.has)
 
 // ===== the records a stop names =====
@@ -333,7 +334,8 @@ function displayRows(list, at) {
         const operation = workOfId(row.operationWorkEffortId)
         const maintenance = row.assetMaintenanceId ? one(MAINTENANCE, {assetMaintenanceId: row.assetMaintenanceId}) : null
         const request = row.requestId ? one(REQUEST, {requestId: row.requestId}) : null
-        const outage = row.resourceUnavailabilityId ? one(OUTAGE, {resourceUnavailabilityId: row.resourceUnavailabilityId}) : null
+        // the outage in force (Maintenance may have corrected it, impl-maintenance P5) and who restored it
+        const outage = row.resourceUnavailabilityId ? outages().current(row.resourceUnavailabilityId) : null
         const endMs = row.thruDate ? ms(row.thruDate) : at
         const minutes = Math.max(0, Math.round((endMs - ms(row.fromDate)) / 60000))
         const durationText = Math.floor(minutes / 60)
@@ -382,7 +384,13 @@ function displayRows(list, at) {
             changeReason: row.changeReason || "",
             resourceUnavailabilityId: row.resourceUnavailabilityId || null,
             outageOpen: !!outage && outage.thruDate == null,
-            outageText: outage ? (outage.thruDate == null ? "Out of service" : "Restored " + dateText(outage.thruDate)) : "",
+            outageText: outage
+                ? outage.thruDate == null
+                    ? "Out of service"
+                    : "Restored " +
+                      dateText(outage.thruDate) +
+                      (outage.endedByUserId ? " by " + userName(outage.endedByUserId) : "")
+                : "",
             assetMaintenanceId: row.assetMaintenanceId || null,
             maintenanceText: maintenance
                 ? enumText(maintenance.maintenanceTypeEnumId) + " · " + statusText(maintenance.statusId)

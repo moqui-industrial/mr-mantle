@@ -40,6 +40,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeEntryId"/>
         </out-parameters>
         <actions>
+            <!-- no new time on managed work, nor an entry moved onto it (a maintenance work order and its steps, a procedure;
+                impl-maintenance P7, F159): Maintenance's own time entry points check their caller and pass it through
+                (WorkProcesses.js asManagedOwner); an entry already on the work keeps its timesheet rules, so a running timer stops -->
+            <if condition="context.workEffortId">
+                <set field="storedTimeWorkEffortId" from="context.timeEntryId ? ec.entity.find('mantle.work.time.TimeEntry')
+                        .condition('timeEntryId', context.timeEntryId).disableAuthz().one()?.workEffortId : null"/>
+                <if condition="storedTimeWorkEffortId != context.workEffortId">
+                    <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:context.workEffortId}"/>
+                    <if condition="ec.message.hasError()"><return/></if>
+                </if>
+            </if>
             <if condition="partyId">
                 <entity-find-one entity-name="mantle.party.Party" value-field="party"/>
                 <if condition="party.disabled == 'Y'"><return error="true" message="Time Entry not created, ${party.pseudoId} is not active."/></if>
@@ -399,6 +410,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="timeEntryId"/></out-parameters>
         <actions>
+            <!-- no clock-in on managed work but through its owner's entry point (impl-maintenance P7, F159; store#TimeEntry's rule) -->
+            <if condition="context.workEffortId">
+                <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:context.workEffortId}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <!-- on the person's timesheet of the week, which must not be submitted (check#TimeEntryTimesheet) -->
             <service-call name="mantle.work.TimeServices.check#TimeEntryTimesheet" out-map="sheetCheck"
                     in-map="{timesheetId:timesheetId, partyId:partyId, fromDate:fromDate, workEffortId:workEffortId}"/>
@@ -1730,7 +1746,8 @@ along with this software (see the LICENSE.md file). If not, see
             Each row is planned: the person, the item (a task or project the user sees), the work type, billable, the time (hours
             rounded to the person's policy's smallest entry, a warning when that changed; rows with hours only stack from 9:00 on
             their person's day), and what it will do: create, skip (an entry of the person on the item starting at the same moment
-            is there already) or fail with its problems (no date, no person found, a work item not found or not visible, no hours,
+            is there already) or fail with its problems (no date, no person found, a work item not found or not visible (managed
+            maintenance work and a procedure among them, impl-maintenance F111), no hours,
             a work item required by the policy, a future day the policy refuses, a week the user may not change, or one submitted
             and locked). preview true plans only (previewList, the first maxRows); otherwise each row to create goes through
             store#TimeEntry in its own transaction: a row that fails is logged and named with its reason, the others are imported.
@@ -1854,6 +1871,8 @@ along with this software (see the LICENSE.md file). If not, see
                 cache.person[key] = ids.length === 1 ? {partyId: ids[0]} : {error: ids.length ? L('${name} matches several people', {name: text}) : L('No person ${name}', {name: text})}
                 return cache.person[key]
             }
+            const processes = ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+            const managedItem = (workEffortId) => !!processes.managedReason([workEffortId])
             const itemOf = (value) => {
                 const text = String(value || '').trim()
                 if (!text) return null
@@ -1870,6 +1889,9 @@ along with this software (see the LICENSE.md file). If not, see
                             && !vis.allProjects && !managed.has(root) && !restricted.has(item.workEffortId)
                     if (!root || !seen || hidden) result = {error: L('Work item ${key} is not available', {key: text})}
                     else if (rootItem?.isTemplate === 'Y') result = {error: L('${key} is in a template', {key: text})}
+                    // impl-maintenance P6 (F111): managed work (a work order's tree, a procedure's) takes time only through its own
+                    // entry points (MaintenanceServices' time, which check the assignment); an every-project reader's import too
+                    else if (managedItem(item.workEffortId)) result = {error: L('Work item ${key} is not available', {key: text})}
                     else result = {workEffortId: item.workEffortId, name: item.workEffortName || item.workEffortId, rootWorkEffortId: root,
                         projectName: rootItem?.workEffortName || root, closed: ['WeComplete', 'WeClosed', 'WeCancelled'].includes(item.statusId)}
                 }
