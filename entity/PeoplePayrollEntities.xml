@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payroll configuration (IronStone People design §8.1, §8.4, PayComponents, PayComponentDetail, PayStructures,
+    PayStructureDetail, PayGroups; PE-08, PE-09, PE-12; impl-people P22): an employer's pay components (PayrollComponent: a stable
+    code a formula names, its kind) with their dated terms (PayrollComponentTerm: an amount or a constrained decimal formula over
+    declared inputs and other components, the explicit currency or unit, the rounding stage, payslip visibility and the account
+    mapping) and the named examples a term is verified with before it is published (PayrollComponentExample); reusable structures
+    (PayrollStructure, in one currency) and their dated components (PayrollStructureComponent); pay groups (PayrollGroup: the
+    employer's currency, frequency, explicit annual divisor, pay-date and proration policy and localization binding) and their pay
+    periods (PayrollGroupPeriod over Mantle's TimePeriod); and the localization registration (PayrollLocalization), seeded with the
+    one synthetic, non-statutory demonstration localization, which can never be live. Written only by
+    mantle.humanres.PayrollSetupServices (PayrollConfiguration.js), which checks PAYROLL_EDIT and PEOPLE_CONFIGURE and the employer
+    first; the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
+    terms and lines are ended, never changed or deleted. Nothing here is the legacy payroll (PayrollAdjustment and its rows), which
+    no People service reads (design §8.4). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PayrollComponent" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's pay component: a stable code (a formula's name for its result, unique in the employer), a name,
+            and its kind, an earning, a deduction, an employer contribution or a statistical value (which enters no total and posts
+            nothing). Its calculation is in its dated terms. Ended (thruDate), never deleted, once it is no longer used.</description>
+        <field name="payrollComponentId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="componentCode" type="text-short"><description>A name a formula may use: a letter or underscore, then letters,
+            digits and underscores</description></field>
+        <field name="componentName" type="text-medium" enable-audit-log="update"/>
+        <field name="componentKindEnumId" type="id"><description>PayrollComponentKind</description></field>
+        <field name="description" type="text-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PayrollComponentKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="componentKindEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="terms">
+            <key-map field-name="payrollComponentId"/></relationship>
+        <index name="PAY_COMP_CODE" unique="true"><index-field name="organizationPartyId"/><index-field name="componentCode"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Component Kind" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckEarning" description="Earning" sequenceNum="1" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckDeduction" description="Deduction" sequenceNum="2" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckContribution" description="Employer contribution" sequenceNum="3"
+                    enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckStatistical" description="Statistical" sequenceNum="4" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.EnumerationType description="Payroll Component Basis" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.Enumeration enumId="PcbAmount" description="Fixed amount" sequenceNum="1" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.Enumeration enumId="PcbFormula" description="Formula" sequenceNum="2" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.EnumerationType description="Payroll Rounding" enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdNearest" description="Nearest (half away from zero)" sequenceNum="1"
+                    enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdDown" description="Down" sequenceNum="2" enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdUp" description="Up" sequenceNum="3" enumTypeId="PayrollRounding"/>
+            <!-- a term or a structure's line: a draft, changed until it is published; a published one is only ended -->
+            <moqui.basic.StatusType description="Payroll Configuration Term" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusItem statusId="PtsDraft" description="Draft" sequenceNum="1" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusItem statusId="PtsPublished" description="Published" sequenceNum="2" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PtsDraft" toStatusId="PtsPublished" transitionName="Publish"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollComponentTerm" package="mantle.humanres.payroll" cache="never">
+        <description>A component's dated calculation, from fromDate until thruDate: a fixed amount or a formula (the framework's
+            decimal expression: named decimal inputs, the codes of other components, comparisons, conditions and an allowlist of
+            functions, nothing else) over its declared inputs (inputNames) and the components it depends on (dependencyCodes, the
+            names it reads that are not inputs); the currency of a money component (required: no implicit currency) or the unit of
+            a statistical one; its rounding stage (places and direction; none keeps the precision); whether a payslip shows it; and
+            its account mapping (the expense account of an earning or contribution, the liability account of a deduction or
+            contribution; a statistical component maps none). A draft is changed until it is published, with examples that verify
+            it; a published term is ended, never changed, and published intervals of one component do not overlap.</description>
+        <field name="payrollComponentTermId" type="id" is-pk="true"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft or published</description></field>
+        <field name="basisEnumId" type="id"><description>PayrollComponentBasis</description></field>
+        <field name="amount" type="number-decimal"><description>A fixed amount's value</description></field>
+        <field name="formula" type="text-long"/>
+        <field name="inputNames" type="text-medium"><description>The declared inputs, comma separated</description></field>
+        <field name="dependencyCodes" type="text-medium"><description>The codes of the components the formula reads, comma
+            separated; computed when the term is stored</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"><description>A statistical component's unit, when it has one</description></field>
+        <field name="roundingPlaces" type="number-integer"/>
+        <field name="roundingEnumId" type="id"><description>PayrollRounding</description></field>
+        <field name="payslipVisible" type="text-indicator"/>
+        <field name="expenseGlAccountId" type="id"/>
+        <field name="liabilityGlAccountId" type="id"/>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="PayrollComponentBasis" related="moqui.basic.Enumeration" short-alias="basis">
+            <key-map field-name="basisEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="PayrollRounding" related="moqui.basic.Enumeration" short-alias="rounding">
+            <key-map field-name="roundingEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Expense" related="mantle.ledger.account.GlAccount" short-alias="expenseAccount">
+            <key-map field-name="expenseGlAccountId" related="glAccountId"/></relationship>
+        <relationship type="one-nofk" title="Liability" related="mantle.ledger.account.GlAccount" short-alias="liabilityAccount">
+            <key-map field-name="liabilityGlAccountId" related="glAccountId"/></relationship>
+        <index name="PAY_COMP_TERM_COMP"><index-field name="payrollComponentId"/></index>
+    </entity>
+    <entity entity-name="PayrollComponentExample" package="mantle.humanres.payroll" cache="never">
+        <description>A named example of a component's term: the value of each name its formula reads (inputValues, a JSON object
+            of decimal texts) and the amount expected. Preview computes each one; a term is published only when every example
+            gives its expected amount. Configuration values, read and written by payroll configuration alone.</description>
+        <field name="payrollComponentExampleId" type="id" is-pk="true"/>
+        <field name="payrollComponentTermId" type="id"/>
+        <field name="exampleName" type="text-medium"/>
+        <field name="inputValues" type="text-long"/>
+        <field name="expectedAmount" type="number-decimal"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
+        <index name="PAY_COMP_EX_TERM"><index-field name="payrollComponentTermId"/></index>
+    </entity>
+
+    <entity entity-name="PayrollStructure" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's reusable pay calculation: a name, one currency (every money component of it is in it), a pay
+            basis, and its components (PayrollStructureComponent). A draft until it is first published, from fromDate; published
+            lines are only ended; ended (thruDate) when no longer used. A copy is a new structure with draft lines and no
+            assignments. Publishing reassigns no employee and rewrites no payslip.</description>
+        <field name="payrollStructureId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="structureName" type="text-medium" enable-audit-log="update"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="payBasisEnumId" type="id" enable-audit-log="update"><description>PayrollPayBasis</description></field>
+        <field name="description" type="text-long"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft until first published</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="copiedFromStructureId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="PayrollPayBasis" related="moqui.basic.Enumeration" short-alias="payBasis">
+            <key-map field-name="payBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollStructureComponent" short-alias="lines">
+            <key-map field-name="payrollStructureId"/></relationship>
+        <index name="PAY_STRUCT_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Pay Basis" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbSalaried" description="Salaried" sequenceNum="1" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbHourly" description="Hourly" sequenceNum="2" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbMixed" description="Salaried and hourly" sequenceNum="3" enumTypeId="PayrollPayBasis"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollStructureComponent" package="mantle.humanres.payroll" cache="never">
+        <description>A component of a structure from fromDate (the structure's publishing date when empty) until thruDate: its
+            payslip order (sequenceNum, independent of the calculation order its dependencies decide) and the structure's values
+            of the component's declared inputs (parameterValues, a JSON object of decimal texts, such as a contribution's rate). A
+            draft until the structure is published; a published line is only ended.</description>
+        <field name="payrollStructureComponentId" type="id" is-pk="true"/>
+        <field name="payrollStructureId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="update"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="parameterValues" type="text-long"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollStructure" short-alias="structure"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_STRUCT_LINE"><index-field name="payrollStructureId"/></index>
+        <index name="PAY_STRUCT_LINE_COMP"><index-field name="payrollComponentId"/></index>
+    </entity>
+
+    <entity entity-name="PayrollGroup" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's pay group: its currency (a run is one employer and currency), its pay frequency (a Payroll time
+            period type) and the first day of its first period, its explicit periods a year (the annual divisor a salary formula
+            reads; never assumed), the pay date's place (days after a period's last day), how a part period is prorated (calendar
+            days, working days or hours) and where hours come from, the time zone of its workweek, and the localization it is bound
+            to. liveEnabled is N in this build: no localization covers a group (the demonstration one never can) and the
+            payroll-origin projection is not built, so a group is preview only (design §8). Its policy fields are audited.</description>
+        <field name="payrollGroupId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="groupName" type="text-medium" enable-audit-log="update"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="timePeriodTypeId" type="id" enable-audit-log="update"/>
+        <field name="firstPeriodFromDate" type="date"/>
+        <field name="periodsPerYear" type="number-decimal" enable-audit-log="update"/>
+        <field name="payDateOffsetDays" type="number-integer" enable-audit-log="update"/>
+        <field name="prorationEnumId" type="id" enable-audit-log="update"><description>PayrollProration</description></field>
+        <field name="timeBasisEnumId" type="id" enable-audit-log="update"><description>PayrollTimeBasis</description></field>
+        <field name="workweekTimeZone" type="text-short" enable-audit-log="update"/>
+        <field name="payrollLocalizationId" type="id" enable-audit-log="update"/>
+        <field name="liveEnabled" type="text-indicator"/>
+        <field name="description" type="text-long"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriodType" short-alias="frequency"/>
+        <relationship type="one" title="PayrollProration" related="moqui.basic.Enumeration" short-alias="proration">
+            <key-map field-name="prorationEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PayrollTimeBasis" related="moqui.basic.Enumeration" short-alias="timeBasis">
+            <key-map field-name="timeBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <index name="PAY_GROUP_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Proration" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprCalendarDays" description="Calendar days" sequenceNum="1" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprWorkingDays" description="Working days" sequenceNum="2" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprHours" description="Hours" sequenceNum="3" enumTypeId="PayrollProration"/>
+            <moqui.basic.EnumerationType description="Payroll Time Basis" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbTimesheets" description="Approved timesheets" sequenceNum="1" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbAttendance" description="Attendance" sequenceNum="2" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbSchedule" description="Working schedule (no time recorded)" sequenceNum="3"
+                    enumTypeId="PayrollTimeBasis"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollGroupPeriod" package="mantle.humanres.payroll" cache="never">
+        <description>A pay period of a group: Mantle's TimePeriod of the employer and the group's frequency (shared by the
+            employer's groups of that frequency and start) with the group's pay date. Prepared once, idempotently; a period is
+            never closed merely to mark a run finished.</description>
+        <field name="payrollGroupId" type="id" is-pk="true"/>
+        <field name="timePeriodId" type="id" is-pk="true"/>
+        <field name="payDate" type="date"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one" related="mantle.party.time.TimePeriod" short-alias="period"/>
+    </entity>
+
+    <entity entity-name="PayrollLocalization" package="mantle.humanres.payroll" use="configuration" cache="never">
+        <description>A payroll localization's registration (design §8.4, PE-12): its jurisdictions, the effective coverage of its
+            rule set and its release, the setup it requires, its outputs, and its calculation service, which implements
+            mantle.humanres.PayrollLocalizationServices.calculate#Localization (side-effect free: declared pay facts and bases in,
+            itemized employee and employer amounts, explanations and findings out). Trusted deployed code registered as seed data,
+            never named in a payroll form. A demonstration localization (isDemonstration Y) previews examples and is never live;
+            this build ships that one alone (impl-people §4, Nov 11, 2026).</description>
+        <field name="payrollLocalizationId" type="id" is-pk="true"/>
+        <field name="localizationName" type="text-medium"/>
+        <field name="jurisdictionText" type="text-medium"/>
+        <field name="calculationServiceName" type="text-medium"/>
+        <field name="coverageFromDate" type="date-time"/>
+        <field name="coverageThruDate" type="date-time"/>
+        <field name="releaseVersion" type="text-short"/>
+        <field name="isDemonstration" type="text-indicator"/>
+        <field name="requiredSetup" type="text-long"/>
+        <field name="supportedOutputs" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <seed-data>
+            <mantle.humanres.payroll.PayrollLocalization payrollLocalizationId="PlzDemonstration"
+                    localizationName="Demonstration (synthetic, not statutory)" jurisdictionText="None: a synthetic example"
+                    calculationServiceName="mantle.humanres.PayrollLocalizationServices.calculate#Demonstration"
+                    coverageFromDate="2000-01-01 00:00:00" releaseVersion="1" isDemonstration="Y"
+                    requiredSetup="None" supportedOutputs="Preview explanations only"
+                    description="A flat demonstration levy on earnings (2% from the employee, 1% from the employer) to show where a localization's amounts enter gross to net. It is no country's law, previews only, and can never make a pay group live."/>
+        </seed-data>
+    </entity>
+</entities>

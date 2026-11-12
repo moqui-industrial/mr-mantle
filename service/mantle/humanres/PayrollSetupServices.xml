@@ -13,8 +13,8 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- People's payroll setup (IronStone People design §5 PayGrades, §8, PE-08; impl-people P4, F4; PayrollSetup.js): pay grades and
-    their dated bands (PayGradeSalary: minimum, reference amount and maximum, with a currency and a pay frequency). Later phases add
-    components, structures, assignments and groups. A band's amounts are answered only to a holder of PAYROLL_VIEW; any other staff
+    their dated bands (PayGradeSalary: minimum, reference amount and maximum, with a currency and a pay frequency). P22 adds the pay
+    components, structures and groups (PayrollConfiguration.js); P23 assignments. A band's amounts are answered only to a holder of PAYROLL_VIEW; any other staff
     reader gets a grade's name alone. A grade is owned by an employer (organizationPartyId), read by that employer's readers and
     changed by its payroll editors, or shared by every employer (no owner), read by every staff reader and changed only by a payroll
     editor who also holds PEOPLE_ALL_ORGANIZATIONS (impl-people §4, Nov 11, 2026). Each service checks the People and payroll permissions itself, then reads and writes with
@@ -105,6 +105,499 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollSetup.js').execute('storePayGrade', context)"/>
             <set field="payGradeId" from="stored.payGradeId"/>
             <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <!-- ===== P22: pay components, structures and groups (design §8.1, PayComponents to PayGroups; PayrollConfiguration.js) =====
+        Read with PAYROLL_VIEW for the employers in the caller's People scope; changed with PAYROLL_VIEW, PAYROLL_EDIT and
+        PEOPLE_CONFIGURE (design §1.1). Another employer's record is a missing one (RECORD_UNAVAILABLE). Formulas are the
+        framework's decimal expressions (org.moqui.impl.ExpressionServices, PE-09). No currency, divisor or rounding is assumed. -->
+    <service verb="find" noun="Components" allow-remote="false">
+        <description>The pay components of the employers the caller reads (or organizationPartyId, an employer in scope), searched
+            by code or name ignoring case (term), of a kind, in a state on asOfDate (draft, current, future or ended; ended ones only
+            when asked), paged (an export up to 2000): each its code, name, kind, employer, and the term in effect (else the next,
+            else the draft): basis, calculation, unit, dates and state. With payrollComponentId, the component (its revision, the
+            draft term's id), every term newest first (formula, declared inputs, dependencies, currency or unit, rounding stage,
+            payslip visibility, account mapping, who published it) and the examples of the term asked for (payrollComponentTermId,
+            else the draft, else the one in effect). Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside
+            the scope (ORGANIZATION_DENIED) and another employer's component (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="payrollComponentId"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="componentKindEnumId"/>
+            <parameter name="state"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="components" type="List"/>
+            <parameter name="component" type="Map"/>
+            <parameter name="terms" type="List"/>
+            <parameter name="examples" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="componentsCount" type="Integer"/>
+            <parameter name="componentsPageIndex" type="Integer"/>
+            <parameter name="componentsPageSize" type="Integer"/>
+            <parameter name="componentsPageMaxIndex" type="Integer"/>
+            <parameter name="componentsPageRangeLow" type="Integer"/>
+            <parameter name="componentsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('findComponents', context)"/>
+            <set field="components" from="found.components"/>
+            <set field="component" from="found.component"/>
+            <set field="terms" from="found.terms"/>
+            <set field="examples" from="found.examples"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="componentsCount" from="found.componentsCount"/>
+            <set field="componentsPageIndex" from="found.componentsPageIndex"/>
+            <set field="componentsPageSize" from="found.componentsPageSize"/>
+            <set field="componentsPageMaxIndex" from="found.componentsPageMaxIndex"/>
+            <set field="componentsPageRangeLow" from="found.componentsPageRangeLow"/>
+            <set field="componentsPageRangeHigh" from="found.componentsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Component" allow-remote="false">
+        <description>A new pay component of an employer in scope (componentCode, a name a formula may use, unique in the employer;
+            componentName; componentKindEnumId: earning, deduction, employer contribution or statistical), or a component's new name,
+            description or end (end, componentThruDate) at the revision read; and with any term field its draft term: created from
+            fromDate (now when empty) when it has none, else changed (payrollComponentTermId names it). A term is a fixed amount or a
+            formula (the framework's decimal expression over the declared inputNames and the codes of the components it reads, which
+            become its dependencies), in its currency (required for money: no implicit currency) or a statistical value's unit, with
+            an optional rounding stage (places and direction), payslip visibility and its account mapping (an earning's expense
+            account, a deduction's liability account, a contribution's both, a statistical value's none). Refuses a caller without
+            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
+            ORGANIZATION_REQUIRED), another employer's component (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), and
+            CODE_REQUIRED, CODE_INVALID, CODE_TAKEN, NAME_REQUIRED, KIND_INVALID, COMPONENT_ENDED, COMPONENT_IN_USE, TERM_PUBLISHED
+            (a published term is never changed), BASIS_REQUIRED, BASIS_INVALID, AMOUNT_REQUIRED, AMOUNT_INVALID, FORMULA_REQUIRED,
+            FORMULA_INVALID (the evaluator's message, position and code), CYCLIC_DEPENDENCY (the formula reads the component itself),
+            INPUT_INVALID, CURRENCY_REQUIRED, CURRENCY_INVALID, CURRENCY_PRECISION, UNIT_REQUIRED, UNIT_INVALID, ROUNDING_INVALID,
+            STATISTICAL_NO_POSTING, ACCOUNT_NOT_FOR_KIND, ACCOUNT_INVALID (not one of the employer's) and DATES_INVALID.</description>
+        <in-parameters>
+            <parameter name="payrollComponentId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="componentCode"/>
+            <parameter name="componentName"/>
+            <parameter name="componentKindEnumId"/>
+            <parameter name="description"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="componentThruDate" type="Timestamp"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="basisEnumId"/>
+            <parameter name="amount"/>
+            <parameter name="formula" allow-html="any"/>
+            <parameter name="inputNames"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="roundingPlaces"/>
+            <parameter name="roundingEnumId"/>
+            <parameter name="payslipVisible"/>
+            <parameter name="expenseGlAccountId"/>
+            <parameter name="liabilityGlAccountId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollComponentId"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('storeComponent', context)"/>
+            <set field="payrollComponentId" from="stored.payrollComponentId"/>
+            <set field="payrollComponentTermId" from="stored.payrollComponentTermId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="ComponentExample" allow-remote="false">
+        <description>A named example of a component's draft term (payrollComponentTermId, else the draft): added, changed
+            (payrollComponentExampleId) or removed (remove), at the component's revision. inputValues gives each name the formula
+            reads a decimal ("name = value" pairs, a JSON object or a map); expectedAmount is what the term must give. Refuses a caller
+            without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's component
+            (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), no draft (NO_DRAFT), a published term (TERM_PUBLISHED), no name
+            (NAME_REQUIRED), a value that is not a name and a decimal (VALUE_INVALID) and no or a bad amount (AMOUNT_REQUIRED,
+            AMOUNT_INVALID).</description>
+        <in-parameters>
+            <parameter name="payrollComponentId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="payrollComponentExampleId"/>
+            <parameter name="exampleName"/>
+            <parameter name="inputValues"/>
+            <parameter name="expectedAmount"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollComponentExampleId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('storeComponentExample', context)"/>
+            <set field="payrollComponentExampleId" from="stored.payrollComponentExampleId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="Component" allow-remote="false">
+        <description>A component's term (payrollComponentTermId, else the draft, else the one in effect) computed for each of its
+            examples beside the amount expected (actual amount, whether it matches, the explanation: the formula with the values
+            read and its rounding, or the evaluator's refusal such as a missing input), whether all pass, and, with inputValues, the
+            amount those values give. A statistical component is shown with no total it enters (inTotals false). Reads and
+            computes only. Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), another employer's component
+            (RECORD_UNAVAILABLE), no term (NO_TERM) and unreadable values (VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="payrollComponentId" required="true"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="inputValues"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="examples" type="List"/>
+            <parameter name="allPassed" type="Boolean"/>
+            <parameter name="inTotals" type="Boolean"/>
+            <parameter name="totalsText"/>
+            <parameter name="sample" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('previewComponent', context)"/>
+            <set field="payrollComponentTermId" from="found.payrollComponentTermId"/>
+            <set field="examples" from="found.examples"/>
+            <set field="allPassed" from="found.allPassed"/>
+            <set field="inTotals" from="found.inTotals"/>
+            <set field="totalsText" from="found.totalsText"/>
+            <set field="sample" from="found.sample"/>
+        </actions>
+    </service>
+
+    <service verb="publish" noun="Component" allow-remote="false">
+        <description>A component's draft term published from its date (or fromDate), with a reason (the audit row's), at the
+            revision read; the published term in effect then ends on that date. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT
+            and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's component (RECORD_UNAVAILABLE), a stale revision
+            (REVISION_CHANGED), an ended component (COMPONENT_ENDED), no draft (NO_DRAFT, TERM_PUBLISHED), no reason
+            (REASON_REQUIRED), the term's own refusals (store#Component's), a mapping its kind needs (MAPPING_REQUIRED), no example
+            (EXAMPLES_REQUIRED), an example not giving its amount (EXAMPLE_FAILED, each named), a component it reads with no published
+            term on that date (MISSING_DEPENDENCY), components reading each other (CYCLIC_DEPENDENCY, the cycle named), a published
+            term starting on or after that date (TERMS_OVERLAP) and ending a published term in the past
+            (EFFECTIVE_DATE_PAST).</description>
+        <in-parameters>
+            <parameter name="payrollComponentId" required="true"/>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollComponentTermId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="published" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('publishComponent', context)"/>
+            <set field="payrollComponentTermId" from="published.payrollComponentTermId"/>
+            <set field="revision" from="published.revision"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Structures" allow-remote="false">
+        <description>The pay structures of the employers the caller reads (or organizationPartyId, an employer in scope), searched
+            by name ignoring case, in a state (draft, current, future or ended; ended ones only when asked), paged: each its employer,
+            currency, pay basis, state, dates and the count of its components on asOfDate. With payrollStructureId, the structure
+            (its revision) and its lines in payslip order (component, kind, dates, state, parameter values, the term it calculates
+            with), with the calculation order of its components on that date and the findings that block one (a dependency the
+            structure lacks, a cycle, no term). Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the
+            scope (ORGANIZATION_DENIED) and another employer's structure (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="payrollStructureId"/>
+            <parameter name="state"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="structures" type="List"/>
+            <parameter name="structure" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="calculationOrder" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="structuresCount" type="Integer"/>
+            <parameter name="structuresPageIndex" type="Integer"/>
+            <parameter name="structuresPageSize" type="Integer"/>
+            <parameter name="structuresPageMaxIndex" type="Integer"/>
+            <parameter name="structuresPageRangeLow" type="Integer"/>
+            <parameter name="structuresPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('findStructures', context)"/>
+            <set field="structures" from="found.structures"/>
+            <set field="structure" from="found.structure"/>
+            <set field="lines" from="found.lines"/>
+            <set field="calculationOrder" from="found.calculationOrder"/>
+            <set field="findings" from="found.findings"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="structuresCount" from="found.structuresCount"/>
+            <set field="structuresPageIndex" from="found.structuresPageIndex"/>
+            <set field="structuresPageSize" from="found.structuresPageSize"/>
+            <set field="structuresPageMaxIndex" from="found.structuresPageMaxIndex"/>
+            <set field="structuresPageRangeLow" from="found.structuresPageRangeLow"/>
+            <set field="structuresPageRangeHigh" from="found.structuresPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Structure" allow-remote="false">
+        <description>A new pay structure of an employer in scope (structureName, currencyUomId: required, never assumed,
+            payBasisEnumId), a copy of one (copyFromStructureId: a new structure of the same employer with the source's current lines
+            as drafts and no assignments), or a structure's new name, pay basis, description or currency (a draft's only) or its end
+            (end, thruDate, reason), at the revision read. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE
+            (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED, ORGANIZATION_REQUIRED), another employer's
+            structure (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), NAME_REQUIRED, CURRENCY_REQUIRED, CURRENCY_INVALID,
+            CURRENCY_LOCKED (a published structure's), BASIS_INVALID, EMPLOYER_CHANGE (a copy for another employer) and
+            STRUCTURE_ENDED.</description>
+        <in-parameters>
+            <parameter name="payrollStructureId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="structureName"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="payBasisEnumId"/>
+            <parameter name="description"/>
+            <parameter name="copyFromStructureId"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollStructureId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('storeStructure', context)"/>
+            <set field="payrollStructureId" from="stored.payrollStructureId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="StructureComponent" allow-remote="false">
+        <description>A component added to a structure as a draft line (payrollComponentId: one of the employer's in use; one draft
+            line of a component at a time), a draft line's dates, payslip order (sequenceNum) or parameter values (the structure's
+            values of the component's declared inputs, "name = value" pairs) changed, a draft line removed (remove), or a published
+            line ended (end, thruDate, reason: its only change), at the structure's revision. Refuses a caller without PAYROLL_VIEW,
+            PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's structure or line (RECORD_UNAVAILABLE), a stale
+            revision (REVISION_CHANGED), STRUCTURE_ENDED, COMPONENT_REQUIRED, COMPONENT_UNAVAILABLE, LINE_EXISTS, LINE_PUBLISHED,
+            ORDER_INVALID, VALUE_INVALID and DATES_INVALID.</description>
+        <in-parameters>
+            <parameter name="payrollStructureId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="payrollStructureComponentId"/>
+            <parameter name="payrollComponentId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="parameterValues"/>
+            <parameter name="remove" type="Boolean"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollStructureComponentId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('storeStructureComponent', context)"/>
+            <set field="payrollStructureComponentId" from="stored.payrollStructureComponentId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="Structure" allow-remote="false">
+        <description>A sample gross to net of a structure on asOfDate, its draft lines and its components' draft terms included so
+            it is seen before it is published: each component computed in dependency order from the sample inputValues, the
+            structure's parameter values and the results it reads, rounded by its own stage, with its explanation or what blocks it
+            (a missing input, a dependency the structure lacks, a cycle, another currency); results in payslip order beside the
+            calculation order; totals (gross, deductions, employer contributions, the localization's employee and employer items,
+            net, the net rounded to the currency with the difference, employer cost; a statistical value enters none); the items of
+            the localization chosen (payrollLocalizationId, else the group's), computed by its registered service; and the findings
+            (complete when none blocks). With payrollGroupId, the group's periods a year are the input periodsPerYear. Reads and
+            computes only: no record is written and no money is created. Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED),
+            another employer's structure or group (RECORD_UNAVAILABLE), a group of another employer (EMPLOYER_CHANGE), an unknown
+            localization (LOCALIZATION_INVALID) and unreadable values (VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="payrollStructureId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="inputValues"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="payrollLocalizationId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="calculationOrder" type="List"/>
+            <parameter name="localizationName"/>
+            <parameter name="localizationItems" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="totals" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('previewStructure', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="calculationOrder" from="found.calculationOrder"/>
+            <set field="localizationName" from="found.localizationName"/>
+            <set field="localizationItems" from="found.localizationItems"/>
+            <set field="findings" from="found.findings"/>
+            <set field="complete" from="found.complete"/>
+            <set field="currencyUomId" from="found.currencyUomId"/>
+            <set field="totals" from="found.totals"/>
+        </actions>
+    </service>
+
+    <service verb="publish" noun="Structure" allow-remote="false">
+        <description>A structure's draft lines published, each from its own date or the publishing date (fromDate, now when
+            empty), with a reason (the audit row's), at the revision read; the first publish starts the structure. Publishing
+            reassigns no employee and rewrites no payslip. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE
+            (PERMISSION_DENIED), another employer's structure (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED),
+            STRUCTURE_ENDED, no reason (REASON_REQUIRED), no draft line (NO_DRAFT), a line's component with no published term on its
+            start (COMPONENT_NOT_PUBLISHED), a money component in another currency (CURRENCY_MISMATCH), two lines of one component at
+            once (TERMS_OVERLAP), no component on the date (LINES_REQUIRED), a dependency the structure lacks (MISSING_DEPENDENCY) and
+            components reading each other (CYCLIC_DEPENDENCY).</description>
+        <in-parameters>
+            <parameter name="payrollStructureId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollStructureId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="published" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('publishStructure', context)"/>
+            <set field="payrollStructureId" from="published.payrollStructureId"/>
+            <set field="revision" from="published.revision"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Groups" allow-remote="false">
+        <description>The pay groups of the employers the caller reads (or organizationPartyId, an employer in scope), by name
+            (ended ones with includeEnded), paged: each its employer, currency, frequency, first period, periods a year, pay-date
+            policy, proration, time basis, workweek zone, localization and readiness (preview only in this build, with its reason:
+            NO_LOCALIZATION, PREVIEW_ONLY for the demonstration, COVERAGE_MISSING or PROJECTION_PENDING; liveAllowed never true),
+            its revision and whether the caller may change it. With payrollGroupId, its prepared periods (dates, pay date, state).
+            Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED) and
+            another employer's group (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="term"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="groups" type="List"/>
+            <parameter name="group" type="Map"/>
+            <parameter name="periods" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="groupsCount" type="Integer"/>
+            <parameter name="groupsPageIndex" type="Integer"/>
+            <parameter name="groupsPageSize" type="Integer"/>
+            <parameter name="groupsPageMaxIndex" type="Integer"/>
+            <parameter name="groupsPageRangeLow" type="Integer"/>
+            <parameter name="groupsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('findGroups', context)"/>
+            <set field="groups" from="found.groups"/>
+            <set field="group" from="found.group"/>
+            <set field="periods" from="found.periods"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="groupsCount" from="found.groupsCount"/>
+            <set field="groupsPageIndex" from="found.groupsPageIndex"/>
+            <set field="groupsPageSize" from="found.groupsPageSize"/>
+            <set field="groupsPageMaxIndex" from="found.groupsPageMaxIndex"/>
+            <set field="groupsPageRangeLow" from="found.groupsPageRangeLow"/>
+            <set field="groupsPageRangeHigh" from="found.groupsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Group" allow-remote="false">
+        <description>A new pay group of an employer in scope, or a group's changes (or its end) at the revision read, its policy
+            fields audited with the reason. Nothing is assumed: currencyUomId, timePeriodTypeId (a Payroll month, semi-month,
+            bi-week or week), firstPeriodFromDate (yyyy-MM-dd), periodsPerYear (the annual divisor), payDateOffsetDays (days after a
+            period's last day, -31 to 62), prorationEnumId and timeBasisEnumId are required; workweekTimeZone and the localization
+            binding are optional. Once periods are prepared the currency, frequency and first period stay. Refuses a caller without
+            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
+            ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live
+            finalization (LIVE_NOT_AVAILABLE: no group can be live in this build), GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
+            CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
+            PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID and
+            POLICY_LOCKED.</description>
+        <in-parameters>
+            <parameter name="payrollGroupId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="groupName"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="timePeriodTypeId"/>
+            <parameter name="firstPeriodFromDate"/>
+            <parameter name="periodsPerYear"/>
+            <parameter name="payDateOffsetDays"/>
+            <parameter name="prorationEnumId"/>
+            <parameter name="timeBasisEnumId"/>
+            <parameter name="workweekTimeZone"/>
+            <parameter name="payrollLocalizationId"/>
+            <parameter name="liveEnabled"/>
+            <parameter name="description"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollGroupId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('storeGroup', context)"/>
+            <set field="payrollGroupId" from="stored.payrollGroupId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="prepare" noun="Periods" allow-remote="false">
+        <description>A pay group's next periodCount periods (1 to 24), after the last prepared one or from its first period's
+            start: each Mantle's TimePeriod of the employer and the group's frequency (create#TimePeriod: made once, shared by the
+            employer's groups of that frequency) with the group's pay date (the period's last day plus its offset). Idempotent: a
+            period prepared already is answered as it is (created false). With preview, the same periods are answered and nothing
+            is written, for a payroll reader. No period is closed. Refuses a caller without PAYROLL_VIEW (a preview) or without
+            PAYROLL_VIEW, PAYROLL_EDIT and PEOPLE_CONFIGURE (PERMISSION_DENIED), another employer's group (RECORD_UNAVAILABLE), an
+            ended group (GROUP_ENDED) and a count outside 1 to 24 (COUNT_INVALID).</description>
+        <in-parameters>
+            <parameter name="payrollGroupId" required="true"/>
+            <parameter name="periodCount"/>
+            <parameter name="preview" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="periods" type="List"><description>timePeriodId, fromDateText, thruDateText, payDateText, created</description></parameter>
+            <parameter name="createdCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="prepared" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollConfiguration.js').execute('preparePeriods', context)"/>
+            <set field="periods" from="prepared.periods"/>
+            <set field="createdCount" from="prepared.createdCount"/>
         </actions>
     </service>
 </services>
