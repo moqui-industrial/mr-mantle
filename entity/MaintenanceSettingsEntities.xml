@@ -40,16 +40,15 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A maintenance team's dispatch and intake defaults from fromDate (mantle.work.MaintenanceSettingsServices
             .store#MaintenanceTeamDefaults; a change ends the row in effect and starts the next, nothing is deleted): the resource
             scope (a facility and those under it whose work the team takes by default), the default assignee (a member of the team),
-            the plus-tag of its intake address (MT-15) and the project its work is charged to by default. The defaults grant
-            nothing: membership and these rows give no permission and move no custody.</description>
+            and the project its work is charged to by default (the plus-tag of its intake address is the team's PartySetting
+            MntIntakePlusTag, which the mail intake reads, impl-maintenance P4). The defaults grant nothing: membership and these
+            rows give no permission and move no custody.</description>
         <field name="teamPartyId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="organizationPartyId" type="id"><description>The team's organization (its ownerPartyId when written)</description></field>
         <field name="facilityId" type="id"><description>The resource scope: this facility and those under it</description></field>
         <field name="defaultAssigneePartyId" type="id"/>
-        <field name="intakeTag" type="text-short"><description>The plus-tag of the team's intake address (lower case letters,
-            digits and hyphens), unique among the teams' defaults in effect</description></field>
         <field name="projectWorkEffortId" type="id"/>
         <field name="changedByUserId" type="id"/>
         <field name="comments" type="text-medium"/>

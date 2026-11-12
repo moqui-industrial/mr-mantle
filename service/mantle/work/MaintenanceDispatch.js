@@ -5,7 +5,8 @@
 // - Teams are People's (impl-people P3, F60): an OrgTeam Organization owned by its organization, with dated PrtMember rows from
 //   the person (from role Assignee for a member, Manager for the lead) to the team (to role OrgTeam), written by
 //   mantle.humanres.OrganizationServices. Maintenance reads them (find#MaintenanceTeams) and owns only their dispatch defaults
-//   (MaintenanceTeamDefaults, dated: store#MaintenanceTeamDefaults). Membership grants nothing: no permission, no work read (a
+//   (MaintenanceTeamDefaults, dated: store#MaintenanceTeamDefaults, which also sets the intake plus-tag P4's mail intake reads,
+//   the team's PartySetting MntIntakePlusTag). Membership grants nothing: no permission, no work read (a
 //   work order's team row makes no member assigned, MaintenanceAccess.js assignment), no custody.
 // - The technicians of a work order (find#MaintenanceCandidates): the organization's people now (employees and agents, those
 //   schedule#MaintenanceWorkOrder admits), ranked by Projects' find#StaffingCandidates over the work's skills, each with the least
@@ -32,6 +33,10 @@ const SKILL_STANDARD = "mantle.work.effort.WorkEffortSkillStandard"
 const RELATIONSHIP = "mantle.party.PartyRelationship"
 const DEFAULTS = "mantle.work.maintenance.MaintenanceTeamDefaults"
 const ENUM = "moqui.basic.Enumeration"
+const SETTING = "mantle.party.PartySetting"
+// the team's intake plus-tag, which the mail intake reads (MaintenanceIntake.js, impl-maintenance P4)
+const plusTagSetting = "MntIntakePlusTag"
+const tagOf = teamPartyId => one(SETTING, {partyId: teamPartyId, partySettingTypeId: plusTagSetting})?.settingValue || null
 
 const teamRole = "OrgTeam"
 const assigneeRole = "Assignee"
@@ -143,8 +148,10 @@ function teamsOf(organizationPartyIds) {
     }
     return Array.from(query.list())
 }
-function defaultsDisplay(row) {
-    if (!row) return null
+function defaultsDisplay(row, teamPartyId) {
+    const intakeTag = tagOf(teamPartyId)
+    if (!row && !intakeTag) return null
+    if (!row) row = {}
     const names = partyNames([row.defaultAssigneePartyId])
     return {
         fromDate: row.fromDate,
@@ -155,7 +162,7 @@ function defaultsDisplay(row) {
             : "",
         defaultAssigneePartyId: row.defaultAssigneePartyId || null,
         defaultAssigneeName: row.defaultAssigneePartyId ? names[row.defaultAssigneePartyId] || row.defaultAssigneePartyId : "",
-        intakeTag: row.intakeTag || null,
+        intakeTag,
         projectWorkEffortId: row.projectWorkEffortId || null,
         projectName: row.projectWorkEffortId
             ? one(WORK, {workEffortId: row.projectWorkEffortId})?.workEffortName || row.projectWorkEffortId
@@ -209,7 +216,7 @@ function findTeams(p) {
                     .map(row => row.personName)
                     .join(", "),
                 members,
-                defaults: defaultsDisplay(defaultsOf(team.partyId))
+                defaults: defaultsDisplay(defaultsOf(team.partyId), team.partyId)
             }
         }),
         canEdit: !!userScope.capabilities.settingsEdit
@@ -218,11 +225,12 @@ function findTeams(p) {
 
 // store#MaintenanceTeamDefaults (MAINTENANCE_SETTINGS_EDIT): a team's dispatch defaults from now, the row in effect ending then
 // (nothing is deleted): the resource scope (a facility of the team's organization), the default assignee (a current member of the
-// team), the intake address's plus-tag (lower case letters, digits and hyphens, unique among the defaults in effect) and the
-// project (an open project). Each field not given is kept from the row in effect; an empty one clears it. Refused: a team out of
+// team), the intake address's plus-tag (the team's PartySetting MntIntakePlusTag, which the mail intake reads: lower case letters,
+// digits, dots, underscores and hyphens, unique among the teams; set or cleared when given, not dated) and the project (an open
+// project). Each field not given is kept from the row in effect; an empty one clears it. Refused: a team out of
 // scope (RECORD_UNAVAILABLE), a facility of another organization (FACILITY_INVALID), an assignee who is not a member
 // (ASSIGNEE_INVALID), a tag that is not one or taken (TAG_INVALID, TAG_TAKEN), a project that is not one (PROJECT_INVALID).
-const tagPattern = /^[a-z0-9][a-z0-9-]{0,39}$/
+const tagPattern = /^[a-z0-9][a-z0-9._-]{0,39}$/
 function storeTeamDefaults(p) {
     const userScope = scopeWithAny(["settingsEdit"])
     const team = requireTeam(userScope, p.teamPartyId)
@@ -239,13 +247,17 @@ function storeTeamDefaults(p) {
         !teamMemberIds(team.teamPartyId).includes(defaultAssigneePartyId)
     )
         denied("ASSIGNEE_INVALID", "The default assignee is a current member of the team")
-    const intakeTag = value("intakeTag") ? value("intakeTag").toLowerCase() : null
+    const intakeTag = given("intakeTag") && text(p.intakeTag) ? text(p.intakeTag).toLowerCase() : null
     if (intakeTag) {
         if (!tagPattern.test(intakeTag))
-            denied("TAG_INVALID", "An intake tag is lower case letters, digits and hyphens, up to 40")
-        const taken = Array.from(
-            find(DEFAULTS, {intakeTag}).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list()
-        ).some(row => row.teamPartyId !== team.teamPartyId)
+            denied("TAG_INVALID", "An intake tag is lower case letters, digits, dots, underscores and hyphens, up to 40")
+        const taken = Array.from(find(SETTING, {partySettingTypeId: plusTagSetting}).list()).some(
+            row =>
+                row.partyId !== team.teamPartyId &&
+                String(row.settingValue || "")
+                    .trim()
+                    .toLowerCase() === intakeTag
+        )
         if (taken) denied("TAG_TAKEN", "Another team's intake address uses " + intakeTag)
     }
     const projectWorkEffortId = value("projectWorkEffortId")
@@ -265,11 +277,21 @@ function storeTeamDefaults(p) {
         organizationPartyId: team.organizationPartyId,
         facilityId,
         defaultAssigneePartyId,
-        intakeTag,
         projectWorkEffortId,
         changedByUserId: ec.user.userId,
         comments: given("comments") ? text(p.comments) : null
     })
+    // the intake tag: the team's setting, set or cleared when given
+    if (given("intakeTag")) {
+        const existing = one(SETTING, {partyId: team.teamPartyId, partySettingTypeId: plusTagSetting})
+        if (intakeTag)
+            call((existing ? "update#" : "create#") + SETTING, {
+                partyId: team.teamPartyId,
+                partySettingTypeId: plusTagSetting,
+                settingValue: intakeTag
+            })
+        else if (existing) call("delete#" + SETTING, {partyId: team.teamPartyId, partySettingTypeId: plusTagSetting})
+    }
     return {teamPartyId: team.teamPartyId, fromDate: now}
 }
 

@@ -116,7 +116,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="MaintenanceTeamDefaults" allow-remote="false">
         <description>A team's dispatch and intake defaults from now (MAINTENANCE_SETTINGS_EDIT; the row in effect ends then, nothing
             is deleted): facilityId (the resource scope, a facility of the team's organization: FACILITY_INVALID), defaultAssigneePartyId
-            (a current member: ASSIGNEE_INVALID), intakeTag (the intake address's plus-tag: TAG_INVALID, TAG_TAKEN) and
+            (a current member: ASSIGNEE_INVALID), intakeTag (the intake address's plus-tag: the team's
+            PartySetting MntIntakePlusTag, which the mail intake reads, set or cleared when given, not dated; TAG_INVALID, TAG_TAKEN) and
             projectWorkEffortId (PROJECT_INVALID). A field not given is kept from the row in effect, an empty one cleared. A team out
             of scope: RECORD_UNAVAILABLE. The defaults grant no permission.</description>
         <in-parameters>
