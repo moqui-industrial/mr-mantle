@@ -712,16 +712,22 @@ function requirementsOf(nodeIds) {
             name: enumText(row.skillTypeEnumId),
             quantity: number(row.estimatedNumPeople),
             duration: number(row.estimatedDuration),
+            // P8: the least level and the qualification that proves it
+            minimumSkillLevel: number(row.minimumSkillLevel),
+            qualificationTypeEnumId: row.qualificationTypeEnumId || null,
             label:
                 "Skill: " +
                 enumText(row.skillTypeEnumId) +
+                (number(row.minimumSkillLevel) ? " at level " + number(row.minimumSkillLevel) + " or more" : "") +
+                (row.qualificationTypeEnumId ? ", proved by " + enumText(row.qualificationTypeEnumId) : "") +
                 (number(row.estimatedNumPeople) ? " × " + number(row.estimatedNumPeople) : "")
         })
     return out
 }
 // store#ProcessRequirements: one planned requirement of a node of the procedure, new, changed or removed (remove): a part
 // (WorkEffortProduct, dated: a change ends the row and starts the next), equipment needed (WorkEffortAssetNeeded) or a skill
-// (WorkEffortSkillStandard; minimumSkillLevel joins with People's P18, impl-maintenance F75).
+// (WorkEffortSkillStandard with its least level, minimumSkillLevel, People's P18, and the qualification type that proves it,
+// impl-maintenance P8 and F75).
 function storeRequirements(p) {
     const userScope = scopeWithAny(["processEdit"])
     const found = requireProcedure(userScope, p.rootWorkEffortId, "edit")
@@ -769,6 +775,20 @@ function storeRequirements(p) {
         if (!skillTypeEnumId || !one("moqui.basic.Enumeration", {enumId: skillTypeEnumId, enumTypeId: "SkillType"}))
             denied("VALUE_INVALID", "Choose the skill")
         const existing = one(SKILL, {workEffortId: nodeId, skillTypeEnumId})
+        // P8: the least level (a current SkillLevel's number) and the qualification type that proves it
+        const level = blank(p.minimumSkillLevel) ? null : Number(String(p.minimumSkillLevel))
+        if (
+            level != null &&
+            (!Number.isInteger(level) ||
+                !find("moqui.basic.Enumeration", {enumTypeId: "SkillLevel", enumCode: String(level)}).count())
+        )
+            denied("VALUE_INVALID", "Choose one of the skill levels")
+        const qualificationTypeEnumId = text(p.qualificationTypeEnumId)
+        if (
+            qualificationTypeEnumId &&
+            !one("moqui.basic.Enumeration", {enumId: qualificationTypeEnumId, enumTypeId: "QualificationType"})
+        )
+            denied("VALUE_INVALID", "Choose a qualification type")
         if (remove) {
             if (existing) call("delete#" + SKILL, {workEffortId: nodeId, skillTypeEnumId})
         } else
@@ -776,7 +796,9 @@ function storeRequirements(p) {
                 workEffortId: nodeId,
                 skillTypeEnumId,
                 estimatedNumPeople: blank(p.estimatedNumPeople) ? 1 : p.estimatedNumPeople,
-                estimatedDuration: blank(p.estimatedDuration) ? null : p.estimatedDuration
+                estimatedDuration: blank(p.estimatedDuration) ? null : p.estimatedDuration,
+                minimumSkillLevel: level,
+                qualificationTypeEnumId: qualificationTypeEnumId || null
             })
         return {workEffortId: nodeId}
     }
@@ -810,7 +832,9 @@ function copyRequirements(idMap) {
             workEffortId: idMap[row.workEffortId],
             skillTypeEnumId: row.skillTypeEnumId,
             estimatedNumPeople: row.estimatedNumPeople,
-            estimatedDuration: row.estimatedDuration
+            estimatedDuration: row.estimatedDuration,
+            minimumSkillLevel: row.minimumSkillLevel,
+            qualificationTypeEnumId: row.qualificationTypeEnumId || null
         })
 }
 

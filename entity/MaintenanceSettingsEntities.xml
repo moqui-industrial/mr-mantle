@@ -33,4 +33,35 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.product.Product" short-alias="product"/>
         <index name="MNT_LKP_APPL_ENUM"><index-field name="enumId"/></index>
     </entity>
+
+    <!-- impl-maintenance P8 (design-maintenance §9 Teams TeamDefaults, review Y4): a team is People's (an OrgTeam Organization with
+        dated PrtMember rows, written by mantle.humanres.OrganizationServices); Maintenance owns only its dispatch defaults. -->
+    <entity entity-name="MaintenanceTeamDefaults" package="mantle.work.maintenance" cache="never">
+        <description>A maintenance team's dispatch and intake defaults from fromDate (mantle.work.MaintenanceSettingsServices
+            .store#MaintenanceTeamDefaults; a change ends the row in effect and starts the next, nothing is deleted): the resource
+            scope (a facility and those under it whose work the team takes by default), the default assignee (a member of the team),
+            the plus-tag of its intake address (MT-15) and the project its work is charged to by default. The defaults grant
+            nothing: membership and these rows give no permission and move no custody.</description>
+        <field name="teamPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="organizationPartyId" type="id"><description>The team's organization (its ownerPartyId when written)</description></field>
+        <field name="facilityId" type="id"><description>The resource scope: this facility and those under it</description></field>
+        <field name="defaultAssigneePartyId" type="id"/>
+        <field name="intakeTag" type="text-short"><description>The plus-tag of the team's intake address (lower case letters,
+            digits and hyphens), unique among the teams' defaults in effect</description></field>
+        <field name="projectWorkEffortId" type="id"/>
+        <field name="changedByUserId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" title="DefaultAssignee" related="mantle.party.Party" short-alias="defaultAssignee">
+            <key-map field-name="defaultAssigneePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Project" related="mantle.work.effort.WorkEffort" short-alias="project">
+            <key-map field-name="projectWorkEffortId" related="workEffortId"/></relationship>
+        <index name="MNT_TEAM_DEF_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
 </entities>

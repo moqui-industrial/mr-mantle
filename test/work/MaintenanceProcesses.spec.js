@@ -210,7 +210,16 @@ feature(
                 rootWorkEffortId: root,
                 workEffortId: oil.workEffortId,
                 kind: "skill",
-                skillTypeEnumId: prefix + "_SKILL"
+                skillTypeEnumId: prefix + "_SKILL",
+                // P8: the least level the step asks
+                minimumSkillLevel: 3
+            })
+            const badLevel = as(state.author, W + "store#ProcessRequirements", {
+                rootWorkEffortId: root,
+                workEffortId: oil.workEffortId,
+                kind: "skill",
+                skillTypeEnumId: prefix + "_SKILL",
+                minimumSkillLevel: 9
             })
             instruction(root, oil.workEffortId, "Drain at 40 C; refill with 2 l ISO 46.")
             const reader = as(state.planner, W + "store#ProcessStep", {rootWorkEffortId: root, workEffortName: "No"})
@@ -233,6 +242,7 @@ feature(
                 findings,
                 part,
                 skill,
+                badLevel,
                 reader,
                 other,
                 requested,
@@ -251,6 +261,7 @@ feature(
             findings,
             part,
             skill,
+            badLevel,
             reader,
             other,
             requested,
@@ -271,6 +282,7 @@ feature(
             badKind == "VALUE_INVALID"
             findings == "PUBLICATION_INVALID"
             part.workEffortId == state.oil && skill.workEffortId == state.oil
+            badLevel == "VALUE_INVALID"
             reader == "PERMISSION_DENIED"
             other == "RECORD_UNAVAILABLE"
             requested.repeated == false
@@ -379,6 +391,8 @@ feature(
             find("mantle.work.effort.WorkEffortProduct", {workEffortId: oil.workEffortId, productId: prefix + "_FILTER"})
                 .length == 1
             find("mantle.work.effort.WorkEffortSkillStandard", {workEffortId: oil.workEffortId}).length == 1
+            // P8: its least level copied with it
+            find("mantle.work.effort.WorkEffortSkillStandard", {workEffortId: oil.workEffortId})[0].minimumSkillLevel == 3
             // the dependency is remapped inside the new tree
             const depends = find("mantle.work.effort.WorkEffortAssoc", {
                 workEffortId: oil.workEffortId,

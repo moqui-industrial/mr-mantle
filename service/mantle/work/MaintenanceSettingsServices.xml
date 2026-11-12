@@ -22,7 +22,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
             zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
-            self-approval, no voice note transcription, and preventive work made on its day when a plan names no lead days
+            self-approval, no voice note transcription, the qualification check warning (qualificationBlocks false, P8), and preventive work made on its day when a plan names no lead days
             (pmLeadDays, P14), and no cost threshold. The cost threshold (approvalThresholdCost and its currency, P11) is
             answered to a settings editor or a cost reader only, in the policy and in planned and ended.
             planned: the policies set to start later (P18), in their order; ended: the last ten that ended, newest first (a
@@ -54,7 +54,8 @@ along with this software (see the LICENSE.md file). If not, see
             (voiceNoteTranscription, off by default; impl-maintenance P7 review), and the approval threshold's cost half
             (approvalThresholdCost, zero or more, VALUE_INVALID; empty unsets it, not compared; approvalThresholdCurrencyUomId, a
             currency, VALUE_INVALID, empty: the organization's base currency; impl-maintenance P11): planned work whose estimated
-            cost is above it, or cannot be priced, needs a supervisor's approval.</description>
+            cost is above it, or cannot be priced, needs a supervisor's approval; and the qualification check of assignment and
+            Start (qualificationBlocks: warn by default, Y blocks; impl-maintenance P8).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
@@ -69,6 +70,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="pmLeadDays"><description>The days ahead preventive work is made for a plan whose terms name none
                 (P14; 0 to 365, empty: on the day)</description></parameter>
             <parameter name="voiceNoteTranscription"/>
+            <parameter name="qualificationBlocks"><description>P8: Y refuses assigning or starting work with a technician missing or
+                expired on its qualifications; N (the default) warns</description></parameter>
             <parameter name="approvalThresholdCost"><description>P11: the estimated cost above which planned work needs a supervisor
                 (empty: not compared)</description></parameter>
             <parameter name="approvalThresholdCurrencyUomId"><description>P11: the cost threshold's currency (empty: the
@@ -85,6 +88,55 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <!-- impl-maintenance P8 (design §9 Teams; review Y4): the teams are People's, Maintenance's are only their dispatch defaults -->
+    <service verb="find" noun="MaintenanceTeams" allow-remote="false">
+        <description>The maintenance teams of the caller's organizations (organizationPartyId narrows them, teamPartyId reads one):
+            People's OrgTeam organizations with their dated PrtMember rows (a member's from role Assignee, the lead's Manager; those in
+            effect and starting later, every one with includeEnded) and the dispatch defaults in effect. Read by a maintenance
+            reader, planner, supervisor or settings editor (PERMISSION_DENIED otherwise); an organization out of scope
+            ORGANIZATION_DENIED, a team RECORD_UNAVAILABLE. Memberships are written by People's OrganizationServices.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="teamList" type="List"><description>teamPartyId, teamName, organizationPartyId, organizationName,
+                memberCount, leadName, members [{partyId, personName, roleTypeId, roleText, fromDate, thruDate, fromDateText,
+                thruDateText, current, stateText}], defaults {fromDate, fromDateText, facilityId, facilityName,
+                defaultAssigneePartyId, defaultAssigneeName, intakeTag, projectWorkEffortId, projectName, comments} or null</description></parameter>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceDispatch.js').execute('findTeams', context)"/>
+            <set field="teamList" from="answer.teamList"/>
+            <set field="canEdit" from="answer.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceTeamDefaults" allow-remote="false">
+        <description>A team's dispatch and intake defaults from now (MAINTENANCE_SETTINGS_EDIT; the row in effect ends then, nothing
+            is deleted): facilityId (the resource scope, a facility of the team's organization: FACILITY_INVALID), defaultAssigneePartyId
+            (a current member: ASSIGNEE_INVALID), intakeTag (the intake address's plus-tag: TAG_INVALID, TAG_TAKEN) and
+            projectWorkEffortId (PROJECT_INVALID). A field not given is kept from the row in effect, an empty one cleared. A team out
+            of scope: RECORD_UNAVAILABLE. The defaults grant no permission.</description>
+        <in-parameters>
+            <parameter name="teamPartyId" required="true"/>
+            <parameter name="facilityId"/>
+            <parameter name="defaultAssigneePartyId"/>
+            <parameter name="intakeTag"/>
+            <parameter name="projectWorkEffortId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="teamPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceDispatch.js').execute('storeTeamDefaults', context)"/>
+            <set field="teamPartyId" from="answer.teamPartyId"/>
+            <set field="fromDate" from="answer.fromDate"/>
+        </actions>
+    </service>
     <!-- ===== P18: lookups and the setup readiness (design §9 Lookups and Readiness; MaintenanceSettings.js) ===== -->
     <service verb="find" noun="MaintenanceLookups" allow-remote="false">
         <description>Maintenance's lookups, a whitelist of Enumeration families: the vocabularies (work types, severities, hold and
