@@ -650,7 +650,8 @@ along with this software (see the LICENSE.md file). If not, see
             but changed by no user here (managedBy names where it is changed; impl-people P19 review, Commons calendar editors of
             Nov 12, 2026); that application's services check their own rules and write it, or call these services as the
             system (runAsSystem: no user and authorization off), which may view and change any event. A booking changes no event,
-            so canBook is canEdit, or for a kept event being its organizer (book#Resource, cancel#ResourceBooking and
+            so canBook is canEdit, or for a kept meeting (a WetEvent other than a production run: People's interview or training
+            session; not leave, review R4) being its organizer (book#Resource, cancel#ResourceBooking and
             check#ResourceBookings ask permission book; impl-maintenance F356). With permission view, edit or book, an error when
             the user may not; an event the user may not view is "not found".
         </description>
@@ -707,12 +708,16 @@ along with this software (see the LICENSE.md file). If not, see
                 // an event an application keeps is changed there (its own checks), never by its organizer or a calendar here
                 canEdit = !managedBy && (isOrganizer || editByCalendar)
                 canView = isOrganizer || editByCalendar || isAttendee || viewByCalendar || row.visibilityEnumId === 'WevAllUsers'
-                // a booking changes no event: the organizer of a kept event books its rooms and equipment (F356)
-                canBook = canEdit || (!!managedBy && isOrganizer)
+                // a booking changes no event: the organizer of a kept meeting (People's interview or training session) books its
+                // rooms and equipment (F356); leave and a production run stay with their apps (the follow-ups' review, R4)
+                const keptMeeting = row.workEffortTypeEnumId === 'WetEvent' && row.purposeEnumId !== 'WepProductionRun'
+                canBook = canEdit || (!!managedBy && isOrganizer && keptMeeting)
                 if (canView) workEffort = row.getMap()
             }
             if (permission !== 'view' && permission !== 'edit' && permission !== 'book') return
             if (!canView) { ec.message.addError(`Event ${workEffortId} not found`); return }
+            if (permission === 'book' && !canBook && managedBy && isOrganizer) {
+                ec.message.addError(`${row.workEffortName || workEffortId} books no rooms or equipment here; it is changed on ${managedBy}`); return }
             if (permission === 'book' && !canBook && managedBy) {
                 ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} books its rooms and equipment; it is changed on ${managedBy}`); return }
             if (permission === 'book' && !canBook) {

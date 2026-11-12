@@ -11,7 +11,7 @@
 // is booked by its organizer and by no attendee; People's change rechecks the booking as the system (a clash refused and named Busy,
 // F358; a free time asks the approved booking again) and its cancel withdraws the booking and its notices. F356 review: of a kept event
 // a calendar editor, a calendar viewer, a user of another organization and a no-user caller book nothing, while an editor of a
-// calendar holding an event no app keeps books for it; and a request's notice reaches its approvers, not a catch-all subscriber (F359).
+// calendar holding an event no app keeps books for it; the person on leave books nothing on it (R4); and a request's notice reaches its approvers, not a catch-all subscriber (F359).
 // Standalone: spec-local organization, building, rooms, equipment, a plant with a work center, groups and users; the services
 // called as each user with the artifact check aside.
 // Run: ./moq test mr-mantle --spec ResourceBookingDecisions
@@ -623,7 +623,7 @@ feature("an interview's organizer books the managed room; People's change rechec
 })
 
 feature(
-    "of a kept event only its organizer books: a calendar editor or viewer, another organization and no user are refused; an approval notice skips a catch-all subscriber",
+    "of a kept meeting only its organizer books: a calendar editor or viewer, another organization, no user and leave's own person are refused; an approval notice skips a catch-all subscriber",
     {
         when() {
             // the recruiter's second interview (People keeps it) and a plain meeting of the recruiter's, both in a calendar the recruiter
@@ -684,6 +684,23 @@ feature(
                 ec.artifactExecution.disableAuthz()
             }
             // an instance administrator subscribed to every ResourceBooking message, as Tools offers
+            // R4: Ann's approved leave ("Out of office", People keeps it): she organizes it, and books nothing on it
+            const leave = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTimeOff",
+                workEffortName: "Out of office",
+                statusId: "WeApproved",
+                ownerPartyId: state.ANN_PARTY,
+                estimatedStartDate: at(0, 10),
+                estimatedCompletionDate: at(8, 10)
+            }).workEffortId
+            call("create#mantle.humanres.leave.LeaveRequest", {leaveRequestId: prefix + "_LEAVE", partyId: state.ANN_PARTY})
+            call("create#mantle.humanres.leave.LeaveRequestSegment", {
+                leaveRequestId: prefix + "_LEAVE",
+                segmentSeqId: "01",
+                workEffortId: leave
+            })
+            const leaveAccess = as(state.ann, E + "check#EventAccess", {workEffortId: leave, permission: "check"})
+            const leaveBooks = books(state.ann, leave)
             const subscription = {topic: "ResourceBooking", userId: "EX_JOHN_DOE"}
             ec.entity
                 .makeValue("moqui.security.user.NotificationTopicUser")
@@ -702,6 +719,13 @@ feature(
                 olgaKept: books(olga, kept),
                 noUser,
                 carlPlain,
+                leaveAccess,
+                leaveBooks,
+                leaveRoom: ec.entity
+                    .find("mantle.work.effort.WorkEffortFacility")
+                    .condition("workEffortId", leave)
+                    .disableAuthz()
+                    .count(),
                 told,
                 subscriberTold,
                 keptRoom: roomBooking(kept)
@@ -722,6 +746,11 @@ feature(
             r.carlPlain.statusId == "WefRequested"
             r.told == [true, true]
             r.subscriberTold == false
+            r.leaveAccess.isOrganizer == true
+            r.leaveAccess.managedBy != null
+            r.leaveAccess.canBook == false
+            r.leaveBooks.error.includes("Out of office books no rooms or equipment here")
+            r.leaveRoom == 0
         }
     }
 )
