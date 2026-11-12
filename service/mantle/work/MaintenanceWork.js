@@ -558,7 +558,9 @@ function createWorkOrder(p) {
 // ===== adopt#MaintenanceRecord =====
 // An open AssetMaintenance with no linked work gets a managed root, once: a retry, or a second adoption, answers the first root.
 function adoptRecord(p) {
-    const userScope = scopeWithAny(["plan", "supervise"])
+    return adoptWith(scopeWithAny(["plan", "supervise"]), p)
+}
+function adoptWith(userScope, p) {
     const assetMaintenanceId = text(p.assetMaintenanceId)
     const maintenance = assetMaintenanceId ? one(MAINTENANCE, {assetMaintenanceId}) : null
     if (!maintenance || !maintenance.assetId)
@@ -1428,6 +1430,27 @@ function home(p) {
     return {counters, myWorkList: myWork, teamWorkList: teamWork, teamTotals: !!userScope.capabilities.view}
 }
 
+// ===== the production handoff (impl-maintenance P4) =====
+// The adoption an owner's service makes for its own record, after its own permission and organization checks
+// (ProductionServices.request#ProductionMaintenance, when the organization's policy manages production requests): a planner's
+// scope of that organization alone, as adopt#MaintenanceRecord's, never a reader of anything else. Once, as adoption is.
+function adoptForOwner(p) {
+    signedIn()
+    const organizationPartyId = text(p.organizationPartyId)
+    if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "The record's organization is required")
+    const caps = maintenanceAccess.capabilities()
+    for (const name of Object.keys(caps)) caps[name] = false
+    Object.assign(caps, {plan: true, view: true, workRead: true, resourceRead: true, anyRead: true})
+    const ownerScope = {
+        capabilities: caps,
+        partyId: ec.user.userAccount?.partyId || null,
+        allOrganizations: false,
+        activeOrganizationPartyId: organizationPartyId,
+        organizationPartyIds: [organizationPartyId]
+    }
+    return adoptWith(ownerScope, p)
+}
+
 const operations = {
     findWorkOrders,
     getWorkOrder,
@@ -1448,5 +1471,8 @@ const operations = {
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown maintenance work operation " + op)
         return operations[op](parameters || {})
-    }
+    },
+    // P4: for Mantle's own callers only (MaintenanceIntake.js), never a service's parameters
+    adoptForOwner,
+    policyOf
 })

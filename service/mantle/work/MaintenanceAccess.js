@@ -94,6 +94,14 @@ function scope() {
         organizationPartyIds: own ? (all ? null : own.organizationPartyIds) : []
     }
 }
+// The organizations a requester reports for and follows reports of (impl-maintenance P4, F78): their own, as ownOrganizations
+// reads them, for a holder of MAINTENANCE_REQUEST or MAINTENANCE_REQUEST_VIEW_OWN, whose own-request view is not a read of
+// Maintenance (scope() gives them none); none for anyone else.
+function requesterOrganizations() {
+    const caps = capabilities()
+    if (!ec.user.userId || !(caps.request || caps.requestViewOwn)) return []
+    return ownOrganizations().organizationPartyIds
+}
 // Whether the scope covers an organization.
 function covers(userScope, partyId) {
     return !!partyId && (userScope.organizationPartyIds == null || userScope.organizationPartyIds.includes(partyId))
@@ -214,6 +222,7 @@ const ids = list => Array.from(new Set(list.filter(Boolean)))
     reads,
     capabilities,
     scope,
+    requesterOrganizations,
     covers,
     requireCapability,
     requireOrganization,

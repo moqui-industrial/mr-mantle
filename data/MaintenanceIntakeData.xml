@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Maintenance intake (IronStone Maintenance design §1.4 Mail intake, §3 Requests, MT-15; impl-maintenance P4). RqtMaintenance
+        is Manufacturing's (ProductionDowntimeData.xml), seeded once. -->
+
+    <!-- the mail rule action beside ErActCreateRequest and ErActCreateWorkItem (MantleSetupData.xml; impl-maintenance F39): a
+        message to a maintenance team's plus-tag address (or the team the rule's value names) becomes a maintenance request, the
+        sender its reporter (mantle.work.MaintenanceServices.create#MaintenanceRequestFromEmail) -->
+    <moqui.basic.Enumeration enumId="ErActCreateMaintenanceRequest" enumTypeId="EmailRuleAction" enumCode="createMaintenanceRequest"
+            sequenceNum="3" description="Make a maintenance request"
+            optionValue="mantle.work.MaintenanceServices.create#MaintenanceRequestFromEmail"/>
+    <!-- a maintenance team's intake plus tag (the "facilities" of maintenance+facilities@...), a PartySetting of the team (an
+        OrgTeam party its organization owns) -->
+    <mantle.party.PartySettingType partySettingTypeId="MntIntakePlusTag" description="Maintenance intake plus tag"/>
+</entity-facade-xml>

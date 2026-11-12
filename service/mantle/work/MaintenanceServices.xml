@@ -345,4 +345,187 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="timeEntryId" from="answer.timeEntryId"/>
         </actions>
     </service>
+
+    <!-- ===== P4: requests and intake (design §3 Requests, §1.4 Mail intake; MT-02, MT-10, MT-15), in MaintenanceIntake.js. A
+        reported problem is a Request of type RqtMaintenance: its organization an OrgInternal party, its one target (an Asset or a
+        Facility) a RequestRecord, its work order a RequestWorkEffort. A requester (MAINTENANCE_REQUEST, _REQUEST_VIEW_OWN) reports on
+        and follows their own, holding no Maintenance read (impl-maintenance F78); a planner or supervisor triages their
+        organizations'. ===== -->
+    <service verb="report" noun="MaintenanceProblem" allow-remote="false">
+        <description>A problem reported on equipment or a facility (MAINTENANCE_REQUEST, PERMISSION_DENIED): a submitted
+            RqtMaintenance request filed by the authenticated party (never a supplied reporter), the target's organization its
+            OrgInternal party, exactly one target (assetId or facilityId of the reporter's own organizations: TARGET_REQUIRED,
+            ONE_TARGET, TARGET_INVALID for stock, RECORD_UNAVAILABLE outside them; organizationPartyId, when given, must be the
+            target's, ORGANIZATION_DENIED) as its RequestRecord, the summary its name (SUMMARY_REQUIRED), the observed time (not
+            later than now, DATE_FUTURE) and the description, a priority 1 to 9, and a photo or other file (contentFile) as
+            RequestContent. A retry under operationKey answers the first request (repeated). An urgent report blocks no
+            equipment.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="summary"/>
+            <parameter name="description"/>
+            <parameter name="observedDate" type="Timestamp"/>
+            <parameter name="priority"/>
+            <parameter name="contentFile" type="FileItem"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('reportProblem', context)"/>
+            <set field="requestId" from="answer.requestId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MaintenanceReportTargets" allow-remote="false" read-only="true">
+        <description>The equipment and facilities the user may report a problem on (MAINTENANCE_REQUEST; none without): those of
+            the user's own organizations (a Maintenance reader's scope), searched by term in the query ignoring case, each as
+            {value: "asset:id" or "facility:id", label}, with the selected value's label.</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="selected"/>
+        </in-parameters>
+        <out-parameters><parameter name="options" type="List"/></out-parameters>
+        <actions>
+            <set field="options" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('reportTargets', context).options"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="MaintenanceReportScan" allow-remote="false" read-only="true">
+        <description>The resolver of a report's asset tag scan-input: the equipment a scanned tag (the EquipmentDetail link it
+            holds) or a typed id or serial names, of the organizations the user may report for (MAINTENANCE_REQUEST; nothing
+            without). Its parameters are client input.</description>
+        <in-parameters>
+            <parameter name="scanText"/>
+            <parameter name="allowedTypes" type="List"/>
+            <parameter name="scanId"/>
+        </in-parameters>
+        <out-parameters><parameter name="matches" type="List"/></out-parameters>
+        <actions>
+            <set field="matches" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('resolveReportScan', context).matches"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MaintenanceRequests" allow-remote="false" read-only="true">
+        <description>Maintenance requests, scoped and filtered in the query before paging: for a planner or supervisor
+            (MAINTENANCE_PLAN or _SUPERVISE) those of their maintenance organizations (organizationPartyId narrows them), for a
+            holder of MAINTENANCE_REQUEST_VIEW_OWN alone the ones they filed (PERMISSION_DENIED without either); by requestId, text
+            (id or name), status (open by default; untriaged; all; or one), target (assetId or facilityId). Each row: the
+            request's name, state (with the reason of a rejected one), priority, date, target and the linked work order's id,
+            name and status; the reporter's name for a planner only. No cost, time, people or other report of the work.</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestList" type="List"/>
+            <parameter name="requestListCount" type="Integer"/>
+            <parameter name="requestListPageIndex" type="Integer"/>
+            <parameter name="requestListPageSize" type="Integer"/>
+            <parameter name="requestListPageMaxIndex" type="Integer"/>
+            <parameter name="requestListPageRangeLow" type="Integer"/>
+            <parameter name="requestListPageRangeHigh" type="Integer"/>
+            <parameter name="canTriage" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('findRequests', context)"/>
+            <set field="requestList" from="answer.requestList"/>
+            <set field="requestListCount" from="answer.requestListCount"/>
+            <set field="requestListPageIndex" from="answer.requestListPageIndex"/>
+            <set field="requestListPageSize" from="answer.requestListPageSize"/>
+            <set field="requestListPageMaxIndex" from="answer.requestListPageMaxIndex"/>
+            <set field="requestListPageRangeLow" from="answer.requestListPageRangeLow"/>
+            <set field="requestListPageRangeHigh" from="answer.requestListPageRangeHigh"/>
+            <set field="canTriage" from="!!answer.canTriage"/>
+        </actions>
+    </service>
+    <service verb="triage" noun="MaintenanceRequest" allow-remote="false">
+        <description>A planner's or supervisor's decision on a maintenance request of their organizations (MAINTENANCE_PLAN or
+            _SUPERVISE; another organization's is RECORD_UNAVAILABLE): create (corrective work, source Reported problem, on the
+            request's target or the one given, which it records; the request's open AssetMaintenance, Manufacturing's, is adopted
+            instead), link (an open work order of the same organization: several reports to one order; WORK_CLOSED,
+            ORGANIZATION_MISMATCH), reject (a reason, REASON_REQUIRED: rejected, duplicate, won't fix, insufficient information,
+            can't reproduce; the request cancelled with it and the comment as a request comment) or assign (the request's
+            assignee, a person of the organization, ASSIGNEE_UNAVAILABLE). Create and link review the request and link it to the
+            work order. A request is triaged once: create again, or link to the same order, answers its work order (repeated);
+            another decision is REQUEST_TRIAGED; a closed request REQUEST_CLOSED. A retry under operationKey answers the first.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="decision" required="true"><description>create, link, reject or assign</description></parameter>
+            <parameter name="workEffortId"><description>link: the work order</description></parameter>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="priority"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="severityEnumId"/>
+            <parameter name="requestResolutionEnumId"><description>reject: the reason</description></parameter>
+            <parameter name="comments"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="decision"/>
+            <parameter name="statusId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('triage', context)"/>
+            <set field="requestId" from="answer.requestId"/>
+            <set field="decision" from="answer.decision"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="UnmanagedMaintenance" allow-remote="false" read-only="true">
+        <description>The adoption queue (MAINTENANCE_PLAN or _SUPERVISE): open AssetMaintenance records with no work of the user's
+            maintenance organizations (Manufacturing's maintenance requests, the baseline's records), newest first, at most 50, each
+            with the request that asked for it; a warranty repair is Customer Service's and not listed. adopt#MaintenanceRecord, or
+            triage of its request, makes one a work order.</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters><parameter name="maintenanceList" type="List"/></out-parameters>
+        <actions>
+            <set field="maintenanceList" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('unmanaged', context).maintenanceList"/>
+        </actions>
+    </service>
+    <service verb="create" noun="MaintenanceRequestFromEmail" authenticate="anonymous-all" allow-remote="false">
+        <description>The createMaintenanceRequest action of the mail client's rules (EmailRuleAction ErActCreateMaintenanceRequest,
+            MT-15): a received message to a maintenance team's plus-tag address (MntIntakePlusTag on the team), or to the team the
+            action's value names, becomes a maintenance request of the team's organization, as report#MaintenanceProblem makes one:
+            the sender its reporter (a party found by the address, else a person made from the sender), the team on it, the
+            subject its name, the text its description, the message on it with its attachments as files (file#RequestEmail), and its
+            target the one equipment id the subject names, else none, left for triage. A team is taken only when the rule's owner
+            works for its organization. A message already on a request is left; a reply in a request's thread joins it; with no
+            team the message is an ordinary request (create#RequestFromEmail). Mail text is untrusted: it decides nothing but the
+            target match.</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailRuleId"/>
+            <parameter name="ruleOwnerUserId"/>
+            <parameter name="value"><description>The team (partyId), or empty for the plus tag</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="joined" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceIntake.js').execute('fromEmail', context)"/>
+            <set field="requestId" from="answer.requestId"/>
+            <set field="created" from="!!answer.created"/>
+            <set field="joined" from="!!answer.joined"/>
+        </actions>
+    </service>
 </services>
