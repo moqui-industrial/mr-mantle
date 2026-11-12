@@ -18,7 +18,9 @@ along with this software (see the LICENSE.md file). If not, see
     Interview, Offer, Hired, with Refused and Withdrawn), an application's private files (its content host) and its interviews
     (a private WetEvent with the panel's scorecards: FormInvitation rows of a form of the interview scorecard purpose, each
     naming its reviewer and the application). Written only by mantle.humanres.RecruitingServices (Recruiting.js); an
-    application is never deleted, a closed opening keeps its applications. -->
+    application is never deleted, a closed opening keeps its applications. P17 (design §5 OfferDetail, §15): an offer of
+    employment (EmploymentOffer, Offers.js) and the letters People issues (EmploymentLetter, Letters.js: an offer's and an
+    employment change's, each stored once). -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="JobOpening" package="mantle.humanres.recruitment" cache="never">
         <description>An opening: the text an employer recruits with (title, description), its recruiting owner, the seats it
@@ -90,9 +92,9 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="EmploymentApplicationContent" package="mantle.humanres.employment" cache="never">
         <description>A private file of an application (its resume, a cover letter; the application's content host, PE-01): read
             and added only by a recruiter of its employer (mantle.humanres.RecruitingServices.check#ApplicationAccess), never on
-            the applicant's Party record or a public link. A recruiter shares a file with the interview panel (panelShared Y; none
-            is shared by default, the resume of a mail application either): a panel member reads the shared files of the
-            applications they interview, and no other (get#ApplicationFile; the user's call of Nov 12, 2026).</description>
+            the applicant's Party record or a public link. A file is shared with the interview panel (panelShared Y): a resume when
+            attached (the user's call of Nov 12, 2026, P17; the recruiter can stop sharing it), another file once a recruiter shares
+            it; a panel member reads the shared files of the applications they interview, and no other (get#ApplicationFile).</description>
         <field name="applicationContentId" type="id" is-pk="true"/>
         <field name="employmentApplicationId" type="id"/>
         <field name="contentTypeEnumId" type="id"/>
@@ -129,5 +131,110 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="event"/>
         <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
         <index name="APP_INTERVIEW_APP"><index-field name="employmentApplicationId"/></index>
+    </entity>
+
+    <!-- impl-people P17 (design-people §5 OfferDetail, §15, §12's PeopleOfferApproval; PE-04, PE-02) -->
+    <entity entity-name="EmploymentOffer" package="mantle.humanres.recruitment" cache="never">
+        <description>An offer of employment to an applicant (a fact of its own: design §17 "Dates and documents"): the dated terms
+            of one application (the seat of its opening, the department, manager, work location and working schedule, the start
+            and an optional end, when the offer expires, a note for the letter) and its proposed pay (payAmount in currencyUomId per
+            timePeriodTypeId, a payroll period: set only with PAYROLL_VIEW and PAYROLL_EDIT and read only with PAYROLL_VIEW, on
+            every path). Its state: Draft, Waiting for approval (a PeopleApproval of kind PakOffer, bound to this row's revision, so
+            changed terms supersede it and the offer is a draft again), Approved, Issued (its letter stored once: EmploymentLetter),
+            Accepted or Declined by the candidate, Hired (consumed by PeopleServices.hire#Employee, exactly once) or Withdrawn; an
+            issued offer past its expiry reads expired. Accepted is not hired, and an offer grants no account or pay record. Written
+            only by mantle.humanres.RecruitingServices (Offers.js) and the hire that consumes it.</description>
+        <field name="employmentOfferId" type="id" is-pk="true"/>
+        <field name="employmentApplicationId" type="id"/>
+        <field name="jobOpeningId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="partyId" type="id"><description>The applicant</description></field>
+        <field name="emplPositionId" type="id" enable-audit-log="update"><description>A seat of the opening</description></field>
+        <field name="departmentPartyId" type="id"><description>The seat's department</description></field>
+        <field name="managerPartyId" type="id" enable-audit-log="update"/>
+        <field name="facilityId" type="id"><description>The work location</description></field>
+        <field name="workingScheduleId" type="id"/>
+        <field name="fromDate" type="date-time" enable-audit-log="update"><description>The start</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>The end of a fixed term; empty: open-ended</description></field>
+        <field name="expireDate" type="date-time" enable-audit-log="update"><description>Open until</description></field>
+        <field name="payAmount" type="currency-amount" enable-audit-log="update"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="timePeriodTypeId" type="id"><description>The pay frequency: a Payroll time period type</description></field>
+        <field name="note" type="text-long"><description>A paragraph of the letter</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="decisionReason" type="text-long"><description>Why approval was refused, or why it was withdrawn</description></field>
+        <field name="submittedDate" type="date-time"/>
+        <field name="approvedDate" type="date-time"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="employmentLetterId" type="id"><description>The letter stored when it was issued</description></field>
+        <field name="responseDate" type="date-time"><description>When the candidate accepted or declined</description></field>
+        <field name="responseNote" type="text-long"/>
+        <field name="responseByUserId" type="id"><description>Who recorded the candidate's answer</description></field>
+        <field name="evidenceLocation" type="text-medium"><description>The candidate's signed acceptance, when one was kept</description></field>
+        <field name="partyRelationshipId" type="id"><description>The employment the hire made from it</description></field>
+        <field name="employmentChangeId" type="id"><description>The hire's change row</description></field>
+        <field name="hiredDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
+        <relationship type="one-nofk" related="mantle.humanres.recruitment.JobOpening" short-alias="opening"/>
+        <relationship type="one" title="EmploymentOffer" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" related="mantle.humanres.position.EmplPosition" short-alias="position"/>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <index name="EMPL_OFFER_APP"><index-field name="employmentApplicationId"/></index>
+        <index name="EMPL_OFFER_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Employment Offer" statusTypeId="EmploymentOffer"/>
+            <moqui.basic.StatusItem statusId="OfrDraft" statusTypeId="EmploymentOffer" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="OfrSubmitted" statusTypeId="EmploymentOffer" sequenceNum="2" description="Waiting for approval"/>
+            <moqui.basic.StatusItem statusId="OfrApproved" statusTypeId="EmploymentOffer" sequenceNum="3" description="Approved"/>
+            <moqui.basic.StatusItem statusId="OfrIssued" statusTypeId="EmploymentOffer" sequenceNum="4" description="Issued"/>
+            <moqui.basic.StatusItem statusId="OfrAccepted" statusTypeId="EmploymentOffer" sequenceNum="5" description="Accepted"/>
+            <moqui.basic.StatusItem statusId="OfrDeclined" statusTypeId="EmploymentOffer" sequenceNum="6" description="Declined"/>
+            <moqui.basic.StatusItem statusId="OfrHired" statusTypeId="EmploymentOffer" sequenceNum="7" description="Hired"/>
+            <moqui.basic.StatusItem statusId="OfrWithdrawn" statusTypeId="EmploymentOffer" sequenceNum="9" description="Withdrawn"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrDraft" toStatusId="OfrSubmitted" transitionName="Submit"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrSubmitted" toStatusId="OfrApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrSubmitted" toStatusId="OfrDraft" transitionName="Back to draft"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrApproved" toStatusId="OfrDraft" transitionName="Back to draft"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrApproved" toStatusId="OfrIssued" transitionName="Issue"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrIssued" toStatusId="OfrAccepted" transitionName="Accept"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrIssued" toStatusId="OfrDeclined" transitionName="Decline"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrAccepted" toStatusId="OfrHired" transitionName="Hire"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrDraft" toStatusId="OfrWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrSubmitted" toStatusId="OfrWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrApproved" toStatusId="OfrWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrIssued" toStatusId="OfrWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="OfrAccepted" toStatusId="OfrWithdrawn" transitionName="Withdraw"/>
+            <!-- the kind of People approval of PeopleApprovalEntities.xml, seeded with the phase that builds its decision service -->
+            <moqui.basic.Enumeration enumId="PakOffer" description="Offer of employment" sequenceNum="7" enumTypeId="PeopleApprovalKind"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentLetter" package="mantle.humanres.employment" cache="never">
+        <description>A letter People issued (design §15 "Employment/offer and lifecycle letters"; impl-people P17): an offer's
+            (employmentOfferId) or the lifecycle letter of an applied employment change (employmentChangeId: a hire's confirmation,
+            a transfer, a manager change, a leave of absence, a return, a separation), rendered once from People's letter template
+            (Letters.js) when issued and stored (contentLocation: its PDF, or its html-print page where the server has no PDF
+            engine), then read from storage and never rendered again. includesPay Y: it holds pay terms, read only with
+            PAYROLL_VIEW. One letter per offer or change; read by the services of its record (RecruitingServices.get#OfferLetter,
+            PeopleServices.get#EmploymentLetter), never a public link.</description>
+        <field name="employmentLetterId" type="id" is-pk="true"/>
+        <field name="employmentOfferId" type="id"/>
+        <field name="employmentChangeId" type="id"/>
+        <field name="changeKindEnumId" type="id"/>
+        <field name="partyId" type="id"><description>Whom it is addressed to</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="title" type="text-medium"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="contentType" type="text-short"/>
+        <field name="fileName" type="text-medium"/>
+        <field name="includesPay" type="text-indicator"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <index name="EMPL_LETTER_OFFER"><index-field name="employmentOfferId"/></index>
+        <index name="EMPL_LETTER_CHANGE"><index-field name="employmentChangeId"/></index>
     </entity>
 </entities>

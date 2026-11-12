@@ -9,7 +9,9 @@
 // application only the applicant's name, the opening, their own interviews and scorecard and the files a recruiter shared with the
 // panel, never its record host; their self-service My interviews (the user's call of Nov 12, 2026); scorecard answers opted out
 // of AI on the entity; an application from a chat message once, by a recruiter, never from their own message; an owner who left
-// files no mail, and their openings are handed over through People's lifecycle participant.
+// files no mail, and their openings are handed over through People's lifecycle participant. P17 (the user's call of Nov 12, 2026):
+// an applicant's resume is shared with the interview panel when attached (by a recruiter, by mail), another file only when a
+// recruiter shares it, and the recruiter can stop sharing the resume.
 // Standalone: spec-local organizations, people, employments, positions, a published scorecard, groups and users, artifact
 // authorization disabled (the rules are the services' own checks). The form rules are FormDefinitions'.
 // Run: ./moq test mr-mantle --spec Recruiting
@@ -436,6 +438,7 @@ feature(
             r.row.referredByEnumId == "EarbEmail"
             r.files.length == 1
             r.files[0].contentTypeEnumId == "EactResume"
+            r.files[0].panelShared == "Y"
             ec.resource.getLocationReference(r.files[0].contentLocation).getText().includes("five years in retail")
         }
     }
@@ -619,6 +622,40 @@ feature(
             r.handed.error == ""
             ec.entity.find("mantle.humanres.recruitment.JobOpening").condition("jobOpeningId", r.openingId).disableAuthz().one()
                 .ownerPartyId == state.recruiter.partyId
+        }
+    }
+)
+
+feature(
+    "an applicant's resume is shared with the panel when attached, another file only when shared; the recruiter unshares it",
+    {
+        when() {
+            const attach = (contentTypeEnumId, description) =>
+                run(state.recruiter.userId, R + "create#ApplicationContent", {
+                    employmentApplicationId: state.dan,
+                    contentTypeEnumId,
+                    description
+                }).applicationContentId
+            const resumeId = attach("EactResume", "dan-resume.pdf")
+            const letterId = attach("EactCoverLetter", "dan-letter.pdf")
+            const row = id =>
+                ec.entity
+                    .find("mantle.humanres.employment.EmploymentApplicationContent")
+                    .condition("applicationContentId", id)
+                    .disableAuthz()
+                    .one()
+            const shared = {resume: row(resumeId).panelShared, letter: row(letterId).panelShared}
+            const unshared = run(state.recruiter.userId, R + "share#ApplicationContent", {
+                applicationContentId: resumeId,
+                shared: false
+            })
+            return {shared, unshared, after: row(resumeId).panelShared}
+        },
+        then(r) {
+            r.shared.resume == "Y"
+            r.shared.letter == "N"
+            r.unshared.shared == false
+            r.after == "N"
         }
     }
 )

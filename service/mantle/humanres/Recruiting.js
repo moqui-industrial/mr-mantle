@@ -5,8 +5,8 @@
 //   its applications;
 // - an application (EmploymentApplication) is of an applicant (a Person with the Applicant role, never an employee role or an
 //   account by applying) to an opening; its stage moves by change#ApplicationStage along the flow Received, Screening,
-//   Interview, Offer, with Refused and Withdrawn: Interview needs a scheduled interview, Offer an offer (P17), and Hired is never
-//   a stage change (P17 hires from an accepted offer); a bulk change names each failure and goes on, each in its own transaction;
+//   Interview, Offer, with Refused and Withdrawn: Interview needs a scheduled interview, Offer an open offer (Offers.js, P17:
+//   drafting one moves it), and Hired is never a stage change (hire#Employee hires from an accepted offer, P17); a bulk change names each failure and goes on, each in its own transaction;
 // - an interview (ApplicationInterview) is a private event (WetEvent, WevRestricted) with its panel and the candidate as
 //   attendees, a video call link when asked (org.moqui.call.CallServices.create#CallLink) and the iMIP invitation
 //   (mantle.work.EventServices.send#EventInvitations); each panel member is assigned the interview's scorecard, a form of the
@@ -18,7 +18,8 @@
 // and applications and every scorecard; PEOPLE_RECRUIT_EDIT changes them. A panel member (the user's call of Nov 12, 2026: from
 // People or from their self-service, find#MyInterviews and get#MyInterview) reads of an application they interview only the
 // applicant's name, the opening and its employer, the interviews they are on the panel of with their own scorecard, and the
-// files a recruiter shared with the panel (EmploymentApplicationContent.panelShared, get#ApplicationFile): never its stage,
+// files shared with the panel (EmploymentApplicationContent.panelShared: a resume when attached, P17, another file once a recruiter
+// shares it; get#ApplicationFile): never its stage,
 // source, referral, contact, notes or other files, the application's record (its notes and files host is the recruiters'),
 // another reviewer's scorecard nor another opening's candidates. Missing and unauthorized records are refused alike
 // (RECORD_UNAVAILABLE).
@@ -684,7 +685,14 @@ function stageProblem(application, statusId) {
         ]
     if (statusId === "EaInterview" && !rows(INTERVIEW, {employmentApplicationId: application.employmentApplicationId}).length)
         return ["INTERVIEW_REQUIRED", "Schedule an interview: it moves the application to Interview"]
-    if (statusId === "EaOffer") return ["OFFER_REQUIRED", "Make an offer first: it moves the application to Offer"]
+    // P17: an open offer of the application (drafting one moves it to Offer)
+    if (
+        statusId === "EaOffer" &&
+        !rows("mantle.humanres.recruitment.EmploymentOffer", {employmentApplicationId: application.employmentApplicationId}).some(
+            offer => ["OfrDraft", "OfrSubmitted", "OfrApproved", "OfrIssued", "OfrAccepted"].includes(offer.statusId)
+        )
+    )
+        return ["OFFER_REQUIRED", "Make an offer first: it moves the application to Offer"]
     return null
 }
 // change#ApplicationStage: a recruiter moves applications (employmentApplicationIds, or one with its revision) to a stage with a
@@ -916,6 +924,16 @@ function getApplication(p) {
             duplicateOfApplicationId: application.duplicateOfApplicationId || "",
             canSchedule: row.canEdit && ["EaReceived", "EaScreening", "EaInterview"].includes(application.statusId),
             scorecardFormId: opening?.scorecardFormId || ""
+        })
+        // P17: its open offer, whether a new one is made (an application at Interview or Offer with none open) and the opening's
+        // seats it is made on
+        const openOffer = rows("mantle.humanres.recruitment.EmploymentOffer", {
+            employmentApplicationId: application.employmentApplicationId
+        }).find(offer => ["OfrDraft", "OfrSubmitted", "OfrApproved", "OfrIssued", "OfrAccepted"].includes(offer.statusId))
+        Object.assign(out, {
+            openOfferId: openOffer?.employmentOfferId || null,
+            canOffer: row.canEdit && !openOffer && ["EaInterview", "EaOffer"].includes(application.statusId),
+            openingSeats: application.jobOpeningId ? seatsOf([application.jobOpeningId])[application.jobOpeningId] || [] : []
         })
     }
     return {application: out}
@@ -1483,8 +1501,8 @@ function createApplicationFromEmail(p) {
     }
 }
 
-// Files of a received message or chat event kept as an application's private files, the first its resume; a file that cannot
-// be copied is logged and the rest go on.
+// Files of a received message or chat event kept as an application's private files, the first its resume, which is shared with
+// the interview panel (the user's call of Nov 12, 2026, P17); a file that cannot be copied is logged and the rest go on.
 function keepFiles(employmentApplicationId, files, what) {
     let first = !rows(CONTENT, {employmentApplicationId}).length
     for (const file of files) {
@@ -1493,6 +1511,7 @@ function keepFiles(employmentApplicationId, files, what) {
             const applicationContentId = call("create#" + CONTENT, {
                 employmentApplicationId,
                 contentTypeEnumId: first ? "EactResume" : "EactOther",
+                panelShared: first ? "Y" : "N",
                 description: name,
                 contentDate: ec.user.nowTimestamp
             }).applicationContentId
