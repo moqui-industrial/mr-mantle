@@ -270,9 +270,9 @@ function getPolicy(p) {
     }
 }
 // store#MaintenancePolicy (MAINTENANCE_SETTINGS_EDIT): the organization's policy from fromDate (now when not given; never
-// earlier, DATE_INVALID), each field not given kept from the policy in effect then. The row in effect then ends at it, and a
-// row planned to start later is withdrawn (ended at its own start, kept for the audit); a row planned for that very time is
-// changed in place. Nothing is deleted.
+// earlier, DATE_INVALID), each field not given kept from the policy in effect then. The row in effect then ends at it; a row
+// planned to start later is refused (PLAN_PENDING, naming its date) unless withdrawPlanned, which withdraws it (ended at its own
+// start, kept for the audit; P18 review R4); a row planned for that very time is changed in place. Nothing is deleted.
 function storePolicy(p) {
     const userScope = scopeWithAny(["settingsEdit"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
@@ -287,12 +287,21 @@ function storePolicy(p) {
         values[name] = given ? field.store(p[name], organizationPartyId) : field.stored ? field.stored(kept[name]) : kept[name]
     }
     const same = one(POLICY, {organizationPartyId, fromDate: at})
+    // a policy planned to start later is withdrawn only when the call says so (the user's call of Nov 12, P18 review R4)
+    const plannedLater = Array.from(
+        find(POLICY, {organizationPartyId}).condition("fromDate", "greater", at).orderBy("fromDate").list()
+    ).filter(row => row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
+    if (plannedLater.length && !flag(p.withdrawPlanned))
+        denied(
+            "PLAN_PENDING",
+            "A policy is planned from " +
+                plannedLater.map(row => dateText(row.fromDate)).join(", ") +
+                ": start this one then or later, or withdraw the plan"
+        )
     for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", at).list()))
         if (!same || ms(row.fromDate) !== ms(same.fromDate))
             call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: at})
-    for (const row of Array.from(find(POLICY, {organizationPartyId}).condition("fromDate", "greater", at).list()))
-        if (row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
-            call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: row.fromDate})
+    for (const row of plannedLater) call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: row.fromDate})
     const fields = Object.assign({organizationPartyId, fromDate: at, thruDate: null}, values, {
         changedByUserId: ec.user.userId,
         comments: text(p.comments)

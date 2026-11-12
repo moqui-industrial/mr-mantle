@@ -42,7 +42,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="MaintenancePolicy" allow-remote="false">
         <description>An organization's work policy from fromDate, now when not given and never earlier (DATE_INVALID; P18)
             (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope), ending the row in effect then; a policy planned
-            to start later is withdrawn (ended at its own start) and one planned for that very time is changed in place. Each
+            to start later refuses it (PLAN_PENDING, naming the plan's date) unless withdrawPlanned, which withdraws the plan (ended
+            at its own start; the user's call of Nov 12) and one planned for that very time is changed in place. Each
             field not given is kept from the policy in effect at fromDate, so a call changes only what it names (P18). The approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
             requests and warranty repairs become managed work, whether a procedure's last author may approve it
@@ -51,6 +52,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="withdrawPlanned" type="Boolean" default="false"/>
             <parameter name="approvalThresholdHours"/>
             <parameter name="closurePolicyEnumId"/>
             <parameter name="defaultMaintenanceTypeEnumId"/>
