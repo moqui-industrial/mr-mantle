@@ -357,8 +357,10 @@ along with this software (see the LICENSE.md file). If not, see
             (a current booking) is checked first as a move on the screens is (EventServices.check#ResourceBookings with the
             new time and checkOnly): a clash with another booking of it is refused with 409 and nothing changes; once stored,
             a booking of a resource with approvers is asked again (check#ResourceBookings). ifMatch and ifNoneMatch are the
-            client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change, 400 for text that
-            holds no event or to-do (or several UIDs). Another refusal of a service it calls is an error: the whole change
+            client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change or an event of it
+            the user may not change (EventServices.check#EventAccess: one the calendar only shows, put there by an attendee, or one
+            an application keeps; Commons calendar editors, Nov 12, 2026), 400 for text that holds no event or to-do (or several
+            UIDs). Another refusal of a service it calls is an error: the whole change
             rolls back and the DAV server answers by it (409, 403 for access).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
@@ -462,6 +464,17 @@ along with this software (see the LICENSE.md file). If not, see
             const seriesRow = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffortDetail').condition('calendarId', collectionId).condition('universalId', uid).list())
                     .find((row) => ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', row.workEffortId)
                         .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').count() === 0) ?? null
+            // an event of the calendar the user may not change (one it only shows, one its organizer or an application keeps) is
+            // refused before anything is checked or stored
+            for (const id of Array.from(new Set([existing?.workEffortId, seriesRow?.workEffortId].filter((id) => id)))) {
+                const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: id, permission: 'check'}).call()
+                if (ec.message.hasError()) return
+                if (!eventAccess?.canEdit) {
+                    status = 403
+                    ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${id} is not changed by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                    return
+                }
+            }
             if (seriesRow != null) {
                 // the series and the instances it changed on their own, by their recurrence start (store#CalendarFeedEvents' keys)
                 const overrideOf = new Map(Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', seriesRow.workEffortId)
@@ -533,9 +546,11 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="delete" noun="DavObject">
         <description>A CalDAV client's delete: an event series of a calendar (edit permission) is cancelled with its changed
-            instances, or only taken out of this calendar when it is in another; a task leaves the Tasks collection by the
-            end of the user's assignment (the task stays for the others on it). status 412 when ifMatch fails, 404 when the
-            name is not there, 403 when the calendar may not be changed.</description>
+            instances, or only taken out of this calendar when another calendar holds it for its editors (one that only shows it,
+            CalendarWorkEffort.viewOnly, does not count); a task leaves the Tasks collection by the end of the user's assignment
+            (the task stays for the others on it). status 412 when ifMatch fails, 404 when the name is not there, 403 when the
+            calendar may not be changed, or the event may not be changed by the user (EventServices.check#EventAccess: one the
+            calendar only shows, one an application keeps; Commons calendar editors, Nov 12, 2026).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
             <parameter name="objectName" required="true"/>
@@ -566,9 +581,16 @@ along with this software (see the LICENSE.md file). If not, see
             const object = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
                     .find((candidate) => candidate.name === objectName)
             if (object == null) { status = 404; return }
+            const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: object.workEffortId, permission: 'check'}).call()
+            if (ec.message.hasError()) return
+            if (!eventAccess?.canEdit) {
+                status = 403
+                ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${object.workEffortId} is not deleted by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                return
+            }
             if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
             const elsewhere = ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('workEffortId', object.workEffortId)
-                    .condition(cf.makeCondition('calendarId', 'not-equals', collectionId)).count() > 0
+                    .condition(cf.makeCondition('calendarId', 'not-equals', collectionId)).condition(cf.makeCondition('viewOnly', 'not-equals', 'Y', true)).count() > 0
             if (elsewhere) {
                 ec.service.sync().name('mantle.work.CalendarServices.remove#CalendarEvent').parameters({calendarId: collectionId, workEffortId: object.workEffortId}).call()
                 return

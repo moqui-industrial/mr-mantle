@@ -610,9 +610,11 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="add" noun="CalendarEvent">
         <description>Puts an event in a calendar: needs edit permission on the calendar (not a subscription calendar, whose
-            events come from its feed) and that the user may see the event (mantle.work.EventServices.check#EventAccess); an event
-            another service keeps (its managedBy: a People training session) is not put in a calendar, whose editors would change
-            it there (impl-people P19 review).</description>
+            events come from its feed) and that the user may see the event (mantle.work.EventServices.check#EventAccess). Putting an
+            event in a calendar gives its editors no more than the user has: an event the user may not change (an attendee's
+            invitation) is put there to be seen only (CalendarWorkEffort.viewOnly), so neither the user nor the calendar's editors
+            change it there, in CalDAV or by an import (Commons calendar editors, Nov 12, 2026). An event an application keeps (its
+            managedBy: a People training session, a People interview) is not put in a calendar (impl-people P19 review).</description>
         <in-parameters>
             <parameter name="calendarId" required="true"/>
             <parameter name="workEffortId" required="true"/>
@@ -631,7 +633,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', calendarId)
                     .condition('workEffortId', workEffortId).one() != null) return
             ec.service.sync().name('create#mantle.work.calendar.CalendarWorkEffort').parameters({calendarId: calendarId,
-                workEffortId: workEffortId, addedDate: ec.user.nowTimestamp}).call()
+                workEffortId: workEffortId, addedDate: ec.user.nowTimestamp, viewOnly: eventAccess?.canEdit ? null : 'Y'}).call()
             added = !ec.message.hasError()
         ]]></script></actions>
     </service>
@@ -847,7 +849,10 @@ along with this software (see the LICENSE.md file). If not, see
             a new series with the override's fields and start takes the rest of the rule, stored by the UID
             "{uid}/{recurrenceId}" so the next read updates it; the overrides of later instances go with it, keyed by their
             start moved as the new series moved. With replaceAll the calendar's events whose UID is not in the list are
-            cancelled and taken out of it. Each event stands alone: one that fails is logged, counted and left out.
+            cancelled and taken out of it. An event the calendar only shows (CalendarWorkEffort.viewOnly: put there by an attendee)
+            or that an application keeps (EventServices.get#ManagedEvents) is not changed, cancelled or taken out by a write here:
+            it counts as failed (Commons calendar editors, Nov 12, 2026). Each event stands alone: one that fails is logged,
+            counted and left out.
         </description>
         <in-parameters>
             <parameter name="calendarId" required="true"/>
@@ -879,6 +884,10 @@ along with this software (see the LICENSE.md file). If not, see
             // the calendar's current events by UID: the series (no instance link) and the overrides by series and recurrence
             const existing = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffortDetail').condition('calendarId', calendarId).list())
             const existingIds = existing.map((row) => row.workEffortId)
+            // the events this calendar only shows, and those an application keeps: never written from a feed, an import or a phone
+            const keptIds = new Set(existing.filter((row) => row.viewOnly === 'Y').map((row) => row.workEffortId))
+            if (existingIds.length) for (const id of Object.keys(ec.service.sync().name('mantle.work.EventServices.get#ManagedEvents')
+                    .parameters({workEffortIdList: existingIds}).call()?.managedMap || {})) keptIds.add(id)
             const instanceLinks = existingIds.length ? Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc')
                     .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').condition(cf.makeCondition('toWorkEffortId', 'in', existingIds)).list()) : []
             const linkOf = new Map(instanceLinks.map((link) => [link.toWorkEffortId, link]))
@@ -984,6 +993,7 @@ along with this software (see the LICENSE.md file). If not, see
                 })
             }
             const upsert = (workEffortId, fields) => {
+                if (workEffortId && keptIds.has(workEffortId)) throw new Error(`event ${workEffortId} is only shown in this calendar or kept by an application; it is changed by its organizer there`)
                 if (workEffortId) {
                     const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
                     for (const [field, value] of Object.entries(fields)) row.set(field, value)
@@ -1015,6 +1025,7 @@ along with this software (see the LICENSE.md file). If not, see
                     } else {
                         const seriesId = seriesByUid.get(uid)
                         if (!seriesId) throw new Error(`an instance of ${uid} without its series`)
+                        if (keptIds.has(seriesId)) throw new Error(`event ${seriesId} is only shown in this calendar or kept by an application; it is changed by its organizer there`)
                         const recurrenceMillis = toMillis(event.recurrenceId)
                         const key = `${uid}|${recurrenceMillis}`
                         const known = overrideByKey.get(key)
@@ -1035,7 +1046,7 @@ along with this software (see the LICENSE.md file). If not, see
             }
             if (!replaceAll) return
             for (const row of existing) {
-                if (seenIds.has(row.workEffortId)) continue
+                if (seenIds.has(row.workEffortId) || keptIds.has(row.workEffortId)) continue
                 const link = ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', calendarId)
                         .condition('workEffortId', row.workEffortId).one()
                 if (link != null) link.delete()

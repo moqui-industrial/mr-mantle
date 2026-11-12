@@ -131,6 +131,12 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="event"/>
         <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
         <index name="APP_INTERVIEW_APP"><index-field name="employmentApplicationId"/></index>
+        <seed-data>
+            <!-- the interview's event is changed only through RecruitingServices (change#Interview, cancel#Interview), never on
+                Commons' event screens or over CalDAV (Commons calendar editors, Nov 12, 2026) -->
+            <mantle.work.calendar.EventManager eventManagerId="PeopleInterview" entityName="mantle.humanres.recruitment.ApplicationInterview"
+                    managedByText="its application's interviews in People"/>
+        </seed-data>
     </entity>
 
     <!-- impl-people P17 (design-people §5 OfferDetail, §15, §12's PeopleOfferApproval; PE-04, PE-02) -->

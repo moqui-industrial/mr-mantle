@@ -659,3 +659,75 @@ feature(
         }
     }
 )
+
+// Commons calendar editors (Nov 12, 2026): an interview's event is People's (the EventManager PeopleInterview). Its recruiter,
+// the event's organizer, sees it on Commons' screens and changes it only here (change#Interview, cancel#Interview); a panel
+// member puts it in no calendar of their own, whose editors and CalDAV would change it there
+feature("an interview's event changes only through recruiting: the organizer refused on Commons, the panel refused a calendar", {
+    when() {
+        const E = "mantle.work.EventServices."
+        const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+            employmentApplicationId: state.cara,
+            startDate: nextWeek(),
+            durationMinutes: 45,
+            panelPartyIds: state.ana.partyId,
+            location: "Room 4"
+        })
+        const workEffortId = scheduled.workEffortId
+        const event = () =>
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+        const anaCalendarId = call("create#mantle.work.calendar.Calendar", {
+            calendarName: "Recruit spec Ana's",
+            calendarKindEnumId: "CalkPersonal",
+            ownerPartyId: state.ana.partyId
+        }).calendarId
+        const startMs = Number(String(event().estimatedStartDate))
+        const out = {
+            scheduled,
+            access: run(state.recruiter.userId, E + "check#EventAccess", {workEffortId}),
+            moved: run(state.recruiter.userId, E + "update#EventOccurrence", {
+                workEffortId,
+                start: ec.l10n.format(new Date(startMs + 3600000), "yyyy-MM-dd HH:mm"),
+                end: ec.l10n.format(new Date(startMs + 7200000), "yyyy-MM-dd HH:mm")
+            }).error,
+            cancelledOnCommons: run(state.recruiter.userId, E + "cancel#EventOccurrence", {workEffortId}).error,
+            anaAdd: run(state.ana.userId, "mantle.work.CalendarServices.add#CalendarEvent", {
+                calendarId: anaCalendarId,
+                workEffortId
+            }).error,
+            readerChange: code(run(state.reader.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            otherChange: code(run(state.recruiterB.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            before: event()
+        }
+        out.changed = run(state.recruiter.userId, R + "change#Interview", {
+            workEffortId,
+            startDate: new Date(startMs + 3600000),
+            durationMinutes: 30,
+            location: "Room 5"
+        })
+        out.after = event()
+        out.cancelled = run(state.recruiter.userId, R + "cancel#Interview", {workEffortId, reason: "The candidate asked"})
+        out.afterCancel = event()
+        out.again = code(run(state.recruiter.userId, R + "cancel#Interview", {workEffortId}))
+        out.startMs = startMs
+        return out
+    },
+    then(r) {
+        r.scheduled.error == "" && r.scheduled.invitationsSent == true
+        r.access.canView && !r.access.canEdit && r.access.isOrganizer
+        r.access.managedBy == "its application's interviews in People"
+        r.moved.includes("is changed on its application's interviews in People")
+        r.cancelledOnCommons.includes("is changed on its application's interviews in People")
+        r.anaAdd.includes("not put in a calendar")
+        r.readerChange == "PERMISSION_DENIED"
+        r.otherChange == "RECORD_UNAVAILABLE"
+        Number(String(r.before.estimatedStartDate)) == r.startMs && r.before.location == "Room 4"
+        r.changed.error == "" && r.changed.invitationsSent == true
+        Number(String(r.after.estimatedStartDate)) == r.startMs + 3600000
+        Number(String(r.after.estimatedCompletionDate)) == r.startMs + 3600000 + 30 * 60000
+        r.after.location == "Room 5"
+        r.cancelled.error == "" && r.cancelled.invitationsSent == true
+        r.afterCancel.statusId == "WeCancelled"
+        r.again == "INTERVIEW_CANCELLED"
+    }
+})

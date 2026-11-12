@@ -307,6 +307,12 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one-nofk" title="Assessment" related="moqui.screen.form.DbForm">
             <key-map field-name="assessmentFormId" related="formId"/></relationship>
         <index name="TRN_SESSION_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <!-- the session's event is changed only on the session (DevelopmentServices.store#Training: its dates, trainer,
+                revision and places), never on Commons' event screens or over CalDAV (impl-people P19 review, R1) -->
+            <mantle.work.calendar.EventManager eventManagerId="PeopleTrainingSession" entityName="mantle.humanres.ability.TrainingSession"
+                    purposeEnumId="WepTraining" managedByText="its People training session"/>
+        </seed-data>
     </entity>
     <entity entity-name="PersonTraining" package="mantle.humanres.ability" cache="never">
         <description>A person's enrollment in a training session, with its own identity: requested by the person (waiting for a

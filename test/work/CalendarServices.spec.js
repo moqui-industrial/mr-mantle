@@ -260,6 +260,63 @@ feature("only the organizer or an editor of its calendar books for an event", {
     },
 })
 
+// Commons calendar editors (Nov 12, 2026): putting an event in a calendar gives its editors no more than the one who put it there.
+// Ben, invited to Ada's design review, puts it in his own calendar to see it there: he, and Cy who edits Ben's calendar, change
+// nothing; Dee, an editor of Ada's calendar, still changes it, and putting it in her own calendar keeps that
+feature("an attendee who puts an invitation in a calendar of their own sees it there and changes nothing; an editor of the organizer's calendar still does", {
+    when() {
+        setTime(8.21)
+        const benCalendarId = as("Ben", () => call(`${CAL}.ensure#UserDefaultCalendar`, {}).calendarId)
+        as("Ben", () => call(`${CAL}.share#Calendar`, { calendarId: benCalendarId, userId: user.Cy, permissionEnumId: "CalpEdit" }))
+        as("Ada", () => call(`${CAL}.share#Calendar`, { calendarId: cal.projects, userId: user.Dee, permissionEnumId: "CalpEdit" }))
+        const link = (calendarId) => ec.entity.find("mantle.work.calendar.CalendarWorkEffort").condition("calendarId", calendarId)
+                .condition("workEffortId", we.review).one()
+        const ben = as("Ben", () => ({
+            added: call(`${CAL}.add#CalendarEvent`, { calendarId: benCalendarId, workEffortId: we.review }).added,
+            access: call(`${EV}.check#EventAccess`, { workEffortId: we.review }),
+            moved: errorOf(`${EV}.update#EventOccurrence`, { workEffortId: we.review, start: "2027-05-10 15:00", end: "2027-05-10 16:00" }),
+            cancelled: errorOf(`${EV}.cancel#EventOccurrence`, { workEffortId: we.review }),
+            booked: errorOf(`${EV}.book#Resource`, { workEffortId: we.review, facilityId: "CS_ROOM_A" }),
+        }))
+        const benLink = link(benCalendarId)
+        const cy = as("Cy", () => ({
+            access: call(`${EV}.check#EventAccess`, { workEffortId: we.review }),
+            moved: errorOf(`${EV}.update#EventOccurrence`, { workEffortId: we.review, start: "2027-05-10 15:00", end: "2027-05-10 16:00" }),
+        }))
+        const deeCalendarId = as("Dee", () => call(`${CAL}.ensure#UserDefaultCalendar`, {}).calendarId)
+        const dee = as("Dee", () => ({
+            access: call(`${EV}.check#EventAccess`, { workEffortId: we.review }),
+            added: call(`${CAL}.add#CalendarEvent`, { calendarId: deeCalendarId, workEffortId: we.review }).added,
+        }))
+        const deeLink = link(deeCalendarId)
+        const review = ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", we.review).one()
+        // as it was for the features after
+        setTime(8.22)
+        as("Ben", () => call(`${CAL}.remove#CalendarEvent`, { calendarId: benCalendarId, workEffortId: we.review }))
+        as("Dee", () => call(`${CAL}.remove#CalendarEvent`, { calendarId: deeCalendarId, workEffortId: we.review }))
+        as("Ben", () => call(`${CAL}.unshare#Calendar`, { calendarId: benCalendarId, userId: user.Cy }))
+        as("Ada", () => call(`${CAL}.unshare#Calendar`, { calendarId: cal.projects, userId: user.Dee }))
+        return { ben, benLink, cy, dee, deeLink, review }
+    },
+    then({ ben, benLink, cy, dee, deeLink, review }) {
+        ben.added == true
+        ben.access.canView == true
+        ben.access.canEdit == false
+        ben.moved.includes("Only the organizer of Design review")
+        ben.cancelled.includes("Only the organizer of Design review")
+        ben.booked.includes("Only the organizer of Design review")
+        cy.access.canView == true
+        cy.access.canEdit == false
+        cy.moved.includes("Only the organizer of Design review")
+        benLink.viewOnly == "Y"
+        millis(review.estimatedStartDate) == millis(at(10))
+        review.statusId != "WeCancelled"
+        dee.access.canEdit == true
+        dee.added == true
+        deeLink.viewOnly == null
+    },
+})
+
 feature("get#FullCalendarData: calendars with their colors, my events, the standup's recurLimit, all-day days, free/busy calendars", {
     when() {
         setTime(8.3)
