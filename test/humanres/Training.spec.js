@@ -554,8 +554,9 @@ feature(
             out.bookedRows = bookingsOf(id).map(row => row.facilityId + " " + row.statusId)
             out.bookedPlace = event(id).location
             out.line = run(state.dev.userId, D + "get#Training", {workEffortId: id}).session
-            // no user changes the room of a kept event on Commons' booking services
-            out.directCancel = run(state.dev.userId, "mantle.work.EventServices.cancel#ResourceBooking", {
+            // on Commons' booking services only the session's organizer books for it (check#EventAccess canBook, impl-maintenance
+            // F356): its trainer, an attendee, is refused
+            out.directCancel = run(coach.userId, "mantle.work.EventServices.cancel#ResourceBooking", {
                 workEffortId: id,
                 facilityId: room
             }).error
@@ -568,11 +569,24 @@ feature(
                 estimatedCompletionDate: on("13:00"),
                 assignToPartyId: zoe.partyId
             })
-            const capacityDay = partyId =>
-                call("mantle.work.ResourceServices.get#PartyCapacity", {partyId, fromDate: dayText, thruDate: dayText})
-                    .capacityList[0].dayList[0]
+            // availability for dispatch and staffing takes training off (lessTraining); a timesheet's expected hours do not (the
+            // user's call of Nov 12, 2026: training is worked time)
+            const capacityDay = (partyId, lessTraining = true) =>
+                call("mantle.work.ResourceServices.get#PartyCapacity", {
+                    partyId,
+                    fromDate: dayText,
+                    thruDate: dayText,
+                    lessTraining
+                }).capacityList[0].dayList[0]
             out.zoe = capacityDay(zoe.partyId)
             out.coach = capacityDay(coach.partyId)
+            out.coachWorked = capacityDay(coach.partyId, false)
+            out.coachExpected = call("mantle.work.TimesheetServices.get#WeekDays", {
+                dayList: [dayText],
+                policy: {dayHours: 8, workDays: [1, 2, 3, 4, 5]},
+                partyId: coach.partyId
+            }).weekDayList[0]
+
             // moved into the meeting or the blackout: refused, the session as it was; moved to 12:00 to 14:00: the room kept
             const revision = () => run(state.dev.userId, D + "get#Training", {workEffortId: id}).session.revision
             const move = (from, to) =>
@@ -614,11 +628,16 @@ feature(
             out.line.roomName == "Train spec classroom" &&
                 out.line.roomStatus == "booked" &&
                 out.line.facilityId == prefix + "_ROOM"
-            out.directCancel.includes("is changed on")
+            out.directCancel.includes("Only the organizer")
             // Zoe: two hours of leave, the session's one hour not under it; the coach: the session's two hours
             out.zoe.leave == 2 && out.zoe.training == 1 && out.zoe.capacity == out.zoe.base - 3
             out.coach.leave == 0 && out.coach.training == 2 && out.coach.capacity == out.coach.base - 2
-            out.intoMeeting.includes("ROOM_UNAVAILABLE") && out.intoMeeting.includes("Busy")
+            // without lessTraining (a timesheet's expected hours) the coach's whole day is expected
+            out.coachWorked.training == 0 && out.coachWorked.capacity == out.coachWorked.base
+            out.coachExpected.expected == out.coach.base
+            out.intoMeeting.includes("ROOM_UNAVAILABLE") &&
+                out.intoMeeting.includes("Busy") &&
+                !out.intoMeeting.includes("board meeting")
             out.intoBlackout == "ROOM_UNAVAILABLE"
             out.unmoved == "10:00"
             out.moved == ""

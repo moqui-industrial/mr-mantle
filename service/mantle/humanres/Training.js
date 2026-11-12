@@ -760,8 +760,7 @@ function storeTraining(p) {
         location,
         description
     })
-    if (startMs !== ms(found.event.estimatedStartDate) || endMs !== ms(found.event.estimatedCompletionDate))
-        bookings().keptEventMoved(id)
+    // the room chosen, and on a move every booking rechecked (keptEventMoved, through place)
     rooms().place(id, facilityId, startChanged || endMs !== ms(found.event.estimatedCompletionDate))
     const previousTrainer = found.session.trainerPartyId
     call("update#" + SESSION, {workEffortId: id, trainerPartyId, capacity, assessmentFormId: formId})
@@ -777,7 +776,6 @@ function cancelSession(found, reason) {
     const workEffortId = found.session.workEffortId
     call("update#" + WORK, {workEffortId, statusId: "WeCancelled"})
     bookings().keptEventCancelled(workEffortId)
-    rooms().cancelAll(workEffortId)
     for (const row of rows(ENROLLMENT, {workEffortId}).filter(item => [REQUESTED, ENROLLED].includes(item.statusEnumId))) {
         call("update#" + ENROLLMENT, {
             personTrainingId: row.personTrainingId,
@@ -1277,38 +1275,16 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown training operation " + op)
     return operations[op](p || {})
 }
-// sessionHours: each person's hours in training sessions from fromMs to thruMs, the sessions they are enrolled in or train, not
-// cancelled; sessions that overlap counted once. For Maintenance's dispatch (find#MaintenanceCandidates' free hours,
-// impl-maintenance F360), which checked its own caller; nothing of a session but its time is answered.
+// sessionHours: each person's hours in training sessions from fromMs to thruMs (sessionTimesOf's sessions: as the trainer, or holding
+// a place enrolled or completed and not marked absent; not cancelled), sessions that overlap counted once. For Maintenance's
+// dispatch (find#MaintenanceCandidates' free hours, impl-maintenance F360), which checked its own caller; nothing of a session but
+// its time is answered. One reading of a person's sessions with get#PartyCapacity's (People follow-up 3 review).
 function sessionHours(partyIds, fromMs, thruMs) {
-    const ids = unique(Array.from(partyIds || []).filter(Boolean))
     const hours = {}
-    if (!ids.length || !(thruMs > fromMs)) return hours
-    const sessionsOf = new Map()
-    const add = (partyId, workEffortId) => sessionsOf.set(partyId, (sessionsOf.get(partyId) || []).concat([workEffortId]))
-    for (const row of Array.from(find(ENROLLMENT).condition("partyId", "in", ids).condition("statusEnumId", ENROLLED).list()))
-        add(row.partyId, row.workEffortId)
-    for (const row of Array.from(find(SESSION).condition("trainerPartyId", "in", ids).list()))
-        add(row.trainerPartyId, row.workEffortId)
-    const eventIds = unique([].concat(...Array.from(sessionsOf.values())))
-    if (!eventIds.length) return hours
-    const spans = new Map()
-    for (const event of Array.from(
-        find(WORK)
-            .condition("workEffortId", "in", eventIds)
-            .condition("statusId", "not-equals", "WeCancelled")
-            .condition("estimatedStartDate", "less", stamp(thruMs))
-            .condition("estimatedCompletionDate", "greater", stamp(fromMs))
-            .list()
-    ))
-        spans.set(event.workEffortId, [
-            Math.max(fromMs, ms(event.estimatedStartDate)),
-            Math.min(thruMs, ms(event.estimatedCompletionDate))
-        ])
-    for (const [partyId, sessions] of sessionsOf) {
-        const own = unique(sessions)
-            .map(id => spans.get(id))
-            .filter(Boolean)
+    if (!(thruMs > fromMs)) return hours
+    for (const [partyId, intervals] of Object.entries(sessionTimesOf(partyIds, fromMs, thruMs))) {
+        const own = intervals
+            .map(([start, stop]) => [Math.max(fromMs, start), Math.min(thruMs, stop)])
             .sort((a, b) => a[0] - b[0])
         let total = 0
         let end = -Infinity

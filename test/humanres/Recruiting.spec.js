@@ -990,7 +990,9 @@ feature(
                 run(state.recruiter.userId, R + "get#Application", {employmentApplicationId: state.cara}).application
                     .interviews || []
             ).find(row => row.workEffortId == id)
-            out.direct = run(state.recruiter.userId, "mantle.work.EventServices.book#Resource", {
+            // on Commons' booking services only the interview's organizer books for it (check#EventAccess canBook,
+            // impl-maintenance F356): a panel member, an attendee, is refused
+            out.direct = run(state.ana.userId, "mantle.work.EventServices.book#Resource", {
                 workEffortId: id,
                 facilityId: annex
             }).error
@@ -1012,8 +1014,10 @@ feature(
             out.bookedRows == [prefix + "_ROOM WefAssigned"]
             out.place == "Recruit spec room"
             out.row.roomName == "Recruit spec room" && out.row.roomStatus == "booked"
-            out.direct.includes("is changed on")
-            out.intoMeeting.includes("ROOM_UNAVAILABLE") && out.intoMeeting.includes("Busy")
+            out.direct.includes("Only the organizer")
+            out.intoMeeting.includes("ROOM_UNAVAILABLE") &&
+                out.intoMeeting.includes("Busy") &&
+                !out.intoMeeting.includes("board meeting")
             out.intoBlackout == "ROOM_UNAVAILABLE"
             out.unchanged == [true, [prefix + "_ROOM WefAssigned"]]
             out.annex == ""

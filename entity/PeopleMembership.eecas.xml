@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- An agent's (a contractor's) agency ending ends their team memberships and leads at the employer (IronStone People follow-up 3
+    review, the user's call of Nov 12, 2026; design §4 OrgStructure: a team takes contractors), as a separation ends an employee's.
+    The agency is a PrtAgent PartyRelationship ended by setting its thruDate, whoever ends it (Admin's store#OrganizationMembership,
+    Lifecycle's offboarding, an import), so the rule is on the record: OrganizationServices.end#AgentMemberships, which never
+    refuses (a membership that cannot be ended is logged and the agency's end stands). Narrow: only an update of a PrtAgent row that
+    sets or changes its thruDate. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="AgentEndsMemberships" entity="mantle.party.PartyRelationship" on-update="true"
+            get-entire-entity="true" get-original-value="true">
+        <condition><expression>relationshipTypeEnumId == 'PrtAgent' &amp;&amp; thruDate &amp;&amp;
+            (originalValue == null || originalValue.thruDate == null || String(originalValue.thruDate) != String(thruDate))</expression></condition>
+        <actions><script>ec.service.sync().name('mantle.humanres.OrganizationServices.end#AgentMemberships')
+            .parameters({partyRelationshipId: partyRelationshipId, partyId: fromPartyId, organizationPartyId: toPartyId, thruDate: thruDate})
+            .disableAuthz().call()</script></actions>
+    </eeca>
+</eecas>

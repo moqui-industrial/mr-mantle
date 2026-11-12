@@ -1,21 +1,26 @@
 // The meeting room of an event People keeps (a training session, Training.js; an interview, Recruiting.js): IronStone People
 // follow-up 3 (impl-people, the user's call of Nov 12, 2026; impl-maintenance F356). The room is a booking of Maintenance's
-// resource booking (mantle.work.EventServices book#Resource, check#ResourceBookings, cancel#ResourceBooking: a WorkEffortFacility
-// row), so the room's policy, its other bookings and its blackouts and outages apply, its approvers decide a booking that waits,
-// and the room's calendar shows it. A free-text place stays for a place that is no bookable room (off site).
+// resource booking (mantle.work.EventServices book#Resource and cancel#ResourceBooking: a WorkEffortFacility row), so the room's
+// policy, its other bookings and its blackouts and outages apply, its approvers decide a booking that waits, and the room's
+// calendar shows it. A free-text place stays for a place that is no bookable room (off site).
 //
-// The event is an application's (the EventManager rows PeopleTrainingSession and PeopleInterview), so no user changes it or its
-// bookings on Commons' screens; the owning module checks its caller first and then books, moves and cancels the room here as the
-// system (runAsSystem: no user, authorization off), which the booking services admit for any event. As the system the booking
-// services name an event the user may not see Busy (ResourcePolicy.js eventVisibility answers no event visible with no user), so a
-// clash says when, not whose. A refusal (a clash, a blackout or outage, the policy's maximum or horizon, a room no longer bookable)
-// is ROOM_UNAVAILABLE with the booking service's words, and the caller's change is rolled back with it.
+// The event is an application's (the EventManager rows PeopleTrainingSession and PeopleInterview): the owning module checks its
+// caller first (a development editor or recruiter of the employer, who need not be the event's organizer) and then books the room
+// chosen and lets go of one no longer chosen here, as the system (runAsSystem: no user, authorization off), which the booking
+// services admit for any event. A move and a cancel are Maintenance's (ResourceBookingDecisions.js keptEventMoved, called by place
+// when the event moved, and keptEventCancelled, called by the module's cancel), which recheck or withdraw every booking of the
+// event, rooms and equipment, the same way. As the system no event is visible (ResourcePolicy.js eventVisibility, F358), so a clash
+// is named Busy: it says when, not whose. A refusal (a clash, a blackout or outage, the policy's maximum or horizon, a room no
+// longer bookable) is ROOM_UNAVAILABLE with the booking service's words, and the caller's change is rolled back with it. The
+// organizer may also book the event's rooms and equipment on Commons (check#EventAccess canBook, impl-maintenance F356).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, ms} = lib
 
 const ROOM = "mantle.facility.Facility"
 const BOOKING = "mantle.work.effort.WorkEffortFacility"
 const EVENTS = "mantle.work.EventServices."
+// Maintenance's recheck of a kept event's bookings after a move (keptEventMoved), as the system
+const decisions = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
 const DENIED = "WefRequestDenied"
 const statuses = {
     WefAssigned: {roomStatus: "booked", roomStatusText: "Room booked"},
@@ -34,20 +39,13 @@ function roomOf(facilityId) {
     return {facilityId: id, roomName: room.facilityName || id}
 }
 
-// A booking service called as the system, for the event its caller checked; a refusal is ROOM_UNAVAILABLE with its words.
-function asSystem(name, parameters) {
+// A booking step run for the event its caller checked; a refusal is ROOM_UNAVAILABLE with its words.
+function refusedAsRoom(step) {
     let problem = null
     let out = {}
     ec.message.pushErrors()
     try {
-        out =
-            ec.artifactExecution.runAsSystem(() =>
-                ec.service
-                    .sync()
-                    .name(EVENTS + name)
-                    .parameters(parameters)
-                    .call()
-            ) || {}
+        out = step() || {}
         if (ec.message.hasError()) problem = ec.message.getErrorsString()
     } catch (error) {
         problem = String(error.message || error)
@@ -58,26 +56,31 @@ function asSystem(name, parameters) {
     if (problem) denied("ROOM_UNAVAILABLE", problem)
     return out
 }
+// A booking service called as the system.
+const asSystem = (name, parameters) =>
+    refusedAsRoom(() =>
+        ec.artifactExecution.runAsSystem(() =>
+            ec.service
+                .sync()
+                .name(EVENTS + name)
+                .parameters(parameters)
+                .call()
+        )
+    )
 
-// The room of the event from now on: facilityId (null for none) at the event's stored time. A room no longer chosen is cancelled;
-// the room kept is checked again at the new time when the event moved (its clashes and blocks refuse the move, an approval asked
-// again where its policy says); a new room, or one refused before that is chosen again for a new time, is booked (at once, or
-// waiting for its approvers).
+// The room of the event from now on: facilityId (null for none) at the event's stored time. A room no longer chosen is let go
+// first; when the event moved, its other bookings (the room kept, any equipment) are checked again at the new time by Maintenance's
+// keptEventMoved (a clash or block refuses the move, an approval is asked again where its policy says); then a new room, or one
+// refused before that is kept for a new time, is booked (at once, or waiting for its approvers).
 function place(workEffortId, facilityId, moved) {
     const current = rows(BOOKING, {workEffortId})
     const wanted = text(facilityId) || null
     for (const row of current)
         if (row.facilityId !== wanted) asSystem("cancel#ResourceBooking", {workEffortId, facilityId: row.facilityId})
+    if (moved) refusedAsRoom(() => decisions().keptEventMoved(workEffortId))
     const kept = wanted ? current.find(row => row.facilityId === wanted) || null : null
-    if (kept && kept.statusId !== DENIED) {
-        if (moved) asSystem("check#ResourceBookings", {workEffortId})
-    } else if (wanted && (!kept || moved)) asSystem("book#Resource", {workEffortId, facilityId: roomOf(wanted).facilityId})
-}
-
-// Every room booking of the event cancelled with it (its approvers' notices withdrawn).
-function cancelAll(workEffortId) {
-    for (const row of rows(BOOKING, {workEffortId}))
-        asSystem("cancel#ResourceBooking", {workEffortId, facilityId: row.facilityId})
+    if (wanted && (!kept || (kept.statusId === DENIED && moved)))
+        asSystem("book#Resource", {workEffortId, facilityId: roomOf(wanted).facilityId})
 }
 
 // The room of each event: {workEffortId: {facilityId, roomName, roomStatus (booked, requested, refused), roomStatusText}}.
@@ -105,4 +108,4 @@ function roomsOf(workEffortIds) {
     return found
 }
 
-;({roomOf, place, cancelAll, roomsOf})
+;({roomOf, place, roomsOf})

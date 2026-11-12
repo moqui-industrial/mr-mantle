@@ -48,10 +48,13 @@ along with this software (see the LICENSE.md file). If not, see
             timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
             and leave), holiday (its name or null), leave (hours), training (hours), capacity, workingScheduleId (the schedule that
             planned the day, or null)}], weekList [{weekStart, base, holidayHours, leaveHours, trainingHours, capacity, workDays}],
-            base, capacity}. A person's time off and People's training sessions (as the trainer, or holding a place enrolled or
-            completed and not marked absent; a cancelled session none: impl-people follow-up 3, impl-maintenance F360) are taken off
-            once where they overlap (training counts the hours leave does not already take), at most the day's base; a holiday
-            takes the whole day and neither counts then. With no partyId and
+            base, capacity}. A person's time off is taken off, timed leave that overlaps once, at most the day's base; a holiday
+            takes the whole day and leave does not count then. With lessTraining (availability for dispatch and staffing alone:
+            find#StaffingCandidates; impl-people follow-up 3 and its review, the user's call of Nov 12, 2026) People's training
+            sessions are taken off too (Training.js sessionTimesOf: as the trainer, or holding a place enrolled or completed and not
+            marked absent; a cancelled session none), merged with the time off so an overlap counts once (training the hours leave
+            does not already take); without it (timesheets' expected hours, utilization, People's capacity) training is worked
+            time and training is 0. With no partyId and
             no partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
             placeholder is planned. policy with organizationPartyId (as get#WeekDays passes them) apply to every party with no
             working hours of their own on the days no schedule plans. A person whose schedule, working hours or leave do not read is
@@ -64,6 +67,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="weekStart" type="Integer" default="1"/>
             <parameter name="policy" type="Map"/>
             <parameter name="organizationPartyId"/>
+            <parameter name="lessTraining" type="Boolean" default="false"><description>Take People's training sessions off
+                (availability for dispatch and staffing; impl-people follow-up 3 review)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="capacityList" type="List"/>
@@ -265,7 +270,8 @@ capacityList = []
                 try { plannedByParty = schedules.scheduledDays(parties, days) } catch (err) {
                     ec.logger.error(`Capacity: the working schedules were not read, each person's own hours or the policy's apply: ${err && err.message ? err.message : err}`)
                 }
-                try {
+                // training is worked time: only availability for dispatch and staffing asks it off (the user's call of Nov 12, 2026)
+                if (lessTraining) try {
                     trainingByParty = ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').sessionTimesOf(parties, starts[0], endMs)
                 } catch (err) {
                     ec.logger.error(`Capacity: the training sessions were not read, none taken off: ${err && err.message ? err.message : err}`)
@@ -1164,7 +1170,8 @@ const L = (text) => ec.l10n.localize(text)
             own person. IronStone People (impl-people P18, its SkillsMatrix's FindAvailable; an owner contract with Projects, whose
             callers pass neither): partyIdList bounds the people to those given (the people of the caller's People scope), and
             each candidate's skillSelfDeclared says the skill's level is the person's own claim (PartySkill sourceEnumId
-            SksSelfDeclared), which People labels and no requirement takes. IronStone Maintenance (impl-maintenance P8, its technician
+            SksSelfDeclared), which People labels and no requirement takes. The free hours are capacity less People's training
+            sessions (get#PartyCapacity lessTraining; impl-people follow-up 3 review), but in a window, whose caller takes them off. IronStone Maintenance (impl-maintenance P8, its technician
             assignment; Projects' and People's callers pass none of these): skillList ranks by several skills, each with a least
             level ({skillTypeEnumId, minimumLevel}): each candidate's skills [{skillTypeEnumId, level, selfDeclared, meets}] (a
             self-declared level meets nothing), skillsMet, hasSkill (every one met) and skillRating (the mean level held); a window
@@ -1255,8 +1262,10 @@ candidateList = []
                 if (!people.length) return
                 if (people.length > 200) people = people.slice(0, 200)
                 const capacities = {}
+                // availability for staffing takes training sessions off (the user's call of Nov 12, 2026); Maintenance's window takes
+                // them off itself (MaintenanceDispatch.js, Training.js sessionHours: impl-maintenance F360), so not twice
                 for (const entry of Array.from(ec.service.sync().name('mantle.work.ResourceServices.get#PartyCapacity').parameters({partyIdList: people,
-                        fromDate: firstDay, thruDate: lastDay}).call()?.capacityList || [])) capacities[entry.partyId] = entry
+                        fromDate: firstDay, thruDate: lastDay, lessTraining: !windowed}).call()?.capacityList || [])) capacities[entry.partyId] = entry
                 ec.message.clearErrors()
                 const allocRows = Array.from(ec.entity.find('mantle.work.effort.WorkEffortAllocation').condition('partyId', 'in', people)
                         .condition('statusId', 'equals', 'WealAllocated').condition('fromDate', 'less-equals', lastDay).condition('thruDate', 'greater-equals', firstDay).list())

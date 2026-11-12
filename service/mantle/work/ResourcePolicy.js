@@ -15,8 +15,7 @@
 //   approver fallback (EventServices), and a recurring booking of it is checked against outages and blocks over its whole range up
 //   to 365 days, its conflicts on the first meeting as before (P16, F165). An inventory or supplies asset is booked as before P15:
 //   no policy or block applies (F172). A write locks the work centers above a facility before the resource (F171, lockResource).
-//   A conflict with an event the user may not see is named Busy, with no id or title; with no user (the system scope, an
-//   application booking for an event it keeps: People follow-up 3) every conflict is.
+//   A conflict with an event the user may not see is named Busy, with no id or title.
 // - availability (get#ResourceAvailability, get#FreeBusy, get#FullCalendarData): the intervals of a resource in a range, kept
 //   apart: requested and assigned bookings, planned blocks and actual outages, each with a safe label.
 // - the policy's services: find#BookableResources, get#, store# and preview#ResourceBookingPolicy and store#ResourceApprover, each

@@ -539,6 +539,13 @@ feature(
                 agentOfB: join(team, agentB, "member"),
                 departmentLead: code(store({partyId: department, headPartyId: agent, expectedRevision: revision(department)})),
                 outsideMember: join(outsideTeam, agent, "member"),
+                // read here, kept by the application that made it (a Customer Service service team): no rename, lead or member
+                outsideRename: code(
+                    store({partyId: outsideTeam, organizationName: "Renamed by HR", expectedRevision: revision(outsideTeam)})
+                ),
+                outsideName: ec.entity.find("mantle.party.Organization").condition("partyId", outsideTeam).disableAuthz().one()
+                    .organizationName,
+                outsideUnit: run(state.hr, O + "get#Unit", {partyId: outsideTeam}).unit,
                 outsideRead: run(state.hr, O + "get#Unit", {partyId: outsideTeam}).error,
                 outsideReadB: code(run(state.hrB, O + "get#Unit", {partyId: outsideTeam})),
                 outsideDepartment: code(run(state.hr, O + "get#Unit", {partyId: outsideDepartment})),
@@ -554,6 +561,9 @@ feature(
             agentOfB,
             departmentLead,
             outsideMember,
+            outsideRename,
+            outsideName,
+            outsideUnit,
             outsideRead,
             outsideReadB,
             outsideDepartment,
@@ -566,13 +576,75 @@ feature(
             agentLead == ""
             agentOfB == "NOT_EMPLOYED"
             departmentLead == "NOT_EMPLOYED"
-            outsideMember == ""
+            outsideMember == "NOT_A_UNIT"
+            outsideRename == "NOT_A_UNIT" && outsideName == "Outside TEAM"
+            outsideUnit.canEdit == false && outsideUnit.membersEditable == false
             outsideRead == ""
             outsideReadB == "RECORD_UNAVAILABLE"
             outsideDepartment == "RECORD_UNAVAILABLE"
             organizations == {[units.team]: orgA, [units.outsideTeam]: orgA, [units.movedTeam]: orgB}
             teamsOfA.includes(units.team) && teamsOfA.includes(units.outsideTeam) && !teamsOfA.includes(units.movedTeam)
             teamsOfB.includes(units.movedTeam) && !teamsOfB.includes(units.outsideTeam)
+        }
+    }
+)
+
+feature(
+    "the user's call of Nov 12: an agency's end ends the contractor's team memberships and leads at the employer, on its date, unless they still work there",
+    {
+        when() {
+            const store = parameters => run(state.hr, O + "store#Unit", parameters)
+            const crew = store({unitKind: "team", organizationName: "Agency crew", parentPartyId: orgA}).partyId
+            const agency = partyId =>
+                call("create#mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: "PrtAgent",
+                    fromPartyId: partyId,
+                    toPartyId: orgA,
+                    toRoleTypeId: "OrgInternal",
+                    fromDate: since
+                }).partyRelationshipId
+            // a contractor (a member, then the crew's lead), a contractor also employed by A (a member)
+            const temp = person("TEMP")
+            const both = person("TEMP_EMPLOYED")
+            const tempAgency = agency(temp)
+            const bothAgency = agency(both)
+            employ(both, orgA)
+            const join = (partyId, memberRole, fromDate = null) =>
+                code(run(state.hr, O + "store#Membership", {unitPartyId: crew, partyId, memberRole, fromDate}))
+            const joined = [join(temp, "member"), join(temp, "lead"), join(both, "member")]
+            const memberships = partyId =>
+                Array.from(
+                    ec.entity
+                        .find("mantle.party.PartyRelationship")
+                        .condition({relationshipTypeEnumId: "PrtMember", fromPartyId: partyId, toPartyId: crew})
+                        .disableAuthz()
+                        .list()
+                )
+            const millis = value => (value == null ? null : Number(String(value)))
+            const open = partyId => memberships(partyId).filter(row => row.thruDate == null).length
+            const before = {temp: open(temp), both: open(both)}
+            // the agencies end in a week, as Admin's store#OrganizationMembership ends them (thruDate set)
+            const end = new Date(state.now + 7 * day)
+            for (const partyRelationshipId of [tempAgency, bothAgency])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId, thruDate: end})
+            const rows = memberships(temp)
+            return {
+                joined,
+                before,
+                tempOpen: open(temp),
+                tempEnds: rows.every(row => millis(row.thruDate) != null && millis(row.thruDate) <= end.getTime()),
+                tempLeadEnd: rows
+                    .filter(row => row.fromRoleTypeId === "Manager")
+                    .map(row => millis(row.thruDate) === end.getTime()),
+                bothOpen: open(both)
+            }
+        },
+        then({joined, before, tempOpen, tempEnds, tempLeadEnd, bothOpen}) {
+            joined == ["", "", ""]
+            before.temp == 1 && before.both == 1
+            // the contractor's member and lead rows end by the agency's date; one still employed by A stays on
+            tempOpen == 0 && tempEnds == true && tempLeadEnd == [true]
+            bothOpen == 1
         }
     }
 )

@@ -1207,7 +1207,7 @@ function changeInterview(p) {
     }
     if (p.note != null) changes.description = text(p.note) || null
     call("update#" + WORK, changes)
-    if (startMs !== oldStartMs || endMs !== oldEndMs) bookings().keptEventMoved(workEffortId)
+    // the room chosen, and on a move every booking rechecked (keptEventMoved, through place)
     rooms().place(workEffortId, facilityId, startMs !== oldStartMs || endMs !== oldEndMs)
     if (interview.callLinkId) {
         const link = one("moqui.call.CallLink", {callLinkId: interview.callLinkId})
@@ -1228,7 +1228,6 @@ function cancelInterview(p) {
         statusId_changeReason: text(p.reason) || "Interview cancelled"
     })
     bookings().keptEventCancelled(workEffortId)
-    rooms().cancelAll(workEffortId)
     closeCallLink(interview.callLinkId)
     return {workEffortId}
 }

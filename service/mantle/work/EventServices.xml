@@ -2084,9 +2084,9 @@ along with this software (see the LICENSE.md file). If not, see
             over its range up to 365 days, its conflicts on the first meeting (F165); a request tells the resource's approvers on the
             ResourceBooking topic (mantle.work.ResourceBookingServices.decide#ResourceBooking decides it).
 
-            An event an application keeps (get#ManagedEvents: People's training sessions and interviews) is booked by that
-            application's own services, as the system after their own check (People's EventRooms.js; People follow-up 3,
-            impl-maintenance F356); check#EventAccess refuses it to every user, and as the system every clash is named Busy.
+            A People training session's or interview's room chosen on People's screens is booked by People's own services, as the
+            system after their own check (Mantle humanres/EventRooms.js; impl-people follow-up 3), so a development editor or
+            recruiter who is not its organizer books it too; as the system every clash is named Busy (F358).
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -2200,8 +2200,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Cancels the booking of a meeting room (deletes the WorkEffortFacility) or equipment (ends the current
             WorkEffortAssetAssign rows, thruDate now) of an event, with book access to the event (check#EventAccess, F356). A booking waiting for approval
             leaves its approvers' inboxes (the ResourceBooking topic; impl-maintenance P16 review), as cancel#EventOccurrence's
-            bookings do. An event an application keeps is cancelled only by that application's services, as the system (People
-            follow-up 3, F356); Commons' get#ResourceBookings offers no Cancel on it (F357).</description>
+            bookings do.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="facilityId"/>
@@ -2259,9 +2258,6 @@ along with this software (see the LICENSE.md file). If not, see
             is requested again. A conflict with an event the user may not see is named Busy, with no id. With reapprove (a move), a
             booking waiting for approval after it (asked again or still waiting) tells the resource's approvers of the new time on the
             ResourceBooking topic, their older notice of it leaving the inbox (impl-maintenance P16).
-
-            An event an application keeps is moved by that application's services, which check its bookings here as the system
-            (People follow-up 3, F356).
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
