@@ -38,6 +38,9 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
+// P7: the checklist's gate, close and cancel (ProcessChecks.js), and the time services' way through (WorkProcesses.js)
+const checks = () => ec.resource.script("component://mr-mantle/service/mantle/work/ProcessChecks.js")
+const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/work/WorkProcesses.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -357,11 +360,14 @@ function timeWork(userScope, workEffortId, needsProgress) {
 function startTimer(p) {
     const userScope = scopeWithAny(["execute"])
     const found = timeWork(userScope, p.workEffortId, true)
-    const out = call("mantle.work.TimesheetServices.start#Timer", {
-        workEffortId: found.workEffortId,
-        comments: text(p.comments),
-        workTypeEnumId: text(p.workTypeEnumId)
-    })
+    // P7 (F159): the time services refuse managed work but through its owner, which checked the caller above
+    const out = workProcesses.asManagedOwner([found.root.workEffortId], () =>
+        call("mantle.work.TimesheetServices.start#Timer", {
+            workEffortId: found.workEffortId,
+            comments: text(p.comments),
+            workTypeEnumId: text(p.workTypeEnumId)
+        })
+    )
     return {timeEntryId: out.timeEntryId, alreadyRunning: !!out.alreadyRunning}
 }
 // stop#MaintenanceTimer: the caller's running timer on the work order's tree.
@@ -370,7 +376,9 @@ function stopTimer(p) {
     const found = timeWork(userScope, p.workEffortId, false)
     const running = runningTimers(found.root.workEffortId).find(row => row.partyId === userScope.partyId)
     if (!running) denied("NO_TIMER", "No timer of yours is running on work order " + found.root.workEffortId)
-    const out = call("mantle.work.TimesheetServices.stop#Timer", {timeEntryId: running.timeEntryId})
+    const out = workProcesses.asManagedOwner([found.root.workEffortId], () =>
+        call("mantle.work.TimesheetServices.stop#Timer", {timeEntryId: running.timeEntryId})
+    )
     return {timeEntryId: running.timeEntryId, hours: out.hours ?? null, discarded: !!out.discarded}
 }
 // record#MaintenanceTime: the caller's own time on assigned work in progress, by its start and end or its hours on a day.
@@ -385,15 +393,17 @@ function recordTime(p) {
     if (thruDate != null && ms(thruDate) <= ms(fromDate)) denied("DATES_INVALID", "The time ends before it starts")
     const latest = thruDate != null ? ms(thruDate) : ms(fromDate)
     if (latest > nowMs() + minuteMs) denied("DATE_FUTURE", "Time is recorded once it is worked")
-    const out = call("mantle.work.TimeServices.store#TimeEntry", {
-        partyId: userScope.partyId,
-        workEffortId: found.workEffortId,
-        fromDate,
-        thruDate,
-        hours: thruDate != null ? null : hours,
-        workTypeEnumId: text(p.workTypeEnumId),
-        comments: text(p.comments)
-    })
+    const out = workProcesses.asManagedOwner([found.root.workEffortId], () =>
+        call("mantle.work.TimeServices.store#TimeEntry", {
+            partyId: userScope.partyId,
+            workEffortId: found.workEffortId,
+            fromDate,
+            thruDate,
+            hours: thruDate != null ? null : hours,
+            workTypeEnumId: text(p.workTypeEnumId),
+            comments: text(p.comments)
+        })
+    )
     return {timeEntryId: out.timeEntryId}
 }
 
@@ -776,12 +786,21 @@ function scheduleWorkOrder(p) {
         const byId = text(p.withPartyId)
         if (!byId) denied("ASSIGNEE_REQUIRED", "Name who takes the work")
         requireMember(organizationPartyId, byId)
+        // P7 (F160): a step that is done keeps who did it; only the root and the open steps move
+        const doneSteps = new Set(
+            Array.from(
+                find(WORK, {rootWorkEffortId: root.workEffortId})
+                    .condition("statusId", "in", doneStatuses)
+                    .selectField("workEffortId")
+                    .list()
+            ).map(row => row.workEffortId)
+        )
         const held = Array.from(
             find(PARTY, {partyId: leaverId, roleTypeId: assigneeRole})
                 .condition("workEffortId", "in", treeIds(root.workEffortId))
                 .conditionDate("fromDate", "thruDate", now)
                 .list()
-        )
+        ).filter(row => !doneSteps.has(row.workEffortId))
         for (const row of held) {
             call("update#" + PARTY, {
                 workEffortId: row.workEffortId,
@@ -958,12 +977,20 @@ function refusalOf(userScope, ctx, action) {
             if (runningTimers(root.workEffortId).length)
                 return {reason: "TIMER_RUNNING", message: "Stop the running timers first"}
             return null
-        case "complete":
+        case "complete": {
             if (!executing(caps, assigned))
                 return {reason: "NOT_ASSIGNED", message: "A technician assigned to the work, or a supervisor, completes it"}
             if (runningTimers(root.workEffortId).length)
                 return {reason: "TIMER_RUNNING", message: "Stop the running timers first"}
+            // P7: the checklist's required steps complete or waived
+            const open = checks().gateOf(root.workEffortId)
+            if (open.length)
+                return {
+                    reason: "STEPS_OPEN",
+                    message: "Required steps are open: " + open.map(row => row.name).join(", ")
+                }
             return null
+        }
         case "close":
             if (caps.supervise) return null
             return {reason: "PERMISSION_DENIED", message: "A supervisor accepts and closes completed work"}
@@ -1086,6 +1113,9 @@ function transitionWorkOrder(p) {
         call("update#" + WORK, {workEffortId: root.workEffortId, statusId: "WeClosed"})
         resultCode = "CLOSED"
     }
+    // P7: Close moves the checklist's complete steps to Closed and stores it; Cancel cancels its open steps
+    if (resultCode === "CLOSED" || resultCode === "CANCELLED")
+        checks().closeExecution(root.workEffortId, resultCode === "CLOSED" ? "WeClosed" : "WeCancelled")
     const revision = bump(order, orderFields)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     return {
@@ -1216,6 +1246,7 @@ function getWorkOrder(p) {
     )[0]
     const assignment = maintenanceAccess.assignment(userScope, root.workEffortId)
     const canLogTime = caps.execute && assignment.step && root.statusId === "WeInProgress"
+    const openSteps = open ? checks().gateOf(root.workEffortId) : []
     const workOrder = {
         workEffortId: root.workEffortId,
         workEffortName: root.workEffortName || root.workEffortId,
@@ -1291,14 +1322,20 @@ function getWorkOrder(p) {
         totalHours: time.totalHours,
         timer: timer ? {timeEntryId: timer.timeEntryId, fromDateText: dateText(timer.fromDate)} : null,
         actionList: actionsFor(userScope, ctx),
-        blockerList: runningTimers(root.workEffortId).length
+        blockerList: (runningTimers(root.workEffortId).length
             ? [
                   {
                       blocker: "Timers running",
                       detail: "Each running timer is stopped before the work is completed, held or cancelled"
                   }
               ]
-            : [],
+            : []
+        ).concat(
+            // P7: the checklist's open required steps
+            openSteps.length
+                ? [{blocker: "Steps open", detail: "Required steps are completed or waived first: " + openSteps.map(row => row.name).join(", ")}]
+                : []
+        ),
         canEdit: (caps.plan || caps.supervise) && open,
         canSchedule: (caps.plan || caps.supervise) && open,
         canLogTime: !!canLogTime,

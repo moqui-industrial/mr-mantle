@@ -355,15 +355,51 @@ function instantiate(p) {
 }
 
 // ===== check#ManagedWork =====
+// The owner's way through (impl-maintenance P7, F159): a managed record's own service, having checked its caller, calls a guarded
+// generic service (the time services from Maintenance's time entry points) inside asManagedOwner, which admits the work of the roots
+// it names for that call alone. It is held in the execution context's user map, which no caller's parameters reach, and restored
+// when the call returns.
+const PASS = "managedWorkPass"
+function passedRoots() {
+    const value = ec.user.context.get(PASS)
+    return value ? String(value).split(",").filter(Boolean) : []
+}
+function asManagedOwner(workEffortIds, body) {
+    const before = ec.user.context.get(PASS) ?? null
+    const ids = Array.from(workEffortIds || []).filter(Boolean)
+    const roots = ids.length
+        ? Array.from(find(WORK).condition("workEffortId", "in", ids).selectField("workEffortId,rootWorkEffortId").list()).map(
+              row => row.rootWorkEffortId || row.workEffortId
+          )
+        : []
+    ec.user.context.put(PASS, Array.from(new Set(passedRoots().concat(roots))).join(","))
+    try {
+        return body()
+    } finally {
+        if (before == null) ec.user.context.remove(PASS)
+        else ec.user.context.put(PASS, before)
+    }
+}
 // Whether work is managed (impl-people §4, impl-maintenance §4): its own process policy, its root's or its parent's guards
-// execution, or its root has a work order (Maintenance's record, when it is defined). Refused with MANAGED_WORK.
+// execution, or its root has a work order (Maintenance's record, when it is defined). Refused with MANAGED_WORK. Work of a root
+// its owner passes through (asManagedOwner) is not refused.
 function managedReason(workEffortIds) {
-    const ids = Array.from(new Set(workEffortIds.filter(Boolean)))
+    let ids = Array.from(new Set(workEffortIds.filter(Boolean)))
     if (!ids.length) return null
     const at = nowMs()
-    const work = Array.from(
+    let work = Array.from(
         find(WORK).condition("workEffortId", "in", ids).selectField("workEffortId,rootWorkEffortId,parentWorkEffortId").list()
     )
+    const passed = passedRoots()
+    if (passed.length) {
+        const rootOf = id => {
+            const row = work.find(item => item.workEffortId === id)
+            return row ? row.rootWorkEffortId || row.workEffortId : id
+        }
+        ids = ids.filter(id => !passed.includes(rootOf(id)))
+        work = work.filter(row => ids.includes(row.workEffortId))
+        if (!ids.length) return null
+    }
     const related = Array.from(
         new Set(ids.concat(work.flatMap(row => [row.rootWorkEffortId, row.parentWorkEffortId]).filter(Boolean)))
     )
@@ -456,5 +492,7 @@ const operations = {storeProcessStep, instantiateWorkProcess, checkManagedWork}
     dependsOn,
     stepPolicyOf,
     managedReason,
-    managedIds
+    managedIds,
+    // impl-maintenance P7: an owner's call of a guarded generic service on its own managed work
+    asManagedOwner
 })

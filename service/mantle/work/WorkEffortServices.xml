@@ -882,6 +882,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- managed work's parts are its owner's (a procedure's requirements, a work order's planned parts; impl-maintenance
+                P7, F159): refused here but through the owner (WorkProcesses.js asManagedOwner) -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortProduct" list="existingWepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="productId"/>
                 <econdition field-name="typeEnumId"/></entity-find>
@@ -996,6 +1000,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <!-- a file a check names as evidence is not changed (impl-maintenance P7, F69: EVIDENCE_PROTECTED) -->
+            <service-call name="mantle.work.ProcessServices.check#EvidenceChange" in-map="{workEffortContentId:workEffortContentId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffortContent" value-field="workEffortContent"/>
