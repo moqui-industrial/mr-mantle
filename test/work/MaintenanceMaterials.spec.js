@@ -1,7 +1,8 @@
 // Maintenance parts and stock (mantle.work.MaintenanceExecutionServices; IronStone Maintenance design §3 PlannedParts and PartsUsed,
 // MT-08; impl-maintenance P9, F30, F71): a planner plans parts on a work order (the model's suggested spare part, a change ending
-// the line and starting the next, a supplies part refused), the assigned technician without the stock permission is refused an
-// issue, one with it issues twice (a second issuance, a retry answering the first), another owner's and supplies stock refused, a
+// the line and starting the next, a supplies part planned as a part is), the assigned technician without the stock permission is
+// refused an issue, one with it issues twice (a second issuance, a retry answering the first) and issues supplies (the user's call of
+// Nov 12: routed to the maintenance expense, test/ledger/MaintenanceExpenseRouting), another owner's stock refused, a
 // return above the net issued refused and a partial one received at the original cost, naming its issuance. Standalone: spec-local
 // organizations, facilities, parts, groups and users; the services called as each user with the artifact check aside (their own
 // permission and scope checks decide). The ledger side is test/ledger/MaintenanceExpenseRouting.
@@ -163,7 +164,7 @@ spec({
     }
 })
 
-feature("a planner plans the model's suggested part and changes a line; supplies and a technician's plan are refused", {
+feature("a planner plans the model's suggested part, changes a line and plans supplies; a technician's plan is refused", {
     when() {
         const before = as(state.planner, X + "get#MaintenanceMaterials", {workEffortId: state.work})
         const suggested = as(state.planner, X + "store#MaintenanceMaterial", {workEffortId: state.work, addSuggested: "Y"})
@@ -203,66 +204,71 @@ feature("a planner plans the model's suggested part and changes a line; supplies
         before.suggestedList.length == 1 && before.suggestedList[0].productId == prefix + "_FILTER"
         suggested.addedProductIds.length == 1
         after.suggestedList.length == 0
-        after.plannedList.length == 2
+        after.plannedList.length == 3
         after.plannedList.find(row => row.productId == prefix + "_FILTER").quantity == "2"
         after.plannedList.find(row => row.productId == prefix + "_BELT").quantity == "2"
         // a change ends the line and starts the next: two rows, one open
         beltRows.length == 2 && beltRows.filter(row => row.thruDate == null).length == 1
         stale == "RECORD_CHANGED"
-        supplies == "SUPPLIES_REFUSED"
+        // supplies are planned as any part (their issue posts to the maintenance expense, the user's call of Nov 12)
+        supplies.productId == prefix + "_RAGS" && supplies.fromDate != null
         byTech == "PERMISSION_DENIED"
     }
 })
 
-feature("an assigned technician without the stock permission is refused; one with it issues twice, each a new issuance", {
-    when() {
-        const parameters = {workEffortId: state.work, productId: prefix + "_FILTER", assetId: state.filterStock, quantity: 1}
-        const noStock = as(state.nostock, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
-        const first = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
-        const retry = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
-        const second = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-2"}, parameters))
-        const supplies = as(state.tech, X + "issue#MaintenanceMaterial", {
-            operationKey: "mat-3",
-            workEffortId: state.work,
-            assetId: state.ragStock,
-            quantity: 1
-        })
-        const otherOwner = as(state.tech, X + "issue#MaintenanceMaterial", {
-            operationKey: "mat-4",
-            workEffortId: state.work,
-            assetId: state.otherStock,
-            quantity: 1
-        })
-        const mismatch = as(state.tech, X + "issue#MaintenanceMaterial", {
-            operationKey: "mat-5",
-            workEffortId: state.work,
-            productId: prefix + "_BELT",
-            assetId: state.filterStock,
-            quantity: 1
-        })
-        const issuances = rows("mantle.product.issuance.AssetIssuance", {workEffortId: state.work})
-        const read = as(state.tech, X + "get#MaintenanceMaterials", {workEffortId: state.work, withStock: true})
-        return {noStock, first, retry, second, supplies, otherOwner, mismatch, issuances, read}
-    },
-    then({noStock, first, retry, second, supplies, otherOwner, mismatch, issuances, read}) {
-        state.started.statusId == "WeInProgress"
-        noStock == "PERMISSION_DENIED"
-        first.result.resultCode == "ISSUED"
-        retry.result.alreadyApplied === true && retry.result.assetIssuanceId == first.result.assetIssuanceId
-        second.result.assetIssuanceId != first.result.assetIssuanceId
-        issuances.length == 2
-        n(asset(state.filterStock).quantityOnHandTotal) == 8
-        supplies == "SUPPLIES_REFUSED"
-        // another organization's stock is outside the technician's facilities
-        otherOwner == "RECORD_UNAVAILABLE"
-        mismatch == "PRODUCT_MISMATCH"
-        read.canIssue === true
-        read.plannedList.find(row => row.productId == prefix + "_FILTER").issued == "2"
-        read.plannedList.find(row => row.productId == prefix + "_FILTER").left == "0"
-        read.plannedList.find(row => row.productId == prefix + "_BELT").stockOptions.length == 1
-        state.firstIssuance = first.result.assetIssuanceId
+feature(
+    "an assigned technician without the stock permission is refused; one with it issues twice, each a new issuance, and supplies",
+    {
+        when() {
+            const parameters = {workEffortId: state.work, productId: prefix + "_FILTER", assetId: state.filterStock, quantity: 1}
+            const noStock = as(state.nostock, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
+            const first = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
+            const retry = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-1"}, parameters))
+            const second = as(state.tech, X + "issue#MaintenanceMaterial", Object.assign({operationKey: "mat-2"}, parameters))
+            const supplies = as(state.tech, X + "issue#MaintenanceMaterial", {
+                operationKey: "mat-3",
+                workEffortId: state.work,
+                assetId: state.ragStock,
+                quantity: 1
+            })
+            const otherOwner = as(state.tech, X + "issue#MaintenanceMaterial", {
+                operationKey: "mat-4",
+                workEffortId: state.work,
+                assetId: state.otherStock,
+                quantity: 1
+            })
+            const mismatch = as(state.tech, X + "issue#MaintenanceMaterial", {
+                operationKey: "mat-5",
+                workEffortId: state.work,
+                productId: prefix + "_BELT",
+                assetId: state.filterStock,
+                quantity: 1
+            })
+            const issuances = rows("mantle.product.issuance.AssetIssuance", {workEffortId: state.work})
+            const read = as(state.tech, X + "get#MaintenanceMaterials", {workEffortId: state.work, withStock: true})
+            return {noStock, first, retry, second, supplies, otherOwner, mismatch, issuances, read}
+        },
+        then({noStock, first, retry, second, supplies, otherOwner, mismatch, issuances, read}) {
+            state.started.statusId == "WeInProgress"
+            noStock == "PERMISSION_DENIED"
+            first.result.resultCode == "ISSUED"
+            retry.result.alreadyApplied === true && retry.result.assetIssuanceId == first.result.assetIssuanceId
+            second.result.assetIssuanceId != first.result.assetIssuanceId
+            // the filter twice and the supplies once
+            issuances.length == 3
+            n(asset(state.filterStock).quantityOnHandTotal) == 8
+            supplies.result.resultCode == "ISSUED" && n(asset(state.ragStock).quantityOnHandTotal) == 49
+            // another organization's stock is outside the technician's facilities
+            otherOwner == "RECORD_UNAVAILABLE"
+            mismatch == "PRODUCT_MISMATCH"
+            read.canIssue === true
+            read.plannedList.find(row => row.productId == prefix + "_FILTER").issued == "2"
+            read.plannedList.find(row => row.productId == prefix + "_FILTER").left == "0"
+            read.plannedList.find(row => row.productId == prefix + "_BELT").stockOptions.length == 1
+            state.firstIssuance = first.result.assetIssuanceId
+        }
     }
-})
+)
 
 feature("a return above what is left of an issuance is refused; a partial one is a receipt at the original cost naming it", {
     when() {

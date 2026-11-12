@@ -53,8 +53,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A planned part of a work order's root or step (MAINTENANCE_PLAN or _SUPERVISE; open work only, WORK_CLOSED): a
             WorkEffortProduct row (WeptConsume) with its quantity (QUANTITY_INVALID), unit, required date and source facility (one of
             the work organization's, VALUE_INVALID); a change ends the open row of the product and starts the next, naming the row it
-            read by fromDate (RECORD_CHANGED); remove ends it. A supplies part is refused (SUPPLIES_REFUSED: it would post as a fixed
-            asset, impl-maintenance F71). With addSuggested, the equipment model's spare parts (PatSparePart) not yet planned on the
+            read by fromDate (RECORD_CHANGED); remove ends it. A supplies part is planned as inventory is (its issue posts to the
+            maintenance expense, AC-24). With addSuggested, the equipment model's spare parts (PatSparePart) not yet planned on the
             work are added to the node at their association's quantity.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -82,9 +82,9 @@ along with this software (see the LICENSE.md file). If not, see
             time through mantle.product.AssetServices.issue#AssetToWorkEffort, carrying the work's cost centre, project and primary
             AssetMaintenance; it posts to the maintenance expense of AC-24, never to WIP. Requires STOCK_ISSUE (the stock in a facility
             of the user's organizations, StockPosting.js) and the maintenance grant: the technician assigned to the work or the step
-            (MAINTENANCE_EXECUTE; NOT_ASSIGNED) or a supervisor; approved or started work (WORK_NOT_STARTED). Refuses equipment and
-            supplies (NOT_STOCK, SUPPLIES_REFUSED), another product than the line's (PRODUCT_MISMATCH), held stock (HELD_STOCK), a
-            customer's or another owner's stock (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), an organization that
+            (MAINTENANCE_EXECUTE; NOT_ASSIGNED) or a supervisor; approved or started work (WORK_NOT_STARTED). Issues inventory and
+            supplies (both post to the maintenance expense, supplies by the user's call of Nov 12); refuses equipment (NOT_STOCK),
+            another product than the line's (PRODUCT_MISMATCH), held stock (HELD_STOCK), a customer's or another owner's stock (OWNER_MISMATCH), more than is free (QUANTITY_EXCEEDS_AVAILABLE), an organization that
             posts with no maintenance expense mapping (COST_POLICY_MISSING, naming what to map) and a closed period (PERIOD_CLOSED). A
             retry with the same operation key answers the first.</description>
         <in-parameters>

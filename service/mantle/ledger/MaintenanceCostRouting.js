@@ -1,9 +1,11 @@
 // Accounting's maintenance expense routing (AC-24; design-accounting PostingDefaults "Maintenance expense routing", design-maintenance
 // MT-09; impl-maintenance P9, F32, F71), called by AssetAutoPostServices' post#AssetIssuance and post#AssetReceipt.
 //
-// - Only stock (AstTpInventory) issued to a managed maintenance work order (a root with a MaintenanceWorkOrder row, not a template)
-//   or one of its steps is routed. Production runs, projects and every other issuance post as Mantle always has (the same-owner
-//   WIP account, else COGS).
+// - Only stock (inventory, and supplies: the user's call of Nov 12) issued to a managed maintenance work order (a root with a
+//   MaintenanceWorkOrder row, not a template) or one of its steps is routed. For supplies the policy's expense replaces Mantle's
+//   fixed-asset debit (GatUnissuedFixedAsset) and the credit stays the asset account the supplies were received into. Production
+//   runs, projects and every other issuance post as Mantle always has (inventory: the same-owner WIP account, else COGS;
+//   supplies: as a fixed asset).
 // - The debit is the expense account of the MaintenanceCostPolicy in effect on the issue date for the asset owner's organization:
 //   the work's facility or its nearest ancestor with a row before a row of every facility, and the work's kind before any kind.
 //   The entry carries the facility (the nearest of the work's facility and its ancestors the posting organization owns, the only
@@ -13,7 +15,9 @@
 //   (issue#MaintenanceMaterial refuses before an issue when the organization posts and has no row, so this is the backstop).
 // - A receipt naming a routed issuance (return#MaintenanceMaterial: sourceAssetIssuanceId, the work's workEffortId, which would
 //   otherwise credit WIP) is credited to the account and dimensions the issuance's debit took, read from its posted transaction,
-//   else from the policy as of the issue date: a return reverses the original cost the way it was charged.
+//   else from the policy as of the issue date: a return reverses the original cost the way it was charged. receive#Asset posts
+//   the receipt before the return can name its issuance, so a receipt to managed work with no source yet is routed by the policy
+//   as of its date (never WIP); return#MaintenanceMaterial reposts it the issuance's way only when the two differ.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, ms} = lib
 
@@ -21,6 +25,9 @@ const ORDER = "mantle.work.maintenance.MaintenanceWorkOrder"
 const WORK = "mantle.work.effort.WorkEffort"
 const POLICY = "mantle.ledger.config.MaintenanceCostPolicy"
 const facilityDepth = 12
+// inventory, and supplies (the user's call of Nov 12): the stock a maintenance issue is routed for
+const routedTypes = ["AstTpInventory", "AstTpSupplies"]
+const routed = asset => routedTypes.includes(asset?.assetTypeEnumId)
 
 // The managed work order of a root or step: {root, order}, or null for anything else (a template, ordinary work, nothing).
 function workOrderOf(workEffortId) {
@@ -94,21 +101,30 @@ function routeFor(found, organizationPartyId, date) {
               " (Accounting › Posting defaults › Maintenance expense)"
     }
 }
-// post#AssetIssuance: the debit of an issuance to managed maintenance work, or null.
-function issuance(assetIssuance, asset) {
-    if (!assetIssuance || asset?.assetTypeEnumId !== "AstTpInventory") return null
-    const found = workOrderOf(assetIssuance.workEffortId)
-    if (!found) return null
-    const route = routeFor(found, asset.ownerPartyId, assetIssuance.issuedDate)
+// The route with the charge (a movement's own cost centre and project, else its work order's) and the failure it names.
+function charged(found, organizationPartyId, date, movement) {
+    const route = routeFor(found, organizationPartyId, date)
     return Object.assign(route, {
-        costCenterId: assetIssuance.costCenterId || found.order.costCenterId || null,
-        projectWorkEffortId: assetIssuance.projectWorkEffortId || found.order.projectWorkEffortId || null,
+        costCenterId: movement.costCenterId || found.order.costCenterId || null,
+        projectWorkEffortId: movement.projectWorkEffortId || found.order.projectWorkEffortId || null,
         failureCode: route.glAccountId ? null : "MAINTENANCE_COST_UNMAPPED"
     })
 }
-// post#AssetReceipt: the credit of a return of a routed issuance, or null.
+// post#AssetIssuance: the debit of an issuance to managed maintenance work, or null.
+function issuance(assetIssuance, asset) {
+    if (!assetIssuance || !routed(asset)) return null
+    const found = workOrderOf(assetIssuance.workEffortId)
+    if (!found) return null
+    return charged(found, asset.ownerPartyId, assetIssuance.issuedDate, assetIssuance)
+}
+// post#AssetReceipt: the credit of a receipt to managed maintenance work, or null: a return of a routed issuance the issuance's
+// way; one that names no issuance yet (receive#Asset posts before return#MaintenanceMaterial names it) by the policy.
 function receipt(assetReceipt, asset) {
-    if (!assetReceipt?.sourceAssetIssuanceId || asset?.assetTypeEnumId !== "AstTpInventory") return null
+    if (!assetReceipt || !routed(asset)) return null
+    if (!assetReceipt.sourceAssetIssuanceId) {
+        const found = workOrderOf(assetReceipt.workEffortId)
+        return found ? charged(found, asset.ownerPartyId, assetReceipt.receivedDate, {}) : null
+    }
     const source = one("mantle.product.issuance.AssetIssuance", {assetIssuanceId: assetReceipt.sourceAssetIssuanceId})
     if (!source || !workOrderOf(source.workEffortId)) return null
     // the issuance's own posting: its debit entry and its project

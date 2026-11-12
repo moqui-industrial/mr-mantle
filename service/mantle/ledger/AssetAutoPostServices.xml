@@ -125,8 +125,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="assetGlAccountTypeEnumId" from="assetGlAccount?.glAccountTypeEnumId"/>
             </if>
 
-            <!-- AC-24 (impl-maintenance P9, F71): a return of stock issued to managed maintenance work (sourceAssetIssuanceId) is
-                credited to the account and dimensions its issuance was debited with, not to WIP (MaintenanceCostRouting.js) -->
+            <!-- AC-24 (impl-maintenance P9, F71): a receipt to managed maintenance work is never credited to WIP: a return naming its
+                issuance (sourceAssetIssuanceId) is credited to the account and dimensions the issuance was debited with, and one that
+                names none yet (receive#Asset posts before return#MaintenanceMaterial names it) to the policy's expense; inventory
+                and supplies alike (MaintenanceCostRouting.js) -->
             <set field="maintenanceRoute" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/MaintenanceCostRouting.js').receipt(assetReceipt, asset)"/>
             <if condition="maintenanceRoute">
                 <set field="receiptGlAccountId" from="maintenanceRoute.glAccountId"/>
@@ -183,9 +185,13 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <set field="assetReceipt.acctgTransResultEnumId"
                     from="postedTrans?.isPosted == 'Y' ? 'AtrSuccess' : 'AtrPostingFailed'"/>
-            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+            <if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; maintenanceRoute?.failureCode">
                 <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
-                        postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                        postingFailureCode:maintenanceRoute.failureCode, postingFailureMessage:maintenanceRoute.message}"/>
+                <else-if condition="postedTrans != null &amp;&amp; postedTrans.isPosted != 'Y' &amp;&amp; !postedTrans.postingFailureCode">
+                    <service-call name="update#mantle.ledger.transaction.AcctgTrans" in-map="{acctgTransId:postedTrans.acctgTransId,
+                            postingFailureCode:'MAPPING_MISSING', postingFailureMessage:'Missing posting account mapping'}"/>
+                </else-if>
             </if>
             <entity-update value-field="assetReceipt"/>
         </actions>
@@ -341,7 +347,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- AC-24 (impl-maintenance P9): stock issued to a managed maintenance work order or step posts to the expense
                 account of the organization's MaintenanceCostPolicy with the facility, cost centre and project, never the
-                same-owner WIP account; no policy row leaves the account empty, so the transaction goes to the error journal
+                same-owner WIP account (supplies too, in place of the fixed-asset debit: the user's call of Nov 12); no policy row leaves the account empty, so the transaction goes to the error journal
                 named MAINTENANCE_COST_UNMAPPED (MaintenanceCostRouting.js) -->
             <set field="maintenanceRoute" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/MaintenanceCostRouting.js').issuance(assetIssuance, asset)"/>
             <if condition="maintenanceRoute">

@@ -10,9 +10,10 @@
 //   (StockPosting.js: STOCK_ISSUE, the operation key, the stock locked in a facility of the user's organizations, the period),
 //   and the maintenance grant: the technician assigned to the work or the step (MAINTENANCE_EXECUTE) or a supervisor, on
 //   approved or started work; then issue#AssetToWorkEffort with authorization disabled, a new AssetIssuance each time to the
-//   root or step, carrying the cost centre, the project and the primary AssetMaintenance. Only available stock
-//   (AstTpInventory) of the work's organization is issued: supplies would post as a fixed asset (F71) and are refused, and a
-//   customer's or another owner's asset is never issued as a spare. An organization that posts needs a maintenance expense
+//   root or step, carrying the cost centre, the project and the primary AssetMaintenance. Only available stock (inventory or
+//   supplies) of the work's organization is issued: supplies post to the maintenance expense as inventory does (AC-24, the
+//   user's call of Nov 12, in place of Mantle's fixed-asset posting, F71), and a customer's or another owner's asset is never
+//   issued as a spare. An organization that posts needs a maintenance expense
 //   mapping first (AC-24: MaintenanceCostRouting.js; COST_POLICY_MISSING), so no issue posts to WIP.
 // - A return is a new AssetReceipt naming its issuance (sourceAssetIssuanceId), into the original asset where it is or a
 //   location of the same facility at the original asset's acquireCost, never more than is left of the issuance; its credit goes
@@ -39,6 +40,8 @@ const FACILITY = "mantle.facility.Facility"
 const openStatuses = ["WeInPlanning", "WeApproved", "WeInProgress", "WeOnHold"]
 const issueStatuses = ["WeApproved", "WeInProgress"]
 const closedStatuses = ["WeClosed", "WeCancelled"]
+// the stock a part is issued from: inventory, and supplies (routed to the maintenance expense too, the user's call of Nov 12)
+const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const stockOptionLimit = 20
 
 const blank = value => value == null || String(value).trim() === ""
@@ -163,7 +166,7 @@ function stockOptionsFor(products, organizationPartyId, sourceFacilities) {
         find(ASSET)
             .condition("productId", "in", products)
             .condition("ownerPartyId", organizationPartyId)
-            .condition("assetTypeEnumId", "AstTpInventory")
+            .condition("assetTypeEnumId", "in", stockTypes)
             .condition("statusId", "AstAvailable")
             .condition("availableToPromiseTotal", "greater", 0)
             .orderBy("facilityId,locationSeqId,assetId")
@@ -363,9 +366,6 @@ function read(p) {
 function requirePart(productId) {
     const product = productId ? one(PRODUCT, {productId}) : null
     if (!product) denied("VALUE_INVALID", "Choose the part")
-    // supplies post as fixed assets on issue (F71): a maintenance part is inventory
-    if (product.assetTypeEnumId === "AstTpSupplies")
-        denied("SUPPLIES_REFUSED", "Part " + productId + " is supplies; a supplies part is not issued to maintenance work")
     return product
 }
 function store(p) {
@@ -391,8 +391,6 @@ function store(p) {
             .map(row => row.productId)
         const added = []
         for (const suggestion of suggestionsOf(order, ids(planned))) {
-            const product = one(PRODUCT, {productId: suggestion.productId})
-            if (product?.assetTypeEnumId === "AstTpSupplies") continue
             call("create#" + LINE, {
                 workEffortId: node.workEffortId,
                 productId: suggestion.productId,
@@ -453,9 +451,13 @@ function issuePlan(p) {
     const quantity = blank(p.quantity) ? zero() : dec(p.quantity)
     if (quantity.compare(0) <= 0) denied("QUANTITY_INVALID", "Give a quantity above zero")
     if (order.assetId && order.assetId === text(p.assetId)) denied("NOT_STOCK", "The equipment under repair is not a spare part")
+    // inventory or supplies (posting.stock refuses equipment, NOT_STOCK)
     const asset = posting.stock(posting.scope(), p.assetId, quantity)
-    if (asset.assetTypeEnumId !== "AstTpInventory")
-        denied("SUPPLIES_REFUSED", "Asset " + asset.assetId + " is not inventory; supplies are not issued to maintenance work")
+    if (!stockTypes.includes(asset.assetTypeEnumId))
+        denied(
+            "NOT_STOCK",
+            "Asset " + asset.assetId + " is not stock; only inventory and supplies are issued to maintenance work"
+        )
     if (!blank(p.productId) && asset.productId !== text(p.productId))
         denied("PRODUCT_MISMATCH", "Asset " + asset.assetId + " is " + asset.productId + ", not " + p.productId)
     if (asset.statusId !== "AstAvailable")

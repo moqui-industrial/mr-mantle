@@ -4,7 +4,8 @@
 // centre on the entry and the project on the transaction, never to WIP; an ordinary work effort of the same owner still posts to
 // WIP; with no mapping the issue is refused by name, and an issue that reaches posting anyway goes to the error journal named
 // MAINTENANCE_COST_UNMAPPED and does not post; a return credits the issuance's expense with its dimensions at the original cost; a
-// retried operation posts once; Accounting's Posting defaults edits the rows (mapping kind maintenance: a row is ended, not
+// retried operation posts once; supplies issued to the work post the same way (the user's call of Nov 12) and elsewhere as a fixed
+// asset as before; a receipt to the work that names no issuance yet is never credited to WIP; Accounting's Posting defaults edits the rows (mapping kind maintenance: a row is ended, not
 // rewritten, and its facility is the organization's). Standalone: spec-local organizations with their accounting set up from DefaultSettings,
 // facilities, parts, groups and users. The stock side is test/work/MaintenanceMaterials.
 // Run: ./moq test mr-mantle --spec MaintenanceExpenseRouting
@@ -15,7 +16,14 @@ const orgA = prefix + "_A",
     since = "2000-01-01T00:00:00Z"
 const S = "mantle.work.MaintenanceServices.",
     X = "mantle.work.MaintenanceExecutionServices."
-const accounts = {site: "613200000", organization: "613100000", wip: "141200000", inventory: "141000000"}
+const accounts = {
+    site: "613200000",
+    organization: "613100000",
+    wip: "141200000",
+    inventory: "141000000",
+    supplies: "131100000",
+    suppliesClearing: "131200000"
+}
 const state = {}
 const hour = 3600000
 
@@ -266,6 +274,109 @@ feature("an ordinary work effort of the same owner still posts to WIP", {
         entry(posted[0], "D").glAccountId == accounts.wip
         entry(posted[0], "D").facilityId == null
         posted[0].trans.workEffortId == null
+    }
+})
+
+feature("a supplies part issued to a work order posts to the mapped expense, not as a fixed asset; elsewhere as before", {
+    when() {
+        // the user's call of Nov 12: supplies issued to managed maintenance work are routed as inventory is; supplies issued to
+        // anything else post as Mantle always has (Dr GatUnissuedFixedAsset, Cr the asset account)
+        call("create#mantle.product.Product", {
+            productId: prefix + "_RAGS",
+            productName: "Expense rags",
+            productTypeEnumId: "PtAsset",
+            assetTypeEnumId: "AstTpSupplies",
+            amountUomId: "OTH_ea"
+        })
+        // A's supplies are held in a fixed-asset account (DefaultSettings maps none), received and issued through another
+        call("create#mantle.ledger.config.AssetTypeGlAccount", {
+            organizationPartyId: orgA,
+            assetTypeEnumId: "AstTpSupplies",
+            assetGlAccountId: accounts.supplies,
+            receiptGlAccountId: accounts.suppliesClearing,
+            issuanceGlAccountId: accounts.suppliesClearing
+        })
+        const rags = call("mantle.product.AssetServices.receive#Asset", {
+            productId: prefix + "_RAGS",
+            quantity: 10,
+            facilityId: prefix + "_WH",
+            locationSeqId: "BIN1",
+            ownerPartyId: orgA,
+            assetTypeEnumId: "AstTpSupplies",
+            statusId: "AstAvailable",
+            acquireCost: 2
+        }).assetId
+        call("update#mantle.product.asset.Asset", {assetId: rags, acquireCostUomId: "USD"})
+        const issued = as(state.tech, X + "issue#MaintenanceMaterial", {
+            operationKey: "exp-s1",
+            workEffortId: state.work,
+            assetId: rags,
+            quantity: 3
+        })
+        const elsewhere = call("mantle.product.AssetServices.issue#AssetToWorkEffort", {
+            assetId: rags,
+            workEffortId: prefix + "_TASK",
+            quantity: 1,
+            noConsumeProduct: "ignore",
+            noOriginFacility: "ignore"
+        })
+        const returned = as(state.tech, X + "return#MaintenanceMaterial", {
+            operationKey: "exp-s2",
+            assetIssuanceId: issued.result?.assetIssuanceId,
+            quantity: 1
+        })
+        return {
+            issued,
+            returned,
+            routed: postings("assetIssuanceId", issued.result?.assetIssuanceId),
+            plain: postings("assetIssuanceId", elsewhere.assetIssuanceId),
+            back: postings("assetReceiptId", returned.result?.assetReceiptId)
+        }
+    },
+    then({issued, returned, routed, plain, back}) {
+        issued.result.resultCode == "ISSUED"
+        routed.length == 1 && routed[0].trans.isPosted == "Y"
+        entry(routed[0], "D").glAccountId == accounts.site
+        entry(routed[0], "D").facilityId == prefix + "_ROOM" && entry(routed[0], "D").costCenterId == costCenter
+        routed[0].trans.workEffortId == prefix + "_PROJECT"
+        n(entry(routed[0], "D").amount) == 6
+        // the ordinary task's: Mantle's fixed-asset debit, no maintenance dimension, the same asset account credited
+        plain.length == 1
+        plain[0].trans.isPosted == "Y"
+        entry(plain[0], "D").glAccountId != accounts.site && entry(plain[0], "D").glAccountId != accounts.organization
+        entry(plain[0], "D").facilityId == null && plain[0].trans.workEffortId == null
+        entry(plain[0], "C").glAccountId == accounts.supplies && entry(routed[0], "C").glAccountId == accounts.supplies
+        // the return reverses the issue: the expense credited with its dimensions, the asset account debited
+        returned.result.resultCode == "RETURNED"
+        back.length == 1 && back[0].trans.isPosted == "Y"
+        entry(back[0], "C").glAccountId == accounts.site
+        entry(back[0], "C").facilityId == prefix + "_ROOM" && entry(back[0], "C").costCenterId == costCenter
+        n(entry(back[0], "C").amount) == 2
+        entry(back[0], "D").glAccountId == entry(routed[0], "C").glAccountId
+    }
+})
+
+feature("a receipt to managed work that names no issuance yet is credited to the mapped expense, never WIP", {
+    when() {
+        // receive#Asset posts before return#MaintenanceMaterial names the issuance: the first posting is already the policy's
+        const received = call("mantle.product.AssetServices.receive#Asset", {
+            assetId: state.stock,
+            productId: prefix + "_PART",
+            quantity: 1,
+            facilityId: prefix + "_WH",
+            locationSeqId: "BIN1",
+            ownerPartyId: orgA,
+            workEffortId: state.work,
+            noProduceProduct: "ignore"
+        })
+        return {posted: postings("assetReceiptId", received.assetReceiptId)}
+    },
+    then({posted}) {
+        posted.length == 1
+        entry(posted[0], "C").glAccountId == accounts.site
+        entry(posted[0], "C").glAccountId != accounts.wip
+        entry(posted[0], "C").facilityId == prefix + "_ROOM" && entry(posted[0], "C").costCenterId == costCenter
+        posted[0].trans.workEffortId == prefix + "_PROJECT"
     }
 })
 
