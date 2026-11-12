@@ -145,7 +145,7 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.context.putAll(out)</script>
         </actions>
     </service>
-    <service verb="read" noun="Receipt" allow-remote="false">
+    <service verb="read" noun="Receipt" allow-remote="false" transaction="ignore">
         <description>Values proposed from a receipt for a line of a claim the caller changes ("Read receipt", design §9): the text
             given (receiptText, typed or pasted), else the text of the line's receipt file (a PDF or a text file; a photo's text is
             not read), passed to org.moqui.agent.AiTaskServices.run#Extract, which wraps it as untrusted. Nothing is saved: the
