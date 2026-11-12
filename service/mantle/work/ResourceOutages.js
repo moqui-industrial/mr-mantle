@@ -23,6 +23,15 @@
 // - find: the outages of the user's maintenance scope (a work or resource read), newest first, with their production and work
 //   context, corrections, restoration and readiness; a resource's correction chain.
 // Every write names the revision it read (REVISION_CHANGED).
+//
+// Planned blocks (impl-maintenance P15, F14; design §7.1, Blackouts): a RukPlanned row is a blackout Maintenance plans or
+// Manufacturing's offline time of a work center (ProductionSchedule.js store#WorkCenterOffline), both written by record# with an
+// end required, from any time (a planned block may lie ahead). Two entry points, checked by data: Maintenance's, a resource
+// administrator (RESOURCE_POLICY_EDIT) or supervisor of the resource's maintenance scope, and Manufacturing's, a scheduler or
+// method engineer (PRODUCTION_SCHEDULE or METHOD_RESOURCES) of a work center of an organization they work for. correct# supersedes a
+// planned block with a new row (either entry point; ProductionSchedule's withdraw ends the row in force of the block it names), and
+// end# ends one now, or withdraws one not begun (its end set to its start), keeping the row. Bookings over a block are kept and
+// counted (affectedBookingIds), never cancelled: an approved booking a new blackout covers is flagged for review.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
@@ -40,6 +49,10 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const openWork = ["WeInPlanning", "WeApproved", "WeInProgress", "WeOnHold"]
 const restoreDispositions = ["MdispAvailable", "MdispRestricted"]
 const productionPermissions = ["PRODUCTION_OPERATE", "PRODUCTION_SUPERVISE"]
+// Manufacturing's offline time of a work center (store#WorkCenterOffline's permissions)
+const schedulingPermissions = ["PRODUCTION_SCHEDULE", "METHOD_RESOURCES"]
+// a planned block is at most a year long, as Manufacturing's offline time is
+const blockLimitMs = 366 * 24 * 60 * 60 * 1000
 // a start or end may be a few minutes ahead of the server's clock (a phone's clock), never more
 const clockSlackMs = 5 * 60 * 1000
 const facilityDepth = 12
@@ -207,7 +220,8 @@ function linkWork(workEffortId, resourceUnavailabilityId) {
 }
 
 // The bookings of the resource over the outage, kept and answered by id only (no title or attendee): an asset's
-// WorkEffortAssetAssign and a facility's WorkEffortFacility bookings of events not cancelled, not denied, ending after it starts.
+// WorkEffortAssetAssign and a facility's WorkEffortFacility bookings (its own and those of the facilities inside it, P15) of events
+// not cancelled, not denied, ending after it starts.
 function affectedBookings(resource, fromDate, thruDate) {
     const f = factory()
     const overlap = [
@@ -233,9 +247,9 @@ function affectedBookings(resource, fromDate, thruDate) {
                       "or"
                   )
               )
-        : find("mantle.work.effort.WorkEffortAndFacilityBooking", {facilityId: resource.facilityId}).condition(
-              f.makeCondition("bookingStatusId", "not-equals", "WefRequestDenied", true)
-          )
+        : find("mantle.work.effort.WorkEffortAndFacilityBooking")
+              .condition("facilityId", "in", subtreeIds(resource.facilityId))
+              .condition(f.makeCondition("bookingStatusId", "not-equals", "WefRequestDenied", true))
     return ids(
         Array.from(found.condition(f.makeCondition(overlap, "and")).selectField("workEffortId").limit(200).list()).map(
             row => row.workEffortId
@@ -246,8 +260,9 @@ function affectedBookings(resource, fromDate, thruDate) {
 // ===== record#ResourceUnavailability =====
 function record(p) {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in to record an outage")
-    if ((p.unavailabilityKindEnumId || "RukActual") !== "RukActual")
-        denied("KIND_INVALID", "Only an actual outage is recorded here; planned blocks are Blackouts'")
+    const kind = text(p.unavailabilityKindEnumId) || "RukActual"
+    if (kind === "RukPlanned") return recordBlock(p)
+    if (kind !== "RukActual") denied("KIND_INVALID", "An outage is actual (RukActual) or a planned block (RukPlanned)")
     const resource = resourceOf(p, true)
     const production = !blank(p.sourceProductionDowntimeId)
     const authority = production ? productionAuthority(p, resource) : maintenanceAuthority(p, resource)
@@ -300,12 +315,12 @@ function answerOf(row, linked, resource) {
 
 // ===== correct#ResourceUnavailability =====
 function correct(p) {
+    if (plannedRow(p.resourceUnavailabilityId)) return correctBlock(p)
     const userScope = maintenanceAccess.scope()
     requireStaff(userScope)
     const row = outageOf(userScope, p.resourceUnavailabilityId, true)
     requireInForce(row)
-    // a planned block is Manufacturing's offline time (store#WorkCenterOffline) or P15's blackout, corrected there
-    if (row.unavailabilityKindEnumId !== "RukActual") denied("KIND_INVALID", "A planned block is not corrected here")
+    if (row.unavailabilityKindEnumId !== "RukActual") denied("KIND_INVALID", "Only an outage or a planned block is corrected")
     requireRevision(row, p.expectedRevision)
     const changeReason = text(p.changeReason)
     if (!changeReason) denied("REASON_REQUIRED", "A correction needs its reason")
@@ -390,6 +405,7 @@ function openWorkOf(row, readable) {
         }))
 }
 function end(p) {
+    if (plannedRow(p.resourceUnavailabilityId)) return endBlock(p)
     const userScope = maintenanceAccess.scope()
     requireStaff(userScope)
     const row = outageOf(userScope, p.resourceUnavailabilityId, true)
@@ -423,6 +439,188 @@ function end(p) {
         resultCode: "RESTORED",
         revision: Number(row.revision || 0) + 1,
         openWorkList: openList
+    }
+}
+
+// ===== planned blocks (P15) =====
+// Whether a row is a planned block (a missing one is not: the actual path refuses it as unavailable).
+function plannedRow(resourceUnavailabilityId) {
+    const row = blank(resourceUnavailabilityId) ? null : one(OUTAGE, {resourceUnavailabilityId})
+    return row?.unavailabilityKindEnumId === "RukPlanned"
+}
+// Who plans a block of the resource, by data: Maintenance's resource administrator or supervisor of the resource's scope, else
+// Manufacturing's scheduler or method engineer of a work center of an organization they work for (its offline time).
+function blockAuthority(resource) {
+    const userScope = maintenanceAccess.scope()
+    const caps = userScope.capabilities
+    if (caps.policyEdit || caps.supervise) {
+        try {
+            const organizationPartyId = resource.assetId
+                ? maintenanceAccess.requireAsset(userScope, resource.assetId).organizationPartyId
+                : maintenanceAccess.requireFacility(userScope, resource.facilityId).organizationPartyId
+            return {organizationPartyId, userScope, maintenance: true}
+        } catch (error) {
+            if (!resource.facilityId) throw error
+        }
+    }
+    const center =
+        resource.facilityId && ec.entity.isEntityDefined("mantle.work.production.WorkCenter")
+            ? one("mantle.work.production.WorkCenter", {facilityId: resource.facilityId})
+            : null
+    if (center && schedulingPermissions.some(lib.access.has)) {
+        const organizationPartyId = maintenanceAccess.facilityOrganization(resource.facilityId)
+        if (organizationPartyId && facilityScope.owns(facilityScope.scope(), organizationPartyId))
+            return {organizationPartyId, userScope, maintenance: false}
+    }
+    if (caps.policyEdit || caps.supervise) denied("RECORD_UNAVAILABLE", resource.name + " is not available")
+    denied(
+        "PERMISSION_DENIED",
+        "A resource administrator or supervisor plans a blackout; a scheduler a work center's offline time"
+    )
+}
+// The bookable facilities inside a facility, locked in their id order (a booking locks its own resource only, so the order is
+// free of cycles with it).
+function lockCovered(resource) {
+    if (!resource.facilityId) return
+    const inside = subtreeIds(resource.facilityId).filter(id => id !== resource.facilityId)
+    if (!inside.length) return
+    for (const row of Array.from(
+        find(FACILITY, {bookable: "Y"})
+            .condition("facilityId", "in", inside)
+            .orderBy("facilityId")
+            .selectField("facilityId")
+            .list()
+    ))
+        find(FACILITY, {facilityId: row.facilityId}).forUpdate(true).one()
+}
+function requireBlockInterval(fromDate, thruDate) {
+    if (thruDate == null) denied("END_REQUIRED", "A planned block needs its end")
+    if (!(ms(thruDate) > ms(fromDate))) denied("INTERVAL_INVALID", "A planned block ends after it starts")
+    if (ms(thruDate) - ms(fromDate) > blockLimitMs) denied("INTERVAL_INVALID", "A planned block is at most a year")
+}
+function blockAnswer(row, resource, linked) {
+    const bookings = affectedBookings(resource, row.fromDate, row.thruDate)
+    return {
+        resourceUnavailabilityId: row.resourceUnavailabilityId,
+        linked,
+        revision: Number(row.revision || 0),
+        affectedBookingIds: bookings,
+        affectedBookingCount: bookings.length
+    }
+}
+// record#: a planned block of the resource, from fromDate (now when empty) to thruDate (required), with its reason (a closure for
+// Maintenance and the offline time of a work center for Manufacturing by default) and, for Maintenance, the work order it is for.
+function recordBlock(p) {
+    if (!blank(p.sourceProductionDowntimeId)) denied("SOURCE_INVALID", "A planned block has no production stop")
+    const resource = resourceOf(p, false)
+    const authority = blockAuthority(resource)
+    // Maintenance's blackout locks the resource as a booking does, and a facility's the bookable facilities inside it, which their
+    // bookings lock (book#Resource), so a booking of a room is decided before or after a blackout of its building, never beside it;
+    // Manufacturing's offline time does not, since it moves the center's operations in transactions of their own after it
+    // (store#WorkCenterOffline), which would wait on the lock
+    if (authority.maintenance) lockCovered(resourceOf(p, true))
+    const reason = requireReason(text(p.unavailabilityReasonEnumId) || (authority.maintenance ? "RurClosure" : "RurOffline"))
+    const fromDate = p.fromDate || ec.user.nowTimestamp
+    const thruDate = p.thruDate || null
+    requireBlockInterval(fromDate, thruDate)
+    const work = authority.maintenance && !blank(p.workEffortId) ? workOf(authority.userScope, p, resource) : null
+    if (!authority.maintenance && !blank(p.workEffortId))
+        denied("WORK_INVALID", "A work center's offline time names no work order")
+    const created = call("create#" + OUTAGE, {
+        unavailabilityKindEnumId: "RukPlanned",
+        assetId: resource.assetId,
+        facilityId: resource.facilityId,
+        organizationPartyId: authority.organizationPartyId,
+        fromDate,
+        thruDate,
+        description: text(p.description),
+        unavailabilityReasonEnumId: reason.enumId,
+        plannedOutage: "Y",
+        workEffortId: work?.order.workEffortId || null,
+        stepWorkEffortId: work?.stepId || null,
+        revision: 1,
+        createdByUserId: ec.user.userId,
+        createdDate: ec.user.nowTimestamp
+    })
+    return blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
+}
+// A planned block in force the caller may change, locked, with its resource.
+function blockFor(p) {
+    const row = find(OUTAGE, {resourceUnavailabilityId: text(p.resourceUnavailabilityId)})
+        .forUpdate(true)
+        .one()
+    if (!row) denied("RECORD_UNAVAILABLE", "Planned block " + (p.resourceUnavailabilityId || "") + " is not available")
+    const resource = resourceOf({assetId: row.assetId, facilityId: row.facilityId}, false)
+    let authority
+    try {
+        authority = blockAuthority(resource)
+    } catch (error) {
+        denied("RECORD_UNAVAILABLE", "Planned block " + row.resourceUnavailabilityId + " is not available")
+    }
+    requireInForce(row)
+    requireRevision(row, p.expectedRevision)
+    return {row, resource, authority}
+}
+// correct#: a new row in force with the corrected interval, reason and note, the block kept and superseded (either entry point).
+function correctBlock(p) {
+    const {row, resource, authority} = blockFor(p)
+    // a correction may widen the block: locked as record#'s (Maintenance's entry)
+    if (authority.maintenance) lockCovered(resourceOf({assetId: row.assetId, facilityId: row.facilityId}, true))
+    const changeReason = text(p.changeReason)
+    if (!changeReason) denied("REASON_REQUIRED", "A correction needs its reason")
+    const fromDate = p.fromDate || row.fromDate
+    const thruDate = p.thruDate || row.thruDate
+    requireBlockInterval(fromDate, thruDate)
+    const reason = requireReason(text(p.unavailabilityReasonEnumId) || row.unavailabilityReasonEnumId || "RurClosure")
+    const created = call("create#" + OUTAGE, {
+        unavailabilityKindEnumId: "RukPlanned",
+        assetId: row.assetId,
+        facilityId: row.facilityId,
+        organizationPartyId: row.organizationPartyId,
+        fromDate,
+        thruDate,
+        description: p.description == null ? row.description || null : text(p.description),
+        unavailabilityReasonEnumId: reason.enumId,
+        plannedOutage: "Y",
+        workEffortId: row.workEffortId || null,
+        stepWorkEffortId: row.stepWorkEffortId || null,
+        revision: 1,
+        createdByUserId: row.createdByUserId,
+        createdDate: row.createdDate,
+        originalUnavailabilityId: row.originalUnavailabilityId || row.resourceUnavailabilityId,
+        correctionOfUnavailabilityId: row.resourceUnavailabilityId,
+        changeReason,
+        correctedByUserId: ec.user.userId,
+        correctedDate: ec.user.nowTimestamp
+    })
+    call("update#" + OUTAGE, {
+        resourceUnavailabilityId: row.resourceUnavailabilityId,
+        supersededByUnavailabilityId: created.resourceUnavailabilityId,
+        revision: Number(row.revision || 0) + 1
+    })
+    const answer = blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
+    return Object.assign(answer, {correctedUnavailabilityId: row.resourceUnavailabilityId})
+}
+// end#: the block ended now, or withdrawn when it has not begun (its end set to its start); the row is kept.
+function endBlock(p) {
+    const {row} = blockFor(p)
+    const now = nowMs()
+    if (ms(row.thruDate) <= now) denied("OUTAGE_ENDED", "Planned block " + row.resourceUnavailabilityId + " has ended")
+    const begun = ms(row.fromDate) <= now
+    const revision = Number(row.revision || 0) + 1
+    call("update#" + OUTAGE, {
+        resourceUnavailabilityId: row.resourceUnavailabilityId,
+        thruDate: begun ? ec.user.nowTimestamp : row.fromDate,
+        endedByUserId: ec.user.userId,
+        endedDate: ec.user.nowTimestamp,
+        endComments: text(p.endComments),
+        revision
+    })
+    return {
+        resourceUnavailabilityId: row.resourceUnavailabilityId,
+        resultCode: begun ? "ENDED" : "WITHDRAWN",
+        revision,
+        openWorkList: []
     }
 }
 
@@ -514,6 +712,8 @@ function displayRows(list, userScope) {
         cached("f" + facilityId, () => (facilityId ? one(FACILITY, {facilityId})?.facilityName || facilityId : ""))
     const caps = userScope.capabilities
     const staff = !!(caps.supervise || caps.resourceEdit)
+    // a blackout's planners (P15): the resource administrator and the supervisor
+    const blockStaff = !!(caps.policyEdit || caps.supervise)
     const readable = workReader(userScope)
     const at = nowMs()
     return list.map(row => {
@@ -540,11 +740,29 @@ function displayRows(list, userScope) {
             const source = one(WORK, {workEffortId: row.workEffortId})
             if (source) work.unshift(source)
         }
-        const openList = open && !superseded ? openWorkOf(row, readable) : []
+        const planned = row.unavailabilityKindEnumId === "RukPlanned"
+        const openList = open && !superseded && !planned ? openWorkOf(row, readable) : []
+        // a planned block counts the bookings it covers until it ends (flagged for review, never cancelled)
+        const blockLive = planned && !superseded && ms(row.thruDate) > at
         const bookings =
-            open && !superseded
-                ? affectedBookings(row.assetId ? {assetId: row.assetId} : {facilityId: row.facilityId}, row.fromDate, null)
+            (open && !superseded) || blockLive
+                ? affectedBookings(
+                      row.assetId ? {assetId: row.assetId} : {facilityId: row.facilityId},
+                      row.fromDate,
+                      planned ? row.thruDate : null
+                  )
                 : []
+        const blockState = !planned
+            ? null
+            : superseded
+              ? ["Corrected", "grey-8"]
+              : ms(row.thruDate) <= ms(row.fromDate)
+                ? ["Withdrawn", "grey-8"]
+                : ms(row.thruDate) <= at
+                  ? ["Ended", "grey-8"]
+                  : ms(row.fromDate) <= at
+                    ? ["In effect", "negative"]
+                    : ["Planned", "warning"]
         const reasonId = row.unavailabilityReasonEnumId || (row.sourceProductionDowntimeId ? "RurEquipmentFault" : null)
         return {
             resourceUnavailabilityId: row.resourceUnavailabilityId,
@@ -605,10 +823,18 @@ function displayRows(list, userScope) {
             correctedByName: userName(row.correctedByUserId),
             correctedText: dateText(row.correctedDate),
             changeReason: row.changeReason || "",
-            stateText: superseded ? "Corrected" : open ? "Out of service" : "Restored",
-            stateColor: superseded ? "grey-8" : open ? "negative" : "positive",
+            stateText: blockState ? blockState[0] : superseded ? "Corrected" : open ? "Out of service" : "Restored",
+            stateColor: blockState ? blockState[1] : superseded ? "grey-8" : open ? "negative" : "positive",
+            kind: planned ? "planned" : "actual",
+            blockSourceText: planned
+                ? row.workEffortId
+                    ? "Work order"
+                    : isWorkCenter(row.facilityId)
+                      ? "Production offline"
+                      : "Blackout"
+                : "",
             restoredText:
-                open || superseded
+                planned || open || superseded
                     ? ""
                     : "Restored " + dateText(row.thruDate) + (row.endedByUserId ? " by " + userName(row.endedByUserId) : ""),
             affectedBookingCount: bookings.length,
@@ -616,10 +842,19 @@ function displayRows(list, userScope) {
             openWorkList: openList,
             openWorkText: openList.map(work => work.text).join("; "),
             canRestore: staff && open && !superseded && row.unavailabilityKindEnumId === "RukActual",
-            canCorrect: staff && !superseded && row.unavailabilityKindEnumId === "RukActual"
+            canCorrect:
+                !superseded &&
+                (planned
+                    ? blockStaff && ms(row.thruDate) > ms(row.fromDate)
+                    : staff && row.unavailabilityKindEnumId === "RukActual"),
+            canEnd: planned && blockStaff && blockLive
         }
     })
 }
+const isWorkCenter = facilityId =>
+    !!facilityId &&
+    ec.entity.isEntityDefined("mantle.work.production.WorkCenter") &&
+    !!one("mantle.work.production.WorkCenter", {facilityId})
 // A row's correction chain, from the first record to the row in force.
 function chainOf(row) {
     const chain = [row]
@@ -656,7 +891,10 @@ function findOutages(p) {
         result.history = displayRows(chainOf(row), userScope)
     }
     const caps = userScope.capabilities
-    result.canRecord = !!(caps.supervise || caps.resourceEdit || caps.execute)
+    result.canRecord =
+        p.unavailabilityKindEnumId === "RukPlanned"
+            ? !!(caps.policyEdit || caps.supervise)
+            : !!(caps.supervise || caps.resourceEdit || caps.execute)
     result.canRestore = !!(caps.supervise || caps.resourceEdit)
     return result
 }
@@ -687,6 +925,8 @@ function workOutage(order) {
 ;({
     openOutage,
     current,
+    subtreeIds,
+    affectedBookings,
     record,
     correct,
     end,
