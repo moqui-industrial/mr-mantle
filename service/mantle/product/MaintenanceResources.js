@@ -69,9 +69,11 @@ function scopeWith(capability) {
     return userScope
 }
 // The scope of a list (impl-maintenance F83, People's rule): a holder of every organization who has chosen an active organization
-// lists that organization's records; anyone else's scope is as it is, and a record check still admits every organization.
-function listScope(userScope) {
-    if (userScope.organizationPartyIds != null) return userScope
+// lists that organization's records; anyone else's scope is as it is, and a record check still admits every organization. A list
+// anchored on a record (anchored: the facility's equipment, a facility's children, the facility itself) is read in the record
+// check's scope, so a record the holder opens in another organization shows what is in it.
+function listScope(userScope, anchored = false) {
+    if (anchored || userScope.organizationPartyIds != null) return userScope
     const info = ec.service.sync().name("mantle.party.PartyServices.get#PartyOrganizationInfo").disableAuthz().call() || {}
     const activeId = info.activeOrgId || null
     if (!activeId || !internalOrganizationIds().includes(activeId)) return userScope
@@ -188,7 +190,7 @@ function requireRevision(row, expectedRevision) {
 // warrantyNoticeDays, or expired). Each row carries its names and texts, its custodian and its warranty state; no cost or book
 // value.
 function findEquipment(p) {
-    const userScope = listScope(scopeWith("resourceRead"))
+    const userScope = listScope(scopeWith("resourceRead"), !blank(p.facilityId))
     const facilities = scopedFacilities(userScope)
     const build = () => {
         let query = equipmentFind(userScope, facilities)
@@ -320,14 +322,17 @@ function equipmentRows(userScope, assets, facilities) {
 // query before paging by name or id, type, owning organization, parent, bookable, capacity and a current room feature; closed
 // ones only when asked. With roots, the top of the tree: the facilities whose parent is none or outside the scope, each such
 // parent shown once as an unnamed node (hiddenAncestor, its key hidden-<n>) with the facilities under it, so a name or id the
-// caller may not see is not given. With parentFacilityId, a level of the tree (hidden-<n> names an unnamed node's).
+// caller may not see is not given. With parentFacilityId, a level of the tree (hidden-<n> names an unnamed node's). With
+// facilityId, that facility alone (a record's header).
 function findFacilities(p) {
-    const userScope = listScope(scopeWith("resourceRead"))
+    const anchored = !blank(p.facilityId) || (!blank(p.parentFacilityId) && !String(p.parentFacilityId).startsWith("hidden-"))
+    const userScope = listScope(scopeWith("resourceRead"), anchored)
     const facilities = scopedFacilities(userScope)
     const scoped = query => (facilities == null ? query : query.condition("facilityId", "in", facilities.size ? Array.from(facilities) : ["_NA_"]))
     let hiddenRows = []
     const filtered = () => {
         let query = scoped(find(FACILITY))
+        if (!blank(p.facilityId)) query = query.condition("facilityId", p.facilityId)
         if (!blank(p.text)) query = query.condition(anyOf([like("facilityId", p.text), like("facilityName", p.text)]))
         if (!blank(p.facilityTypeEnumId)) query = query.condition("facilityTypeEnumId", p.facilityTypeEnumId)
         if (flag(p.bookable)) query = query.condition("bookable", "Y")
@@ -379,8 +384,9 @@ function findFacilities(p) {
     }
     const paged = lib.page(build(), p, "facilityList", build().count())
     const rows = facilityRows(userScope, paged.rows, facilities, hidden)
-    // above a page that is not one level, one unnamed node for each parent outside the scope that holds a facility of the page
-    if (blank(p.parentFacilityId)) {
+    // above a page that is not one level or one facility, one unnamed node for each parent outside the scope that holds a
+    // facility of the page
+    if (blank(p.parentFacilityId) && blank(p.facilityId)) {
         const keys = [...new Set(rows.filter(row => row.hiddenParent && row.parentFacilityId).map(row => row.parentFacilityId))]
         hiddenRows = keys.map(key => ({
             facilityId: key,
@@ -683,6 +689,16 @@ function changeCustody(p) {
     for (const row of ending)
         if (ms(row.fromDate) > ms(effectiveDate))
             denied("DATE_BEFORE_HOLDING", "The current holding started " + lib.dateText(row.fromDate) + ", after that date")
+    // nor inside another holder's ended holding of the role: two holders at once
+    const overlapped = find(ASSIGNMENT, {assetId: asset.assetId, roleTypeId})
+        .condition("partyId", "not-equals", party.partyId)
+        .condition("thruDate", "greater", effectiveDate)
+        .condition("thruDate", "less-equals", ec.user.nowTimestamp)
+        .orderBy("-thruDate")
+        .limit(1)
+        .one()
+    if (overlapped)
+        denied("DATE_BEFORE_HOLDING", "An earlier holding ended " + lib.dateText(overlapped.thruDate) + ", after that date")
     call("mantle.product.AssetServices.replace#AssetPartyAssignment", {
         assetId: asset.assetId,
         roleTypeId,
@@ -741,7 +757,8 @@ function moveEquipment(p) {
     }
     if (effect.organizationChanges)
         denied("ORGANIZATION_CHANGE", "The equipment would pass to another organization; its owner changes it first")
-    call("update#" + ASSET, {assetId: asset.assetId, facilityId: toFacilityId, locationSeqId: toLocationSeqId})
+    // out of any container too, as move#Asset's whole move does (a container's move would carry it back, ContainerAssetLocation)
+    call("update#" + ASSET, {assetId: asset.assetId, facilityId: toFacilityId, locationSeqId: toLocationSeqId, containerId: null})
     return {effect, moved: true}
 }
 // The bookings of a piece of equipment from now on (requested or assigned), counted; their events are not named.

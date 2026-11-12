@@ -3,8 +3,10 @@
 // audit log, two readings at one time refused and the first kept, a correction of a reading taken), the equipment writer (a
 // parent cycle refused; another organization's equipment refused with the parameters that change the caller's own; a write
 // permission alone refused), the custody change (dated, the earlier holder ended at that date, a later date refused, F61) and the
-// facility's new fields and room features (store#Facility, store#FacilityFeature) with the inherited time zone, and an
-// every-organization reader's list narrowed to the active organization (F83).
+// facility's new fields and room features (store#Facility, store#FacilityFeature) with the inherited time zone, an
+// every-organization reader's list narrowed to the active organization (F83) but not a record's, the custody change inside an
+// ended holding and replace#AssetPartyAssignment's own refusal of a later date, and the equipment move (stock move authority,
+// both facilities, equipment only, audit-logged, out of its container).
 // Standalone: spec-local organizations, facilities, a model with an hour meter, equipment, groups and users, with artifact
 // authorization disabled (the rules are the services' own permission and scope checks).
 // Run: ./moq test mr-mantle --spec MaintenanceResources
@@ -128,6 +130,11 @@ spec({
             fromDate: "2026-01-01T00:00:00Z"
         })
         state.resources = user("RESOURCES", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_RESOURCE_EDIT", "FACILITY_EDIT"], orgA)
+        // the move: a mover with Warehouse's stock move too, equipment in a container of the room, and stock there
+        state.mover = user("MOVER", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_RESOURCE_EDIT", "STOCK_MOVE"], orgA)
+        call("create#mantle.product.asset.Container", {containerId: prefix + "_CART", facilityId: state.room, containerTypeEnumId: null})
+        state.moved = asset("MOVED", orgA, state.room, {containerId: prefix + "_CART"})
+        state.stock = asset("STOCK", orgA, state.room, {assetTypeEnumId: "AstTpInventory"})
         state.editOnly = user("EDITONLY", ["MAINTENANCE_RESOURCE_EDIT"], orgA)
         // every organization's reader, an agent of A and B, for the list's narrowing to the active organization (F83)
         state.every = user("EVERY", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_ALL_ORGANIZATIONS"], orgA)
@@ -208,12 +215,18 @@ feature("the equipment writer refuses a parent cycle, another organization's equ
         ec.user.setPreference("ACTIVE_ORGANIZATION", orgA)
         login("john.doe")
         const everyActive = everyIds()
+        // a record of another organization the holder opens is read in the record check's scope: the facility itself and its
+        // equipment, while the roots stay the active organization's
+        const everyRecord = attempt(state.every, services + "find#MaintenanceFacilities", {facilityId: state.otherSite}).facilityList
+        const everyRoots = attempt(state.every, services + "find#MaintenanceFacilities", {roots: true, text: "Maintenance resources"}).facilityList
+        const everyThere = attempt(state.every, services + "find#MaintenanceEquipment", {facilityId: state.otherSite}).equipmentList
         login(state.every)
         ec.user.setPreference("ACTIVE_ORGANIZATION", null)
         login("john.doe")
         ec.artifactExecution.disableAuthz()
         const warrantyThru = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js").calendarDateText(compressor.warrantyThruDate)
-        return {cycle, renamed, otherRenamed, editOnly, created, otherOwner, compressor, warrantyThru, madeAsset, listed, everyAll, everyActive}
+        return {cycle, renamed, otherRenamed, editOnly, created, otherOwner, compressor, warrantyThru, madeAsset, listed, everyAll, everyActive,
+            everyRecord, everyRoots, everyThere}
     },
     then(r) {
         r.cycle.refused.includes("PARENT_CYCLE")
@@ -229,6 +242,9 @@ feature("the equipment writer refuses a parent cycle, another organization's equ
         !r.listed.equipmentList.some(row => row.assetId == state.otherPump)
         r.everyAll.includes(state.otherPump) && r.everyAll.includes(state.motor)
         !r.everyActive.includes(state.otherPump) && r.everyActive.includes(state.motor)
+        r.everyRecord.length == 1 && r.everyRecord[0].facilityId == state.otherSite && r.everyRecord[0].facilityName != ""
+        !r.everyRoots.some(row => row.facilityId == state.otherSite) && r.everyRoots.some(row => row.facilityId == state.site)
+        r.everyThere.some(row => row.assetId == state.otherPump)
     }
 })
 
@@ -249,7 +265,24 @@ feature("a custody change takes effect at its date, ending the earlier holding t
             newPartyId: state.newHolder,
             effectiveDate: stamp("2026-06-01 09:00")
         })
-        return {later, beforeHolding, dated, ended, started, other, expected: stamp("2026-06-01 09:00")}
+        // an operator who held it from January to March: a new operator from February would be a second holder then
+        call("create#mantle.product.asset.AssetPartyAssignment", {
+            assetId: state.compressor,
+            partyId: state.holder,
+            roleTypeId: "Operator",
+            fromDate: stamp("2026-01-01 09:00"),
+            thruDate: stamp("2026-03-01 09:00")
+        })
+        const overlapping = change({roleTypeId: "Operator", effectiveDate: stamp("2026-02-01 09:00")})
+        const afterIt = change({roleTypeId: "Operator", effectiveDate: stamp("2026-03-02 09:00")})
+        // the owner service refuses a later date itself (it is on the /mantle REST asset path too)
+        const replacedLater = attempt("john.doe", "mantle.product.AssetServices.replace#AssetPartyAssignment", {
+            assetId: state.compressor,
+            roleTypeId: "Custodian",
+            newPartyId: state.holder,
+            effectiveDate: stamp("2099-01-01 09:00")
+        })
+        return {later, beforeHolding, dated, ended, started, other, overlapping, afterIt, replacedLater, expected: stamp("2026-06-01 09:00")}
     },
     then(r) {
         r.later.refused.includes("DATE_FUTURE")
@@ -259,6 +292,36 @@ feature("a custody change takes effect at its date, ending the earlier holding t
         Number(r.started.fromDate) == Number(r.expected)
         r.started.thruDate == null
         r.other.refused.includes("RECORD_UNAVAILABLE")
+        r.overlapping.refused.includes("DATE_BEFORE_HOLDING")
+        !r.afterIt.refused
+        r.replacedLater.refused.includes("DATE_FUTURE")
+    }
+})
+
+feature("an equipment move needs stock move authority and both facilities, takes equipment only, and is audit-logged out of its container", {
+    when() {
+        const move = (username, parameters) =>
+            attempt(username, services + "move#MaintenanceEquipment", Object.assign({assetId: state.moved, toFacilityId: state.site}, parameters))
+        const preview = move(state.resources, {preview: true})
+        const noStockMove = move(state.resources, {})
+        const stock = move(state.mover, {assetId: state.stock})
+        const otherSite = move(state.mover, {toFacilityId: state.otherSite})
+        const moved = move(state.mover, {})
+        const asset = ec.entity.find("mantle.product.asset.Asset").condition("assetId", state.moved).one()
+        const audited = ec.entity
+            .find("moqui.entity.EntityAuditLog")
+            .condition({changedEntityName: "mantle.product.asset.Asset", changedFieldName: "facilityId", pkPrimaryValue: state.moved})
+            .list()
+        return {preview, noStockMove, stock, otherSite, moved, asset, audited: Array.from(audited)}
+    },
+    then(r) {
+        r.preview.moved == false && r.preview.effect.toFacilityId == state.site && r.preview.effect.fromFacilityId == state.room
+        r.noStockMove.refused.includes("PERMISSION_DENIED")
+        r.stock.refused.includes("RECORD_UNAVAILABLE")
+        r.otherSite.refused.includes("RECORD_UNAVAILABLE")
+        r.moved.moved
+        r.asset.facilityId == state.site && r.asset.containerId == null
+        r.audited.some(row => row.oldValueText == state.room && row.newValueText == state.site)
     }
 })
 

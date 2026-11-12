@@ -25,7 +25,8 @@ along with this software (see the LICENSE.md file). If not, see
             Found by id, name, serial, soft identifier or registration number, product, class, type, status, parent, facility
             (with those inside it), custodian and supplier warranty (expiring within thirty days, or expired); equipment that
             has left only with includeLeft. Each row carries its names, custodian and warranty state; no cost or book
-            value.</description>
+            value. A holder of MAINTENANCE_ALL_ORGANIZATIONS with an active organization lists its equipment alone (F83), but a
+            facility's equipment is read in the record check's scope.</description>
         <in-parameters>
             <parameter name="text"/>
             <parameter name="productId"/>
@@ -67,9 +68,12 @@ along with this software (see the LICENSE.md file). If not, see
             bookable, minimum capacity and a current room feature; closed ones only with includeClosed. With roots, the top of
             the tree: the facilities whose parent is none or outside the scope, each such parent given once as an unnamed node
             (hiddenAncestor, key hidden-n) with the facilities under it, never its name or id; with parentFacilityId, one level
-            (hidden-n names an unnamed node's). Rows carry the type, the organization, the time zone (own or inherited), the
-            state, the children and equipment counts and the current room features.</description>
+            (hidden-n names an unnamed node's); with facilityId, that facility alone. Rows carry the type, the organization, the
+            time zone (own or inherited), the state, the children and equipment counts and the current room features. A holder
+            of MAINTENANCE_ALL_ORGANIZATIONS with an active organization lists its facilities alone (F83), but a facility, or a
+            level under a facility, is read in the record check's scope.</description>
         <in-parameters>
+            <parameter name="facilityId"/>
             <parameter name="text"/>
             <parameter name="facilityTypeEnumId"/>
             <parameter name="organizationPartyId"/>
@@ -203,7 +207,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="change" noun="MaintenanceCustody" allow-remote="false">
         <description>The guarded custody change (design §6; impl-maintenance F18, F61): a new holder of a role (Custodian by
             default) of one piece of the user's equipment (MAINTENANCE_RESOURCE_EDIT), from an effective date now or earlier
-            (DATE_FUTURE) and not before a current holder's start (DATE_BEFORE_HOLDING). The role's current holders end and the
+            (DATE_FUTURE) and not before a current holder's start or inside another holder's ended holding
+            (DATE_BEFORE_HOLDING). The role's current holders end and the
             new one starts at that date, through AssetServices.replace#AssetPartyAssignment; People's rule on the end of a
             holding then completes a separation's return task, as for People's and Warehouse's changes. The new holder is a
             person or an organization (PARTY_UNAVAILABLE).</description>
@@ -232,7 +237,9 @@ along with this software (see the LICENSE.md file). If not, see
             (counted). A move that would pass the equipment to another organization (a customer's equipment held at another
             organization's site) is ORGANIZATION_CHANGE; to where it is, SAME_LOCATION. AssetServices.move#Asset makes a new
             asset for a move to another facility (stock), so the asset's facility and location, both audit-logged, are written
-            directly after the checks.</description>
+            directly after the checks, and the asset leaves any container. Equipment only: stock and an asset with no type are
+            refused (RECORD_UNAVAILABLE), and no ledger posting follows (a fixed asset's book is by organization, which a move
+            never changes).</description>
         <in-parameters>
             <parameter name="assetId" required="true"/>
             <parameter name="toFacilityId" required="true"/>
