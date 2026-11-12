@@ -35,6 +35,7 @@ const RELATIONSHIP = "mantle.party.PartyRelationship"
 const POSITION = "mantle.humanres.position.EmplPosition"
 const CHANGE = "mantle.humanres.employment.EmploymentChange"
 const LEAVE_REQUEST = "mantle.humanres.leave.LeaveRequest"
+const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -148,6 +149,37 @@ const kinds = {
                     subjectText,
                     organizationName: names[request.organizationPartyId] || request.organizationPartyId || "",
                     departmentName: request.departmentPartyId ? names[request.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P13: a correction of a day's attendance (AttendanceServices.request#Correction and decide#Correction). The request is bound to
+    // the correction's last change, so a withdrawal supersedes it. What the notice says: the person, the day and the corrected
+    // hours, the employer and department; never the reason.
+    PakAttendance: {
+        topic: "PeopleAttendanceApproval",
+        sourceEntityName: ATTENDANCE_CORRECTION,
+        sourceField: "attendanceCorrectionId",
+        describe(sourceId) {
+            const correction = one(ATTENDANCE_CORRECTION, {attendanceCorrectionId: sourceId})
+            if (!correction) return {label: "attendance correction " + sourceId}
+            const personName = people.personNames([correction.partyId])[correction.partyId] || correction.partyId
+            const names = people.organizationNames([correction.organizationPartyId, correction.departmentPartyId].filter(Boolean))
+            const dayText = lib.calendarDateText(correction.attendanceDate)
+            const minutes = Number(correction.workedMinutes || 0)
+            const workedText = Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0")
+            return {
+                label: "attendance of " + personName + ", " + dayText,
+                message: {
+                    attendanceCorrectionId: sourceId,
+                    attendanceDayId: correction.attendanceDayId,
+                    partyId: correction.partyId,
+                    personName,
+                    dayText,
+                    workedText,
+                    subjectText: "the attendance of " + personName + " on " + dayText + " (" + workedText + " h)",
+                    organizationName: names[correction.organizationPartyId] || correction.organizationPartyId || "",
+                    departmentName: correction.departmentPartyId ? names[correction.departmentPartyId] || "" : ""
                 }
             }
         }

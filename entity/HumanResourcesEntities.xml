@@ -252,6 +252,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id"/>
         <field name="terminationReasonEnumId" type="id" enable-audit-log="update"/>
         <field name="terminationTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="clockingEnabled" type="text-indicator" enable-audit-log="update"><description>This employment's exception to
+            its employer's clocking default (IronStone People P13, mantle.humanres.AttendanceServices store#Clocking; the
+            employer's default is its PartySetting PeopleClocking): Y, the person clocks in and out for it (their self-service
+            offers the clock and record#Punch takes it); N, they do not, whatever the employer's default; empty, the employer's
+            default applies. Attendance.js isClockingOn is the one rule every caller reads.</description></field>
         <!-- not yet used: <field name="jobRequisitionId" type="id"/> -->
 
         <field name="identityTypeEnumId" type="id"/>
