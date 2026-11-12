@@ -296,7 +296,7 @@ feature(
                     orgB + " people.managers warning EMPLOYEE_NO_MANAGER"
                 ].sort()
             one.length == 2
-            one.every(row => row.fixPath == "People/Settings" && row.title && row.message)
+            one.every(row => row.fixRoute == "peopleSettings" && row.subject && row.scope.organizationPartyId == orgA && row.title && row.message)
             one.find(row => row.checkKey == "people.managers").message == "4 employees have no manager"
             hr.error.includes("PERMISSION_DENIED")
             outside.error.includes("ORGANIZATION_DENIED")
